@@ -366,17 +366,15 @@ Si les appels d'outils ne fonctionnent pas bien, choisissez un modèle chargé a
 ### Azure OpenAI
 
 :::note
-Si vous rencontrez des erreurs « Je suis désolé, mais je ne peux pas vous aider avec cette demande », essayez de modifier le filtre de contenu de **DefaultV2** à **Default** dans votre ressource Azure.
+Si vous rencontrez des erreurs du type "I'm sorry, but I cannot assist with that request", essayez de remplacer le filtre de contenu **DefaultV2** par **Default** dans votre ressource Azure.
 :::
 
-1. Rendez-vous sur le [portail Azure](https://portal.azure.com/) et créez une ressource **Azure OpenAI**. Vous aurez besoin de :
-   - **Nom de la ressource** : cela fait partie de votre point de terminaison API (`https://RESOURCE_NAME.openai.azure.com/`)
-   - **Clé API** : soit `KEY 1` ou `KEY 2` de votre ressource
+1. Accédez au [portail Azure](https://portal.azure.com/) et créez une ressource **Azure OpenAI**. Vous aurez besoin du **nom de la ressource** ; il fera partie de votre point de terminaison API (`https://RESOURCE_NAME.openai.azure.com/`).
 
 2. Accédez à [Azure AI Foundry](https://ai.azure.com/) et déployez un modèle.
 
    :::note
-   Le nom du déploiement doit correspondre au nom du modèle pour que opencode fonctionne correctement.
+   Le nom du déploiement doit correspondre au nom du modèle pour qu’opencode fonctionne correctement.
    :::
 
 3. Exécutez la commande `/connect` et recherchez **Azure**.
@@ -385,7 +383,20 @@ Si vous rencontrez des erreurs « Je suis désolé, mais je ne peux pas vous aid
    /connect
    ```
 
-4. Entrez votre clé API.
+4. Choisissez une méthode d’authentification.
+
+   - **Clé API** : collez `KEY 1` ou `KEY 2` depuis votre ressource.
+   - **Microsoft Entra ID (OAuth via az login)** : exécutez d’abord `az login`. L’identité Azure connectée doit disposer du rôle `Cognitive Services OpenAI User` pour la ressource.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Si vous avez choisi la clé API, saisissez votre clé API.
 
    ```txt
    ┌ API key
@@ -394,19 +405,19 @@ Si vous rencontrez des erreurs « Je suis désolé, mais je ne peux pas vous aid
    └ enter
    ```
 
-5. Définissez le nom de votre ressource comme variable d'environnement :
+6. Facultatif : définissez le nom de la ressource comme variable d’environnement pour ignorer la demande du nom de ressource pendant `/connect`.
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-Ou ajoutez-le à votre profil bash :
+   Ou ajoutez-le à votre profil bash :
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
-```
+   ```
 
-6. Exécutez la commande `/models` pour sélectionner votre modèle déployé.
+7. Exécutez la commande `/models` pour sélectionner votre modèle déployé.
 
    ```txt
    /models
@@ -416,14 +427,12 @@ Ou ajoutez-le à votre profil bash :
 
 ### Azure Cognitive Services
 
-1. Rendez-vous sur le [portail Azure](https://portal.azure.com/) et créez une ressource **Azure OpenAI**. Vous aurez besoin de :
-   - **Nom de la ressource** : cela fait partie de votre point de terminaison API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
-   - **Clé API** : soit `KEY 1` ou `KEY 2` de votre ressource
+1. Accédez au [portail Azure](https://portal.azure.com/) et créez une ressource **Azure OpenAI**. Vous aurez besoin du **nom de la ressource** ; il fera partie de votre point de terminaison API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
 2. Accédez à [Azure AI Foundry](https://ai.azure.com/) et déployez un modèle.
 
    :::note
-   Le nom du déploiement doit correspondre au nom du modèle pour que opencode fonctionne correctement.
+   Le nom du déploiement doit correspondre au nom du modèle pour qu’opencode fonctionne correctement.
    :::
 
 3. Exécutez la commande `/connect` et recherchez **Azure Cognitive Services**.
@@ -432,7 +441,20 @@ Ou ajoutez-le à votre profil bash :
    /connect
    ```
 
-4. Entrez votre clé API.
+4. Choisissez une méthode d’authentification.
+
+   - **Clé API** : collez `KEY 1` ou `KEY 2` depuis votre ressource.
+   - **Microsoft Entra ID (OAuth via az login)** : exécutez d’abord `az login`. L’identité Azure connectée doit disposer du rôle `Cognitive Services OpenAI User` pour la ressource.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Si vous avez choisi la clé API, saisissez votre clé API.
 
    ```txt
    ┌ API key
@@ -441,19 +463,19 @@ Ou ajoutez-le à votre profil bash :
    └ enter
    ```
 
-5. Définissez le nom de votre ressource comme variable d'environnement :
+6. Facultatif : définissez le nom de la ressource comme variable d’environnement pour ignorer la demande du nom de ressource pendant `/connect`.
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-Ou ajoutez-le à votre profil bash :
+   Ou ajoutez-le à votre profil bash :
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
-```
+   ```
 
-6. Exécutez la commande `/models` pour sélectionner votre modèle déployé.
+7. Exécutez la commande `/models` pour sélectionner votre modèle déployé.
 
    ```txt
    /models

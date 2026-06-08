@@ -370,26 +370,37 @@ opencode は、OpenAI 互換の API サーバーの背後でローカル LLM を
 ### Azure OpenAI
 
 :::note
-「申し訳ありませんが、そのリクエストには対応できません」エラーが発生した場合は、Azure リソースのコンテンツフィルターを **DefaultV2** から **Default** に変更してみてください。
+「I'm sorry, but I cannot assist with that request」のようなエラーが発生する場合は、Azure リソースのコンテンツ フィルターを **DefaultV2** から **Default** に変更してみてください。
 :::
 
-1. [Azure portal](https://portal.azure.com/) に移動し、**Azure OpenAI** リソースを作成します。必要なものは次のとおりです。
-   - **リソース名**: これは API エンドポイント (`https://RESOURCE_NAME.openai.azure.com/`) の一部になります。
-   - **API キー**: リソースの `KEY 1` または `KEY 2` のいずれか
+1. [Azure portal](https://portal.azure.com/) に移動し、**Azure OpenAI** リソースを作成します。**リソース名**が必要です。これは API エンドポイントの一部になります (`https://RESOURCE_NAME.openai.azure.com/`).
 
 2. [Azure AI Foundry](https://ai.azure.com/) に移動し、モデルをデプロイします。
 
-:::note
-OpenCode が正しく動作するには、デプロイメント名がモデル名と一致する必要があります。
-:::
+   :::note
+   opencode が正しく動作するには、デプロイ名がモデル名と一致している必要があります。
+   :::
 
-3. `/connect` コマンドを実行し、**Azure** を検索します。
+3. `/connect` コマンドを実行して **Azure**.
 
    ```txt
    /connect
    ```
 
-4. API キーを入力します。
+4. 認証方法を選択します。
+
+   - **API キー**: リソースの `KEY 1` または `KEY 2` を貼り付けます。
+   - **Microsoft Entra ID (az login による OAuth)**: 先に `az login` を実行します。サインインしている Azure ID には、そのリソースに対する `Cognitive Services OpenAI User` ロールが必要です。
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. API キーを選択した場合は、API キーを入力します。
 
    ```txt
    ┌ API key
@@ -398,19 +409,19 @@ OpenCode が正しく動作するには、デプロイメント名がモデル�
    └ enter
    ```
 
-5. リソース名を環境変数として設定します。
+6. 任意: `/connect` 中のリソース名の入力を省略するには、リソース名を環境変数として設定します。
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-または、bash プロファイルに追加します。
+   または bash プロファイルに追加します:
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
-```
+   ```
 
-6. `/models` コマンドを実行して、デプロイされたモデルを選択します。
+7. `/models` コマンドを実行して、デプロイ済みモデルを選択します。
 
    ```txt
    /models
@@ -420,23 +431,34 @@ OpenCode が正しく動作するには、デプロイメント名がモデル�
 
 ### Azure Cognitive Services
 
-1. [Azure portal](https://portal.azure.com/) に移動し、**Azure OpenAI** リソースを作成します。必要なものは次のとおりです。
-   - **リソース名**: これは API エンドポイント (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`) の一部になります。
-   - **API キー**: リソースの `KEY 1` または `KEY 2` のいずれか
+1. [Azure portal](https://portal.azure.com/) に移動し、**Azure OpenAI** リソースを作成します。**リソース名**が必要です。これは API エンドポイントの一部になります (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
 2. [Azure AI Foundry](https://ai.azure.com/) に移動し、モデルをデプロイします。
 
-:::note
-OpenCode が正しく動作するには、デプロイメント名がモデル名と一致する必要があります。
-:::
+   :::note
+   opencode が正しく動作するには、デプロイ名がモデル名と一致している必要があります。
+   :::
 
-3. `/connect` コマンドを実行し、**Azure Cognitive Services** を検索します。
+3. `/connect` コマンドを実行して **Azure Cognitive Services**.
 
    ```txt
    /connect
    ```
 
-4. API キーを入力します。
+4. 認証方法を選択します。
+
+   - **API キー**: リソースの `KEY 1` または `KEY 2` を貼り付けます。
+   - **Microsoft Entra ID (az login による OAuth)**: 先に `az login` を実行します。サインインしている Azure ID には、そのリソースに対する `Cognitive Services OpenAI User` ロールが必要です。
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. API キーを選択した場合は、API キーを入力します。
 
    ```txt
    ┌ API key
@@ -445,19 +467,19 @@ OpenCode が正しく動作するには、デプロイメント名がモデル�
    └ enter
    ```
 
-5. リソース名を環境変数として設定します。
+6. 任意: `/connect` 中のリソース名の入力を省略するには、リソース名を環境変数として設定します。
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-または、bash プロファイルに追加します。
+   または bash プロファイルに追加します:
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
-```
+   ```
 
-6. `/models` コマンドを実行して、デプロイされたモデルを選択します。
+7. `/models` コマンドを実行して、デプロイ済みモデルを選択します。
 
    ```txt
    /models

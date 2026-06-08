@@ -362,17 +362,15 @@ OpenCode Go — это недорогой план подписки, обесп�
 ### Azure OpenAI
 
 :::note
-Если вы столкнулись с ошибками «Извините, но я не могу помочь с этим запросом», попробуйте изменить фильтр содержимого с **DefaultV2** на **Default** в своем ресурсе Azure.
+Если появляются ошибки вроде "I'm sorry, but I cannot assist with that request", попробуйте изменить фильтр содержимого с **DefaultV2** на **Default** в вашем ресурсе Azure.
 :::
 
-1. Перейдите на [портал Azure](https://portal.azure.com/) и создайте ресурс **Azure OpenAI**. Вам понадобится:
-   - **Имя ресурса**: оно становится частью вашей конечной точки API (`https://RESOURCE_NAME.openai.azure.com/`).
-   - **Ключ API**: `KEY 1` или `KEY 2` из вашего ресурса.
+1. Перейдите на [портал Azure](https://portal.azure.com/) и создайте ресурс **Azure OpenAI**. Вам понадобится **имя ресурса**; оно станет частью вашего API endpoint (`https://RESOURCE_NAME.openai.azure.com/`).
 
 2. Перейдите в [Azure AI Foundry](https://ai.azure.com/) и разверните модель.
 
-   :::примечание
-   Для правильной работы opencode имя развертывания должно совпадать с именем модели.
+   :::note
+   Имя развертывания должно совпадать с именем модели, чтобы opencode работал правильно.
    :::
 
 3. Запустите команду `/connect` и найдите **Azure**.
@@ -381,7 +379,19 @@ OpenCode Go — это недорогой план подписки, обесп�
    /connect
    ```
 
-4. Введите свой ключ API.
+4. Выберите способ аутентификации.
+   - **API-ключ**: вставьте `KEY 1` или `KEY 2` из вашего ресурса.
+   - **Microsoft Entra ID (OAuth через az login)**: сначала выполните `az login`. Вошедшая идентичность Azure должна иметь роль `Cognitive Services OpenAI User` для этого ресурса.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Если вы выбрали API-ключ, введите свой API-ключ.
 
    ```txt
    ┌ API key
@@ -390,19 +400,19 @@ OpenCode Go — это недорогой план подписки, обесп�
    └ enter
    ```
 
-5. Задайте имя ресурса как переменную среды:
+6. Необязательно: задайте имя ресурса как переменную окружения, чтобы пропустить запрос имени ресурса во время `/connect`.
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   Или добавьте его в свой профиль bash:
+   Или добавьте его в свой bash-профиль:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-6. Запустите команду `/models`, чтобы выбрать развернутую модель.
+7. Запустите команду `/models`, чтобы выбрать развернутую модель.
 
    ```txt
    /models
@@ -412,14 +422,12 @@ OpenCode Go — это недорогой план подписки, обесп�
 
 ### Azure Cognitive Services
 
-1. Перейдите на [портал Azure](https://portal.azure.com/) и создайте ресурс **Azure OpenAI**. Вам понадобится:
-   - **Имя ресурса**: оно становится частью вашей конечной точки API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
-   - **Ключ API**: `KEY 1` или `KEY 2` из вашего ресурса.
+1. Перейдите на [портал Azure](https://portal.azure.com/) и создайте ресурс **Azure OpenAI**. Вам понадобится **имя ресурса**; оно станет частью вашего API endpoint (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
 2. Перейдите в [Azure AI Foundry](https://ai.azure.com/) и разверните модель.
 
-   :::примечание
-   Для правильной работы opencode имя развертывания должно совпадать с именем модели.
+   :::note
+   Имя развертывания должно совпадать с именем модели, чтобы opencode работал правильно.
    :::
 
 3. Запустите команду `/connect` и найдите **Azure Cognitive Services**.
@@ -428,7 +436,19 @@ OpenCode Go — это недорогой план подписки, обесп�
    /connect
    ```
 
-4. Введите свой ключ API.
+4. Выберите способ аутентификации.
+   - **API-ключ**: вставьте `KEY 1` или `KEY 2` из вашего ресурса.
+   - **Microsoft Entra ID (OAuth через az login)**: сначала выполните `az login`. Вошедшая идентичность Azure должна иметь роль `Cognitive Services OpenAI User` для этого ресурса.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Если вы выбрали API-ключ, введите свой API-ключ.
 
    ```txt
    ┌ API key
@@ -437,19 +457,19 @@ OpenCode Go — это недорогой план подписки, обесп�
    └ enter
    ```
 
-5. Задайте имя ресурса как переменную среды:
+6. Необязательно: задайте имя ресурса как переменную окружения, чтобы пропустить запрос имени ресурса во время `/connect`.
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   Или добавьте его в свой профиль bash:
+   Или добавьте его в свой bash-профиль:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-6. Запустите команду `/models`, чтобы выбрать развернутую модель.
+7. Запустите команду `/models`, чтобы выбрать развернутую модель.
 
    ```txt
    /models

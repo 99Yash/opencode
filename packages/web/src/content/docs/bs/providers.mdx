@@ -365,98 +365,120 @@ Ako pozivi alata ne rade dobro, odaberite učitani model sa jakom podrškom za t
 ### Azure OpenAI
 
 :::note
-Ako naiđete na greške "Žao mi je, ali ne mogu pomoći s tim zahtjevom", pokušajte promijeniti filter sadržaja iz **DefaultV2** u **Default** u vašem Azure resursu.
+Ako naiđete na greške "Žao mi je, ali ne mogu pomoći s tim zahtjevom", pokušajte promijeniti filter sadržaja sa **DefaultV2** na **Default** u svom Azure resursu.
 :::
 
-1. Idite na [Azure portal](https://portal.azure.com/) i kreirajte **Azure OpenAI** resurs. trebat će vam:
-   - **Naziv resursa**: Ovo postaje dio vaše krajnje tačke API-ja (`https://RESOURCE_NAME.openai.azure.com/`)
-   - **API ključ**: Ili `KEY 1` ili `KEY 2` sa vašeg izvora
+1. Idite na [Azure portal](https://portal.azure.com/) i kreirajte **Azure OpenAI** resurs. Trebat će vam **naziv resursa**; on postaje dio vašeg API endpointa (`https://RESOURCE_NAME.openai.azure.com/`).
 
-2. Idite na [Azure AI Foundry](https://ai.azure.com/) i implementirajte model.
+2. Idite na [Azure AI Foundry](https://ai.azure.com/) i deployajte model.
 
    :::note
-   Ime implementacije mora odgovarati imenu modela da bi opencode ispravno radio.
+   Naziv deploymenta mora odgovarati nazivu modela da bi opencode ispravno radio.
    :::
 
-3. Pokrenite naredbu `/connect` i potražite **Azure**.
+3. Pokrenite komandu `/connect` i potražite **Azure**.
 
-```txt
+   ```txt
    /connect
-```
+   ```
 
-4. Unesite svoj API ključ.
+4. Odaberite način autentifikacije.
 
-```txt
+   - **API ključ**: zalijepite `KEY 1` ili `KEY 2` iz svog resursa.
+   - **Microsoft Entra ID (OAuth preko az login)**: prvo pokrenite `az login`. Prijavljeni Azure identitet mora imati ulogu `Cognitive Services OpenAI User` za taj resurs.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Ako ste odabrali API ključ, unesite svoj API ključ.
+
+   ```txt
    ┌ API key
    │
    │
    └ enter
-```
+   ```
 
-5. Postavite ime vašeg resursa kao varijablu okruženja:
+6. Opcionalno: postavite naziv resursa kao varijablu okruženja da preskočite pitanje za naziv resursa tokom `/connect`.
 
-```bash
+   ```bash
    AZURE_RESOURCE_NAME=XXX opencode
-```
+   ```
 
-Ili ga dodajte na svoj bash profil:
+   Ili ga dodajte u svoj bash profil:
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
-```
+   ```
 
-6. Pokrenite naredbu `/models` da odaberete svoj raspoređeni model.
+7. Pokrenite komandu `/models` da odaberete deployani model.
 
-```txt
+   ```txt
    /models
-```
+   ```
 
 ---
 
 ### Azure Cognitive Services
 
-1. Idite na [Azure portal](https://portal.azure.com/) i kreirajte **Azure OpenAI** resurs. trebat će vam:
-   - **Naziv resursa**: Ovo postaje dio vaše krajnje tačke API-ja (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
-   - **API ključ**: Ili `KEY 1` ili `KEY 2` sa vašeg izvora
+1. Idite na [Azure portal](https://portal.azure.com/) i kreirajte **Azure OpenAI** resurs. Trebat će vam **naziv resursa**; on postaje dio vašeg API endpointa (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
-2. Idite na [Azure AI Foundry](https://ai.azure.com/) i implementirajte model.
+2. Idite na [Azure AI Foundry](https://ai.azure.com/) i deployajte model.
 
    :::note
-   Ime implementacije mora odgovarati imenu modela da bi opencode ispravno radio.
+   Naziv deploymenta mora odgovarati nazivu modela da bi opencode ispravno radio.
    :::
 
-3. Pokrenite naredbu `/connect` i potražite **Azure kognitivne usluge**.
+3. Pokrenite komandu `/connect` i potražite **Azure Cognitive Services**.
 
-```txt
+   ```txt
    /connect
-```
+   ```
 
-4. Unesite svoj API ključ.
+4. Odaberite način autentifikacije.
 
-```txt
+   - **API ključ**: zalijepite `KEY 1` ili `KEY 2` iz svog resursa.
+   - **Microsoft Entra ID (OAuth preko az login)**: prvo pokrenite `az login`. Prijavljeni Azure identitet mora imati ulogu `Cognitive Services OpenAI User` za taj resurs.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Ako ste odabrali API ključ, unesite svoj API ključ.
+
+   ```txt
    ┌ API key
    │
    │
    └ enter
-```
+   ```
 
-5. Postavite ime vašeg resursa kao varijablu okruženja:
+6. Opcionalno: postavite naziv resursa kao varijablu okruženja da preskočite pitanje za naziv resursa tokom `/connect`.
 
-```bash
+   ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
-```
+   ```
 
-Ili ga dodajte na svoj bash profil:
+   Ili ga dodajte u svoj bash profil:
 
-```bash title="~/.bash_profile"
+   ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
-```
+   ```
 
-6. Pokrenite naredbu `/models` da odaberete svoj raspoređeni model.
+7. Pokrenite komandu `/models` da odaberete deployani model.
 
-```txt
+   ```txt
    /models
-```
+   ```
 
 ---
 

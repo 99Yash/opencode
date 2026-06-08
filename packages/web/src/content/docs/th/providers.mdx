@@ -365,9 +365,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
 หากคุณพบข้อผิดพลาด "ฉันขอโทษ แต่ฉันไม่สามารถช่วยเหลือคำขอนั้นได้" ให้ลองเปลี่ยนตัวกรองเนื้อหาจาก **DefaultV2** เป็น **Default** ในทรัพยากร Azure ของคุณ
 :::
 
-1. ไปที่ [พอร์ทัล Azure](https://portal.azure.com/) และสร้างทรัพยากร **Azure OpenAI** คุณจะต้องการ:
-   - **ชื่อทรัพยากร**: นี่จะกลายเป็นส่วนหนึ่งของจุดสิ้นสุด API ของคุณ (`https://RESOURCE_NAME.openai.azure.com/`)
-   - **API key**: `KEY 1` หรือ `KEY 2` จากทรัพยากรของคุณ
+1. ไปที่ [พอร์ทัล Azure](https://portal.azure.com/) และสร้างทรัพยากร **Azure OpenAI** คุณจะต้องใช้ **ชื่อทรัพยากร** ซึ่งจะกลายเป็นส่วนหนึ่งของจุดสิ้นสุด API ของคุณ (`https://RESOURCE_NAME.openai.azure.com/`)
 
 2. ไปที่ [Azure AI Foundry](https://ai.azure.com/) และปรับใช้โมเดล
 
@@ -381,7 +379,20 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    /connect
    ```
 
-4. ป้อน API ของคุณ
+4. เลือกวิธีการยืนยันตัวตน
+
+   - **API key**: วาง `KEY 1` หรือ `KEY 2` จากทรัพยากรของคุณ
+   - **Microsoft Entra ID (OAuth ผ่าน az login)**: เรียกใช้ `az login` ก่อน ตัวตน Azure ที่ลงชื่อเข้าใช้ต้องมีบทบาท `Cognitive Services OpenAI User` สำหรับทรัพยากรนี้
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. หากเลือก API key ให้ป้อน API key ของคุณ
 
    ```txt
    ┌ API key
@@ -390,7 +401,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    └ enter
    ```
 
-5. ตั้งชื่อทรัพยากรของคุณเป็นตัวแปรสภาพแวดล้อม:
+6. ไม่บังคับ: ตั้งชื่อทรัพยากรเป็นตัวแปรสภาพแวดล้อมเพื่อข้ามการถามชื่อทรัพยากรระหว่าง `/connect`
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
@@ -402,7 +413,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-6. รันคำสั่ง `/models` เพื่อเลือกโมเดลที่ปรับใช้ของคุณ
+7. รันคำสั่ง `/models` เพื่อเลือกโมเดลที่ปรับใช้ของคุณ
 
    ```txt
    /models
@@ -412,9 +423,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
 
 ### Azure Cognitive Services
 
-1. ไปที่ [พอร์ทัล Azure](https://portal.azure.com/) และสร้างทรัพยากร **Azure OpenAI** คุณจะต้องการ:
-   - **ชื่อทรัพยากร**: นี่จะกลายเป็นส่วนหนึ่งของจุดสิ้นสุด API ของคุณ (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
-   - **API key**: `KEY 1` หรือ `KEY 2` จากทรัพยากรของคุณ
+1. ไปที่ [พอร์ทัล Azure](https://portal.azure.com/) และสร้างทรัพยากร **Azure OpenAI** คุณจะต้องใช้ **ชื่อทรัพยากร** ซึ่งจะกลายเป็นส่วนหนึ่งของจุดสิ้นสุด API ของคุณ (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
 
 2. ไปที่ [Azure AI Foundry](https://ai.azure.com/) และปรับใช้โมเดล
 
@@ -428,7 +437,20 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    /connect
    ```
 
-4. ป้อน API ของคุณ
+4. เลือกวิธีการยืนยันตัวตน
+
+   - **API key**: วาง `KEY 1` หรือ `KEY 2` จากทรัพยากรของคุณ
+   - **Microsoft Entra ID (OAuth ผ่าน az login)**: เรียกใช้ `az login` ก่อน ตัวตน Azure ที่ลงชื่อเข้าใช้ต้องมีบทบาท `Cognitive Services OpenAI User` สำหรับทรัพยากรนี้
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. หากเลือก API key ให้ป้อน API key ของคุณ
 
    ```txt
    ┌ API key
@@ -437,7 +459,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    └ enter
    ```
 
-5. ตั้งชื่อทรัพยากรของคุณเป็นตัวแปรสภาพแวดล้อม:
+6. ไม่บังคับ: ตั้งชื่อทรัพยากรเป็นตัวแปรสภาพแวดล้อมเพื่อข้ามการถามชื่อทรัพยากรระหว่าง `/connect`
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
@@ -449,7 +471,7 @@ OpenCode Go คือแผนการสมัครสมาชิกรา�
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-6. รันคำสั่ง `/models` เพื่อเลือกโมเดลที่ปรับใช้ของคุณ
+7. รันคำสั่ง `/models` เพื่อเลือกโมเดลที่ปรับใช้ของคุณ
 
    ```txt
    /models

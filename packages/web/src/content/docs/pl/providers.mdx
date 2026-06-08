@@ -362,17 +362,15 @@ Jeśli wywołania narzędzi nie działają dobrze, wybierz załadowany model z d
 ### Azure OpenAI
 
 :::note
-Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, spróbuj zmienić filtr zawartości z **DefaultV2** na **Default** w zasobie platformy Azure.
+Jeśli pojawią się błędy typu "I'm sorry, but I cannot assist with that request", spróbuj zmienić filtr treści z **DefaultV2** na **Default** w swoim zasobie Azure.
 :::
 
-1. Przejdź do [Azure portal](https://portal.azure.com/) i utwórz zasób **Azure OpenAI**. Będziesz potrzebować:
-   - **Nazwa zasobu**: staje się częścią punktu końcowego API (`https://RESOURCE_NAME.openai.azure.com/`)
-   - **Klucz API**: `KEY 1` lub `KEY 2` z Twojego zasobu
+1. Przejdź do [portalu Azure](https://portal.azure.com/) i utwórz zasób **Azure OpenAI**. Potrzebujesz **nazwy zasobu**; stanie się ona częścią punktu końcowego API (`https://RESOURCE_NAME.openai.azure.com/`).
 
 2. Przejdź do [Azure AI Foundry](https://ai.azure.com/) i wdróż model.
 
    :::note
-   Aby kod opencode działał poprawnie, nazwa wdrożenia musi być zgodna z nazwą modelu.
+   Nazwa wdrożenia musi odpowiadać nazwie modelu, aby opencode działał poprawnie.
    :::
 
 3. Uruchom polecenie `/connect` i wyszukaj **Azure**.
@@ -381,7 +379,20 @@ Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, 
    /connect
    ```
 
-4. Wpisz swój klucz API.
+4. Wybierz metodę uwierzytelniania.
+
+   - **Klucz API**: wklej `KEY 1` lub `KEY 2` ze swojego zasobu.
+   - **Microsoft Entra ID (OAuth przez az login)**: najpierw uruchom `az login`. Zalogowana tożsamość Azure musi mieć rolę `Cognitive Services OpenAI User` dla tego zasobu.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Jeśli wybrano klucz API, wpisz swój klucz API.
 
    ```txt
    ┌ API key
@@ -390,19 +401,19 @@ Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, 
    └ enter
    ```
 
-5. Ustaw nazwę zasobu jako zmienną środowiskową:
+6. Opcjonalnie: ustaw nazwę zasobu jako zmienną środowiskową, aby pominąć pytanie o nazwę zasobu podczas `/connect`.
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   Lub dodaj go do swojego profilu bash:
+   Albo dodaj ją do profilu bash:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-6. Uruchom komendę `/models`, aby wybrać wdrożony model.
+7. Uruchom polecenie `/models`, aby wybrać wdrożony model.
 
    ```txt
    /models
@@ -412,14 +423,12 @@ Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, 
 
 ### Azure Cognitive Services
 
-1. Przejdź do [Azure portal](https://portal.azure.com/) i utwórz zasób **Azure OpenAI**. Będziesz potrzebować:
-   - **Nazwa zasobu**: staje się częścią punktu końcowego API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
-   - **Klucz API**: `KEY 1` lub `KEY 2` z Twojego zasobu
+1. Przejdź do [portalu Azure](https://portal.azure.com/) i utwórz zasób **Azure OpenAI**. Potrzebujesz **nazwy zasobu**; stanie się ona częścią punktu końcowego API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
 2. Przejdź do [Azure AI Foundry](https://ai.azure.com/) i wdróż model.
 
    :::note
-   Aby kod opencode działał poprawnie, nazwa wdrożenia musi być zgodna z nazwą modelu.
+   Nazwa wdrożenia musi odpowiadać nazwie modelu, aby opencode działał poprawnie.
    :::
 
 3. Uruchom polecenie `/connect` i wyszukaj **Azure Cognitive Services**.
@@ -428,7 +437,20 @@ Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, 
    /connect
    ```
 
-4. Wpisz swój klucz API.
+4. Wybierz metodę uwierzytelniania.
+
+   - **Klucz API**: wklej `KEY 1` lub `KEY 2` ze swojego zasobu.
+   - **Microsoft Entra ID (OAuth przez az login)**: najpierw uruchom `az login`. Zalogowana tożsamość Azure musi mieć rolę `Cognitive Services OpenAI User` dla tego zasobu.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Jeśli wybrano klucz API, wpisz swój klucz API.
 
    ```txt
    ┌ API key
@@ -437,19 +459,19 @@ Jeśli napotkasz błędy „Przykro mi, ale nie mogę pomóc w tej prośbie”, 
    └ enter
    ```
 
-5. Ustaw nazwę zasobu jako zmienną środowiskową:
+6. Opcjonalnie: ustaw nazwę zasobu jako zmienną środowiskową, aby pominąć pytanie o nazwę zasobu podczas `/connect`.
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   Lub dodaj go do swojego profilu bash:
+   Albo dodaj ją do profilu bash:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-6. Uruchom komendę `/models`, aby wybrać wdrożony model.
+7. Uruchom polecenie `/models`, aby wybrać wdrożony model.
 
    ```txt
    /models

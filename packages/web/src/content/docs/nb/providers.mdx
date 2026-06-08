@@ -364,17 +364,15 @@ Hvis verktøykall ikke fungerer godt, velg en lastet modell med god tool calling
 ### Azure OpenAI
 
 :::note
-Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»-feil, kan du prøve å endre innholdsfilteret fra **DefaultV2** til **Default** i Azure-ressursen.
+Hvis du får feil som "I'm sorry, but I cannot assist with that request", kan du prøve å endre innholdsfilteret fra **DefaultV2** til **Default** i Azure-ressursen din.
 :::
 
-1. Gå over til [Azure-portalen](https://portal.azure.com/) og lag en **Azure OpenAI**-ressurs. Du trenger:
-   - **Ressursnavn**: Dette blir en del av API-endepunktet (`https://RESOURCE_NAME.openai.azure.com/`)
-   - **API nøkkel**: Enten `KEY 1` eller `KEY 2` fra ressursen din
+1. Gå til [Azure-portalen](https://portal.azure.com/) og opprett en **Azure OpenAI**-ressurs. Du trenger **ressursnavnet**; det blir en del av API-endepunktet ditt (`https://RESOURCE_NAME.openai.azure.com/`).
 
 2. Gå til [Azure AI Foundry](https://ai.azure.com/) og distribuer en modell.
 
    :::note
-   Distribusjonsnavnet må samsvare med modellnavnet for at OpenCode skal fungere skikkelig.
+   Distribusjonsnavnet må samsvare med modellnavnet for at opencode skal fungere riktig.
    :::
 
 3. Kjør kommandoen `/connect` og søk etter **Azure**.
@@ -383,7 +381,20 @@ Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»
    /connect
    ```
 
-4. Skriv inn API-nøkkelen.
+4. Velg en autentiseringsmetode.
+
+   - **API-nøkkel**: lim inn `KEY 1` eller `KEY 2` fra ressursen din.
+   - **Microsoft Entra ID (OAuth via az login)**: kjør `az login` først. Den påloggede Azure-identiteten må ha rollen `Cognitive Services OpenAI User` for ressursen.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Hvis du valgte API-nøkkel, skriver du inn API-nøkkelen.
 
    ```txt
    ┌ API key
@@ -392,19 +403,19 @@ Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»
    └ enter
    ```
 
-5. Angi ressursnavnet ditt som en miljøvariabel:
+6. Valgfritt: angi ressursnavnet som en miljøvariabel for å hoppe over ressursnavnsprompten under `/connect`.
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   Eller legg den til bash-profilen din:
+   Eller legg det til i bash-profilen din:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-6. Kjør kommandoen `/models` for å velge den distribuerte modellen.
+7. Kjør kommandoen `/models` for å velge den distribuerte modellen.
 
    ```txt
    /models
@@ -414,14 +425,12 @@ Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»
 
 ### Azure Cognitive Services
 
-1. Gå over til [Azure-portalen](https://portal.azure.com/) og lag en **Azure OpenAI**-ressurs. Du trenger:
-   - **Ressursnavn**: Dette blir en del av API-endepunktet (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
-   - **API nøkkel**: Enten `KEY 1` eller `KEY 2` fra ressursen din
+1. Gå til [Azure-portalen](https://portal.azure.com/) og opprett en **Azure OpenAI**-ressurs. Du trenger **ressursnavnet**; det blir en del av API-endepunktet ditt (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
 
 2. Gå til [Azure AI Foundry](https://ai.azure.com/) og distribuer en modell.
 
    :::note
-   Distribusjonsnavnet må samsvare med modellnavnet for at OpenCode skal fungere skikkelig.
+   Distribusjonsnavnet må samsvare med modellnavnet for at opencode skal fungere riktig.
    :::
 
 3. Kjør kommandoen `/connect` og søk etter **Azure Cognitive Services**.
@@ -430,7 +439,20 @@ Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»
    /connect
    ```
 
-4. Skriv inn API-nøkkelen.
+4. Velg en autentiseringsmetode.
+
+   - **API-nøkkel**: lim inn `KEY 1` eller `KEY 2` fra ressursen din.
+   - **Microsoft Entra ID (OAuth via az login)**: kjør `az login` først. Den påloggede Azure-identiteten må ha rollen `Cognitive Services OpenAI User` for ressursen.
+
+   ```txt
+   ┌ Select auth method
+   │
+   │ API key
+   │ Microsoft Entra ID (OAuth via az login)
+   └
+   ```
+
+5. Hvis du valgte API-nøkkel, skriver du inn API-nøkkelen.
 
    ```txt
    ┌ API key
@@ -439,19 +461,19 @@ Hvis du støter på «Beklager, men jeg kan ikke hjelpe med den forespørselen»
    └ enter
    ```
 
-5. Angi ressursnavnet ditt som en miljøvariabel:
+6. Valgfritt: angi ressursnavnet som en miljøvariabel for å hoppe over ressursnavnsprompten under `/connect`.
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   Eller legg den til bash-profilen din:
+   Eller legg det til i bash-profilen din:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-6. Kjør kommandoen `/models` for å velge den distribuerte modellen.
+7. Kjør kommandoen `/models` for å velge den distribuerte modellen.
 
    ```txt
    /models
