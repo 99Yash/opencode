@@ -234,6 +234,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         return [
           provider.options?.resourceName,
           auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+          auth?.type === "oauth" ? auth.accountId : undefined,
           env["AZURE_RESOURCE_NAME"],
         ].find((name) => typeof name === "string" && name.trim() !== "")
       })
@@ -267,8 +268,14 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
         },
       }
     }),
-    "azure-cognitive-services": Effect.fnUntraced(function* () {
-      const resourceName = yield* dep.get("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME")
+    "azure-cognitive-services": Effect.fnUntraced(function* (provider: Info) {
+      const env = yield* dep.env()
+      const auth = yield* dep.auth(provider.id)
+      const resourceName = [
+        auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+        auth?.type === "oauth" ? auth.accountId : undefined,
+        env["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"],
+      ].find((name) => typeof name === "string" && name.trim() !== "")
       return {
         autoload: false,
         async getModel(sdk: any, modelID: string, options?: Record<string, any>) {

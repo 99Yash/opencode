@@ -16,7 +16,7 @@ import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
 import { PoeAuthPlugin } from "opencode-poe-auth"
 import { CloudflareAIGatewayAuthPlugin, CloudflareWorkersAuthPlugin } from "./cloudflare"
-import { AzureAuthPlugin } from "./azure"
+import { AzureAuthPlugin, AzureCognitiveServicesAuthPlugin } from "./azure"
 import { DigitalOceanAuthPlugin } from "./digitalocean"
 import { XaiAuthPlugin } from "./xai"
 import { Effect, Layer, Context } from "effect"
@@ -76,6 +76,7 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
     AzureAuthPlugin,
+    AzureCognitiveServicesAuthPlugin,
     DigitalOceanAuthPlugin,
     XaiAuthPlugin,
   ]
