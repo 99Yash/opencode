@@ -92,7 +92,7 @@ function azureAuthPlugin(input: {
         },
         {
           type: "oauth",
-          label: "Microsoft Entra ID (OAuth via az login)",
+          label: "Microsoft Entra ID (OAuth via az cli)",
           prompts: input.prompts,
           authorize: async (inputs) => ({
             url: "https://learn.microsoft.com/azure/developer/ai/keyless-connections",
@@ -118,10 +118,10 @@ function azureCliTokenProvider() {
   return async () => {
     if (cached && cached.expires - Date.now() > AZURE_TOKEN_REFRESH_BUFFER) return cached.token
 
-    const proc = Bun.spawn(
-      ["az", "account", "get-access-token", "--resource", AZURE_SCOPE, "--output", "json"],
-      { stdout: "pipe", stderr: "pipe" },
-    )
+    const proc = Bun.spawn(["az", "account", "get-access-token", "--resource", AZURE_SCOPE, "--output", "json"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
       new Response(proc.stderr).text(),
