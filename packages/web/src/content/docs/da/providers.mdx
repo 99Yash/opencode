@@ -356,15 +356,17 @@ Hvis værktøjskald ikke fungerer godt, så vælg en indlæst model med god tool
 ### Azure OpenAI
 
 :::note
-Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du prøve at ændre indholdsfilteret fra **DefaultV2** til **Default** i din Azure-ressource.
+Hvis du støder på "Beklager, men jeg kan ikke hjælpe med den anmodning"-fejl, kan du prøve at ændre indholdsfilteret fra **DefaultV2** til **Default** i Azure-ressourcen.
 :::
 
-1. Gå til [Azure-portalen](https://portal.azure.com/) og opret en **Azure OpenAI**-ressource. Du skal bruge **ressourcenavnet**; det bliver en del af dit API-endpoint (`https://RESOURCE_NAME.openai.azure.com/`).
+1. Gå til [Azure-portalen](https://portal.azure.com/) og opret en **Azure OpenAI**-ressource. Du skal bruge:
+   - **Ressourcenavn**: Dette bliver en del af API-endpointet (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **API-nøgle**: Enten `KEY 1` eller `KEY 2` fra din ressource
 
-2. Gå til [Azure AI Foundry](https://ai.azure.com/) og udrul en model.
+2. Gå til [Azure AI Foundry](https://ai.azure.com/) og distribuer en model.
 
    :::note
-   Udrulningsnavnet skal matche modelnavnet, for at opencode fungerer korrekt.
+   Distributionsnavnet skal matche modelnavnet for at opencode skal fungere korrekt.
    :::
 
 3. Kør kommandoen `/connect` og søg efter **Azure**.
@@ -373,20 +375,7 @@ Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du
    /connect
    ```
 
-4. Vælg en godkendelsesmetode.
-
-   - **API-nøgle**: indsæt `KEY 1` eller `KEY 2` fra din ressource.
-   - **Microsoft Entra ID (OAuth via az login)**: kør først `az login`. Den indloggede Azure-identitet skal have rollen `Cognitive Services OpenAI User` for ressourcen.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Hvis du valgte API-nøgle, skal du indtaste din API-nøgle.
+4. Indtast API-nøglen.
 
    ```txt
    ┌ API key
@@ -395,19 +384,19 @@ Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du
    └ enter
    ```
 
-6. Valgfrit: angiv ressourcenavnet som en miljøvariabel for at springe prompten om ressourcenavn over under `/connect`.
+5. Angiv dit ressourcenavn som en miljøvariabel:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   Eller føj det til din bash-profil:
+   Eller tilføj den til din bash-profil:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. Kør kommandoen `/models` for at vælge din udrullede model.
+6. Kør kommandoen `/models` for at vælge den distribuerede model.
 
    ```txt
    /models
@@ -417,12 +406,14 @@ Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du
 
 ### Azure Cognitive Services
 
-1. Gå til [Azure-portalen](https://portal.azure.com/) og opret en **Azure OpenAI**-ressource. Du skal bruge **ressourcenavnet**; det bliver en del af dit API-endpoint (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. Gå til [Azure-portalen](https://portal.azure.com/) og opret en **Azure OpenAI**-ressource. Du skal bruge:
+   - **Ressourcenavn**: Dette bliver en del af API-endpointet (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **API-nøgle**: Enten `KEY 1` eller `KEY 2` fra din ressource
 
-2. Gå til [Azure AI Foundry](https://ai.azure.com/) og udrul en model.
+2. Gå til [Azure AI Foundry](https://ai.azure.com/) og distribuer en model.
 
    :::note
-   Udrulningsnavnet skal matche modelnavnet, for at opencode fungerer korrekt.
+   Distributionsnavnet skal matche modelnavnet for at opencode skal fungere korrekt.
    :::
 
 3. Kør kommandoen `/connect` og søg efter **Azure Cognitive Services**.
@@ -431,20 +422,7 @@ Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du
    /connect
    ```
 
-4. Vælg en godkendelsesmetode.
-
-   - **API-nøgle**: indsæt `KEY 1` eller `KEY 2` fra din ressource.
-   - **Microsoft Entra ID (OAuth via az login)**: kør først `az login`. Den indloggede Azure-identitet skal have rollen `Cognitive Services OpenAI User` for ressourcen.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Hvis du valgte API-nøgle, skal du indtaste din API-nøgle.
+4. Indtast API-nøglen.
 
    ```txt
    ┌ API key
@@ -453,19 +431,19 @@ Hvis du får fejl som "I'm sorry, but I cannot assist with that request", kan du
    └ enter
    ```
 
-6. Valgfrit: angiv ressourcenavnet som en miljøvariabel for at springe prompten om ressourcenavn over under `/connect`.
+5. Angiv dit ressourcenavn som en miljøvariabel:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   Eller føj det til din bash-profil:
+   Eller tilføj den til din bash-profil:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. Kør kommandoen `/models` for at vælge din udrullede model.
+6. Kør kommandoen `/models` for at vælge den distribuerede model.
 
    ```txt
    /models

@@ -357,37 +357,26 @@ OpenCode Go 是一個低成本的訂閱計畫，提供對 OpenCode 團隊提供�
 ### Azure OpenAI
 
 :::note
-如果遇到「I'm sorry, but I cannot assist with that request」之類的錯誤，請嘗試在 Azure 資源中將內容篩選器從 **DefaultV2** 改為 **Default**。
+如果遇到 "I'm sorry, but I cannot assist with that request" 錯誤，請嘗試將 Azure 資源中的內容篩選器從 **DefaultV2** 更改為 **Default**。
 :::
 
-1. 前往 [Azure 入口網站](https://portal.azure.com/) 並建立 **Azure OpenAI** 資源。你需要 **資源名稱**；它會成為 API 端點的一部分 (`https://RESOURCE_NAME.openai.azure.com/`).
+1. 前往 [Azure 入口網站](https://portal.azure.com/)並建立 **Azure OpenAI** 資源。您需要：
+   - **資源名稱**：這會成為您的 API 端點的一部分（`https://RESOURCE_NAME.openai.azure.com/`）
+   - **API 金鑰**：資源中的 `KEY 1` 或 `KEY 2`
 
-2. 前往 [Azure AI Foundry](https://ai.azure.com/) 並部署模型。
+2. 前往 [Azure AI Foundry](https://ai.azure.com/) 並部署一個模型。
 
    :::note
-   部署名稱必須與模型名稱相符，opencode 才能正常運作。
+   部署名稱必須與模型名稱一致，OpenCode 才能正常運作。
    :::
 
-3. 執行 `/connect` 命令並搜尋 **Azure**.
+3. 執行 `/connect` 指令並搜尋 **Azure**。
 
    ```txt
    /connect
    ```
 
-4. 選擇驗證方法。
-
-   - **API 金鑰**：貼上資源中的 `KEY 1` 或 `KEY 2`。
-   - **Microsoft Entra ID（透過 az login 使用 OAuth）**：先執行 `az login`。已登入的 Azure 身分必須擁有該資源的 `Cognitive Services OpenAI User` 角色。
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. 如果選擇 API 金鑰，請輸入你的 API 金鑰。
+4. 輸入您的 API 金鑰。
 
    ```txt
    ┌ API key
@@ -396,19 +385,19 @@ OpenCode Go 是一個低成本的訂閱計畫，提供對 OpenCode 團隊提供�
    └ enter
    ```
 
-6. 選用：將資源名稱設為環境變數，以略過 `/connect` 期間的資源名稱提示。
+5. 將資源名稱設定為環境變數：
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   或將它加入你的 bash 設定檔：
+   或者新增到您的 bash 設定檔中：
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. 執行 `/models` 命令以選擇已部署的模型。
+6. 執行 `/models` 指令選擇您已部署的模型。
 
    ```txt
    /models
@@ -418,34 +407,23 @@ OpenCode Go 是一個低成本的訂閱計畫，提供對 OpenCode 團隊提供�
 
 ### Azure Cognitive Services
 
-1. 前往 [Azure 入口網站](https://portal.azure.com/) 並建立 **Azure OpenAI** 資源。你需要 **資源名稱**；它會成為 API 端點的一部分 (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. 前往 [Azure 入口網站](https://portal.azure.com/)並建立 **Azure OpenAI** 資源。您需要：
+   - **資源名稱**：這會成為您的 API 端點的一部分（`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`）
+   - **API 金鑰**：資源中的 `KEY 1` 或 `KEY 2`
 
-2. 前往 [Azure AI Foundry](https://ai.azure.com/) 並部署模型。
+2. 前往 [Azure AI Foundry](https://ai.azure.com/) 並部署一個模型。
 
    :::note
-   部署名稱必須與模型名稱相符，opencode 才能正常運作。
+   部署名稱必須與模型名稱一致，OpenCode 才能正常運作。
    :::
 
-3. 執行 `/connect` 命令並搜尋 **Azure Cognitive Services**.
+3. 執行 `/connect` 指令並搜尋 **Azure Cognitive Services**。
 
    ```txt
    /connect
    ```
 
-4. 選擇驗證方法。
-
-   - **API 金鑰**：貼上資源中的 `KEY 1` 或 `KEY 2`。
-   - **Microsoft Entra ID（透過 az login 使用 OAuth）**：先執行 `az login`。已登入的 Azure 身分必須擁有該資源的 `Cognitive Services OpenAI User` 角色。
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. 如果選擇 API 金鑰，請輸入你的 API 金鑰。
+4. 輸入您的 API 金鑰。
 
    ```txt
    ┌ API key
@@ -454,19 +432,19 @@ OpenCode Go 是一個低成本的訂閱計畫，提供對 OpenCode 團隊提供�
    └ enter
    ```
 
-6. 選用：將資源名稱設為環境變數，以略過 `/connect` 期間的資源名稱提示。
+5. 將資源名稱設定為環境變數：
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   或將它加入你的 bash 設定檔：
+   或者新增到您的 bash 設定檔中：
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. 執行 `/models` 命令以選擇已部署的模型。
+6. 執行 `/models` 指令選擇您已部署的模型。
 
    ```txt
    /models

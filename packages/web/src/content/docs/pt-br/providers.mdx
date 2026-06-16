@@ -366,12 +366,14 @@ Se as chamadas de ferramentas não estiverem funcionando bem, escolha um modelo 
 ### Azure OpenAI
 
 :::note
-Se encontrar erros como "I'm sorry, but I cannot assist with that request", tente alterar o filtro de conteúdo de **DefaultV2** para **Default** no seu recurso do Azure.
+Se você encontrar erros "Desculpe, mas não posso ajudar com esse pedido", tente mudar o filtro de conteúdo de **DefaultV2** para **Default** em seu recurso Azure.
 :::
 
-1. Acesse o [portal do Azure](https://portal.azure.com/) e crie um recurso **Azure OpenAI**. Você precisará do **nome do recurso**; ele se torna parte do endpoint da API (`https://RESOURCE_NAME.openai.azure.com/`).
+1. Acesse o [portal Azure](https://portal.azure.com/) e crie um recurso **Azure OpenAI**. Você precisará:
+   - **Nome do recurso**: Isso se torna parte do seu endpoint da API (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **Chave da API**: Seja `KEY 1` ou `KEY 2` do seu recurso
 
-2. Acesse o [Azure AI Foundry](https://ai.azure.com/) e implante um modelo.
+2. Vá para [Azure AI Foundry](https://ai.azure.com/) e implante um modelo.
 
    :::note
    O nome da implantação deve corresponder ao nome do modelo para que o opencode funcione corretamente.
@@ -383,20 +385,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    /connect
    ```
 
-4. Escolha um método de autenticação.
-
-   - **Chave de API**: cole `KEY 1` ou `KEY 2` do seu recurso.
-   - **Microsoft Entra ID (OAuth via az login)**: execute `az login` primeiro. A identidade do Azure conectada deve ter a função `Cognitive Services OpenAI User` para o recurso.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Se você escolheu chave de API, insira sua chave de API.
+4. Insira sua chave da API.
 
    ```txt
    ┌ API key
@@ -405,7 +394,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    └ enter
    ```
 
-6. Opcional: defina o nome do recurso como uma variável de ambiente para pular a solicitação do nome do recurso durante `/connect`.
+5. Defina o nome do seu recurso como uma variável de ambiente:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
@@ -417,7 +406,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. Execute o comando `/models` para selecionar o modelo implantado.
+6. Execute o comando `/models` para selecionar seu modelo implantado.
 
    ```txt
    /models
@@ -427,9 +416,11 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
 
 ### Azure Cognitive Services
 
-1. Acesse o [portal do Azure](https://portal.azure.com/) e crie um recurso **Azure OpenAI**. Você precisará do **nome do recurso**; ele se torna parte do endpoint da API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. Acesse o [portal Azure](https://portal.azure.com/) e crie um recurso **Azure OpenAI**. Você precisará:
+   - **Nome do recurso**: Isso se torna parte do seu endpoint da API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **Chave da API**: Seja `KEY 1` ou `KEY 2` do seu recurso
 
-2. Acesse o [Azure AI Foundry](https://ai.azure.com/) e implante um modelo.
+2. Vá para [Azure AI Foundry](https://ai.azure.com/) e implante um modelo.
 
    :::note
    O nome da implantação deve corresponder ao nome do modelo para que o opencode funcione corretamente.
@@ -441,20 +432,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    /connect
    ```
 
-4. Escolha um método de autenticação.
-
-   - **Chave de API**: cole `KEY 1` ou `KEY 2` do seu recurso.
-   - **Microsoft Entra ID (OAuth via az login)**: execute `az login` primeiro. A identidade do Azure conectada deve ter a função `Cognitive Services OpenAI User` para o recurso.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Se você escolheu chave de API, insira sua chave de API.
+4. Insira sua chave da API.
 
    ```txt
    ┌ API key
@@ -463,7 +441,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    └ enter
    ```
 
-6. Opcional: defina o nome do recurso como uma variável de ambiente para pular a solicitação do nome do recurso durante `/connect`.
+5. Defina o nome do seu recurso como uma variável de ambiente:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
@@ -475,7 +453,7 @@ Se encontrar erros como "I'm sorry, but I cannot assist with that request", tent
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. Execute o comando `/models` para selecionar o modelo implantado.
+6. Execute o comando `/models` para selecionar seu modelo implantado.
 
    ```txt
    /models

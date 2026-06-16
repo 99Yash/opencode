@@ -366,37 +366,26 @@ OpenAI 호환 API 서버 뒤에서 로컬 LLM을 실행하는 데스크톱 애�
 ### Azure OpenAI
 
 :::note
-"I'm sorry, but I cannot assist with that request" 같은 오류가 발생하면 Azure 리소스에서 콘텐츠 필터를 **DefaultV2**에서 **Default**로 변경해 보세요.
+"I'm sorry, but I cannot assist with that request" 오류가 발생하면, Azure 리소스의 콘텐츠 필터를 **DefaultV2**에서 **Default**로 변경해 보세요.
 :::
 
-1. [Azure 포털](https://portal.azure.com/)로 이동하여 **Azure OpenAI** 리소스를 만드세요. **리소스 이름**이 필요하며, 이는 API 엔드포인트의 일부가 됩니다 (`https://RESOURCE_NAME.openai.azure.com/`).
+1. [Azure 포털](https://portal.azure.com/)로 이동하여 **Azure OpenAI** 리소스를 만듭니다. 다음이 필요합니다:
+   - **리소스 이름**: API 엔드포인트의 일부가 됩니다 (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **API 키**: 리소스의 `KEY 1` 또는 `KEY 2`
 
-2. [Azure AI Foundry](https://ai.azure.com/)로 이동하여 모델을 배포하세요.
+2. [Azure AI Foundry](https://ai.azure.com/)로 이동하여 모델을 배포합니다.
 
    :::note
-   opencode가 올바르게 작동하려면 배포 이름이 모델 이름과 일치해야 합니다.
+   배포 이름은 제대로 작동하려면 OpenCode의 모델 이름과 일치해야 합니다.
    :::
 
-3. `/connect` 명령을 실행하고 **Azure**.
+3. `/connect` 명령을 실행하고 **Azure**를 검색하십시오.
 
    ```txt
    /connect
    ```
 
-4. 인증 방법을 선택하세요.
-
-   - **API 키**: 리소스의 `KEY 1` 또는 `KEY 2`를 붙여넣으세요.
-   - **Microsoft Entra ID (az login을 통한 OAuth)**: 먼저 `az login`을 실행하세요. 로그인한 Azure ID에는 해당 리소스에 대한 `Cognitive Services OpenAI User` 역할이 있어야 합니다.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. API 키를 선택했다면 API 키를 입력하세요.
+4. API 키를 입력하십시오.
 
    ```txt
    ┌ API key
@@ -405,19 +394,19 @@ OpenAI 호환 API 서버 뒤에서 로컬 LLM을 실행하는 데스크톱 애�
    └ enter
    ```
 
-6. 선택 사항: `/connect` 중 리소스 이름 프롬프트를 건너뛰려면 리소스 이름을 환경 변수로 설정하세요.
+5. 리소스 이름을 환경 변수로 설정:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   또는 bash 프로필에 추가하세요:
+   또는 bash 프로필에 추가:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. `/models` 명령을 실행하여 배포된 모델을 선택하세요.
+6. `/models` 명령을 실행하여 배포된 모델을 선택하십시오.
 
    ```txt
    /models
@@ -427,34 +416,23 @@ OpenAI 호환 API 서버 뒤에서 로컬 LLM을 실행하는 데스크톱 애�
 
 ### Azure Cognitive Services
 
-1. [Azure 포털](https://portal.azure.com/)로 이동하여 **Azure OpenAI** 리소스를 만드세요. **리소스 이름**이 필요하며, 이는 API 엔드포인트의 일부가 됩니다 (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. [Azure 포털](https://portal.azure.com/)로 이동하여 **Azure OpenAI** 리소스를 만듭니다. 다음이 필요합니다:
+   - **리소스 이름**: API 엔드포인트의 일부가 됩니다 (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **API 키**: 리소스의 `KEY 1` 또는 `KEY 2`
 
-2. [Azure AI Foundry](https://ai.azure.com/)로 이동하여 모델을 배포하세요.
+2. [Azure AI Foundry](https://ai.azure.com/)로 이동하여 모델을 배포합니다.
 
    :::note
-   opencode가 올바르게 작동하려면 배포 이름이 모델 이름과 일치해야 합니다.
+   배포 이름은 제대로 작동하려면 OpenCode의 모델 이름과 일치해야 합니다.
    :::
 
-3. `/connect` 명령을 실행하고 **Azure Cognitive Services**.
+3. `/connect` 명령을 실행하고 **Azure Cognitive Services**를 검색하십시오.
 
    ```txt
    /connect
    ```
 
-4. 인증 방법을 선택하세요.
-
-   - **API 키**: 리소스의 `KEY 1` 또는 `KEY 2`를 붙여넣으세요.
-   - **Microsoft Entra ID (az login을 통한 OAuth)**: 먼저 `az login`을 실행하세요. 로그인한 Azure ID에는 해당 리소스에 대한 `Cognitive Services OpenAI User` 역할이 있어야 합니다.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. API 키를 선택했다면 API 키를 입력하세요.
+4. API 키를 입력하십시오.
 
    ```txt
    ┌ API key
@@ -463,19 +441,19 @@ OpenAI 호환 API 서버 뒤에서 로컬 LLM을 실행하는 데스크톱 애�
    └ enter
    ```
 
-6. 선택 사항: `/connect` 중 리소스 이름 프롬프트를 건너뛰려면 리소스 이름을 환경 변수로 설정하세요.
+5. 리소스 이름을 환경 변수로 설정:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   또는 bash 프로필에 추가하세요:
+   또는 bash 프로필에 추가:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. `/models` 명령을 실행하여 배포된 모델을 선택하세요.
+6. `/models` 명령을 실행하여 배포된 모델을 선택하십시오.
 
    ```txt
    /models

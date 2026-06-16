@@ -367,7 +367,9 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
 "Üzgünüm ama bu isteğe yardımcı olamıyorum" hatalarıyla karşılaşırsanız Azure kaynağınızda içerik filtresini **DefaultV2** yerine **Default** olarak değiştirmeyi deneyin.
 :::
 
-1. [Azure portal](https://portal.azure.com/)'a gidin ve bir **Azure OpenAI** kaynağı oluşturun. **Kaynak adına** ihtiyacınız olacak; bu, API bitiş noktanızın (`https://RESOURCE_NAME.openai.azure.com/`) parçası olur.
+1. [Azure portal](https://portal.azure.com/)'a gidin ve bir **Azure OpenAI** kaynağı oluşturun. İhtiyacınız olacak:
+   - **Kaynak adı**: Bu, API bitiş noktanızın (`https://RESOURCE_NAME.openai.azure.com/`) parçası olur
+   - **API anahtarı**: Kaynağınızdan `KEY 1` veya `KEY 2`
 
 2. [Azure AI Foundry](https://ai.azure.com/)'a gidin ve bir model dağıtın.
 
@@ -381,20 +383,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    /connect
    ```
 
-4. Bir kimlik doğrulama yöntemi seçin.
-
-   - **API anahtarı**: Kaynağınızdan `KEY 1` veya `KEY 2` değerini yapıştırın.
-   - **Microsoft Entra ID (az login ile OAuth)**: Önce `az login` çalıştırın. Oturum açmış Azure kimliğinin bu kaynak için `Cognitive Services OpenAI User` rolüne sahip olması gerekir.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. API anahtarını seçtiyseniz API anahtarınızı girin.
+4. API anahtarınızı girin.
 
    ```txt
    ┌ API key
@@ -403,7 +392,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    └ enter
    ```
 
-6. İsteğe bağlı: `/connect` sırasında kaynak adı sorusunu atlamak için kaynak adınızı ortam değişkeni olarak ayarlayın.
+5. Kaynak adınızı ortam değişkeni olarak ayarlayın:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
@@ -415,7 +404,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. Dağıtılan modelinizi seçmek için `/models` komutunu çalıştırın.
+6. Dağıtılan modelinizi seçmek için `/models` komutunu çalıştırın.
 
    ```txt
    /models
@@ -425,7 +414,9 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
 
 ### Azure Cognitive Services
 
-1. [Azure portal](https://portal.azure.com/)'a gidin ve bir **Azure OpenAI** kaynağı oluşturun. **Kaynak adına** ihtiyacınız olacak; bu, API bitiş noktanızın (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`) parçası olur.
+1. [Azure portal](https://portal.azure.com/)'a gidin ve bir **Azure OpenAI** kaynağı oluşturun. İhtiyacınız olacak:
+   - **Kaynak adı**: Bu, API bitiş noktanızın (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`) parçası olur
+   - **API anahtarı**: Kaynağınızdan `KEY 1` veya `KEY 2`
 
 2. [Azure AI Foundry](https://ai.azure.com/)'a gidin ve bir model dağıtın.
 
@@ -439,20 +430,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    /connect
    ```
 
-4. Bir kimlik doğrulama yöntemi seçin.
-
-   - **API anahtarı**: Kaynağınızdan `KEY 1` veya `KEY 2` değerini yapıştırın.
-   - **Microsoft Entra ID (az login ile OAuth)**: Önce `az login` çalıştırın. Oturum açmış Azure kimliğinin bu kaynak için `Cognitive Services OpenAI User` rolüne sahip olması gerekir.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. API anahtarını seçtiyseniz API anahtarınızı girin.
+4. API anahtarınızı girin.
 
    ```txt
    ┌ API key
@@ -461,7 +439,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    └ enter
    ```
 
-6. İsteğe bağlı: `/connect` sırasında kaynak adı sorusunu atlamak için kaynak adınızı ortam değişkeni olarak ayarlayın.
+5. Kaynak adınızı ortam değişkeni olarak ayarlayın:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
@@ -473,7 +451,7 @@ Araç çağrıları iyi çalışmıyorsa, tool calling desteği güçlü olan y�
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. Dağıtılan modelinizi seçmek için `/models` komutunu çalıştırın.
+6. Dağıtılan modelinizi seçmek için `/models` komutunu çalıştırın.
 
    ```txt
    /models

@@ -360,15 +360,17 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
 ### Azure OpenAI
 
 :::note
-إذا واجهت أخطاء مثل "أنا آسف، لكن لا يمكنني المساعدة في هذا الطلب"، فجرّب تغيير عامل تصفية المحتوى من **DefaultV2** إلى **Default** في مورد Azure الخاص بك.
+إذا واجهت أخطاء "I'm sorry, but I cannot assist with that request"، فجرّب تغيير مرشح المحتوى من **DefaultV2** إلى **Default** في مورد Azure الخاص بك.
 :::
 
-1. انتقل إلى [مدخل Azure](https://portal.azure.com/) وأنشئ مورد **Azure OpenAI**. ستحتاج إلى **اسم المورد**؛ ويصبح هذا جزءًا من نقطة نهاية API الخاصة بك (`https://RESOURCE_NAME.openai.azure.com/`).
+1. توجّه إلى [Azure portal](https://portal.azure.com/) وأنشئ موردا من نوع **Azure OpenAI**. ستحتاج إلى:
+   - **Resource name**: يصبح جزءا من نقطة نهاية API لديك (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **API key**: إما `KEY 1` أو `KEY 2` من موردك
 
-2. انتقل إلى [Azure AI Foundry](https://ai.azure.com/) وانشر نموذجًا.
+2. اذهب إلى [Azure AI Foundry](https://ai.azure.com/) وانشر نموذجا.
 
    :::note
-   يجب أن يتطابق اسم النشر مع اسم النموذج حتى يعمل opencode بشكل صحيح.
+   يجب أن يطابق اسم النشر اسم النموذج كي يعمل opencode بشكل صحيح.
    :::
 
 3. شغّل الأمر `/connect` وابحث عن **Azure**.
@@ -377,20 +379,7 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
    /connect
    ```
 
-4. اختر طريقة المصادقة.
-
-   - **مفتاح API**: الصق `KEY 1` أو `KEY 2` من موردك.
-   - **Microsoft Entra ID (OAuth عبر az login)**: شغّل `az login` أولًا. يجب أن تكون هوية Azure التي سجّلت الدخول بها مالكة لدور `Cognitive Services OpenAI User` لهذا المورد.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. إذا اخترت مفتاح API، فأدخل مفتاح API الخاص بك.
+4. أدخل مفتاح API.
 
    ```txt
    ┌ API key
@@ -399,19 +388,19 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
    └ enter
    ```
 
-6. اختياري: عيّن اسم المورد كمتغير بيئة لتخطي طلب اسم المورد أثناء `/connect`.
+5. عيّن اسم المورد كمتغير بيئة:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
    ```
 
-   أو أضفه إلى ملف تعريف bash الخاص بك:
+   أو أضفه إلى bash profile:
 
    ```bash title="~/.bash_profile"
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. شغّل الأمر `/models` لتحديد النموذج المنشور.
+6. شغّل الأمر `/models` لاختيار النموذج الذي قمت بنشره.
 
    ```txt
    /models
@@ -421,12 +410,14 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
 
 ### Azure Cognitive Services
 
-1. انتقل إلى [مدخل Azure](https://portal.azure.com/) وأنشئ مورد **Azure OpenAI**. ستحتاج إلى **اسم المورد**؛ ويصبح هذا جزءًا من نقطة نهاية API الخاصة بك (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. توجّه إلى [Azure portal](https://portal.azure.com/) وأنشئ موردا من نوع **Azure OpenAI**. ستحتاج إلى:
+   - **Resource name**: يصبح جزءا من نقطة نهاية API لديك (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **API key**: إما `KEY 1` أو `KEY 2` من موردك
 
-2. انتقل إلى [Azure AI Foundry](https://ai.azure.com/) وانشر نموذجًا.
+2. اذهب إلى [Azure AI Foundry](https://ai.azure.com/) وانشر نموذجا.
 
    :::note
-   يجب أن يتطابق اسم النشر مع اسم النموذج حتى يعمل opencode بشكل صحيح.
+   يجب أن يطابق اسم النشر اسم النموذج كي يعمل opencode بشكل صحيح.
    :::
 
 3. شغّل الأمر `/connect` وابحث عن **Azure Cognitive Services**.
@@ -435,20 +426,7 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
    /connect
    ```
 
-4. اختر طريقة المصادقة.
-
-   - **مفتاح API**: الصق `KEY 1` أو `KEY 2` من موردك.
-   - **Microsoft Entra ID (OAuth عبر az login)**: شغّل `az login` أولًا. يجب أن تكون هوية Azure التي سجّلت الدخول بها مالكة لدور `Cognitive Services OpenAI User` لهذا المورد.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. إذا اخترت مفتاح API، فأدخل مفتاح API الخاص بك.
+4. أدخل مفتاح API.
 
    ```txt
    ┌ API key
@@ -457,19 +435,19 @@ OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وص
    └ enter
    ```
 
-6. اختياري: عيّن اسم المورد كمتغير بيئة لتخطي طلب اسم المورد أثناء `/connect`.
+5. عيّن اسم المورد كمتغير بيئة:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
    ```
 
-   أو أضفه إلى ملف تعريف bash الخاص بك:
+   أو أضفه إلى bash profile:
 
    ```bash title="~/.bash_profile"
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. شغّل الأمر `/models` لتحديد النموذج المنشور.
+6. شغّل الأمر `/models` لاختيار النموذج الذي قمت بنشره.
 
    ```txt
    /models

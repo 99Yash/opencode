@@ -340,15 +340,17 @@ Se le chiamate agli strumenti non funzionano bene, scegli un modello caricato co
 ### Azure OpenAI
 
 :::note
-Se incontri errori come "I'm sorry, but I cannot assist with that request", prova a cambiare il filtro dei contenuti da **DefaultV2** a **Default** nella tua risorsa Azure.
+Se incontri errori "I'm sorry, but I cannot assist with that request", prova a cambiare il filtro contenuti da **DefaultV2** a **Default** nella tua risorsa Azure.
 :::
 
-1. Vai al [portale Azure](https://portal.azure.com/) e crea una risorsa **Azure OpenAI**. Ti servirà il **nome della risorsa**; diventa parte del tuo endpoint API (`https://RESOURCE_NAME.openai.azure.com/`).
+1. Vai al [portale Azure](https://portal.azure.com/) e crea una risorsa **Azure OpenAI**. Ti serviranno:
+   - **Resource name**: Diventa parte del tuo endpoint API (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **API key**: O `KEY 1` o `KEY 2` dalla tua risorsa
 
-2. Vai ad [Azure AI Foundry](https://ai.azure.com/) e distribuisci un modello.
+2. Vai su [Azure AI Foundry](https://ai.azure.com/) e fai il deploy di un modello.
 
    :::note
-   Il nome della distribuzione deve corrispondere al nome del modello affinché opencode funzioni correttamente.
+   Il nome del deployment deve corrispondere al nome del modello affinché opencode funzioni correttamente.
    :::
 
 3. Esegui il comando `/connect` e cerca **Azure**.
@@ -357,20 +359,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    /connect
    ```
 
-4. Scegli un metodo di autenticazione.
-
-   - **Chiave API**: incolla `KEY 1` o `KEY 2` dalla tua risorsa.
-   - **Microsoft Entra ID (OAuth tramite az login)**: esegui prima `az login`. L’identità Azure connessa deve avere il ruolo `Cognitive Services OpenAI User` per la risorsa.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Se hai scelto la chiave API, inserisci la tua chiave API.
+4. Inserisci la tua chiave API.
 
    ```txt
    ┌ API key
@@ -379,7 +368,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    └ enter
    ```
 
-6. Opzionale: imposta il nome della risorsa come variabile d’ambiente per saltare la richiesta del nome della risorsa durante `/connect`.
+5. Imposta il nome della risorsa come variabile d'ambiente:
 
    ```bash
    AZURE_RESOURCE_NAME=XXX opencode
@@ -391,7 +380,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    export AZURE_RESOURCE_NAME=XXX
    ```
 
-7. Esegui il comando `/models` per selezionare il modello distribuito.
+6. Esegui il comando `/models` per selezionare il tuo modello deployato.
 
    ```txt
    /models
@@ -401,12 +390,14 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
 
 ### Azure Cognitive Services
 
-1. Vai al [portale Azure](https://portal.azure.com/) e crea una risorsa **Azure OpenAI**. Ti servirà il **nome della risorsa**; diventa parte del tuo endpoint API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`).
+1. Vai al [portale Azure](https://portal.azure.com/) e crea una risorsa **Azure OpenAI**. Ti serviranno:
+   - **Resource name**: Diventa parte del tuo endpoint API (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **API key**: O `KEY 1` o `KEY 2` dalla tua risorsa
 
-2. Vai ad [Azure AI Foundry](https://ai.azure.com/) e distribuisci un modello.
+2. Vai su [Azure AI Foundry](https://ai.azure.com/) e fai il deploy di un modello.
 
    :::note
-   Il nome della distribuzione deve corrispondere al nome del modello affinché opencode funzioni correttamente.
+   Il nome del deployment deve corrispondere al nome del modello affinché opencode funzioni correttamente.
    :::
 
 3. Esegui il comando `/connect` e cerca **Azure Cognitive Services**.
@@ -415,20 +406,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    /connect
    ```
 
-4. Scegli un metodo di autenticazione.
-
-   - **Chiave API**: incolla `KEY 1` o `KEY 2` dalla tua risorsa.
-   - **Microsoft Entra ID (OAuth tramite az login)**: esegui prima `az login`. L’identità Azure connessa deve avere il ruolo `Cognitive Services OpenAI User` per la risorsa.
-
-   ```txt
-   ┌ Select auth method
-   │
-   │ API key
-   │ Microsoft Entra ID (OAuth via az login)
-   └
-   ```
-
-5. Se hai scelto la chiave API, inserisci la tua chiave API.
+4. Inserisci la tua chiave API.
 
    ```txt
    ┌ API key
@@ -437,7 +415,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    └ enter
    ```
 
-6. Opzionale: imposta il nome della risorsa come variabile d’ambiente per saltare la richiesta del nome della risorsa durante `/connect`.
+5. Imposta il nome della risorsa come variabile d'ambiente:
 
    ```bash
    AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
@@ -449,7 +427,7 @@ Se incontri errori come "I'm sorry, but I cannot assist with that request", prov
    export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
    ```
 
-7. Esegui il comando `/models` per selezionare il modello distribuito.
+6. Esegui il comando `/models` per selezionare il tuo modello deployato.
 
    ```txt
    /models
