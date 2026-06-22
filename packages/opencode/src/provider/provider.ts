@@ -271,6 +271,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       const env = yield* dep.env()
       const auth = yield* dep.auth(provider.id)
       const resourceName = [
+        provider.options?.resourceName,
         auth?.type === "api" ? auth.metadata?.resourceName : undefined,
         auth?.type === "oauth" ? auth.accountId : undefined,
         env["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"],
@@ -285,6 +286,14 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
             resourceName && auth?.type !== "oauth"
               ? `https://${resourceName}.cognitiveservices.azure.com/openai`
               : undefined,
+        },
+        vars(_options): Record<string, string> {
+          if (resourceName) {
+            return {
+              AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: resourceName,
+            }
+          }
+          return {}
         },
       }
     }),
