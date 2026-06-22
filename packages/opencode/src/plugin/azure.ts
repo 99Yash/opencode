@@ -9,6 +9,8 @@ export async function AzureAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return azureAuthPlugin({
     provider: "azure",
     resourceEnv: "AZURE_RESOURCE_NAME",
+    oauthInstructions:
+      "Sign in with `az login`. The signed-in Azure identity must have the Cognitive Services OpenAI User role for this resource.",
     prompts: process.env.AZURE_RESOURCE_NAME
       ? []
       : [
@@ -27,6 +29,8 @@ export async function AzureCognitiveServicesAuthPlugin(_input: PluginInput): Pro
   return azureAuthPlugin({
     provider: "azure-cognitive-services",
     resourceEnv: "AZURE_COGNITIVE_SERVICES_RESOURCE_NAME",
+    oauthInstructions:
+      "Sign in with `az login`. The signed-in Azure identity must have the Cognitive Services User or Foundry User role for this resource.",
     prompts: process.env.AZURE_COGNITIVE_SERVICES_RESOURCE_NAME
       ? []
       : [
@@ -43,6 +47,7 @@ export async function AzureCognitiveServicesAuthPlugin(_input: PluginInput): Pro
 function azureAuthPlugin(input: {
   provider: string
   resourceEnv: string
+  oauthInstructions: string
   prompts: NonNullable<Hooks["auth"]>["methods"][number]["prompts"]
   providerOptions?: (resourceName: string) => Record<string, string>
 }): Hooks {
@@ -96,8 +101,7 @@ function azureAuthPlugin(input: {
           prompts: input.prompts,
           authorize: async (inputs) => ({
             url: "https://learn.microsoft.com/azure/developer/ai/keyless-connections",
-            instructions:
-              "Sign in with `az login`. The signed-in Azure identity must have the Cognitive Services OpenAI User role for this resource.",
+            instructions: input.oauthInstructions,
             method: "auto" as const,
             callback: async () => ({
               type: "success" as const,
