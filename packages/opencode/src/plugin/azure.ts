@@ -135,12 +135,18 @@ function azureCliTokenProvider() {
       throw new Error(stderr.trim() || "Failed to get Azure access token. Run `az login` and try again.")
     }
 
-    const result = JSON.parse(stdout) as { accessToken?: string; expiresOn?: string }
+    const result = JSON.parse(stdout) as { accessToken?: string; expires_on?: number; expiresOn?: string }
     if (!result.accessToken) throw new Error("Azure CLI did not return an access token")
 
     cached = {
       token: result.accessToken,
-      expires: result.expiresOn ? new Date(result.expiresOn).getTime() : Date.now() + 30 * 60 * 1000,
+      // Azure CLI's expiresOn is a timezone-less local datetime; expires_on avoids DST ambiguity.
+      expires:
+        typeof result.expires_on === "number"
+          ? result.expires_on * 1000
+          : result.expiresOn
+            ? new Date(result.expiresOn).getTime()
+            : Date.now() + 30 * 60 * 1000,
     }
     return cached.token
   }
