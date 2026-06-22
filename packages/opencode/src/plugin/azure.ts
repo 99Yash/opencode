@@ -37,7 +37,6 @@ export async function AzureCognitiveServicesAuthPlugin(_input: PluginInput): Pro
             placeholder: "e.g. my-models",
           },
         ],
-    providerOptions: (resourceName) => ({ baseURL: `https://${resourceName}.cognitiveservices.azure.com/openai` }),
   })
 }
 
@@ -45,7 +44,7 @@ function azureAuthPlugin(input: {
   provider: string
   resourceEnv: string
   prompts: NonNullable<Hooks["auth"]>["methods"][number]["prompts"]
-  providerOptions: (resourceName: string) => Record<string, string>
+  providerOptions?: (resourceName: string) => Record<string, string>
 }): Hooks {
   return {
     auth: {
@@ -58,7 +57,7 @@ function azureAuthPlugin(input: {
         const tokenProvider = azureCliTokenProvider()
 
         return {
-          ...((resourceName && input.providerOptions(resourceName)) ?? {}),
+          ...((resourceName && input.providerOptions?.(resourceName)) ?? {}),
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
             const currentAuth = await getAuth()

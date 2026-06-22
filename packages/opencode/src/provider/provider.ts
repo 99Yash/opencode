@@ -281,7 +281,10 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           return selectAzureLanguageModel(sdk, modelID, Boolean(options?.["useCompletionUrls"]))
         },
         options: {
-          baseURL: resourceName ? `https://${resourceName}.cognitiveservices.azure.com/openai` : undefined,
+          baseURL:
+            resourceName && auth?.type !== "oauth"
+              ? `https://${resourceName}.cognitiveservices.azure.com/openai`
+              : undefined,
         },
       }
     }),
