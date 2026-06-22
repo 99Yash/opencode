@@ -76,6 +76,7 @@ function azureAuthPlugin(input: {
               }
             }
             headers.delete("api-key")
+            headers.delete("x-api-key")
             headers.set("authorization", `Bearer ${await tokenProvider()}`)
             headers.set("User-Agent", `opencode/${InstallationVersion}`)
 
