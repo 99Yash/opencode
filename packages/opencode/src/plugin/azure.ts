@@ -1,9 +1,16 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { OAUTH_DUMMY_KEY } from "../auth"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { Option, Schema } from "effect"
 
 const AZURE_SCOPE = "https://cognitiveservices.azure.com"
 const AZURE_TOKEN_REFRESH_BUFFER = 60_000
+const AzureCliToken = Schema.Struct({
+  accessToken: Schema.String,
+  expires_on: Schema.optional(Schema.Number),
+  expiresOn: Schema.optional(Schema.String),
+})
+const decodeAzureCliToken = Schema.decodeUnknownOption(Schema.fromJsonString(AzureCliToken))
 
 export async function AzureAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return azureAuthPlugin({
@@ -135,17 +142,17 @@ function azureCliTokenProvider() {
       throw new Error(stderr.trim() || "Failed to get Azure access token. Run `az login` and try again.")
     }
 
-    const result = JSON.parse(stdout) as { accessToken?: string; expires_on?: number; expiresOn?: string }
-    if (!result.accessToken) throw new Error("Azure CLI did not return an access token")
+    const decoded = decodeAzureCliToken(stdout)
+    if (Option.isNone(decoded)) throw new Error("Azure CLI did not return an access token")
 
     cached = {
-      token: result.accessToken,
+      token: decoded.value.accessToken,
       // Azure CLI's expiresOn is a timezone-less local datetime; expires_on avoids DST ambiguity.
       expires:
-        typeof result.expires_on === "number"
-          ? result.expires_on * 1000
-          : result.expiresOn
-            ? new Date(result.expiresOn).getTime()
+        decoded.value.expires_on !== undefined
+          ? decoded.value.expires_on * 1000
+          : decoded.value.expiresOn
+            ? new Date(decoded.value.expiresOn).getTime()
             : Date.now() + 30 * 60 * 1000,
     }
     return cached.token
