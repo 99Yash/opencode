@@ -282,14 +282,13 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           return selectAzureLanguageModel(sdk, modelID, Boolean(options?.["useCompletionUrls"]))
         },
         options: {
-          baseURL:
-            resourceName && auth?.type !== "oauth"
-              ? `https://${resourceName}.cognitiveservices.azure.com/openai`
-              : undefined,
+          baseURL: resourceName ? `https://${resourceName}.cognitiveservices.azure.com/openai` : undefined,
         },
         vars(_options): Record<string, string> {
           if (resourceName) {
             return {
+              // Some Cognitive Services catalog entries use the generic Azure placeholder.
+              AZURE_RESOURCE_NAME: resourceName,
               AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: resourceName,
             }
           }
