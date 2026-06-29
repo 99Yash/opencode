@@ -1687,7 +1687,7 @@ export const layer = Layer.effect(
           options["azureOpenAICompatibleBaseURL"] !== ""
         ) {
           // Azure Cognitive Services hosts multiple protocol shapes under one provider.
-          // Only default @ai-sdk/azure models without user-set baseURL or models.dev (api.url) use this Azure OpenAI-compatible URL.
+          // Only default @ai-sdk/azure models use this Azure OpenAI-compatible URL.
           options["baseURL"] = options["azureOpenAICompatibleBaseURL"]
         }
 
@@ -1717,6 +1717,7 @@ export const layer = Layer.effect(
         })
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
+        delete options["azureOpenAICompatibleBaseURL"]
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.headers)
           options["headers"] = {
