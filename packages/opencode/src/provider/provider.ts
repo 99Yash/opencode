@@ -282,7 +282,10 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           return selectAzureLanguageModel(sdk, modelID, Boolean(options?.["useCompletionUrls"]))
         },
         options: {
-          baseURL: resourceName ? `https://${resourceName}.cognitiveservices.azure.com/openai` : undefined,
+          // Used only when a Cognitive model relies on the default @ai-sdk/azure endpoint.
+          azureOpenAICompatibleBaseURL: resourceName
+            ? `https://${resourceName}.cognitiveservices.azure.com/openai`
+            : undefined,
         },
         vars(_options): Record<string, string> {
           if (resourceName) {
@@ -1675,6 +1678,19 @@ export const layer = Layer.effect(
           delete options.fetch
         }
 
+        if (
+          model.providerID === "azure-cognitive-services" &&
+          model.api.npm === "@ai-sdk/azure" &&
+          !model.api.url &&
+          typeof options["baseURL"] !== "string" &&
+          typeof options["azureOpenAICompatibleBaseURL"] === "string" &&
+          options["azureOpenAICompatibleBaseURL"] !== ""
+        ) {
+          // Azure Cognitive Services hosts multiple protocol shapes under one provider.
+          // Only default @ai-sdk/azure models without user-set baseURL or models.dev (api.url) use this Azure OpenAI-compatible URL.
+          options["baseURL"] = options["azureOpenAICompatibleBaseURL"]
+        }
+
         if (model.api.npm.includes("@ai-sdk/openai-compatible") && options["includeUsage"] !== false) {
           options["includeUsage"] = true
         }
@@ -1701,6 +1717,7 @@ export const layer = Layer.effect(
         })
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
+        delete options["azureOpenAICompatibleBaseURL"]
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.headers)
           options["headers"] = {
