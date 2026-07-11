@@ -1,7 +1,7 @@
 // Client data layer: apply server events and cache API reads into a Solid store.
-// Prefer straightforward projection. Do not add generation counters, stale-response
-// merges, live/history overlays, or other race machinery here—last write wins.
-// Reconnect invalidates cached reads; active UI owners decide what to sync again.
+// Prefer straightforward projection. API reads replace cached state, except admitted
+// inputs survive history refresh until the server projects them. Reconnect invalidates
+// cached reads; active UI owners decide what to sync again.
 
 import type {
   AgentInfo,
@@ -71,7 +71,6 @@ type Store = {
     active: Record<string, DataSessionStatus>
     message: Record<string, SessionMessageInfo[]>
     pending: Record<string, SessionPendingInfo[]>
-    input: Record<string, string[]>
     permission: Record<string, PermissionV2Request[]>
     // Pending forms keyed by owner: a session ID or the temporary "global" elicitation sentinel.
     form: Record<string, FormWithLocation[]>
@@ -81,6 +80,11 @@ type Store = {
   }
   location: Record<string, LocationData>
 }
+
+type PendingOperation =
+  | { type: "admitted"; item: SessionPendingInfo }
+  | { type: "promoted"; inputID: string }
+  | { type: "reverted"; to: string }
 
 function locationKey(location: LocationRef) {
   return JSON.stringify([location.directory, location.workspaceID])
@@ -131,7 +135,6 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         active: {},
         message: {},
         pending: {},
-        input: {},
         permission: {},
         form: {},
       },
@@ -147,24 +150,57 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     })
     const messageIndex = new Map<string, Map<string, number>>()
     const sync = createSync()
+    const pendingOperations = new Map<string, PendingOperation[]>()
 
     function setSessionActive(sessionID: string, status: DataSessionStatus) {
       setStore("session", "active", sessionID, status)
     }
 
     function addPending(item: SessionPendingInfo) {
+      pendingOperations.get(item.sessionID)?.push({ type: "admitted", item })
       if (store.session.pending[item.sessionID]?.some((pending) => pending.id === item.id)) return
       setStore("session", "pending", item.sessionID, [...(store.session.pending[item.sessionID] ?? []), item])
     }
 
     function removePending(sessionID: string, inputID?: string) {
       if (!inputID) return
+      pendingOperations.get(sessionID)?.push({ type: "promoted", inputID })
       setStore(
         "session",
         "pending",
         sessionID,
         (store.session.pending[sessionID] ?? []).filter((item) => item.id !== inputID),
       )
+    }
+
+    function pendingInputs(sessionID: string) {
+      return (store.session.pending[sessionID] ?? []).filter((item) => item.type !== "compaction")
+    }
+
+    function syncPending(sessionID: string) {
+      return sync.run(`session.pending:${sessionID}`, async () => {
+        const operations = pendingOperations.get(sessionID) ?? []
+        pendingOperations.set(sessionID, operations)
+        try {
+          const pending = new Map((await client.api.session.pending.list({ sessionID })).map((item) => [item.id, item]))
+          operations.forEach((operation) => {
+            if (operation.type === "admitted") {
+              pending.set(operation.item.id, operation.item)
+              return
+            }
+            if (operation.type === "promoted") {
+              pending.delete(operation.inputID)
+              return
+            }
+            pending.forEach((_, id) => {
+              if (id >= operation.to) pending.delete(id)
+            })
+          })
+          setStore("session", "pending", sessionID, reconcile([...pending.values()]))
+        } finally {
+          if (pendingOperations.get(sessionID) === operations) pendingOperations.delete(sessionID)
+        }
+      })
     }
 
     const message = {
@@ -198,6 +234,31 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
       compaction(messages: SessionMessageInfo[]) {
         const item = messages.findLast((item) => item.type === "compaction" && item.status === "running")
         return item?.type === "compaction" ? item : undefined
+      },
+      fromPending(item: SessionPendingInfo): SessionMessageInfo {
+        if (item.type === "user")
+          return {
+            id: item.id,
+            type: "user",
+            ...item.data,
+            time: { created: item.timeCreated },
+          }
+        if (item.type === "synthetic")
+          return {
+            id: item.id,
+            type: "synthetic",
+            ...item.data,
+            time: { created: item.timeCreated },
+          }
+        return {
+          id: item.id,
+          type: "compaction",
+          status: "running",
+          reason: "manual",
+          summary: "",
+          recent: "",
+          time: { created: item.timeCreated },
+        }
       },
       latestTool(assistant: SessionMessageAssistant | undefined, callID?: string) {
         return assistant?.content.findLast(
@@ -269,6 +330,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
 
     function removeSession(sessionID: string) {
       messageIndex.delete(sessionID)
+      pendingOperations.delete(sessionID)
       sync.invalidate(`session:${sessionID}`)
       sync.invalidate(`session.pending:${sessionID}`)
       sync.invalidate(`session.message:${sessionID}`)
@@ -281,7 +343,6 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           delete draft.active[sessionID]
           delete draft.message[sessionID]
           delete draft.pending[sessionID]
-          delete draft.input[sessionID]
           delete draft.permission[sessionID]
           delete draft.form[sessionID]
           for (const [rootID, family] of Object.entries(draft.family)) {
@@ -374,59 +435,35 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           }
           break
         case "session.input.promoted": {
+          const pending = store.session.pending[event.data.sessionID]?.some((item) => item.id === event.data.inputID)
           removePending(event.data.sessionID, event.data.inputID)
           message.update(event.data.sessionID, (draft, index) => {
             const position = index.get(event.data.inputID)
             if (position === undefined) return
             const existing = draft[position]
-            if (!existing || !store.session.input[event.data.sessionID]?.includes(event.data.inputID)) return
+            if (!existing || !pending) return
             existing.time.created = event.created
             draft.splice(position, 1)
             draft.push(existing)
             index.clear()
             draft.forEach((message, indexValue) => index.set(message.id, indexValue))
           })
-          setStore(
-            "session",
-            "input",
-            event.data.sessionID,
-            (store.session.input[event.data.sessionID] ?? []).filter((id) => id !== event.data.inputID),
-          )
           break
         }
-        case "session.input.admitted":
-          addPending({
+        case "session.input.admitted": {
+          const pending: SessionPendingInfo = {
             id: event.data.inputID,
             sessionID: event.data.sessionID,
             admittedSeq: event.durable.seq,
             timeCreated: event.created,
             ...event.data.input,
-          })
-          if (!store.session.input[event.data.sessionID]?.includes(event.data.inputID))
-            setStore("session", "input", event.data.sessionID, [
-              ...(store.session.input[event.data.sessionID] ?? []),
-              event.data.inputID,
-            ])
+          }
+          addPending(pending)
           message.update(event.data.sessionID, (draft, index) => {
-            message.append(
-              draft,
-              index,
-              event.data.input.type === "user"
-                ? {
-                    id: event.data.inputID,
-                    type: "user",
-                    ...event.data.input.data,
-                    time: { created: event.created },
-                  }
-                : {
-                    id: event.data.inputID,
-                    type: "synthetic",
-                    ...event.data.input.data,
-                    time: { created: event.created },
-                  },
-            )
+            message.append(draft, index, message.fromPending(pending))
           })
           break
+        }
         case "session.instructions.updated":
           const instructions = event.metadata?.instructions
           if (
@@ -736,11 +773,12 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           if (store.session.info[event.data.sessionID]) {
             setStore("session", "info", event.data.sessionID, "revert", undefined)
           }
+          pendingOperations.get(event.data.sessionID)?.push({ type: "reverted", to: event.data.to })
           setStore(
             "session",
-            "input",
+            "pending",
             event.data.sessionID,
-            (store.session.input[event.data.sessionID] ?? []).filter((id) => id < event.data.to),
+            (store.session.pending[event.data.sessionID] ?? []).filter((item) => item.id < event.data.to),
           )
           message.update(event.data.sessionID, (draft, index) => {
             const position = draft.findIndex((item) => item.id >= event.data.to)
@@ -914,10 +952,10 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         },
         input: {
           list(sessionID: string) {
-            return store.session.input[sessionID] ?? []
+            return pendingInputs(sessionID).map((item) => item.id)
           },
           has(sessionID: string, inputID: string) {
-            return store.session.input[sessionID]?.includes(inputID) ?? false
+            return pendingInputs(sessionID).some((item) => item.id === inputID)
           },
         },
         pending: {
@@ -925,16 +963,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             return store.session.pending[sessionID] ?? []
           },
           sync(sessionID: string) {
-            return sync.run(`session.pending:${sessionID}`, async () => {
-              const pending = await client.api.session.pending.list({ sessionID })
-              setStore("session", "pending", sessionID, reconcile(pending))
-              setStore(
-                "session",
-                "input",
-                sessionID,
-                reconcile(pending.filter((item) => item.type !== "compaction").map((item) => item.id)),
-              )
-            })
+            return syncPending(sessionID)
           },
           invalidate(sessionID: string) {
             sync.invalidate(`session.pending:${sessionID}`)
@@ -960,11 +989,21 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           },
           sync(sessionID: string) {
             return sync.run(`session.message:${sessionID}`, async () => {
-              const messages = (
-                await client.api.message.list({ sessionID, limit: 200, order: "desc" })
-              ).data.toReversed()
-              messageIndex.set(sessionID, new Map(messages.map((message, index) => [message.id, index])))
-              setStore("session", "message", sessionID, reconcile(messages))
+              await syncPending(sessionID)
+              const localInputs = pendingInputs(sessionID).map((item) => item.id)
+              const pendingMessages = [...(store.session.pending[sessionID] ?? [])].map(message.fromPending)
+              const projected = await client.api.message.list({ sessionID, limit: 200, order: "desc" })
+              const next = projected.data.toReversed()
+              const index = new Map(next.map((message, index) => [message.id, index]))
+              const localInputIDs = new Set([...localInputs, ...pendingInputs(sessionID).map((item) => item.id)])
+              localInputIDs.forEach((messageID) => {
+                const position = messageIndex.get(sessionID)?.get(messageID)
+                const item = position === undefined ? undefined : store.session.message[sessionID]?.[position]
+                if (item) message.append(next, index, item)
+              })
+              pendingMessages.forEach((item) => message.append(next, index, item))
+              messageIndex.set(sessionID, index)
+              setStore("session", "message", sessionID, reconcile(next))
             })
           },
           invalidate(sessionID: string) {
