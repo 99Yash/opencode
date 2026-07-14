@@ -19,6 +19,7 @@ import type {
   ShellInfo,
   SkillInfo,
 } from "@opencode-ai/client"
+import type { Renderable } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
 
 interface LocationCollection<Value> {
@@ -86,27 +87,93 @@ export interface Data {
   }
 }
 
-export interface RouteDefinition {
+export type Route =
+  | { readonly type: "home" }
+  | { readonly type: "session"; readonly sessionID: string }
+  | {
+      readonly type: "plugin"
+      readonly id: string
+      readonly name: string
+      readonly data?: Record<string, any>
+    }
+
+export type Destination = Route | Omit<Extract<Route, { readonly type: "plugin" }>, "id">
+
+export interface Page {
   readonly name: string
-  readonly render: (input: { readonly params: any }) => JSX.Element
+  readonly render: (input: { readonly data?: Record<string, any> }) => JSX.Element
 }
 
-export interface Route {
-  register(definition: RouteDefinition): () => void
-  navigate(input: { readonly name: string; readonly params?: any }): void
-  current(): {
+export type Slot = (props: Record<string, any>) => JSX.Element
+
+export interface KeymapCommand {
+  /** Stable command and config keybind identifier. Omit for an inline command. */
+  readonly id?: string
+  /** Optional label used by command discovery and keyboard-help UI. */
+  readonly title?: string
+  /** Optional longer description. */
+  readonly description?: string
+  /** Groups the command in discovery and keyboard-help UI. */
+  readonly group?: string
+  /** Enables or disables the command. */
+  readonly enabled?: boolean | (() => boolean)
+  /** Configures automatic binding, or disables it for a named command. */
+  readonly bind?: false | string
+  /** Adds a named command to the command palette. */
+  readonly palette?: true
+  /** Adds a named command to prompt slash completion. */
+  readonly slash?: {
     readonly name: string
-    readonly params: any
+    readonly aliases?: string[]
+  }
+  /** Executes the command. Return false to let keymap dispatch continue. */
+  readonly run: () => void | false | Promise<void>
+}
+
+export interface KeymapLayer {
+  /** Limits the layer to one OpenCode input mode. Use global to opt out; defaults to base. */
+  readonly mode?: string
+  /** Enables or disables the complete layer. */
+  readonly enabled?: boolean | (() => boolean)
+  /** Limits the layer to a focused renderable. */
+  readonly target?: () => Renderable | null | undefined
+  /** Resolves conflicts with other active layers. */
+  readonly priority?: number
+  /** Commands owned by this layer. */
+  readonly commands?: readonly KeymapCommand[]
+  /** IDs of commands whose configured bindings should be active in this layer. */
+  readonly bindings?: readonly string[]
+}
+
+export interface Keymap {
+  /** Creates a reactive keymap layer owned by the calling component. */
+  layer(input: () => KeymapLayer): void
+  /** Dispatches a reachable command by ID. */
+  dispatch(id: string): void
+  /** Returns the formatted shortcut for a registered command. */
+  shortcut(id: string): string | undefined
+  /** Controls mutually exclusive OpenCode input modes. */
+  readonly mode: {
+    /** Returns the active mode. */
+    current(): string
+    /** Pushes a mode until the returned cleanup is called. */
+    push(mode: string): () => void
   }
 }
 
 export interface UI {
-  readonly route: Route
+  readonly router: {
+    register(page: Page): () => void
+    navigate(destination: Destination): void
+    current(): Route
+  }
+  readonly slot: (name: string, render: Slot) => () => void
 }
 
 export interface Context {
-  readonly options: Record<string, any>
+  readonly options: Readonly<Record<string, any>>
   readonly client: OpenCodeClient
   readonly data: Data
+  readonly keymap: Keymap
   readonly ui: UI
 }

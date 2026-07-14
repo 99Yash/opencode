@@ -9,8 +9,8 @@ import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useClipboard } from "../context/clipboard"
 import { useData } from "../context/data"
 import { useClient } from "../context/client"
+import { Keymap } from "../context/keymap"
 import { useTheme } from "../context/theme"
-import { useBindings } from "../keymap"
 import { useDialog } from "../ui/dialog"
 import { DialogPrompt } from "../ui/dialog-prompt"
 import { DialogSelect } from "../ui/dialog-select"
@@ -88,6 +88,11 @@ export function DialogIntegration(props: { onConnected?: OnIntegrationConnected 
       emptyView={
         <box paddingLeft={4} paddingRight={4} paddingTop={1}>
           <text fg={theme.textMuted}>No integrations available</text>
+        </box>
+      }
+      noMatchView={
+        <box paddingLeft={4} paddingRight={4} paddingTop={1}>
+          <text fg={theme.textMuted}>No integrations found</text>
         </box>
       }
     />
@@ -183,8 +188,8 @@ function KeyMethod(props: {
       placeholder="API key"
       onConfirm={(key) => {
         if (!key) return
-        void client.api.integration
-          .connect.key({
+        void client.api.integration.connect
+          .key({
             integrationID: props.integration.id,
             location: location(data),
             key,
@@ -222,8 +227,8 @@ function OAuthStarting(props: {
   const toast = useToast()
 
   onMount(() => {
-    void client.api.integration
-      .connect.oauth({
+    void client.api.integration.connect
+      .oauth({
         integrationID: props.integration.id,
         location: location(data),
         methodID: props.method.id,
@@ -273,13 +278,14 @@ function OAuthAuto(props: {
   let timer: ReturnType<typeof setTimeout> | undefined
   let settled = false
 
-  useBindings(() => ({
-    bindings: [
+  Keymap.createLayer(() => ({
+    mode: "modal",
+    commands: [
       {
-        key: "c",
-        desc: "Copy authorization details",
+        bind: "c",
+        title: "Copy authorization details",
         group: "Dialog",
-        cmd: () => {
+        run: () => {
           const value = props.attempt.instructions.match(/[A-Z0-9]{4}-[A-Z0-9]{4,5}/)?.[0] ?? props.attempt.url
           clipboard
             .write?.(value)
@@ -291,8 +297,8 @@ function OAuthAuto(props: {
   }))
 
   const poll = () => {
-    void client.api.integration
-      .attempt.status({ attemptID: props.attempt.attemptID, location: location(data) })
+    void client.api.integration.attempt
+      .status({ attemptID: props.attempt.attemptID, location: location(data) })
       .then((result) => {
         const status = result.data
         if (status.status === "pending") {
@@ -357,8 +363,8 @@ function OAuthCode(props: {
       placeholder="Authorization code"
       onConfirm={(code) => {
         if (!code) return
-        void client.api.integration
-          .attempt.complete({ attemptID: props.attempt.attemptID, location: location(data), code })
+        void client.api.integration.attempt
+          .complete({ attemptID: props.attempt.attemptID, location: location(data), code })
           .then(() => {
             settled = true
             return connected(props.integration, data, dialog, toast, props.onConnected)

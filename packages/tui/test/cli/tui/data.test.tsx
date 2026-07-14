@@ -42,6 +42,90 @@ function durable(sessionID: string, seq = 0, version = 1) {
   return { aggregateID: sessionID, seq, version }
 }
 
+test("bootstraps MCP data for the TUI location", async () => {
+  const events = createEventStream()
+  const requests: URL[] = []
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/mcp" || url.pathname === "/api/mcp/resource") requests.push(url)
+    return undefined
+  }, events)
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <box />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await wait(() => requests.length === 2)
+    expect(requests.map((url) => url.searchParams.get("location[directory]"))).toEqual([
+      process.cwd(),
+      process.cwd(),
+    ])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("refreshes MCP status when a connection settles during bootstrap", async () => {
+  const events = createEventStream()
+  let mcpRequests = 0
+  let resolveModels!: (response: Response) => void
+  const calls = createFetch((url) => {
+    if (url.pathname === "/api/mcp") {
+      mcpRequests++
+      return json({
+        location: { directory, project: { id: "proj_test", directory } },
+        data: [{ name: "context7", status: { status: mcpRequests === 1 ? "pending" : "connected" } }],
+      })
+    }
+    if (url.pathname === "/api/model")
+      return new Promise<Response>((resolve) => {
+        resolveModels = resolve
+      })
+    return undefined
+  }, events)
+  let data!: ReturnType<typeof useData>
+
+  function Probe() {
+    data = useData()
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await wait(() => data.location.mcp.server.list()?.[0]?.status.status === "pending")
+    emitEvent(events, {
+      id: "evt_mcp_connected",
+      created: 1,
+      type: "mcp.status.changed",
+      data: { server: "context7" },
+    })
+    await wait(() => data.location.mcp.server.list()?.[0]?.status.status === "connected")
+    expect(mcpRequests).toBe(2)
+    resolveModels(json({ location: { directory, project: { id: "proj_test", directory } }, data: [] }))
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("refreshes resources into reactive getters", async () => {
   const events = createEventStream()
   const location = {
@@ -2146,10 +2230,34 @@ test("settles pending tools when a live failure arrives", async () => {
       },
     })
     emitEvent(events, {
+      id: "evt_progress_1",
+      created: 0,
+      type: "session.tool.progress",
+      durable: durable("session-1", 5),
+      data: {
+        sessionID: "session-1",
+        assistantMessageID: "msg_explicit_assistant_9",
+        callID: "call-1",
+        structured: { sessionID: "session-child", status: "running" },
+        content: [],
+      },
+    })
+
+    await wait(() => {
+      const assistant = sync.session.message.get("session-1", "msg_explicit_assistant_9")
+      return (
+        assistant?.type === "assistant" &&
+        assistant.content[0]?.type === "tool" &&
+        assistant.content[0].state.status === "running" &&
+        assistant.content[0].state.structured.sessionID === "session-child"
+      )
+    })
+
+    emitEvent(events, {
       id: "evt_failed_1",
       created: 0,
       type: "session.tool.failed",
-      durable: durable("session-1", 5),
+      durable: durable("session-1", 6),
       data: {
         sessionID: "session-1",
         assistantMessageID: "msg_explicit_assistant_9",
@@ -2180,7 +2288,7 @@ test("settles pending tools when a live failure arrives", async () => {
     if (tool.state.status !== "error") return
     expect(tool.state.error).toEqual({ type: "unknown", message: "aborted" })
     expect(tool.state.input).toEqual({})
-    expect(tool.state.structured).toEqual({})
+    expect(tool.state.structured).toEqual({ sessionID: "session-child", status: "running" })
     expect(tool.state.content).toEqual([])
     expect(tool.executed).toBe(false)
     expect(tool.providerState).toEqual({ call: true })
@@ -2301,7 +2409,7 @@ test("renders admitted prompts immediately and tracks them until promoted", asyn
   }
 })
 
-test("projects live instruction updates with their message ID", async () => {
+test("skips initial instruction state and projects later updates with their message ID", async () => {
   const events = createEventStream()
   const calls = createFetch(undefined, events)
   let sync!: ReturnType<typeof useData>
@@ -2335,18 +2443,30 @@ test("projects live instruction updates with their message ID", async () => {
       created: 0,
       type: "session.instructions.updated",
       durable: durable("session-1", 0, 2),
+      metadata: { instructions: { initial: true } },
       data: {
         sessionID: "session-1",
         delta: { "core/date": "0".repeat(64) },
       },
     })
+    emitEvent(events, {
+      id: "evt_instructions_2",
+      created: 1,
+      type: "session.instructions.updated",
+      durable: durable("session-1", 1, 2),
+      data: {
+        sessionID: "session-1",
+        delta: { "core/date": "1".repeat(64) },
+      },
+    })
 
-    await wait(() => sync.session.message.list("session-1")?.length === 1)
+    await wait(() => sync.session.message.list("session-1")?.some((message) => message.time.created === 1))
+    expect(sync.session.message.list("session-1")).toHaveLength(1)
     expect(sync.session.message.list("session-1")?.[0]).toMatchObject({
-      id: SessionMessage.ID.fromEvent(EventV2.ID.make("evt_instructions_1")),
+      id: SessionMessage.ID.fromEvent(EventV2.ID.make("evt_instructions_2")),
       type: "system",
       text: "Instructions updated: core/date",
-      time: { created: 0 },
+      time: { created: 1 },
     })
   } finally {
     app.renderer.destroy()

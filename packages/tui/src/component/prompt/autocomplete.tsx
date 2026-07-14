@@ -19,7 +19,8 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
 import type { PromptInfo, PromptPartRef } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
-import { useBindings, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
+import { useBindings, useCommandSlashes } from "../../keymap"
+import { Keymap } from "../../context/keymap"
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/client"
 
@@ -88,7 +89,7 @@ export function Autocomplete(props: {
   const data = useData()
   const project = useProject()
   const slashes = useCommandSlashes()
-  const modeStack = useOpencodeModeStack()
+  const keymap = Keymap.use()
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
@@ -106,7 +107,7 @@ export function Autocomplete(props: {
 
   createEffect(() => {
     if (!store.visible) return
-    const popMode = modeStack.push("autocomplete")
+    const popMode = keymap.mode.push("autocomplete")
     onCleanup(popMode)
   })
 
@@ -309,10 +310,10 @@ export function Autocomplete(props: {
   }
 
   const [files] = createResource(
-    () => ({ query: search(), location: location() }),
+    () => ({ query: search(), location: location(), visible: store.visible }),
     async (input) => {
-      if (!store.visible || store.visible === "/") return []
-      if (referenceMatch()) return []
+      if (!input.visible || input.visible === "/") return { options: [], failed: false }
+      if (referenceMatch()) return { options: [], failed: false }
       const { lineRange, baseQuery } = extractLineRange(input.query ?? "")
 
       const result = await client.api.file
@@ -324,34 +325,37 @@ export function Autocomplete(props: {
             workspace: input.location?.workspaceID ?? project.workspace.current(),
           },
         })
-        .catch(() => undefined)
+        .then(
+          (result) => result,
+          () => undefined,
+        )
+
+      if (!result) return { options: [], failed: true }
 
       const options: AutocompleteOption[] = []
 
       // Add file options. Trust the order returned by fff (frecency, fuzzy
       // score, filename bonus, etc. are already factored in).
-      if (result) {
-        const width = props.anchor().width - 4
-        options.push(
-          ...result.data.map((item): AutocompleteOption => {
-            const { filename, part } = createFilePart(item, path.join(result.location.directory, item.path), lineRange)
-            return {
-              display: Locale.truncateMiddle(filename, width),
-              value: filename,
-              isDirectory: item.type === "directory",
-              path: item.path,
-              onSelect: () => {
-                insertPart(filename, part)
-              },
-            }
-          }),
-        )
-      }
+      const width = props.anchor().width - 4
+      options.push(
+        ...result.data.map((item): AutocompleteOption => {
+          const { filename, part } = createFilePart(item, path.join(result.location.directory, item.path), lineRange)
+          return {
+            display: Locale.truncateMiddle(filename, width),
+            value: filename,
+            isDirectory: item.type === "directory",
+            path: item.path,
+            onSelect: () => {
+              insertPart(filename, part)
+            },
+          }
+        }),
+      )
 
-      return options
+      return { options, failed: false }
     },
     {
-      initialValue: [],
+      initialValue: { options: [], failed: false },
     },
   )
 
@@ -470,8 +474,8 @@ export function Autocomplete(props: {
     }))
   })
 
-  const options = createMemo((prev: AutocompleteOption[] | undefined) => {
-    const filesValue = files()
+  const options = createMemo(() => {
+    const fileSearch = files()
     const referenceMatchValue = referenceMatch()
     const agentsValue = agents()
     const referenceAliasesValue = referenceAliases()
@@ -484,16 +488,12 @@ export function Autocomplete(props: {
 
     // Files come from fff already fuzzy ranked and filtered
     // it shouldn't be additionally sorted by fuzzysort as it will loose the results
-    const fileOptions: AutocompleteOption[] = store.visible === "@" ? filesValue || [] : []
+    const fileOptions: AutocompleteOption[] = store.visible === "@" && !files.loading ? fileSearch.options : []
     const nonFileOptions: AutocompleteOption[] =
       store.visible === "@" ? [...referenceAliasesValue, ...agentsValue, ...mcpResources()] : [...commandsValue]
 
     if (!searchValue) {
       return [...nonFileOptions, ...fileOptions]
-    }
-
-    if (files.loading && prev && prev.length > 0) {
-      return prev
     }
 
     const fuzziedNonFiles = fuzzysort
@@ -628,13 +628,13 @@ export function Autocomplete(props: {
         },
       },
     ],
-    bindings: config.keybinds.gather("prompt.autocomplete", [
+    bindings: [
       "prompt.autocomplete.prev",
       "prompt.autocomplete.next",
       "prompt.autocomplete.hide",
       "prompt.autocomplete.select",
       "prompt.autocomplete.complete",
-    ]),
+    ].flatMap((command) => config.keybinds.get(command)),
   }))
 
   function show(mode: "@" | "/") {
@@ -715,6 +715,13 @@ export function Autocomplete(props: {
 
   let scroll: ScrollBoxRenderable
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
+  const emptyMessage = createMemo(() => {
+    if (store.visible === "/") return "No matching commands"
+    if (files.loading) return "Searching…"
+    if (files().failed) return "Could not search files. Keep typing to try again."
+    return "No matching files, agents, or references"
+  })
+  const emptyError = createMemo(() => store.visible === "@" && !files.loading && files().failed)
 
   return (
     <box
@@ -738,7 +745,7 @@ export function Autocomplete(props: {
           each={options()}
           fallback={
             <box paddingLeft={1} paddingRight={1}>
-              <text fg={theme.textMuted}>No matching items</text>
+              <text fg={emptyError() ? theme.error : theme.textMuted}>{emptyMessage()}</text>
             </box>
           }
         >

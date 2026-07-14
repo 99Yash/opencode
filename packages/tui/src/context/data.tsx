@@ -27,7 +27,7 @@ import type {
   SkillInfo,
   OpenCodeEvent,
 } from "@opencode-ai/client"
-import type { Data } from "@opencode-ai/plugin/v2/tui/context"
+import type { Plugin } from "@opencode-ai/plugin/v2/tui"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useClient } from "./client"
@@ -404,6 +404,14 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           })
           break
         case "session.instructions.updated":
+          const instructions = event.metadata?.instructions
+          if (
+            typeof instructions === "object" &&
+            instructions !== null &&
+            "initial" in instructions &&
+            instructions.initial === true
+          )
+            break
           message.update(event.data.sessionID, (draft, index) => {
             message.append(draft, index, {
               id: messageIDFromEvent(event.id),
@@ -841,7 +849,6 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         // Authenticating an MCP integration reconnects its server, which emits mcp.status.changed,
         // so the mcp list refreshes here rather than off integration.updated.
         case "mcp.status.changed":
-          if (bootstrapping) break
           void result.location.mcp.server.refresh(event.location)
           break
         case "mcp.resources.changed":
@@ -1044,7 +1051,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               return store.location[locationKey(location ?? defaultLocation())]?.mcp?.server
             },
             async refresh(ref?: LocationRef) {
-              const result = await client.api.mcp.list({ location: locationQuery(ref) })
+              const result = await client.api.mcp.list({ location: locationQuery(ref ?? defaultLocation()) })
               const key = locationKey(result.location)
               setStore("location", key, {
                 ...store.location[key],
@@ -1057,7 +1064,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               return store.location[locationKey(location ?? defaultLocation())]?.mcp?.resource
             },
             async refresh(ref?: LocationRef) {
-              const result = await client.api.mcp.resource.catalog({ location: locationQuery(ref) })
+              const result = await client.api.mcp.resource.catalog({ location: locationQuery(ref ?? defaultLocation()) })
               const key = locationKey(result.location)
               setStore("location", key, {
                 ...store.location[key],
@@ -1108,7 +1115,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         },
       },
     }
-    result satisfies Data
+    result satisfies Plugin.Context["data"]
 
     async function bootstrap() {
       if (bootstrapping) return bootstrapping

@@ -77,45 +77,6 @@ import { switchLabel } from "../../util/model"
 
 addDefaultParsers(parsers.parsers)
 
-const sessionBindingCommands = [
-  "session.share",
-  "session.rename",
-  "session.timeline",
-  "session.fork",
-  "session.compact",
-  "session.unshare",
-  "session.undo",
-  "session.redo",
-  "session.sidebar.toggle",
-  "session.toggle.thinking",
-  "session.toggle.scrollbar",
-  "session.toggle.exploration_grouping",
-  "session.first",
-  "session.last",
-  "session.messages_last_user",
-  "session.message.next",
-  "session.message.previous",
-  "messages.copy",
-  "session.copy",
-  "session.export",
-  "session.background",
-  "session.child.first",
-  "session.parent",
-  "session.child.next",
-  "session.child.previous",
-] as const
-
-const sessionGlobalBindingCommands = [
-  "session.page.up",
-  "session.page.down",
-  "session.line.up",
-  "session.line.down",
-  "session.half.page.up",
-  "session.half.page.down",
-] as const
-
-const sessionGlobalUnfocusedBindingCommands = ["session.first", "session.last"] as const
-
 const context = createContext<{
   width: number
   sessionID: string
@@ -339,10 +300,96 @@ export function Session() {
     }, 50)
   }
 
-  const sessionCommandList = createMemo(() => [
+  const globalCommands = [
+    {
+      name: "session.page.up",
+      title: "Page up",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(-scroll.height / 2)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.page.down",
+      title: "Page down",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(scroll.height / 2)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.line.up",
+      title: "Line up",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(-1)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.line.down",
+      title: "Line down",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(1)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.half.page.up",
+      title: "Half page up",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(-scroll.height / 4)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.half.page.down",
+      title: "Half page down",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollBy(scroll.height / 4)
+        dialog.clear()
+      },
+    },
+  ]
+
+  const baseAndUnfocusedCommands = [
+    {
+      name: "session.first",
+      title: "First message",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollTo(0)
+        dialog.clear()
+      },
+    },
+    {
+      name: "session.last",
+      title: "Last message",
+      category: "Session",
+      hidden: true,
+      run: () => {
+        scroll.scrollTo(scroll.scrollHeight)
+        dialog.clear()
+      },
+    },
+  ]
+
+  const baseCommands = createMemo(() => [
     {
       title: "Share session",
-      value: "session.share",
+      name: "session.share",
       suggested: route.type === "session",
       category: "Session",
       slash: { name: "share" },
@@ -350,21 +397,21 @@ export function Session() {
     },
     {
       title: "Rename session",
-      value: "session.rename",
+      name: "session.rename",
       category: "Session",
       slash: { name: "rename" },
       run: () => DialogSessionRename.show(dialog, route.sessionID, session()?.title),
     },
     {
       title: "Jump to message",
-      value: "session.timeline",
+      name: "session.timeline",
       category: "Session",
       slash: { name: "timeline" },
       run: () => unavailable("The message timeline"),
     },
     {
       title: "Fork session",
-      value: "session.fork",
+      name: "session.fork",
       category: "Session",
       slash: { name: "fork" },
       run: () => {
@@ -382,7 +429,7 @@ export function Session() {
     },
     {
       title: "Compact session",
-      value: "session.compact",
+      name: "session.compact",
       category: "Session",
       slash: {
         name: "compact",
@@ -395,7 +442,7 @@ export function Session() {
     },
     {
       title: "Unshare session",
-      value: "session.unshare",
+      name: "session.unshare",
       category: "Session",
       enabled: false,
       slash: { name: "unshare" },
@@ -403,7 +450,7 @@ export function Session() {
     },
     {
       title: "Undo previous message",
-      value: "session.undo",
+      name: "session.undo",
       category: "Session",
       slash: { name: "undo" },
       run: () => {
@@ -439,7 +486,7 @@ export function Session() {
     },
     {
       title: "Redo",
-      value: "session.redo",
+      name: "session.redo",
       category: "Session",
       enabled: !!session()?.revert?.messageID,
       slash: { name: "redo" },
@@ -456,7 +503,7 @@ export function Session() {
     },
     {
       title: sidebarVisible() ? "Hide sidebar" : "Show sidebar",
-      value: "session.sidebar.toggle",
+      name: "session.sidebar.toggle",
       category: "Session",
       run: () => {
         batch(() => {
@@ -477,7 +524,7 @@ export function Session() {
         if (next === "hide") return "Collapse thinking"
         return "Expand thinking"
       })(),
-      value: "session.toggle.thinking",
+      name: "session.toggle.thinking",
       category: "Session",
       hidden: true,
       slash: {
@@ -495,7 +542,7 @@ export function Session() {
     },
     {
       title: "Toggle session scrollbar",
-      value: "session.toggle.scrollbar",
+      name: "session.toggle.scrollbar",
       category: "Session",
       hidden: true,
       run: () => {
@@ -509,7 +556,7 @@ export function Session() {
     },
     {
       title: groupExploration() ? "Show tool calls individually" : "Group related tool calls",
-      value: "session.toggle.exploration_grouping",
+      name: "session.toggle.exploration_grouping",
       category: "Session",
       hidden: true,
       run: () => {
@@ -522,88 +569,8 @@ export function Session() {
       },
     },
     {
-      title: "Page up",
-      value: "session.page.up",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(-scroll.height / 2)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Page down",
-      value: "session.page.down",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(scroll.height / 2)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Line up",
-      value: "session.line.up",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(-1)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Line down",
-      value: "session.line.down",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(1)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Half page up",
-      value: "session.half.page.up",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(-scroll.height / 4)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Half page down",
-      value: "session.half.page.down",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollBy(scroll.height / 4)
-        dialog.clear()
-      },
-    },
-    {
-      title: "First message",
-      value: "session.first",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollTo(0)
-        dialog.clear()
-      },
-    },
-    {
-      title: "Last message",
-      value: "session.last",
-      category: "Session",
-      hidden: true,
-      run: () => {
-        scroll.scrollTo(scroll.scrollHeight)
-        dialog.clear()
-      },
-    },
-    {
       title: "Jump to last user message",
-      value: "session.messages_last_user",
+      name: "session.messages_last_user",
       category: "Session",
       hidden: true,
       run: () => {
@@ -626,21 +593,21 @@ export function Session() {
     },
     {
       title: "Next message",
-      value: "session.message.next",
+      name: "session.message.next",
       category: "Session",
       hidden: true,
       run: () => scrollToMessage("next", dialog),
     },
     {
       title: "Previous message",
-      value: "session.message.previous",
+      name: "session.message.previous",
       category: "Session",
       hidden: true,
       run: () => scrollToMessage("prev", dialog),
     },
     {
       title: "Copy last assistant message",
-      value: "messages.copy",
+      name: "messages.copy",
       category: "Session",
       run: () => {
         const revertID = session()?.revert?.messageID
@@ -682,7 +649,7 @@ export function Session() {
     },
     {
       title: "Copy session transcript",
-      value: "session.copy",
+      name: "session.copy",
       category: "Session",
       slash: {
         name: "copy",
@@ -702,7 +669,7 @@ export function Session() {
     },
     {
       title: "Export session transcript",
-      value: "session.export",
+      name: "session.export",
       category: "Session",
       slash: {
         name: "export",
@@ -772,7 +739,7 @@ export function Session() {
     },
     {
       title: "Background blocking tools",
-      value: "session.background",
+      name: "session.background",
       category: "Session",
       hidden: true,
       run: () => {
@@ -782,7 +749,7 @@ export function Session() {
     },
     {
       title: "Toggle subagent picker",
-      value: "session.child.first",
+      name: "session.child.first",
       category: "Session",
       run: () => {
         if (composer.open || session()?.parentID) setComposer("open", false)
@@ -792,7 +759,7 @@ export function Session() {
     },
     {
       title: "Go to parent session",
-      value: "session.parent",
+      name: "session.parent",
       category: "Session",
       hidden: true,
       enabled: !!session()?.parentID,
@@ -809,7 +776,7 @@ export function Session() {
     },
     {
       title: "Next child session",
-      value: "session.child.next",
+      name: "session.child.next",
       category: "Session",
       hidden: true,
       enabled: !!session()?.parentID,
@@ -817,7 +784,7 @@ export function Session() {
     },
     {
       title: "Previous child session",
-      value: "session.child.previous",
+      name: "session.child.previous",
       category: "Session",
       hidden: true,
       enabled: !!session()?.parentID,
@@ -825,33 +792,25 @@ export function Session() {
     },
   ])
 
-  const sessionCommands = createMemo(() =>
-    sessionCommandList().map((command) => ({
+  useBindings(() => ({
+    commands: [...globalCommands, ...baseAndUnfocusedCommands, ...baseCommands()].map((command) => ({
       namespace: "palette",
-      name: command.value,
-      desc: "description" in command ? command.description : undefined,
-      slashName: "slash" in command ? command.slash?.name : undefined,
-      slashAliases: "slash" in command ? command.slash?.aliases : undefined,
       ...command,
     })),
-  )
-
-  useBindings(() => ({
-    commands: sessionCommands(),
   }))
 
   useBindings(() => ({
-    bindings: config.keybinds.gather("session.global", sessionGlobalBindingCommands),
+    bindings: globalCommands.flatMap((command) => config.keybinds.get(command.name)),
   }))
 
   useBindings(() => ({
     enabled: () => renderer.currentFocusedEditor === null,
-    bindings: config.keybinds.gather("session.global.unfocused", sessionGlobalUnfocusedBindingCommands),
+    bindings: baseAndUnfocusedCommands.flatMap((command) => config.keybinds.get(command.name)),
   }))
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
-    bindings: config.keybinds.gather("session", sessionBindingCommands),
+    bindings: [...baseAndUnfocusedCommands, ...baseCommands()].flatMap((command) => config.keybinds.get(command.name)),
   }))
 
   // snap to bottom when session changes
@@ -1009,7 +968,10 @@ function SessionRowView(props: { row: SessionRow; message: (messageID: string) =
         <Match when={props.row.type === "part" ? props.row : undefined}>
           {(row) => <SessionPartView partRef={row().ref} message={props.message} />}
         </Match>
-        <Match when={props.row.type === "group" ? props.row : undefined}>
+        <Match when={props.row.type === "group" && props.row.kind === "reasoning" ? props.row : undefined}>
+          {(row) => <SessionReasoningGroupView refs={row().refs} completed={row().completed} message={props.message} />}
+        </Match>
+        <Match when={props.row.type === "group" && props.row.kind === "exploration" ? props.row : undefined}>
           {(row) => (
             <SessionGroupView
               refs={row().refs}
@@ -1115,6 +1077,110 @@ function SessionPartView(props: { partRef: PartRef; message: (messageID: string)
           </Match>
         </Switch>
       )}
+    </Show>
+  )
+}
+
+function SessionReasoningGroupView(props: {
+  refs: PartRef[]
+  completed: boolean
+  message: (messageID: string) => SessionMessageInfo | undefined
+}) {
+  const ctx = use()
+  const { theme, syntax } = useTheme()
+  const renderer = useRenderer()
+  const [expanded, setExpanded] = createSignal(false)
+  const [hover, setHover] = createSignal(false)
+  const parts = createMemo<{ message: SessionMessageAssistant; part: SessionMessageAssistantReasoning }[]>(
+    (previous) => {
+      const next = props.refs.flatMap((ref) => {
+        const message = props.message(ref.messageID)
+        if (message?.type !== "assistant") return []
+        const part = resolvePart(message, ref.partID)
+        if (part?.type !== "reasoning" || !part.text.replace("[REDACTED]", "").trim()) return []
+        return [{ message, part }]
+      })
+      return next.length > 0 ? next : previous
+    },
+    [] as { message: SessionMessageAssistant; part: SessionMessageAssistantReasoning }[],
+  )
+  const latest = createMemo((previous: string | null) => {
+    const item = parts().at(-1)
+    if (!item) return previous
+    const title = reasoningSummary(item.part.text.replace("[REDACTED]", "").trim()).title
+    if (title) return title
+    if (item.part.time?.completed !== undefined || item.message.time.completed !== undefined) return null
+    return previous
+  }, null)
+  const duration = createMemo(() =>
+    parts().reduce((total, item) => {
+      const end = item.part.time?.completed ?? item.message.time.completed
+      const start = item.part.time?.created ?? item.message.time.created
+      return total + (end === undefined ? 0 : Math.max(0, end - start))
+    }, 0),
+  )
+
+  return (
+    <Show when={parts().length > 0}>
+      <Show
+        when={ctx.thinkingMode() === "hide"}
+        fallback={
+          <For each={parts()}>{(item) => <ReasoningPart part={item.part} message={item.message} last={false} />}</For>
+        }
+      >
+        <box flexDirection="column" flexShrink={0}>
+          <InlineToolRow
+            icon={expanded() ? "-" : "+"}
+            color={
+              !props.completed
+                ? theme.text
+                : hover() || expanded()
+                  ? theme.warning
+                  : RGBA.fromValues(theme.warning.r, theme.warning.g, theme.warning.b, theme.thinkingOpacity)
+            }
+            complete={props.completed}
+            pending={latest() ? `Thinking: ${latest()}` : "Thinking"}
+            spinner={!props.completed}
+            onMouseOver={() => setHover(true)}
+            onMouseOut={() => setHover(false)}
+            onMouseUp={() => {
+              if (renderer.getSelection()?.getSelectedText()) return
+              setExpanded((value) => !value)
+            }}
+          >
+            {props.completed ? "Thought" : latest() ? `Thinking: ${latest()}` : "Thinking"}
+            <Show when={props.completed && !expanded() && latest()}>: {latest()}</Show>
+            <Show when={props.completed && parts().length > 1}> · {parts().length} steps</Show>
+            <Show when={props.completed && duration()}> · {Locale.duration(duration())}</Show>
+          </InlineToolRow>
+          <Show when={expanded()}>
+            <box paddingLeft={3}>
+              <For each={parts()}>
+                {(item) => (
+                  <box marginTop={1}>
+                    <box
+                      border={["left"]}
+                      customBorderChars={SplitBorder.customBorderChars}
+                      borderColor={theme.backgroundElement}
+                      paddingLeft={1}
+                    >
+                      <code
+                        filetype="markdown"
+                        drawUnstyledText={false}
+                        streaming={false}
+                        syntaxStyle={syntax()}
+                        content={item.part.text.replace("[REDACTED]", "").trim()}
+                        conceal={ctx.markdownMode() === "rendered"}
+                        fg={theme.textMuted}
+                      />
+                    </box>
+                  </box>
+                )}
+              </For>
+            </box>
+          </Show>
+        </box>
+      </Show>
     </Show>
   )
 }
@@ -1744,26 +1810,40 @@ function ReasoningPart(props: {
   return (
     <Show when={content()}>
       <box paddingLeft={3} flexDirection="column" flexShrink={0}>
-        <box onMouseUp={toggle}>
-          <ReasoningHeader
-            toggleable={inMinimal()}
-            open={!inMinimal() || expanded()}
-            done={isDone()}
-            title={summary().title}
-            duration={isDone() ? Locale.duration(duration()) : undefined}
-          />
-        </box>
-        <Show when={(!inMinimal() || expanded()) && summary().body}>
-          <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
-            <code
-              filetype="markdown"
-              drawUnstyledText={false}
-              streaming={true}
-              syntaxStyle={syntax()}
-              content={summary().body}
-              conceal={ctx.markdownMode() === "rendered"}
-              fg={theme.textMuted}
+        <box
+          border={!inMinimal() || expanded() ? ["left"] : undefined}
+          customBorderChars={SplitBorder.customBorderChars}
+          borderColor={theme.backgroundElement}
+          paddingLeft={!inMinimal() || expanded() ? 1 : 0}
+        >
+          <box onMouseUp={toggle}>
+            <ReasoningHeader
+              toggleable={inMinimal()}
+              open={!inMinimal() || expanded()}
+              done={isDone()}
+              title={inMinimal() && !expanded() ? summary().title : null}
+              duration={isDone() ? Locale.duration(duration()) : undefined}
             />
+          </box>
+        </box>
+        <Show when={!inMinimal() || expanded()}>
+          <box marginTop={1}>
+            <box
+              border={["left"]}
+              customBorderChars={SplitBorder.customBorderChars}
+              borderColor={theme.backgroundElement}
+              paddingLeft={inMinimal() ? 3 : 1}
+            >
+              <code
+                filetype="markdown"
+                drawUnstyledText={false}
+                streaming={true}
+                syntaxStyle={syntax()}
+                content={content()}
+                conceal={ctx.markdownMode() === "rendered"}
+                fg={theme.textMuted}
+              />
+            </box>
           </box>
         </Show>
       </box>
@@ -2419,8 +2499,12 @@ function WebSearch(props: ToolProps) {
 function Subagent(props: ToolProps) {
   const { navigate } = useRoute()
   const data = useData()
-  const sessionID = createMemo(() => stringValue(props.metadata.sessionID) ?? stringValue(props.metadata.sessionId))
-  const description = createMemo(() => stringValue(props.input.description))
+  const input = createMemo(() => (typeof props.part.state.input === "string" ? {} : props.part.state.input))
+  const metadata = createMemo(() =>
+    props.part.state.status === "streaming" ? {} : props.part.state.structured,
+  )
+  const sessionID = createMemo(() => stringValue(metadata().sessionID) ?? stringValue(metadata().sessionId))
+  const description = createMemo(() => stringValue(input().description))
   const isRunning = createMemo(() => {
     const id = sessionID()
     return props.part.state.status === "running" || Boolean(id && data.session.status(id) === "running")
@@ -2438,12 +2522,12 @@ function Subagent(props: ToolProps) {
         if (id) navigate({ type: "session", sessionID: id })
       }}
       status={
-        props.input.background === true || props.metadata.status === "running" ? (
+        input().background === true || metadata().status === "running" ? (
           <StatusBadge>Background</StatusBadge>
         ) : undefined
       }
     >
-      {`${Locale.titlecase(stringValue(props.input.agent) ?? stringValue(props.input.subagent_type) ?? "General")} Subagent — ${description() ?? "Subagent"}`}
+      {`${Locale.titlecase(stringValue(input().agent) ?? stringValue(input().subagent_type) ?? "General")} Subagent — ${description() ?? "Subagent"}`}
     </InlineTool>
   )
 }
