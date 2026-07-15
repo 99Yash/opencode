@@ -1,10 +1,10 @@
-import { Service } from "@opencode-ai/client/effect"
+import { Service, type Endpoint } from "@opencode-ai/client/effect/service"
 import { OpenCode, type OpenCodeClient } from "@opencode-ai/client/promise"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Model } from "@opencode-ai/schema/model"
 import { open } from "node:fs/promises"
 import path from "node:path"
-import { Server } from "../services/server"
+import { ServerConnection } from "../services/server-connection"
 import { loadRunAgents, waitForCatalogReady } from "./catalog.shared"
 import { runNonInteractivePrompt } from "./noninteractive"
 import { toolInlineInfo } from "./tool"
@@ -12,7 +12,7 @@ import type { MiniToolPart } from "./types"
 import { UI } from "./ui"
 
 export type RunCommandInput = {
-  server: Server.Resolved
+  server: ServerConnection.Resolved
   message: string[]
   continue?: boolean
   session?: string
@@ -55,7 +55,7 @@ async function run(input: RunCommandInput) {
   return execute(input, prepared, input.server.endpoint)
 }
 
-async function execute(input: RunCommandInput, prepared: Prepared, endpoint: Service.Endpoint) {
+async function execute(input: RunCommandInput, prepared: Prepared, endpoint: Endpoint) {
   const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
   const requestedDirectory = prepared.directory ?? (await client.location.get()).directory
   if (!requestedDirectory) fail("Failed to resolve server directory")
@@ -73,8 +73,7 @@ async function execute(input: RunCommandInput, prepared: Prepared, endpoint: Ser
           .then((result) => (result.data ? { providerID: result.data.providerID, modelID: result.data.id } : undefined))
       : undefined
   const model = pickRunModel(explicitModel, variant, sessionModel, defaultModel)
-  if (variant && !model)
-    return reportError(input, "Cannot select a variant before selecting a model", session?.id)
+  if (variant && !model) return reportError(input, "Cannot select a variant before selecting a model", session?.id)
   if (model) {
     await waitForCatalogReady({ sdk: client, directory: cwd, workspace, model })
     const available = await client.model.list({ location: { directory: cwd, workspace } })

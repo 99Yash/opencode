@@ -3,7 +3,7 @@ export * as ProviderV2 from "./provider"
 import { Effect, Schema } from "effect"
 import { pathToFileURL } from "url"
 import { Provider } from "@opencode-ai/schema/provider"
-import type { ProviderPackageDefinition } from "@opencode-ai/llm"
+import type { ProviderPackageDefinition } from "@opencode-ai/ai"
 import { Npm } from "./npm"
 import type { DeepMutable } from "./schema"
 
@@ -11,9 +11,12 @@ export const ID = Provider.ID
 export type ID = typeof ID.Type
 
 export const AISDK_PREFIX = "aisdk:"
-export const isAISDK = (value: string | undefined) => value?.startsWith(AISDK_PREFIX) ?? false
+export const isAISDK = (value: string | undefined): value is string => value?.startsWith(AISDK_PREFIX) ?? false
 export const aisdk = (value: string) => (isAISDK(value) ? value : `${AISDK_PREFIX}${value}`)
-export const packageName = (value: string | undefined) => {
+export function packageName(value: string): string
+export function packageName(value: undefined): undefined
+export function packageName(value: string | undefined): string | undefined
+export function packageName(value: string | undefined) {
   if (value === undefined || !isAISDK(value)) return value
   return value.slice(AISDK_PREFIX.length)
 }
@@ -32,7 +35,7 @@ const packages = new Map<string, Promise<unknown>>()
 
 export const loadPackage = Effect.fn("ProviderV2.loadPackage")(function* (specifier: string, npm?: Npm.Interface) {
   const resolved = yield* Effect.sync(() => {
-    if (specifier.startsWith("file://") || specifier.startsWith("@opencode-ai/llm/")) return specifier
+    if (specifier.startsWith("file://") || specifier.startsWith("@opencode-ai/ai/")) return specifier
     try {
       return import.meta.resolve(specifier)
     } catch {

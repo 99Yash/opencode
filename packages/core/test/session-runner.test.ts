@@ -3,7 +3,9 @@ import {
   LLMClient,
   LLMError,
   LLMEvent,
+  Message,
   Model,
+  SystemPart,
   ToolFailure,
   TransportReason,
   InvalidProviderOutputReason,
@@ -11,8 +13,8 @@ import {
   RateLimitReason,
   type LLMClientShape,
   type LLMRequest,
-} from "@opencode-ai/llm"
-import * as OpenAIChat from "@opencode-ai/llm/protocols/openai-chat"
+} from "@opencode-ai/ai"
+import * as OpenAIChat from "@opencode-ai/ai/protocols/openai-chat"
 import { Database } from "@opencode-ai/core/database/database"
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -20,6 +22,7 @@ import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Flag } from "@opencode-ai/core/flag/flag"
+import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { Project } from "@opencode-ai/core/project"
@@ -41,6 +44,7 @@ import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { SessionRunnerSystemPrompt } from "@opencode-ai/core/session/runner/system-prompt"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { QuestionTool } from "@opencode-ai/core/tool/question"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -396,6 +400,7 @@ const it = testEffect(
       AgentV2.node,
       ToolRegistry.node,
       ToolRegistry.toolsNode,
+      PluginHooks.node,
       echoNode,
       SessionRunnerModel.node,
       InstructionBuiltIns.node,
@@ -772,6 +777,32 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
+  it.effect("applies AI request hooks without exposing unavailable tools", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const hooks = yield* PluginHooks.Service
+      yield* hooks.register("ai", "request", (event) =>
+        Effect.sync(() => {
+          event.system = [SystemPart.make("Hooked system")]
+          event.messages = [Message.user("Hooked message")]
+          delete event.tools.echo
+          event.tools.unregistered = { description: "Unavailable", input: { type: "object" } }
+        }),
+      )
+      yield* admit(session, "Original message")
+      responses = [reply.tool("call-removed", "echo", { text: "blocked" })]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.system.map((part) => part.text)).toEqual(["Hooked system"])
+      expect(requests[0]?.messages).toEqual([Message.user("Hooked message")])
+      expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("echo")
+      expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("unregistered")
+      expect(executions).toEqual([])
+    }),
+  )
+
   it.effect("advertises and executes a location registered tool", () =>
     Effect.gen(function* () {
       const session = yield* setup
@@ -3086,10 +3117,32 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(requests[0]?.http?.headers).toEqual({
+        "x-session-affinity": sessionID,
+        "X-Session-Id": sessionID,
+        "User-Agent": `opencode/${InstallationVersion}`,
         "x-opencode-project": Project.ID.global,
         "x-opencode-session": sessionID,
         "x-opencode-client": Flag.OPENCODE_CLIENT,
       })
+    }),
+  )
+
+  it.effect("adds the parent session header to child model requests", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const parentID = SessionV2.ID.make("ses_runner_parent")
+      const { db } = yield* Database.Service
+      yield* db
+        .update(SessionTable)
+        .set({ parent_id: parentID })
+        .where(eq(SessionTable.id, sessionID))
+        .run()
+        .pipe(Effect.orDie)
+      yield* admit(session, "Run child request")
+
+      yield* session.resume(sessionID)
+
+      expect(requests[0]?.http?.headers?.["x-parent-session-id"]).toBe(parentID)
     }),
   )
 

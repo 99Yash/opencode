@@ -6,7 +6,6 @@ import { firstBy } from "remeda"
 import { createMemo, createResource, createEffect, onMount, onCleanup, Index, Show, createSignal } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useEditorContext } from "../../context/editor"
-import { useProject } from "../../context/project"
 import { useClient } from "../../context/client"
 import { useData } from "../../context/data"
 import { getScrollAcceleration } from "../../util/scroll"
@@ -19,7 +18,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "../../util/locale"
 import type { PromptInfo, PromptPartRef } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
-import { useBindings, useCommandSlashes } from "../../keymap"
+import { useBindings } from "../../keymap"
 import { Keymap } from "../../context/keymap"
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
 import type { FileSystemEntry } from "@opencode-ai/client"
@@ -87,9 +86,8 @@ export function Autocomplete(props: {
   const editor = useEditorContext()
   const client = useClient()
   const data = useData()
-  const project = useProject()
-  const slashes = useCommandSlashes()
   const keymap = Keymap.use()
+  const keymapCommands = Keymap.useCommands()
   const { theme } = useTheme()
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
@@ -284,7 +282,7 @@ export function Autocomplete(props: {
   })
 
   function normalizeMentionPath(filePath: string) {
-    const baseDir = location()?.directory || project.instance.directory() || paths.cwd
+    const baseDir = location.current?.directory || data.location.info()?.directory || paths.cwd
     const absolute = path.resolve(filePath)
     const relative = path.relative(baseDir, absolute)
 
@@ -310,7 +308,7 @@ export function Autocomplete(props: {
   }
 
   const [files] = createResource(
-    () => ({ query: search(), location: location(), visible: store.visible }),
+    () => ({ query: search(), location: location.current, visible: store.visible }),
     async (input) => {
       if (!input.visible || input.visible === "/") return { options: [], failed: false }
       if (referenceMatch()) return { options: [], failed: false }
@@ -322,7 +320,7 @@ export function Autocomplete(props: {
           limit: 20,
           location: {
             directory: input.location?.directory,
-            workspace: input.location?.workspaceID ?? project.workspace.current(),
+            workspace: input.location?.workspaceID ?? data.location.default().workspaceID,
           },
         })
         .then(
@@ -365,7 +363,7 @@ export function Autocomplete(props: {
     const options: AutocompleteOption[] = []
     const width = props.anchor().width - 4
 
-    for (const res of data.location.mcp.resource.list(location()) ?? []) {
+    for (const res of data.location.mcp.resource.list(location.current) ?? []) {
       options.push({
         display: Locale.truncateMiddle(res.name, width),
         // Match the name only; matching the URI caused unrelated fuzzy hits.
@@ -429,38 +427,43 @@ export function Autocomplete(props: {
       ),
   )
 
+  function insertSlash(name: string) {
+    const newText = `/${name} `
+    const cursor = props.input().logicalCursor
+    props.input().deleteRange(0, 0, cursor.row, cursor.col)
+    props.input().insertText(newText)
+    props.input().cursorOffset = Bun.stringWidth(newText)
+  }
+
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = [...slashes()]
+    const results: AutocompleteOption[] = keymapCommands().flatMap((command) => {
+      const slash = command.slash
+      if (!slash) return []
+      return {
+        display: `/${slash.name}`,
+        description: command.description ?? command.title,
+        aliases: slash.aliases?.map((alias) => `/${alias}`),
+        onSelect: slash.arguments ? () => insertSlash(slash.name) : command.run,
+      }
+    })
     const commandNames = new Set<string>()
 
-    for (const serverCommand of data.location.command.list(location()) ?? []) {
+    for (const serverCommand of data.location.command.list(location.current) ?? []) {
       commandNames.add(serverCommand.name)
       results.push({
         display: "/" + serverCommand.name,
         description: serverCommand.description,
-        onSelect: () => {
-          const newText = "/" + serverCommand.name + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
-        },
+        onSelect: () => insertSlash(serverCommand.name),
       })
     }
 
     for (const skill of data.location.skill
-      .list(location())
+      .list(location.current)
       ?.filter((skill) => skill.slash === true && !commandNames.has(skill.id)) ?? []) {
       results.push({
         display: "/" + skill.id,
         description: skill.description,
-        onSelect: () => {
-          const newText = "/" + skill.id + " "
-          const cursor = props.input().logicalCursor
-          props.input().deleteRange(0, 0, cursor.row, cursor.col)
-          props.input().insertText(newText)
-          props.input().cursorOffset = Bun.stringWidth(newText)
-        },
+        onSelect: () => insertSlash(skill.id),
       })
     }
 

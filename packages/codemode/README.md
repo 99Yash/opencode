@@ -15,7 +15,7 @@ runs, no sandbox required.
 The deliberate differences:
 
 - **No ambient authority.** No `fetch`, `process`, filesystem, timers, or host globals - only the allowlisted standard
-  library and the `tools` tree.
+  library and supplied `tools`.
 - **No dynamic code.** No `eval`, `Function`, or module loading.
 - **Plain-data boundaries.** Tool arguments and program results are JSON-like data. Dates become ISO strings, RegExp,
   Map, and Set serialize as `{}`, and promises, functions, and runtime references cannot cross the boundary.
@@ -33,8 +33,8 @@ generators, and full sparse-array parity) are tracked as unchecked items in the
 ## Quick Start
 
 The package is workspace-private (`"@opencode-ai/codemode": "workspace:*"`). Hosts interact with it through `effect`
-and should depend on `effect` themselves. Define tools with Effect Schema, then place them in the object tree exposed
-to programs as `tools`:
+and should depend on `effect` themselves. Define tools with Effect Schema, then expose them to programs through
+`tools`:
 
 ```ts
 import { CodeMode, Tool } from "@opencode-ai/codemode"
@@ -75,6 +75,10 @@ is decoded before `run` is invoked; an Effect Schema `output` is decoded and cop
 Schemas only shape the model-visible signature. Without `output` the signature advertises `Promise<unknown>`.
 Descriptions and schemas are model-visible contract; keep authorization in `run`.
 
+Dots in tool names are namespace separators: `{ "issues.list": tool }` exposes `tools.issues.list(...)`, exactly like
+`{ issues: { list: tool } }`. Other non-identifier characters render with bracket notation, e.g.
+`tools.context7["resolve-library-id"](...)`.
+
 ### `CodeMode.execute` and `CodeMode.make`
 
 `CodeMode.execute({ ...options, code })` runs once and is equivalent to `CodeMode.make(options).execute(code)`. A
@@ -94,8 +98,8 @@ Effect-returning and must not fail.
 
 ### OpenAPI tools
 
-`OpenAPI.fromSpec` turns an OpenAPI 3.x document into a tool subtree - one tool per operation, namespaced by dotted
-`operationId`:
+`OpenAPI.fromSpec` turns an OpenAPI 3.x document into namespaced tools - one tool per operation, using dotted
+`operationId` segments as namespaces:
 
 ```ts
 const api = OpenAPI.fromSpec({ spec, auth: { resolve } })

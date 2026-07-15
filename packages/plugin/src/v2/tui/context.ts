@@ -24,7 +24,8 @@ import type { JSX } from "@opentui/solid"
 
 interface LocationCollection<Value> {
   list(location?: LocationRef): Value[] | undefined
-  refresh(location?: LocationRef): Promise<void>
+  sync(location?: LocationRef): Promise<void>
+  invalidate(location?: LocationRef): void
 }
 
 export interface Data {
@@ -42,37 +43,45 @@ export interface Data {
     status(sessionID: string): "idle" | "running"
     readonly pending: {
       list(sessionID: string): SessionPendingInfo[]
-      refresh(sessionID: string): Promise<void>
+      sync(sessionID: string): Promise<void>
+      invalidate(sessionID: string): void
     }
-    refresh(sessionID: string): Promise<void>
+    sync(sessionID: string): Promise<void>
+    invalidate(sessionID: string): void
     readonly message: {
       list(sessionID: string): SessionMessageInfo[]
       get(sessionID: string, messageID: string): SessionMessageInfo | undefined
-      refresh(sessionID: string): Promise<void>
+      sync(sessionID: string): Promise<void>
+      invalidate(sessionID: string): void
     }
     readonly permission: {
       list(sessionID: string): PermissionV2Request[] | undefined
-      refresh(sessionID: string): Promise<void>
+      sync(sessionID: string): Promise<void>
+      invalidate(sessionID: string): void
     }
     readonly form: {
       list(sessionID: string, location?: LocationRef): Array<FormInfo & { readonly location?: LocationRef }> | undefined
-      refresh(sessionID: string, location?: LocationRef): Promise<void>
+      sync(sessionID: string, location?: LocationRef): Promise<void>
+      invalidate(sessionID: string, location?: LocationRef): void
     }
   }
   readonly project: {
     readonly permission: {
       list(projectID: string): PermissionSavedInfo[] | undefined
-      refresh(projectID: string): Promise<void>
+      sync(projectID: string): Promise<void>
+      invalidate(projectID: string): void
     }
   }
   readonly shell: {
     list(location?: LocationRef): ShellInfo[]
     get(id: string): ShellInfo | undefined
-    refresh(location?: LocationRef): Promise<void>
+    sync(location?: LocationRef): Promise<void>
+    invalidate(location?: LocationRef): void
   }
   readonly location: {
     default(): LocationRef
-    refresh(location?: LocationRef): Promise<void>
+    sync(location?: LocationRef): Promise<void>
+    invalidate(location?: LocationRef): void
     readonly agent: LocationCollection<AgentInfo>
     readonly command: LocationCollection<CommandInfo>
     readonly integration: LocationCollection<IntegrationInfo>
@@ -125,9 +134,13 @@ export interface KeymapCommand {
   readonly slash?: {
     readonly name: string
     readonly aliases?: string[]
+    /** Keeps the slash command in the prompt and passes its raw input to run. */
+    readonly arguments?: true
   }
+  /** Promotes the command in discovery UI. */
+  readonly suggested?: boolean | (() => boolean)
   /** Executes the command. Return false to let keymap dispatch continue. */
-  readonly run: () => void | false | Promise<void>
+  readonly run: (input?: string) => void | false | Promise<void>
 }
 
 export interface KeymapLayer {
@@ -149,7 +162,7 @@ export interface Keymap {
   /** Creates a reactive keymap layer owned by the calling component. */
   layer(input: () => KeymapLayer): void
   /** Dispatches a reachable command by ID. */
-  dispatch(id: string): void
+  dispatch(id: string, input?: string): void
   /** Returns the formatted shortcut for a registered command. */
   shortcut(id: string): string | undefined
   /** Controls mutually exclusive OpenCode input modes. */
@@ -172,6 +185,7 @@ export interface UI {
 
 export interface Context {
   readonly options: Readonly<Record<string, any>>
+  readonly location: LocationRef | undefined
   readonly client: OpenCodeClient
   readonly data: Data
   readonly keymap: Keymap

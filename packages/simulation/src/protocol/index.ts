@@ -95,6 +95,29 @@ export namespace Frontend {
   export const Screenshot = Schema.String
   export type Screenshot = Schema.Schema.Type<typeof Screenshot>
 
+  export const Color = Schema.Tuple([Schema.Number, Schema.Number, Schema.Number, Schema.Number])
+  export type Color = Schema.Schema.Type<typeof Color>
+
+  export const CapturedFrame = Schema.Struct({
+    cols: Schema.Number,
+    rows: Schema.Number,
+    cursor: Schema.Tuple([Schema.Number, Schema.Number]),
+    lines: Schema.Array(
+      Schema.Struct({
+        spans: Schema.Array(
+          Schema.Struct({
+            text: Schema.String,
+            fg: Color,
+            bg: Color,
+            attributes: Schema.Number,
+            width: Schema.Number,
+          }),
+        ),
+      }),
+    ),
+  })
+  export interface CapturedFrame extends Schema.Schema.Type<typeof CapturedFrame> {}
+
   export const RecordingFinish = Schema.String
   export type RecordingFinish = Schema.Schema.Type<typeof RecordingFinish>
 
@@ -142,9 +165,11 @@ export namespace Frontend {
       ...JsonRpc.RequestFields,
       method: Schema.Literals(["ui.enter", "ui.state", "ui.recording.finish"]),
     }),
+    Schema.Struct({ ...JsonRpc.RequestFields, method: Schema.Literal("ui.capture") }),
   ])
   export type Request = Schema.Schema.Type<typeof Request>
   export const decodeRequest = Schema.decodeUnknownSync(Request)
+  export const decodeRequestEffect = Schema.decodeUnknownEffect(Schema.fromJsonString(Request))
 }
 
 export namespace Backend {
@@ -188,9 +213,10 @@ export namespace Backend {
   ])
   export type Request = Schema.Schema.Type<typeof Request>
   export const decodeRequest = Schema.decodeUnknownSync(Request)
+  export const decodeRequestEffect = Schema.decodeUnknownEffect(Schema.fromJsonString(Request))
 
-  export const OpenedExchange = Schema.Struct({ id: Schema.String, url: Schema.String, body: Schema.Json })
-  export interface OpenedExchange extends Schema.Schema.Type<typeof OpenedExchange> {}
+  export const ProviderInvocation = Schema.Struct({ id: Schema.String, url: Schema.String, body: Schema.Json })
+  export interface ProviderInvocation extends Schema.Schema.Type<typeof ProviderInvocation> {}
 
   export const NetworkLogEntry = Schema.Struct({
     time: Schema.Number,

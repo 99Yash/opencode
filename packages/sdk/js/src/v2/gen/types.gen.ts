@@ -598,24 +598,6 @@ export type Part =
   | RetryPart
   | CompactionPart
 
-export type Shell = {
-  id: string
-  status: "running" | "exited" | "timeout" | "killed"
-  command: string
-  cwd: string
-  shell: string
-  file: string
-  pid?: number
-  exit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  metadata: {
-    [key: string]: unknown
-  }
-  time: {
-    started: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-    completed?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
-  }
-}
-
 export type Pty = {
   id: string
   title: string
@@ -803,6 +785,7 @@ export type GlobalEvent = {
         properties: {
           sessionID: string
           location: LocationRef
+          projectID?: string
           subpath?: string
         }
       }
@@ -917,7 +900,7 @@ export type GlobalEvent = {
         type: "session.shell.started"
         properties: {
           sessionID: string
-          shell: Shell
+          shell: ShellInfo
         }
       }
     | {
@@ -925,7 +908,7 @@ export type GlobalEvent = {
         type: "session.shell.ended"
         properties: {
           sessionID: string
-          shell: Shell
+          shell: ShellInfo
           output: {
             output: string
             cursor: number
@@ -1358,7 +1341,7 @@ export type GlobalEvent = {
         id: string
         type: "shell.created"
         properties: {
-          info: Shell
+          info: ShellInfo
         }
       }
     | {
@@ -1366,7 +1349,7 @@ export type GlobalEvent = {
         type: "shell.exited"
         properties: {
           id: string
-          exit?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+          exit?: number
           status: "running" | "exited" | "timeout" | "killed"
         }
       }
@@ -2812,9 +2795,23 @@ export type WorkspaceWarpError = {
   }
 }
 
+export type ServiceHealth = {
+  healthy: true
+  version: string
+  pid: number
+}
+
 export type UnauthorizedError = {
   _tag: "UnauthorizedError"
   message: string
+}
+
+export type ServiceStopRequest = {
+  instanceID: string
+}
+
+export type ServiceStopResponse = {
+  accepted: boolean
 }
 
 export type SessionsResponse = {
@@ -2888,24 +2885,6 @@ export type InstructionEntryValueTooLargeError = {
   actualBytes: number
   maxBytes: number
   message: string
-}
-
-export type Shell1 = {
-  id: string
-  status: "running" | "exited" | "timeout" | "killed"
-  command: string
-  cwd: string
-  shell: string
-  file: string
-  pid?: number
-  exit?: number | "NaN" | "Infinity" | "-Infinity"
-  metadata: {
-    [key: string]: unknown
-  }
-  time: {
-    started: number | "NaN" | "Infinity" | "-Infinity"
-    completed?: number | "NaN" | "Infinity" | "-Infinity"
-  }
 }
 
 export type SessionLogItem = SessionEventDurable | EventLogSynced
@@ -3154,24 +3133,6 @@ export type EffectHttpApiErrorForbidden = {
   _tag: "Forbidden"
 }
 
-export type Shell2 = {
-  id: string
-  status: "running" | "exited" | "timeout" | "killed"
-  command: string
-  cwd: string
-  shell: string
-  file: string
-  pid?: number
-  exit?: number | "NaN" | "Infinity" | "-Infinity"
-  metadata: {
-    [key: string]: unknown
-  }
-  time: {
-    started: number | "NaN" | "Infinity" | "-Infinity"
-    completed?: number | "NaN" | "Infinity" | "-Infinity"
-  }
-}
-
 export type EventTuiPromptAppend2 = {
   id: string
   type: "tui.prompt.append"
@@ -3396,6 +3357,24 @@ export type SessionPendingMessage = SessionPendingUserMessage | SessionPendingSy
 export type SessionStructuredError = {
   type: string
   message: string
+}
+
+export type ShellInfo = {
+  id: string
+  status: "running" | "exited" | "timeout" | "killed"
+  command: string
+  cwd: string
+  shell: string
+  file: string
+  pid?: number
+  exit?: number
+  metadata: {
+    [key: string]: unknown
+  }
+  time: {
+    started: number
+    completed?: number
+  }
 }
 
 export type SessionMessageProviderState = {
@@ -3773,6 +3752,7 @@ export type SyncEventSessionMoved = {
     data: {
       sessionID: string
       location: LocationRef
+      projectID?: string
       subpath?: string
     }
   }
@@ -3962,7 +3942,7 @@ export type SyncEventSessionShellStarted = {
     aggregateID: string
     data: {
       sessionID: string
-      shell: Shell
+      shell: ShellInfo
     }
   }
 }
@@ -3977,7 +3957,7 @@ export type SyncEventSessionShellEnded = {
     aggregateID: string
     data: {
       sessionID: string
-      shell: Shell
+      shell: ShellInfo
       output: {
         output: string
         cursor: number
@@ -4828,6 +4808,7 @@ export type SessionMoved = {
   data: {
     sessionID: string
     location: LocationRef
+    projectID?: string
     subpath?: string
   }
 }
@@ -5083,7 +5064,7 @@ export type SessionShellStarted = {
   location?: LocationRef
   data: {
     sessionID: string
-    shell: Shell1
+    shell: ShellInfo
   }
 }
 
@@ -5102,7 +5083,7 @@ export type SessionShellEnded = {
   location?: LocationRef
   data: {
     sessionID: string
-    shell: Shell1
+    shell: ShellInfo
     output: {
       output: string
       cursor: number
@@ -6461,7 +6442,7 @@ export type ShellCreated = {
   type: "shell.created"
   location?: LocationRef
   data: {
-    info: Shell1
+    info: ShellInfo
   }
 }
 
@@ -6475,7 +6456,7 @@ export type ShellExited = {
   location?: LocationRef
   data: {
     id: string
-    exit?: number | "NaN" | "Infinity" | "-Infinity"
+    exit?: number
     status: "running" | "exited" | "timeout" | "killed"
   }
 }
@@ -7158,6 +7139,7 @@ export type EventSessionMoved = {
   properties: {
     sessionID: string
     location: LocationRef
+    projectID?: string
     subpath?: string
   }
 }
@@ -7285,7 +7267,7 @@ export type EventSessionShellStarted = {
   type: "session.shell.started"
   properties: {
     sessionID: string
-    shell: Shell2
+    shell: ShellInfo
   }
 }
 
@@ -7294,7 +7276,7 @@ export type EventSessionShellEnded = {
   type: "session.shell.ended"
   properties: {
     sessionID: string
-    shell: Shell2
+    shell: ShellInfo
     output: {
       output: string
       cursor: number
@@ -7772,7 +7754,7 @@ export type EventShellCreated = {
   id: string
   type: "shell.created"
   properties: {
-    info: Shell2
+    info: ShellInfo
   }
 }
 
@@ -7781,7 +7763,7 @@ export type EventShellExited = {
   type: "shell.exited"
   properties: {
     id: string
-    exit?: number | "NaN" | "Infinity" | "-Infinity"
+    exit?: number
     status: "running" | "exited" | "timeout" | "killed"
   }
 }
@@ -8139,6 +8121,12 @@ export type BadRequestError = {
   }
 }
 
+export type ServiceHealthV2 = {
+  healthy: true
+  version: string
+  pid: number
+}
+
 export type InvalidRequestErrorV2 = {
   _tag: "InvalidRequestError"
   message: string
@@ -8177,24 +8165,6 @@ export type UnknownErrorV2 = {
   _tag: "UnknownError"
   message: string
   ref?: string | null
-}
-
-export type ShellV2 = {
-  id: string
-  status: "running" | "exited" | "timeout" | "killed"
-  command: string
-  cwd: string
-  shell: string
-  file: string
-  pid?: number
-  exit?: number | "NaN" | "Infinity" | "-Infinity"
-  metadata: {
-    [key: string]: unknown
-  }
-  time: {
-    started: number | "NaN" | "Infinity" | "-Infinity"
-    completed?: number | "NaN" | "Infinity" | "-Infinity"
-  }
 }
 
 export type SessionMessagesResponseV2 = {
@@ -9064,6 +9034,7 @@ export type SessionMovedV2 = {
   data: {
     sessionID: string
     location: LocationRefV2
+    projectID?: string
     subpath?: string
   }
 }
@@ -9333,6 +9304,24 @@ export type SessionSkillActivatedV2 = {
   }
 }
 
+export type ShellInfoV2 = {
+  id: string
+  status: "running" | "exited" | "timeout" | "killed"
+  command: string
+  cwd: string
+  shell: string
+  file: string
+  pid?: number
+  exit?: number
+  metadata: {
+    [key: string]: unknown
+  }
+  time: {
+    started: number
+    completed?: number
+  }
+}
+
 export type SessionShellStartedV2 = {
   id: string
   created: number
@@ -9348,7 +9337,7 @@ export type SessionShellStartedV2 = {
   location?: LocationRefV2
   data: {
     sessionID: string
-    shell: ShellV2
+    shell: ShellInfoV2
   }
 }
 
@@ -9367,7 +9356,7 @@ export type SessionShellEndedV2 = {
   location?: LocationRefV2
   data: {
     sessionID: string
-    shell: ShellV2
+    shell: ShellInfoV2
     output: {
       output: string
       cursor: number
@@ -10514,7 +10503,7 @@ export type ShellCreatedV2 = {
   type: "shell.created"
   location?: LocationRefV2
   data: {
-    info: ShellV2
+    info: ShellInfoV2
   }
 }
 
@@ -10528,7 +10517,7 @@ export type ShellExitedV2 = {
   location?: LocationRefV2
   data: {
     id: string
-    exit?: number | "NaN" | "Infinity" | "-Infinity"
+    exit?: number
     status: "running" | "exited" | "timeout" | "killed"
   }
 }
@@ -10984,6 +10973,24 @@ export type V2EventServerConnected = {
 export type PtyTicketConnectTokenV2 = {
   ticket: string
   expires_in: number
+}
+
+export type ShellInfo1 = {
+  id: string
+  status: "running" | "exited" | "timeout" | "killed"
+  command: string
+  cwd: string
+  shell: string
+  file: string
+  pid?: number
+  exit?: number
+  metadata: {
+    [key: string]: unknown
+  }
+  time: {
+    started: number
+    completed?: number
+  }
 }
 
 export type QuestionV2RequestV2 = {
@@ -15124,16 +15131,41 @@ export type V2HealthGetError = V2HealthGetErrors[keyof V2HealthGetErrors]
 
 export type V2HealthGetResponses = {
   /**
-   * Success
+   * ServiceHealth
    */
-  200: {
-    healthy: true
-    version: string
-    pid: number
-  }
+  200: ServiceHealthV2
 }
 
 export type V2HealthGetResponse = V2HealthGetResponses[keyof V2HealthGetResponses]
+
+export type V2HealthStopData = {
+  body: ServiceStopRequest
+  path?: never
+  query?: never
+  url: "/api/service/stop"
+}
+
+export type V2HealthStopErrors = {
+  /**
+   * InvalidRequestError
+   */
+  400: InvalidRequestErrorV2
+  /**
+   * UnauthorizedError
+   */
+  401: UnauthorizedError
+}
+
+export type V2HealthStopError = V2HealthStopErrors[keyof V2HealthStopErrors]
+
+export type V2HealthStopResponses = {
+  /**
+   * ServiceStopResponse
+   */
+  200: ServiceStopResponse
+}
+
+export type V2HealthStopResponse = V2HealthStopResponses[keyof V2HealthStopResponses]
 
 export type V2ServerGetData = {
   body?: never
@@ -15611,12 +15643,7 @@ export type V2SessionRenameResponses = {
 export type V2SessionRenameResponse = V2SessionRenameResponses[keyof V2SessionRenameResponses]
 
 export type V2SessionMoveData = {
-  body: {
-    destination: {
-      directory: string
-    }
-    moveChanges?: boolean | null
-  }
+  body: LocationRefV2
   path: {
     sessionID: string
   }
@@ -18318,7 +18345,7 @@ export type V2ShellListResponses = {
    */
   200: {
     location: LocationInfoV2
-    data: Array<ShellV2>
+    data: Array<ShellInfo1>
   }
 }
 
@@ -18362,7 +18389,7 @@ export type V2ShellCreateResponses = {
    */
   200: {
     location: LocationInfoV2
-    data: ShellV2
+    data: ShellInfo1
   }
 }
 
@@ -18445,7 +18472,7 @@ export type V2ShellGetResponses = {
    */
   200: {
     location: LocationInfoV2
-    data: ShellV2
+    data: ShellInfo1
   }
 }
 
@@ -18490,7 +18517,7 @@ export type V2ShellTimeoutResponses = {
    */
   200: {
     location: LocationInfoV2
-    data: ShellV2
+    data: ShellInfo1
   }
 }
 

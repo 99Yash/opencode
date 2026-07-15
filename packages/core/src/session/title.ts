@@ -1,6 +1,6 @@
 export * as SessionTitle from "./title"
 
-import { LLM, LLMClient, LLMError, LLMEvent, Message, type LLMRequest } from "@opencode-ai/llm"
+import { LLM, LLMClient, LLMError, LLMEvent, Message, type LLMRequest } from "@opencode-ai/ai"
 import { Context, DateTime, Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "../agent"
 import { Database } from "../database/database"
@@ -9,6 +9,7 @@ import { makeLocationNode } from "../effect/app-node"
 import { llmClient } from "../effect/app-node-platform"
 import { SessionEvent } from "./event"
 import { SessionHistory } from "./history"
+import { SessionModelHeaders } from "./model-headers"
 import { SessionRunnerModel } from "./runner/model"
 import { SessionSchema } from "./schema"
 
@@ -54,6 +55,7 @@ const make = (dependencies: Dependencies) => {
       .stream(
         LLM.request({
           model: resolved.model,
+          http: { headers: SessionModelHeaders.make(session) },
           system: agent.system,
           messages: [Message.user(firstUser.text)],
           tools: [],

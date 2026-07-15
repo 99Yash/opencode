@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
-import { LLMClient, LLMEvent, Model, type LLMRequest } from "@opencode-ai/llm"
-import { OpenAIChat } from "@opencode-ai/llm/protocols"
+import { LLMClient, LLMEvent, Model, type LLMRequest } from "@opencode-ai/ai"
+import { OpenAIChat } from "@opencode-ai/ai/protocols"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -17,6 +17,8 @@ import { SessionTitle } from "@opencode-ai/core/session/title"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { Flag } from "@opencode-ai/core/flag/flag"
+import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { DateTime, Effect, Layer, Stream } from "effect"
 import { testEffect } from "./lib/effect"
@@ -117,6 +119,14 @@ it.effect("generates a title from the sole user message and renames the session"
     yield* title.generateForFirstPrompt(session)
 
     expect(requests).toHaveLength(1)
+    expect(requests[0]?.http?.headers).toEqual({
+      "x-session-affinity": sessionID,
+      "X-Session-Id": sessionID,
+      "User-Agent": `opencode/${InstallationVersion}`,
+      "x-opencode-project": Project.ID.global,
+      "x-opencode-session": sessionID,
+      "x-opencode-client": Flag.OPENCODE_CLIENT,
+    })
     expect(JSON.stringify(requests[0]?.messages)).toContain("Help me debug the failing build")
     const renamed = yield* store.get(sessionID)
     expect(renamed?.title).toBe("Generated Title")

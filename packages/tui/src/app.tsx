@@ -1,7 +1,7 @@
 import { render, TimeToFirstDraw, useRenderer, useTerminalDimensions } from "@opentui/solid"
 import { registerOpencodeSpinner } from "./component/register-spinner"
 import { Deferred, Effect } from "effect"
-import { Service } from "@opencode-ai/client/effect"
+import { Service, type Endpoint } from "@opencode-ai/client/effect/service"
 import { OpenCode } from "@opencode-ai/client"
 import { Global } from "@opencode-ai/core/global"
 import { Flag } from "@opencode-ai/core/flag/flag"
@@ -42,14 +42,13 @@ import { DialogProvider, useDialog } from "./ui/dialog"
 import { DialogIntegration } from "./component/dialog-integration"
 import { ErrorComponent } from "./component/error-component"
 import { PluginRouteMissing } from "./component/plugin-route-missing"
-import { ProjectProvider, useProject } from "./context/project"
 import { EditorContextProvider } from "./context/editor"
 import { useEvent } from "./context/event"
 import { ClientProvider, useClient } from "./context/client"
 import { StartupLoading } from "./component/startup-loading"
 import { Reconnecting } from "./component/reconnecting"
 import { DataProvider, useData } from "./context/data"
-import { LocationProvider } from "./context/location"
+import { LocationProvider, useLocation } from "./context/location"
 import { LocalProvider, useLocal } from "./context/local"
 import { PermissionProvider } from "./context/permission"
 import { DialogModel } from "./component/dialog-model"
@@ -69,7 +68,7 @@ import { Session } from "./routes/session"
 import { PromptHistoryProvider } from "./component/prompt/history"
 import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
-import { ToastProvider, useToast } from "./ui/toast"
+import { Toast, ToastProvider, useToast } from "./ui/toast"
 import { isDefaultTitle } from "./util/session"
 import * as Model from "./util/model"
 import { ArgsProvider, useArgs, type Args } from "./context/args"
@@ -119,6 +118,7 @@ const appBindingCommands = [
   "provider.connect",
   "opencode.status",
   "server.pair",
+  "service.restart",
   "opencode.debug",
   "theme.switch",
   "theme.switch_mode",
@@ -138,9 +138,11 @@ const appBindingCommands = [
 
 export type TuiInput = {
   server: {
-    endpoint: Service.Endpoint
-    reconnect?: (attempt: number) => Promise<Service.Endpoint>
-    reload?: () => Promise<void>
+    endpoint: Endpoint
+    service?: {
+      reconnect: (signal: AbortSignal) => Promise<Endpoint>
+      restart: () => Promise<void>
+    }
   }
   args: Args
   config: Config.Interface
@@ -184,55 +186,52 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
     Effect.catch(() => Effect.tryPromise(() => api.location.get()).pipe(Effect.map((response) => response.directory))),
   )
   const handoff = input.terminalHandoff ? yield* Effect.promise(input.terminalHandoff) : undefined
-  const reconnectEndpoint = input.server.reconnect
-  const reconnect = reconnectEndpoint
-    ? async (attempt: number) => {
-        const endpoint = await reconnectEndpoint(attempt)
-        const next = { baseUrl: endpoint.url, headers: Service.headers(endpoint) }
-        return {
-          api: OpenCode.make(next),
-        }
+  const managed = input.server.service
+  const service = managed
+    ? {
+        reconnect: async (signal: AbortSignal) => {
+          const endpoint = await managed.reconnect(signal)
+          const next = { baseUrl: endpoint.url, headers: Service.headers(endpoint) }
+          return { api: OpenCode.make(next) }
+        },
+        restart: managed.restart,
       }
     : undefined
   const exit = { epilogue: undefined as string | undefined, reason: undefined as unknown }
   const result = yield* Effect.scoped(
     Effect.gen(function* () {
-      const renderer = yield* Effect.acquireRelease(
-        Effect.tryPromise({
-          try: async () => {
-            const options = {
-              externalOutputMode: "passthrough",
-              targetFps: 60,
-              gatherStats: false,
-              exitOnCtrlC: false,
-              useKittyKeyboard: {},
-              autoFocus: false,
-              openConsoleOnError: false,
-              useMouse: !Flag.OPENCODE_DISABLE_MOUSE && config.mouse,
-              consoleOptions: {
-                keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
-              },
-            } satisfies CliRendererConfig
-
-            if (handoff) {
-              handoff.renderer.useMouse = options.useMouse
-              return handoff.renderer
-            }
-
-            if (process.env.OPENCODE_DRIVE) {
-              const { Drive } = await import("@opencode-ai/simulation/frontend")
-              return Drive.create(options)
-            }
-
-            return createCliRenderer(options)
-          },
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-        }),
-        (renderer) =>
-          Effect.sync(() => {
-            destroyRenderer(renderer)
+      const options = {
+        externalOutputMode: "passthrough",
+        targetFps: 60,
+        gatherStats: false,
+        exitOnCtrlC: false,
+        useKittyKeyboard: {},
+        autoFocus: false,
+        openConsoleOnError: false,
+        useMouse: !Flag.OPENCODE_DISABLE_MOUSE && config.mouse,
+        consoleOptions: {
+          keyBindings: [{ name: "y", ctrl: true, action: "copy-selection" }],
+        },
+      } satisfies CliRendererConfig
+      const renderer = yield* Effect.gen(function* () {
+        if (handoff) {
+          handoff.renderer.useMouse = options.useMouse
+          return yield* Effect.acquireRelease(Effect.succeed(handoff.renderer), (renderer) =>
+            Effect.sync(() => destroyRenderer(renderer)),
+          )
+        }
+        if (process.env.OPENCODE_DRIVE) {
+          const { Drive } = yield* Effect.promise(() => import("@opencode-ai/simulation/frontend"))
+          return yield* Drive.create(options)
+        }
+        return yield* Effect.acquireRelease(
+          Effect.tryPromise({
+            try: () => createCliRenderer(options),
+            catch: (error) => (error instanceof Error ? error : new Error(String(error))),
           }),
-      )
+          (renderer) => Effect.sync(() => destroyRenderer(renderer)),
+        )
+      })
       win32DisableProcessedInput()
       const finalizers = new Set<() => Promise<void>>()
       yield* Effect.addFinalizer(() =>
@@ -329,10 +328,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                         }
                                       >
                                         <PluginRuntimeProvider value={pluginRuntime}>
-                                          <ClientProvider api={api} reconnect={reconnect} reload={input.server.reload}>
+                                          <ClientProvider api={api} service={service}>
                                             <PermissionProvider>
-                                              <ProjectProvider>
-                                                <DataProvider>
+                                              <DataProvider>
+                                                <LocationProvider>
                                                   <ThemeProvider mode={mode}>
                                                     <LocalProvider>
                                                       <PromptStashProvider>
@@ -341,20 +340,18 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                             <PromptHistoryProvider>
                                                               <PromptRefProvider>
                                                                 <EditorContextProvider>
-                                                                  <LocationProvider>
-                                                                    <PluginProvider packages={input.packages}>
-                                                                      <App
-                                                                        pair={
-                                                                          input.server.endpoint.auth
-                                                                            ? input.server.endpoint.auth
-                                                                            : {
-                                                                                username: "opencode",
-                                                                                password: "",
-                                                                              }
-                                                                        }
-                                                                      />
-                                                                    </PluginProvider>
-                                                                  </LocationProvider>
+                                                                  <PluginProvider packages={input.packages}>
+                                                                    <App
+                                                                      pair={
+                                                                        input.server.endpoint.auth
+                                                                          ? input.server.endpoint.auth
+                                                                          : {
+                                                                              username: "opencode",
+                                                                              password: "",
+                                                                            }
+                                                                      }
+                                                                    />
+                                                                  </PluginProvider>
                                                                 </EditorContextProvider>
                                                               </PromptRefProvider>
                                                             </PromptHistoryProvider>
@@ -363,8 +360,8 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                       </PromptStashProvider>
                                                     </LocalProvider>
                                                   </ThemeProvider>
-                                                </DataProvider>
-                                              </ProjectProvider>
+                                                </LocationProvider>
+                                              </DataProvider>
                                             </PermissionProvider>
                                           </ClientProvider>
                                         </PluginRuntimeProvider>
@@ -417,7 +414,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   const themeState = useTheme()
   const { theme, mode, setMode, locked, lock, unlock } = themeState
   const data = useData()
-  const project = useProject()
+  const location = useLocation()
   const exit = useExit()
   const promptRef = usePromptRef()
   const pluginRuntime = usePluginRuntime()
@@ -764,19 +761,21 @@ function App(props: { pair?: DialogPairCredentials }) {
         },
         category: "System",
       },
-      ...(client.reload
+      ...(client.restart
         ? [
             {
-              name: "server.reload",
-              title: "Reload server",
-              slash: { name: "reload" },
+              name: "service.restart",
+              title: "Restart service",
+              slash: { name: "restart" },
               run: async () => {
+                const restart = client.restart
+                if (!restart) return
                 dialog.clear()
-                toast.show({ variant: "info", message: "Reloading server...", duration: 30000 })
-                // reload resolves once the replacement service is healthy; the
+                toast.show({ variant: "info", message: "Restarting service...", duration: 30000 })
+                // restart resolves once the replacement service is healthy; the
                 // event stream reattaches through the reconnect loop.
-                await client.reload!()
-                  .then(() => toast.show({ variant: "success", message: "Server reloaded" }))
+                await restart()
+                  .then(() => toast.show({ variant: "success", message: "Service restarted" }))
                   .catch(toast.error)
               },
               category: "System",
@@ -992,12 +991,12 @@ function App(props: { pair?: DialogPairCredentials }) {
   }))
 
   event.on("tui.command.execute", (evt, { workspace }) => {
-    if (workspace !== project.workspace.current()) return
+    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
     keymap.dispatchCommand(evt.data.command)
   })
 
   event.on("tui.toast.show", (evt, { workspace }) => {
-    if (workspace !== project.workspace.current()) return
+    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
     toast.show({
       title: evt.data.title,
       message: evt.data.message,
@@ -1006,14 +1005,8 @@ function App(props: { pair?: DialogPairCredentials }) {
     })
   })
 
-  event.on("plugin.updated", (_evt, { directory, workspace }) => {
-    if (directory !== project.instance.directory()) return
-    if (workspace !== project.workspace.current()) return
-    toast.show({ variant: "success", message: "Plugins reloaded" })
-  })
-
   event.on("tui.session.select", (evt, { workspace }) => {
-    if (workspace !== project.workspace.current()) return
+    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
     route.navigate({
       type: "session",
       sessionID: evt.data.sessionID,
@@ -1031,7 +1024,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   })
 
   event.on("session.error", (evt, { workspace }) => {
-    if (workspace !== project.workspace.current()) return
+    if (workspace !== (location.current?.workspaceID ?? data.location.default().workspaceID)) return
     const error = evt.data.error
     if (error && typeof error === "object" && error.name === "MessageAbortedError") return
     const message = errorMessage(error)
@@ -1121,8 +1114,9 @@ function App(props: { pair?: DialogPairCredentials }) {
         <StartupLoading ready={plugins.ready} />
       </Show>
       <Show when={showReconnecting()}>
-        <Reconnecting attempt={client.connection.attempt()} error={client.connection.error()} />
+        <Reconnecting />
       </Show>
+      <Toast />
     </box>
   )
 }

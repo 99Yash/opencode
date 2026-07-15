@@ -9,7 +9,8 @@ import {
   SystemPart,
   isContextOverflowFailure,
   type ProviderErrorEvent,
-} from "@opencode-ai/llm"
+} from "@opencode-ai/ai"
+import type { AIHooks } from "@opencode-ai/plugin/v2/effect/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
 import { Money } from "@opencode-ai/schema/money"
 import { Cause, Effect, Exit, Fiber, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
@@ -51,7 +52,8 @@ import { AgentNotFoundError, StepFailedError } from "../error"
 import { toSessionError } from "../to-session-error"
 import { SessionRunnerRetry } from "./retry"
 import { PluginSupervisor } from "../../plugin/supervisor"
-import { Flag } from "../../flag/flag"
+import { PluginHooks } from "../../plugin/hooks"
+import { SessionModelHeaders } from "../model-headers"
 
 type StepTokens = {
   readonly input: number
@@ -89,6 +91,7 @@ const layer = Layer.effect(
     const llm = yield* LLMClient.Service
     const agents = yield* AgentV2.Service
     const tools = yield* ToolRegistry.Service
+    const hooks = yield* PluginHooks.Service
     const models = yield* SessionRunnerModel.Service
     const store = yield* SessionStore.Service
     const location = yield* Location.Service
@@ -145,7 +148,7 @@ const layer = Layer.effect(
     const loadInstructions = (agent: AgentV2.Selection, sessionID: SessionSchema.ID) =>
       Effect.all(
         [
-          builtins.load(),
+          builtins.load(sessionID),
           discovery.load(),
           skillGuidance.load(agent),
           referenceGuidance.load(),
@@ -187,7 +190,7 @@ const layer = Layer.effect(
       const providerMetadataKey = model.route.providerMetadataKey ?? model.provider
       const history = yield* SessionHistory.entriesForRunner(db, session.id, instructions)
       const context = history.entries.map((entry) => entry.message)
-      const compactionInput = { sessionID: session.id, messages: context, model }
+      const compactionInput = { session, messages: context, model }
       if (compaction.required(compactionInput) && !(yield* SessionPending.compaction(db, session.id))) {
         const compacted = yield* compaction.compact(compactionInput)
         if (compacted.status === "completed") return { _tag: "RestartAfterCompaction", step: currentStep } as const
@@ -199,11 +202,7 @@ const layer = Layer.effect(
       const request = LLM.request({
         model,
         http: {
-          headers: {
-            "x-opencode-project": session.projectID,
-            "x-opencode-session": session.id,
-            "x-opencode-client": Flag.OPENCODE_CLIENT,
-          },
+          headers: SessionModelHeaders.make(session),
         },
         providerOptions: { openai: { promptCacheKey } },
         system: [agentInfo.system ? agentInfo.system : SessionRunnerSystemPrompt.provider(model), history.initial]
@@ -216,6 +215,30 @@ const layer = Layer.effect(
         tools: toolMaterialization?.definitions ?? [],
         toolChoice: isLastStep ? "none" : undefined,
       })
+      const availableTools = new Map(request.tools.map((tool) => [tool.name, tool]))
+      const requestEvent: AIHooks["request"] = {
+        sessionID: session.id,
+        agent: agent.id,
+        model: resolved.ref,
+        system: [...request.system],
+        messages: [...request.messages],
+        tools: Object.fromEntries(
+          request.tools.map((tool) => [tool.name, { description: tool.description, input: { ...tool.inputSchema } }]),
+        ),
+      }
+      // Plugins may reshape the draft but cannot advertise tools excluded by
+      // permissions, registration state, or the selected agent's step limit.
+      yield* hooks.trigger("ai", "request", requestEvent)
+      const hookedRequest = LLM.updateRequest(request, {
+        system: requestEvent.system,
+        messages: requestEvent.messages,
+        tools: Object.entries(requestEvent.tools).flatMap(([name, tool]) => {
+          const registered = availableTools.get(name)
+          if (!registered) return []
+          return [{ ...registered, description: tool.description, inputSchema: tool.input }]
+        }),
+      })
+      const advertisedTools = new Set(hookedRequest.tools.map((tool) => tool.name))
       const toolFibers = yield* FiberSet.make<void, ToolOutputStore.Error>()
       const ownedToolFibers: Array<Fiber.Fiber<void, ToolOutputStore.Error>> = []
       let needsContinuation = false
@@ -236,7 +259,7 @@ const layer = Layer.effect(
       const serialized = <A, E, R>(effect: Effect.Effect<A, E, R>) => publication.withPermit(effect)
       const publish = (event: LLMEvent, error?: SessionError.Error) => serialized(publisher.publish(event, error))
       let overflowFailure: ProviderErrorEvent | undefined
-      const providerStream = llm.stream(request).pipe(
+      const providerStream = llm.stream(hookedRequest).pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             if (overflowFailure || publisher.hasProviderError()) return
@@ -248,11 +271,13 @@ const layer = Layer.effect(
             }
             yield* publish(event)
             if (event.type !== "tool-call" || event.providerExecuted) return
-            if (!toolMaterialization) {
+            if (!toolMaterialization || (availableTools.has(event.name) && !advertisedTools.has(event.name))) {
               yield* serialized(
                 publisher.failUnsettledTools({
                   type: "tool.execution",
-                  message: "Tools are disabled after the maximum agent steps",
+                  message: toolMaterialization
+                    ? `Tool is not available for this request: ${event.name}`
+                    : "Tools are disabled after the maximum agent steps",
                 }),
               )
               return
@@ -341,7 +366,7 @@ const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasRetryEvidence() &&
             isContextOverflowFailure(overflowFailure ?? streamFailure) &&
-            (yield* restore(recoverOverflow({ sessionID: session.id, messages: context, model }))).status ===
+            (yield* restore(recoverOverflow({ session, messages: context, model }))).status ===
               "completed"
           )
             return { _tag: "RestartAfterOverflowCompaction", step: currentStep } as const
@@ -589,6 +614,7 @@ export const node = makeLocationNode({
     llmClient,
     AgentV2.node,
     ToolRegistry.node,
+    PluginHooks.node,
     SessionRunnerModel.node,
     SessionStore.node,
     Location.node,

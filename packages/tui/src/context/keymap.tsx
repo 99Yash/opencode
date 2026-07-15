@@ -9,7 +9,7 @@ import {
   registerManagedTextareaLayer,
   registerTimedLeader,
 } from "@opentui/keymap/addons/opentui"
-import { formatKeySequence } from "@opentui/keymap/extras"
+import { formatCommandBindings, formatKeySequence } from "@opentui/keymap/extras"
 import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import { KeymapProvider, useBindings, useKeymapSelector } from "@opentui/keymap/solid"
 import { useRenderer } from "@opentui/solid"
@@ -19,9 +19,11 @@ import { TuiKeybind } from "../config/keybind"
 
 declare module "@opentui/keymap" {
   interface Command {
+    opencode?: KeymapCommand
     slash?: {
       name: string
       aliases?: string[]
+      arguments?: true
     }
   }
 }
@@ -31,13 +33,28 @@ const MODE = { key: "opencode.mode", base: "base" } as const
 type OpenTuiKeymap = Parameters<typeof KeymapProvider>[0]["keymap"]
 type Mode = ReturnType<typeof createMode>
 
-const Context = createContext<{ readonly keymap: OpenTuiKeymap; readonly mode: Mode }>()
+const Context = createContext<{
+  readonly keymap: OpenTuiKeymap
+  readonly mode: Mode
+  readonly dispatch: (id: string, input?: string) => void
+  readonly input: (id: string) => string | undefined
+}>()
 
 function Provider(props: ParentProps) {
   const renderer = useRenderer()
   const config = useConfig()
   const keymap = createDefaultOpenTuiKeymap(renderer)
   const mode = createMode(keymap)
+  let invocation: { readonly id: string; readonly input?: string } | undefined
+  const dispatch = (id: string, input?: string) => {
+    const previous = invocation
+    invocation = { id, input }
+    try {
+      keymap.dispatchCommand(id)
+    } finally {
+      invocation = previous
+    }
+  }
   const dispose = [
     registerCommaBindings(keymap),
     keymap.appendBindingExpander((context) => {
@@ -113,7 +130,11 @@ function Provider(props: ParentProps) {
   })
   return (
     <KeymapProvider keymap={keymap}>
-      <Context.Provider value={{ keymap, mode }}>{props.children}</Context.Provider>
+      <Context.Provider
+        value={{ keymap, mode, dispatch, input: (id) => (invocation?.id === id ? invocation.input : undefined) }}
+      >
+        {props.children}
+      </Context.Provider>
     </KeymapProvider>
   )
 }
@@ -122,7 +143,7 @@ export type { KeymapCommand, KeymapLayer } from "@opencode-ai/plugin/v2/tui/cont
 
 export interface Keymap {
   /** Dispatches a reachable command by ID. */
-  dispatch(id: string): void
+  dispatch(id: string, input?: string): void
   /** Controls mutually exclusive OpenCode input modes. */
   readonly mode: {
     /** Returns the active mode. */
@@ -135,15 +156,15 @@ export interface Keymap {
 function use(): Keymap {
   const value = useValue()
   return {
-    dispatch(id) {
-      value.keymap.dispatchCommand(id)
+    dispatch(id, input) {
+      value.dispatch(id, input)
     },
     mode: value.mode,
   }
 }
 
 function createLayer(input: () => KeymapLayer) {
-  useValue()
+  const value = useValue()
   const config = useConfig()
   useBindings(() => {
     const layer = input()
@@ -173,10 +194,12 @@ function createLayer(input: () => KeymapLayer) {
       ...options,
       ...(mode === "global" ? {} : { mode: mode ?? MODE.base }),
       commands: grouped.named.map((command) => {
-        const { id, description, group, palette, bind, ...definition } = command
+        const { id, description, group, palette, bind, run, ...definition } = command
         return {
           ...definition,
           name: id,
+          opencode: command,
+          run: () => run(value.input(id)),
           ...(description === undefined ? {} : { desc: description }),
           ...(group === undefined ? {} : { category: group }),
           ...(palette === undefined ? {} : { namespace: "palette" }),
@@ -215,12 +238,21 @@ function useShortcuts() {
     const commands = keymap.getCommands({ visibility: "registered" }).map((command) => command.name)
     const bindings = keymap.getCommandBindings({ visibility: "registered", commands })
     return new Map(
-      commands.map((id) => [id, formatKeySequence(bindings.get(id)?.[0]?.sequence, formatOptions(config.data))]),
+      commands.map((id) => [
+        id,
+        {
+          first: formatKeySequence(bindings.get(id)?.[0]?.sequence, formatOptions(config.data)),
+          all: formatCommandBindings(bindings.get(id) ?? [], formatOptions(config.data)),
+        },
+      ]),
     )
   })
   return {
     get(id: string) {
-      return shortcuts().get(id)
+      return shortcuts().get(id)?.first
+    },
+    all(id: string) {
+      return shortcuts().get(id)?.all
     },
   }
 }
@@ -232,17 +264,30 @@ function useCommands(): Accessor<readonly KeymapCommand[]> {
       .getCommandEntries({
         visibility: "reachable",
       })
-      .map((entry) => ({
-        id: entry.command.name,
-        title: typeof entry.command.title === "string" ? entry.command.title : entry.command.name,
-        description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
-        group: typeof entry.command.category === "string" ? entry.command.category : undefined,
-        palette: entry.command.namespace === "palette" ? true : undefined,
-        slash: entry.command.slash,
-        run: () => {
-          value.keymap.dispatchCommand(entry.command.name)
-        },
-      })),
+      .map((entry) => {
+        const command = entry.command.opencode ?? {
+          id: entry.command.name,
+          title: typeof entry.command.title === "string" ? entry.command.title : undefined,
+          description: typeof entry.command.desc === "string" ? entry.command.desc : undefined,
+          group: typeof entry.command.category === "string" ? entry.command.category : undefined,
+          enabled:
+            typeof entry.command.enabled === "boolean" || typeof entry.command.enabled === "function"
+              ? (entry.command.enabled as boolean | (() => boolean))
+              : undefined,
+          palette: entry.command.namespace === "palette" ? true : undefined,
+          slash: entry.command.slash,
+          suggested:
+            typeof entry.command.suggested === "boolean" || typeof entry.command.suggested === "function"
+              ? (entry.command.suggested as boolean | (() => boolean))
+              : undefined,
+        }
+        return {
+          ...command,
+          run: (input?: string) => {
+            value.dispatch(entry.command.name, input)
+          },
+        }
+      }),
   )
 }
 

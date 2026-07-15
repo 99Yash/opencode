@@ -18,7 +18,6 @@ import { EOL, tmpdir } from "node:os"
 import { mkdir, writeFile } from "node:fs/promises"
 import { useRoute, useRouteData } from "../../context/route"
 import { createStore } from "solid-js/store"
-import { useProject } from "../../context/project"
 import { useData } from "../../context/data"
 import { SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
@@ -53,7 +52,7 @@ import { Composer } from "./composer"
 import { filetype } from "../../util/filetype"
 import parsers from "../../parsers-config"
 import { errorMessage } from "../../util/error"
-import { Toast, useToast } from "../../ui/toast"
+import { useToast } from "../../ui/toast"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
 import { useEpilogue } from "../../context/epilogue"
@@ -71,7 +70,7 @@ import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
-import { LocationProvider } from "../../context/location"
+import { useLocation } from "../../context/location"
 import { createSessionRows, resolvePart, type PartRef, type SessionRow } from "./rows"
 import { switchLabel } from "../../util/model"
 
@@ -106,7 +105,6 @@ export function Session() {
   const route = useRouteData("session")
   const { navigate } = useRoute()
   const data = useData()
-  const project = useProject()
   const paths = useTuiPaths()
   const configState = useConfig()
   const config = configState.data
@@ -115,6 +113,9 @@ export function Session() {
   const session = createMemo(() => data.session.get(route.sessionID))
   const messages = () => data.session.message.list(route.sessionID)
   const location = createMemo(() => session()?.location)
+  const currentLocation = useLocation()
+
+  createEffect(() => currentLocation.set(location()))
 
   createEffect(() => {
     const title = Locale.truncate(session()?.title ?? "", 50)
@@ -181,23 +182,22 @@ export function Session() {
   const rows = createSessionRows(() => route.sessionID)
 
   createEffect(
-    on(descendantSessionIDs, (sessionIDs) => {
+    on([descendantSessionIDs, () => client.connection.status()], ([sessionIDs, status]) => {
+      if (status !== "connected") return
       void Promise.all(
-        sessionIDs.flatMap((sessionID) => [
-          data.session.permission.refresh(sessionID),
-          data.session.form.refresh(sessionID),
-        ]),
+        sessionIDs.flatMap((sessionID) => [data.session.permission.sync(sessionID), data.session.form.sync(sessionID)]),
       )
     }),
   )
 
   createEffect(() => {
+    if (client.connection.status() !== "connected") return
     const sessionID = route.sessionID
     void (async () => {
       await Promise.all([
-        data.session.refresh(sessionID),
-        data.session.permission.refresh(sessionID),
-        data.session.form.refresh(sessionID),
+        data.session.sync(sessionID),
+        data.session.permission.sync(sessionID),
+        data.session.form.sync(sessionID),
       ])
       const info = data.session.get(sessionID)
       if (!info) {
@@ -209,14 +209,6 @@ export function Session() {
         navigate({ type: "home" })
         return
       }
-      void data.session.form.refresh("global", info.location).catch((error) =>
-        toast.show({
-          message: `Failed to refresh global forms: ${errorMessage(error)}`,
-          variant: "error",
-          duration: 5000,
-        }),
-      )
-      project.workspace.set(info.location.workspaceID)
       editor.reconnect(info.location.directory)
       if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
     })().catch((error) => {
@@ -823,133 +815,130 @@ export function Session() {
   )
 
   return (
-    <LocationProvider location={location()}>
-      <context.Provider
-        value={{
-          get width() {
-            return contentWidth()
-          },
-          sessionID: route.sessionID,
-          thinkingMode,
-          showThinking,
-          markdownMode,
-          groupExploration,
-          diffWrapMode,
-          models,
-          config,
-        }}
-      >
-        <box flexDirection="row" flexGrow={1} minHeight={0}>
-          <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
-            <Show when={session()}>
-              <scrollbox
-                ref={(r) => (scroll = r)}
-                viewportOptions={{
-                  paddingRight: showScrollbar() ? 1 : 0,
-                }}
-                verticalScrollbarOptions={{
-                  paddingLeft: 1,
-                  visible: showScrollbar(),
-                  trackOptions: {
-                    backgroundColor: theme.backgroundElement,
-                    foregroundColor: theme.border,
-                  },
-                }}
-                stickyScroll={true}
-                stickyStart="bottom"
-                flexGrow={1}
-                scrollAcceleration={scrollAcceleration()}
-              >
-                <For each={rows}>
-                  {(row) => (
-                    <SessionRowView
-                      row={row}
-                      message={(messageID) => data.session.message.get(route.sessionID, messageID)}
-                    />
-                  )}
-                </For>
-                <BackgroundToolHint messages={messages()} />
-                <Show when={session()?.revert?.messageID}>
-                  <RevertMessage
-                    count={
-                      messages().filter(
-                        (message) => message.id >= session()!.revert!.messageID && message.type === "user",
-                      ).length
-                    }
-                    files={session()!.revert!.files ?? []}
+    <context.Provider
+      value={{
+        get width() {
+          return contentWidth()
+        },
+        sessionID: route.sessionID,
+        thinkingMode,
+        showThinking,
+        markdownMode,
+        groupExploration,
+        diffWrapMode,
+        models,
+        config,
+      }}
+    >
+      <box flexDirection="row" flexGrow={1} minHeight={0}>
+        <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
+          <Show when={session()}>
+            <scrollbox
+              ref={(r) => (scroll = r)}
+              viewportOptions={{
+                paddingRight: showScrollbar() ? 1 : 0,
+              }}
+              verticalScrollbarOptions={{
+                paddingLeft: 1,
+                visible: showScrollbar(),
+                trackOptions: {
+                  backgroundColor: theme.backgroundElement,
+                  foregroundColor: theme.border,
+                },
+              }}
+              stickyScroll={true}
+              stickyStart="bottom"
+              flexGrow={1}
+              scrollAcceleration={scrollAcceleration()}
+            >
+              <For each={rows}>
+                {(row) => (
+                  <SessionRowView
+                    row={row}
+                    message={(messageID) => data.session.message.get(route.sessionID, messageID)}
                   />
-                </Show>
-              </scrollbox>
-              <box flexShrink={0}>
-                <Composer
-                  sessionID={route.sessionID}
-                  open={composer.open || (!!session()?.parentID && forms().length === 0)}
-                  defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
-                  onClose={() => setComposer("open", false)}
+                )}
+              </For>
+              <BackgroundToolHint messages={messages()} />
+              <Show when={session()?.revert?.messageID}>
+                <RevertMessage
+                  count={
+                    messages().filter(
+                      (message) => message.id >= session()!.revert!.messageID && message.type === "user",
+                    ).length
+                  }
+                  files={session()!.revert!.files ?? []}
                 />
-                <Switch>
-                  <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
-                  <Match when={permissions().length > 0}>
-                    <PermissionPrompt request={permissions()[0]} directory={session()?.location.directory} />
-                  </Match>
-                  <Match when={forms().length > 0}>
-                    <Show when={forms()[0]?.id} keyed>
-                      {(_) => {
-                        const form = forms()[0]
-                        return form ? <FormPrompt form={form} /> : null
-                      }}
-                    </Show>
-                  </Match>
-                  <Match when={!disabled()}>
-                    <pluginRuntime.Slot
-                      name="session_prompt"
-                      mode="replace"
-                      session_id={route.sessionID}
+              </Show>
+            </scrollbox>
+            <box flexShrink={0}>
+              <Composer
+                sessionID={route.sessionID}
+                open={composer.open || (!!session()?.parentID && forms().length === 0)}
+                defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
+                onClose={() => setComposer("open", false)}
+              />
+              <Switch>
+                <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
+                <Match when={permissions().length > 0}>
+                  <PermissionPrompt request={permissions()[0]} directory={session()?.location.directory} />
+                </Match>
+                <Match when={forms().length > 0}>
+                  <Show when={forms()[0]?.id} keyed>
+                    {(_) => {
+                      const form = forms()[0]
+                      return form ? <FormPrompt form={form} /> : null
+                    }}
+                  </Show>
+                </Match>
+                <Match when={!disabled()}>
+                  <pluginRuntime.Slot
+                    name="session_prompt"
+                    mode="replace"
+                    session_id={route.sessionID}
+                    visible={true}
+                    disabled={false}
+                    on_submit={toBottom}
+                    ref={bind}
+                  >
+                    <Prompt
                       visible={true}
-                      disabled={false}
-                      on_submit={toBottom}
                       ref={bind}
-                    >
-                      <Prompt
-                        visible={true}
-                        ref={bind}
-                        disabled={false}
-                        onSubmit={() => {
-                          toBottom()
-                        }}
-                        sessionID={route.sessionID}
-                        right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
-                      />
-                    </pluginRuntime.Slot>
-                  </Match>
-                </Switch>
-              </box>
-            </Show>
-            <Toast />
-          </box>
-          <Show when={sidebarVisible()}>
-            <Switch>
-              <Match when={wide()}>
-                <Sidebar sessionID={route.sessionID} />
-              </Match>
-              <Match when={!wide()}>
-                <box
-                  position="absolute"
-                  top={0}
-                  left={0}
-                  right={0}
-                  bottom={0}
-                  alignItems="flex-end"
-                  backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
-                >
-                  <Sidebar sessionID={route.sessionID} />
-                </box>
-              </Match>
-            </Switch>
+                      disabled={false}
+                      onSubmit={() => {
+                        toBottom()
+                      }}
+                      sessionID={route.sessionID}
+                      right={<pluginRuntime.Slot name="session_prompt_right" session_id={route.sessionID} />}
+                    />
+                  </pluginRuntime.Slot>
+                </Match>
+              </Switch>
+            </box>
           </Show>
         </box>
-      </context.Provider>
-    </LocationProvider>
+        <Show when={sidebarVisible()}>
+          <Switch>
+            <Match when={wide()}>
+              <Sidebar sessionID={route.sessionID} />
+            </Match>
+            <Match when={!wide()}>
+              <box
+                position="absolute"
+                top={0}
+                left={0}
+                right={0}
+                bottom={0}
+                alignItems="flex-end"
+                backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
+              >
+                <Sidebar sessionID={route.sessionID} />
+              </box>
+            </Match>
+          </Switch>
+        </Show>
+      </box>
+    </context.Provider>
   )
 }
 
@@ -1091,32 +1080,28 @@ function SessionReasoningGroupView(props: {
   const renderer = useRenderer()
   const [expanded, setExpanded] = createSignal(false)
   const [hover, setHover] = createSignal(false)
-  const parts = createMemo<{ message: SessionMessageAssistant; part: SessionMessageAssistantReasoning }[]>(
-    (previous) => {
-      const next = props.refs.flatMap((ref) => {
-        const message = props.message(ref.messageID)
-        if (message?.type !== "assistant") return []
-        const part = resolvePart(message, ref.partID)
-        if (part?.type !== "reasoning" || !part.text.replace("[REDACTED]", "").trim()) return []
-        return [{ message, part }]
-      })
-      return next.length > 0 ? next : previous
-    },
-    [] as { message: SessionMessageAssistant; part: SessionMessageAssistantReasoning }[],
+  const parts = createMemo(() =>
+    props.refs.flatMap((ref) => {
+      const message = props.message(ref.messageID)
+      if (message?.type !== "assistant") return []
+      const part = resolvePart(message, ref.partID)
+      if (part?.type !== "reasoning" || !reasoningContent(part)) return []
+      return [{ message, part }]
+    }),
   )
   const latest = createMemo((previous: string | null) => {
     const item = parts().at(-1)
     if (!item) return previous
-    const title = reasoningSummary(item.part.text.replace("[REDACTED]", "").trim()).title
+    const title = reasoningSummary(reasoningContent(item.part)).title
     if (title) return title
     if (item.part.time?.completed !== undefined || item.message.time.completed !== undefined) return null
     return previous
   }, null)
   const duration = createMemo(() =>
     parts().reduce((total, item) => {
-      const end = item.part.time?.completed ?? item.message.time.completed
-      const start = item.part.time?.created ?? item.message.time.created
-      return total + (end === undefined ? 0 : Math.max(0, end - start))
+      const start = item.part.time?.created
+      const end = item.part.time?.completed
+      return total + (start === undefined || end === undefined ? 0 : Math.max(0, end - start))
     }, 0),
   )
 
@@ -1124,9 +1109,7 @@ function SessionReasoningGroupView(props: {
     <Show when={parts().length > 0}>
       <Show
         when={ctx.thinkingMode() === "hide"}
-        fallback={
-          <For each={parts()}>{(item) => <ReasoningPart part={item.part} message={item.message} last={false} />}</For>
-        }
+        fallback={<For each={props.refs}>{(ref) => <SessionPartView partRef={ref} message={props.message} />}</For>}
       >
         <box flexDirection="column" flexShrink={0}>
           <InlineToolRow
@@ -1155,27 +1138,45 @@ function SessionReasoningGroupView(props: {
           </InlineToolRow>
           <Show when={expanded()}>
             <box paddingLeft={3}>
-              <For each={parts()}>
-                {(item) => (
-                  <box marginTop={1}>
-                    <box
-                      border={["left"]}
-                      customBorderChars={SplitBorder.customBorderChars}
-                      borderColor={theme.backgroundElement}
-                      paddingLeft={1}
-                    >
-                      <code
-                        filetype="markdown"
-                        drawUnstyledText={false}
-                        streaming={false}
-                        syntaxStyle={syntax()}
-                        content={item.part.text.replace("[REDACTED]", "").trim()}
-                        conceal={ctx.markdownMode() === "rendered"}
-                        fg={theme.textMuted}
-                      />
-                    </box>
-                  </box>
-                )}
+              <For each={props.refs}>
+                {(ref) => {
+                  const message = createMemo(() => {
+                    const item = props.message(ref.messageID)
+                    return item?.type === "assistant" ? item : undefined
+                  })
+                  const part = createMemo(() => {
+                    const item = message()
+                    if (!item) return undefined
+                    const part = resolvePart(item, ref.partID)
+                    return part?.type === "reasoning" ? part : undefined
+                  })
+                  const content = createMemo(() => {
+                    const item = part()
+                    return item ? reasoningContent(item) : ""
+                  })
+                  return (
+                    <Show when={content()}>
+                      <box marginTop={1}>
+                        <box
+                          border={["left"]}
+                          customBorderChars={SplitBorder.customBorderChars}
+                          borderColor={theme.backgroundElement}
+                          paddingLeft={1}
+                        >
+                          <code
+                            filetype="markdown"
+                            drawUnstyledText={false}
+                            streaming={part()?.time?.completed === undefined && message()?.time.completed === undefined}
+                            syntaxStyle={syntax()}
+                            content={content()}
+                            conceal={ctx.markdownMode() === "rendered"}
+                            fg={theme.textMuted}
+                          />
+                        </box>
+                      </box>
+                    </Show>
+                  )
+                }}
               </For>
             </box>
           </Show>
@@ -1788,10 +1789,7 @@ function ReasoningPart(props: {
   // layout never shifts. Click to open the full markdown block, click to close.
   const [expanded, setExpanded] = createSignal(false)
 
-  const content = createMemo(() => {
-    // OpenRouter encrypts some reasoning blocks; drop the placeholder.
-    return props.part.text.replace("[REDACTED]", "").trim()
-  })
+  const content = createMemo(() => reasoningContent(props.part))
   const isDone = createMemo(
     () => props.part.time?.completed !== undefined || props.message.time.completed !== undefined,
   )
@@ -1849,6 +1847,11 @@ function ReasoningPart(props: {
       </box>
     </Show>
   )
+}
+
+function reasoningContent(part: SessionMessageAssistantReasoning) {
+  // OpenRouter encrypts some reasoning blocks; drop the placeholder.
+  return part.text.replace("[REDACTED]", "").trim()
 }
 
 function ReasoningHeader(props: {
@@ -2315,6 +2318,7 @@ function BlockTool(props: {
 function Shell(props: ToolProps) {
   const { theme } = useTheme()
   const ctx = use()
+  const client = useClient()
   const data = useData()
   const permission = createMemo(() => {
     const request = data.session.permission.list(ctx.sessionID)?.[0]
@@ -2328,13 +2332,35 @@ function Shell(props: ToolProps) {
   })
   const isRunning = createMemo(() => props.part.state.status === "running" || backgroundRunning())
   const command = createMemo(() => stringValue(props.input.command))
+  const [expanded, setExpanded] = createSignal(false)
+  const [backgroundOutput, setBackgroundOutput] = createSignal("")
+  let loading = false
+  const loadBackgroundOutput = async () => {
+    const id = shellID()
+    if (!id || loading) return
+    loading = true
+    const location = data.session.get(ctx.sessionID)?.location
+    await client.api.shell
+      .output({
+        id,
+        limit: 1024 * 1024,
+        location: location ? { directory: location.directory, workspace: location.workspaceID } : undefined,
+      })
+      .then((response) => setBackgroundOutput(stripAnsi(response.data.output.trim())))
+      .catch(() => undefined)
+    loading = false
+  }
+  createEffect(() => {
+    if (!expanded() || !backgroundRunning()) return
+    const interval = setInterval(() => void loadBackgroundOutput(), 1_000)
+    onCleanup(() => clearInterval(interval))
+  })
   const output = createMemo(() => {
     if (props.part.state.status === "streaming") return ""
-    if (shellID()) return ""
+    if (shellID()) return expanded() ? backgroundOutput() : ""
     const content = props.part.state.content[0]
     return stripAnsi(content?.type === "text" ? content.text.trim() : "")
   })
-  const [expanded, setExpanded] = createSignal(false)
   const maxLines = 10
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
   const input = createMemo(() => (command() ? `${isRunning() ? "" : "$ "}${command()}` : ""))
@@ -2344,9 +2370,15 @@ function Shell(props: ToolProps) {
     if (expanded() || !collapsed().overflow) return content()
     return collapsed().output
   })
+  const expandable = createMemo(() => Boolean(shellID()) || collapsed().overflow)
+  const toggle = () => {
+    const next = !expanded()
+    setExpanded(next)
+    if (next) void loadBackgroundOutput()
+  }
 
   return (
-    <BlockTool part={props.part} onClick={collapsed().overflow ? () => setExpanded((prev) => !prev) : undefined}>
+    <BlockTool part={props.part} onClick={expandable() ? toggle : undefined}>
       <box gap={1}>
         <Show
           when={command()}
@@ -2375,9 +2407,6 @@ function Shell(props: ToolProps) {
         </Show>
         <Show when={shellID()}>
           <StatusBadge>Background</StatusBadge>
-        </Show>
-        <Show when={collapsed().overflow}>
-          <text fg={theme.textMuted}>{expanded() ? "Click to collapse" : "Click to expand"}</text>
         </Show>
       </box>
     </BlockTool>
@@ -2500,9 +2529,7 @@ function Subagent(props: ToolProps) {
   const { navigate } = useRoute()
   const data = useData()
   const input = createMemo(() => (typeof props.part.state.input === "string" ? {} : props.part.state.input))
-  const metadata = createMemo(() =>
-    props.part.state.status === "streaming" ? {} : props.part.state.structured,
-  )
+  const metadata = createMemo(() => (props.part.state.status === "streaming" ? {} : props.part.state.structured))
   const sessionID = createMemo(() => stringValue(metadata().sessionID) ?? stringValue(metadata().sessionId))
   const description = createMemo(() => stringValue(input().description))
   const isRunning = createMemo(() => {
@@ -2697,27 +2724,36 @@ function ApplyPatch(props: ToolProps) {
                 }}
                 part={props.part}
               >
-                <box paddingLeft={1}>
-                  <diff
-                    diff={file.patch}
-                    view={view()}
-                    filetype={filetype(file.relativePath)}
-                    syntaxStyle={syntax()}
-                    showLineNumbers={true}
-                    width="100%"
-                    wrapMode={ctx.diffWrapMode()}
-                    fg={theme.text}
-                    addedBg={theme.diffAddedBg}
-                    removedBg={theme.diffRemovedBg}
-                    contextBg={theme.diffContextBg}
-                    addedSignColor={theme.diffHighlightAdded}
-                    removedSignColor={theme.diffHighlightRemoved}
-                    lineNumberFg={theme.diffLineNumber}
-                    lineNumberBg={theme.diffContextBg}
-                    addedLineNumberBg={theme.diffAddedLineNumberBg}
-                    removedLineNumberBg={theme.diffRemovedLineNumberBg}
-                  />
-                </box>
+                <Show
+                  when={file.type !== "delete"}
+                  fallback={
+                    <text fg={theme.diffRemoved}>
+                      -{file.deletions} line{file.deletions !== 1 ? "s" : ""}
+                    </text>
+                  }
+                >
+                  <box paddingLeft={1}>
+                    <diff
+                      diff={file.patch}
+                      view={view()}
+                      filetype={filetype(file.relativePath)}
+                      syntaxStyle={syntax()}
+                      showLineNumbers={true}
+                      width="100%"
+                      wrapMode={ctx.diffWrapMode()}
+                      fg={theme.text}
+                      addedBg={theme.diffAddedBg}
+                      removedBg={theme.diffRemovedBg}
+                      contextBg={theme.diffContextBg}
+                      addedSignColor={theme.diffHighlightAdded}
+                      removedSignColor={theme.diffHighlightRemoved}
+                      lineNumberFg={theme.diffLineNumber}
+                      lineNumberBg={theme.diffContextBg}
+                      addedLineNumberBg={theme.diffAddedLineNumberBg}
+                      removedLineNumberBg={theme.diffRemovedLineNumberBg}
+                    />
+                  </box>
+                </Show>
               </BlockTool>
             )}
           </For>
