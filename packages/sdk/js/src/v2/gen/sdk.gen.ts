@@ -280,6 +280,8 @@ import type {
   V2DebugLocationListResponses,
   V2EventSubscribeErrors,
   V2EventSubscribeResponses,
+  V2ExperimentalIntegrationWellknownAddErrors,
+  V2ExperimentalIntegrationWellknownAddResponses,
   V2FormRequestListErrors,
   V2FormRequestListResponses,
   V2FsFindErrors,
@@ -294,20 +296,26 @@ import type {
   V2HealthGetResponses,
   V2HealthStopErrors,
   V2HealthStopResponses,
-  V2IntegrationAttemptCancelErrors,
-  V2IntegrationAttemptCancelResponses,
-  V2IntegrationAttemptCompleteErrors,
-  V2IntegrationAttemptCompleteResponses,
-  V2IntegrationAttemptStatusErrors,
-  V2IntegrationAttemptStatusResponses,
+  V2IntegrationCommandCancelErrors,
+  V2IntegrationCommandCancelResponses,
+  V2IntegrationCommandConnectErrors,
+  V2IntegrationCommandConnectResponses,
+  V2IntegrationCommandStatusErrors,
+  V2IntegrationCommandStatusResponses,
   V2IntegrationConnectKeyErrors,
   V2IntegrationConnectKeyResponses,
-  V2IntegrationConnectOauthErrors,
-  V2IntegrationConnectOauthResponses,
   V2IntegrationGetErrors,
   V2IntegrationGetResponses,
   V2IntegrationListErrors,
   V2IntegrationListResponses,
+  V2IntegrationOauthCancelErrors,
+  V2IntegrationOauthCancelResponses,
+  V2IntegrationOauthCompleteErrors,
+  V2IntegrationOauthCompleteResponses,
+  V2IntegrationOauthConnectErrors,
+  V2IntegrationOauthConnectResponses,
+  V2IntegrationOauthStatusErrors,
+  V2IntegrationOauthStatusResponses,
   V2LocationGetErrors,
   V2LocationGetResponses,
   V2McpListErrors,
@@ -6827,13 +6835,15 @@ export class Connect extends HeyApiClient {
       },
     })
   }
+}
 
+export class Oauth2 extends HeyApiClient {
   /**
    * Begin OAuth connection
    *
    * Start an OAuth attempt and return the authorization details.
    */
-  public oauth<ThrowOnError extends boolean = false>(
+  public connect<ThrowOnError extends boolean = false>(
     parameters: {
       integrationID: string
       location?: {
@@ -6863,8 +6873,8 @@ export class Connect extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).post<
-      V2IntegrationConnectOauthResponses,
-      V2IntegrationConnectOauthErrors,
+      V2IntegrationOauthConnectResponses,
+      V2IntegrationOauthConnectErrors,
       ThrowOnError
     >({
       url: "/api/integration/{integrationID}/connect/oauth",
@@ -6877,9 +6887,7 @@ export class Connect extends HeyApiClient {
       },
     })
   }
-}
 
-export class Attempt extends HeyApiClient {
   /**
    * Cancel OAuth connection
    *
@@ -6887,6 +6895,7 @@ export class Attempt extends HeyApiClient {
    */
   public cancel<ThrowOnError extends boolean = false>(
     parameters: {
+      integrationID: string
       attemptID: string
       location?: {
         directory?: string | null
@@ -6900,6 +6909,7 @@ export class Attempt extends HeyApiClient {
       [
         {
           args: [
+            { in: "path", key: "integrationID" },
             { in: "path", key: "attemptID" },
             { in: "query", key: "location" },
           ],
@@ -6907,11 +6917,11 @@ export class Attempt extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).delete<
-      V2IntegrationAttemptCancelResponses,
-      V2IntegrationAttemptCancelErrors,
+      V2IntegrationOauthCancelResponses,
+      V2IntegrationOauthCancelErrors,
       ThrowOnError
     >({
-      url: "/api/integration/attempt/{attemptID}",
+      url: "/api/integration/{integrationID}/connect/oauth/{attemptID}",
       ...options,
       ...params,
     })
@@ -6924,6 +6934,7 @@ export class Attempt extends HeyApiClient {
    */
   public status<ThrowOnError extends boolean = false>(
     parameters: {
+      integrationID: string
       attemptID: string
       location?: {
         directory?: string | null
@@ -6937,6 +6948,7 @@ export class Attempt extends HeyApiClient {
       [
         {
           args: [
+            { in: "path", key: "integrationID" },
             { in: "path", key: "attemptID" },
             { in: "query", key: "location" },
           ],
@@ -6944,11 +6956,11 @@ export class Attempt extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).get<
-      V2IntegrationAttemptStatusResponses,
-      V2IntegrationAttemptStatusErrors,
+      V2IntegrationOauthStatusResponses,
+      V2IntegrationOauthStatusErrors,
       ThrowOnError
     >({
-      url: "/api/integration/attempt/{attemptID}",
+      url: "/api/integration/{integrationID}/connect/oauth/{attemptID}",
       ...options,
       ...params,
     })
@@ -6961,6 +6973,7 @@ export class Attempt extends HeyApiClient {
    */
   public complete<ThrowOnError extends boolean = false>(
     parameters: {
+      integrationID: string
       attemptID: string
       location?: {
         directory?: string | null
@@ -6975,6 +6988,7 @@ export class Attempt extends HeyApiClient {
       [
         {
           args: [
+            { in: "path", key: "integrationID" },
             { in: "path", key: "attemptID" },
             { in: "query", key: "location" },
             { in: "body", key: "code" },
@@ -6983,11 +6997,11 @@ export class Attempt extends HeyApiClient {
       ],
     )
     return (options?.client ?? this.client).post<
-      V2IntegrationAttemptCompleteResponses,
-      V2IntegrationAttemptCompleteErrors,
+      V2IntegrationOauthCompleteResponses,
+      V2IntegrationOauthCompleteErrors,
       ThrowOnError
     >({
-      url: "/api/integration/attempt/{attemptID}/complete",
+      url: "/api/integration/{integrationID}/connect/oauth/{attemptID}/complete",
       ...options,
       ...params,
       headers: {
@@ -6995,6 +7009,132 @@ export class Attempt extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+}
+
+export class Command2 extends HeyApiClient {
+  /**
+   * Begin command connection
+   *
+   * Start a command authentication attempt.
+   */
+  public connect<ThrowOnError extends boolean = false>(
+    parameters: {
+      integrationID: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+      methodID?: string
+      label?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "integrationID" },
+            { in: "query", key: "location" },
+            { in: "body", key: "methodID" },
+            { in: "body", key: "label" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2IntegrationCommandConnectResponses,
+      V2IntegrationCommandConnectErrors,
+      ThrowOnError
+    >({
+      url: "/api/integration/{integrationID}/connect/command",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Cancel command connection
+   *
+   * Cancel a command authentication attempt and terminate its process.
+   */
+  public cancel<ThrowOnError extends boolean = false>(
+    parameters: {
+      integrationID: string
+      attemptID: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "integrationID" },
+            { in: "path", key: "attemptID" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      V2IntegrationCommandCancelResponses,
+      V2IntegrationCommandCancelErrors,
+      ThrowOnError
+    >({
+      url: "/api/integration/{integrationID}/connect/command/{attemptID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get command attempt status
+   *
+   * Poll the current status and output of a command authentication attempt.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters: {
+      integrationID: string
+      attemptID: string
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "integrationID" },
+            { in: "path", key: "attemptID" },
+            { in: "query", key: "location" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      V2IntegrationCommandStatusResponses,
+      V2IntegrationCommandStatusErrors,
+      ThrowOnError
+    >({
+      url: "/api/integration/{integrationID}/connect/command/{attemptID}",
+      ...options,
+      ...params,
     })
   }
 }
@@ -7060,9 +7200,72 @@ export class Integration extends HeyApiClient {
     return (this._connect ??= new Connect({ client: this.client }))
   }
 
-  private _attempt?: Attempt
-  get attempt(): Attempt {
-    return (this._attempt ??= new Attempt({ client: this.client }))
+  private _oauth?: Oauth2
+  get oauth(): Oauth2 {
+    return (this._oauth ??= new Oauth2({ client: this.client }))
+  }
+
+  private _command?: Command2
+  get command(): Command2 {
+    return (this._command ??= new Command2({ client: this.client }))
+  }
+}
+
+export class Wellknown extends HeyApiClient {
+  /**
+   * Add wellknown integration
+   *
+   * Discover and persist an experimental wellknown integration source.
+   */
+  public add<ThrowOnError extends boolean = false>(
+    parameters?: {
+      location?: {
+        directory?: string | null
+        workspace?: string | null
+      } | null
+      url?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "location" },
+            { in: "body", key: "url" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      V2ExperimentalIntegrationWellknownAddResponses,
+      V2ExperimentalIntegrationWellknownAddErrors,
+      ThrowOnError
+    >({
+      url: "/api/experimental/integration/wellknown",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
+export class Integration2 extends HeyApiClient {
+  private _wellknown?: Wellknown
+  get wellknown(): Wellknown {
+    return (this._wellknown ??= new Wellknown({ client: this.client }))
+  }
+}
+
+export class Experimental2 extends HeyApiClient {
+  private _integration?: Integration2
+  get integration(): Integration2 {
+    return (this._integration ??= new Integration2({ client: this.client }))
   }
 }
 
@@ -7486,7 +7689,7 @@ export class Fs extends HeyApiClient {
   }
 }
 
-export class Command2 extends HeyApiClient {
+export class Command3 extends HeyApiClient {
   /**
    * List commands
    *
@@ -8357,6 +8560,11 @@ export class V2 extends HeyApiClient {
     return (this._integration ??= new Integration({ client: this.client }))
   }
 
+  private _experimental?: Experimental2
+  get experimental(): Experimental2 {
+    return (this._experimental ??= new Experimental2({ client: this.client }))
+  }
+
   private _mcp?: Mcp2
   get mcp(): Mcp2 {
     return (this._mcp ??= new Mcp2({ client: this.client }))
@@ -8387,9 +8595,9 @@ export class V2 extends HeyApiClient {
     return (this._fs ??= new Fs({ client: this.client }))
   }
 
-  private _command?: Command2
-  get command(): Command2 {
-    return (this._command ??= new Command2({ client: this.client }))
+  private _command?: Command3
+  get command(): Command3 {
+    return (this._command ??= new Command3({ client: this.client }))
   }
 
   private _skill?: Skill

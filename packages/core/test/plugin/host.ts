@@ -5,21 +5,26 @@ import { Credential } from "@opencode-ai/core/credential"
 import { Integration } from "@opencode-ai/core/integration"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
-import type { IntegrationEnvMethod, IntegrationKeyMethod, IntegrationOAuthMethod } from "@opencode-ai/sdk/v2/types"
+import type {
+  IntegrationCommandMethod,
+  IntegrationEnvMethod,
+  IntegrationKeyMethod,
+  IntegrationOAuthMethod,
+} from "@opencode-ai/sdk/v2/types"
 import { Effect, Stream } from "effect"
 
-type Overrides = Partial<Omit<PluginContext, "options">>
+type Overrides = Partial<Omit<PluginContext, "options" | "session">> & {
+  readonly session?: Partial<PluginContext["session"]>
+}
 
 export function host(overrides: Overrides = {}): PluginContext {
   return {
     options: {},
     agent: overrides.agent ?? {
+      get: () => Effect.die("unused agent.get"),
       list: () => Effect.die("unused agent.list"),
       transform: () => Effect.die("unused agent.transform"),
       reload: () => Effect.die("unused agent.reload"),
-    },
-    ai: overrides.ai ?? {
-      hook: () => Effect.die("unused ai.hook"),
     },
     aisdk: overrides.aisdk ?? {
       hook: () => Effect.die("unused aisdk.hook"),
@@ -30,6 +35,7 @@ export function host(overrides: Overrides = {}): PluginContext {
         get: () => Effect.die("unused catalog.provider.get"),
       },
       model: {
+        get: () => Effect.die("unused catalog.model.get"),
         list: () => Effect.die("unused catalog.model.list"),
         default: () => Effect.die("unused catalog.model.default"),
       },
@@ -49,12 +55,17 @@ export function host(overrides: Overrides = {}): PluginContext {
       get: () => Effect.die("unused integration.get"),
       connect: {
         key: () => Effect.die("unused integration.connect.key"),
-        oauth: () => Effect.die("unused integration.connect.oauth"),
       },
-      attempt: {
-        status: () => Effect.die("unused integration.attempt.status"),
-        complete: () => Effect.die("unused integration.attempt.complete"),
-        cancel: () => Effect.die("unused integration.attempt.cancel"),
+      oauth: {
+        connect: () => Effect.die("unused integration.oauth.connect"),
+        status: () => Effect.die("unused integration.oauth.status"),
+        complete: () => Effect.die("unused integration.oauth.complete"),
+        cancel: () => Effect.die("unused integration.oauth.cancel"),
+      },
+      command: {
+        connect: () => Effect.die("unused integration.command.connect"),
+        status: () => Effect.die("unused integration.command.status"),
+        cancel: () => Effect.die("unused integration.command.cancel"),
       },
       transform: () => Effect.die("unused integration.transform"),
       reload: () => Effect.die("unused integration.reload"),
@@ -80,18 +91,21 @@ export function host(overrides: Overrides = {}): PluginContext {
       transform: () => Effect.die("unused tool.transform"),
       hook: () => Effect.die("unused tool.hook"),
     },
-    session: overrides.session ?? {
-      create: () => Effect.die("unused session.create"),
-      get: () => Effect.die("unused session.get"),
-      prompt: () => Effect.die("unused session.prompt"),
-      command: () => Effect.die("unused session.command"),
-      interrupt: () => Effect.die("unused session.interrupt"),
+    session: {
+      hook: overrides.session?.hook ?? (() => Effect.die("unused session.hook")),
+      create: overrides.session?.create ?? (() => Effect.die("unused session.create")),
+      get: overrides.session?.get ?? (() => Effect.die("unused session.get")),
+      prompt: overrides.session?.prompt ?? (() => Effect.die("unused session.prompt")),
+      command: overrides.session?.command ?? (() => Effect.die("unused session.command")),
+      synthetic: overrides.session?.synthetic ?? (() => Effect.die("unused session.synthetic")),
+      interrupt: overrides.session?.interrupt ?? (() => Effect.die("unused session.interrupt")),
     },
   }
 }
 
 export function agentHost(agent: AgentV2.Interface): PluginContext["agent"] {
   return {
+    get: (id) => agent.get(AgentV2.ID.make(id)).pipe(Effect.map((value) => value && agentInfo(value))),
     list: () => Effect.die("unused agent.list"),
     reload: agent.reload,
     transform: (callback) =>
@@ -122,6 +136,10 @@ export function catalogHost(catalog: Catalog.Interface): PluginContext["catalog"
       get: () => Effect.die("unused catalog.provider.get"),
     },
     model: {
+      get: (providerID, modelID) =>
+        catalog.model
+          .get(ProviderV2.ID.make(providerID), ModelV2.ID.make(modelID))
+          .pipe(Effect.map((value) => value && modelInfo(value))),
       list: () => Effect.die("unused catalog.model.list"),
       default: () => Effect.die("unused catalog.model.default"),
     },
@@ -193,12 +211,17 @@ export function integrationHost(integration: Integration.Interface): PluginConte
     get: () => Effect.die("unused integration.get"),
     connect: {
       key: () => Effect.die("unused integration.connect.key"),
-      oauth: () => Effect.die("unused integration.connect.oauth"),
     },
-    attempt: {
-      status: () => Effect.die("unused integration.attempt.status"),
-      complete: () => Effect.die("unused integration.attempt.complete"),
-      cancel: () => Effect.die("unused integration.attempt.cancel"),
+    oauth: {
+      connect: () => Effect.die("unused integration.oauth.connect"),
+      status: () => Effect.die("unused integration.oauth.status"),
+      complete: () => Effect.die("unused integration.oauth.complete"),
+      cancel: () => Effect.die("unused integration.oauth.cancel"),
+    },
+    command: {
+      connect: () => Effect.die("unused integration.command.connect"),
+      status: () => Effect.die("unused integration.command.status"),
+      cancel: () => Effect.die("unused integration.command.cancel"),
     },
     reload: integration.reload,
     connection: {
@@ -281,6 +304,17 @@ export function integrationHost(integration: Integration.Interface): PluginConte
                 })
                 return
               }
+              if (input.method.type === "command") {
+                draft.method.update({
+                  integrationID: Integration.ID.make(input.integrationID),
+                  method: {
+                    ...input.method,
+                    id: Integration.MethodID.make(input.method.id),
+                    command: [...input.method.command],
+                  },
+                })
+                return
+              }
               draft.method.update({
                 integrationID: Integration.ID.make(input.integrationID),
                 method: input.method,
@@ -296,6 +330,7 @@ export function integrationHost(integration: Integration.Interface): PluginConte
 function method(value: Integration.Method) {
   if (value.type === "env") return { type: value.type, names: [...value.names] }
   if (value.type === "key") return { type: value.type, label: value.label }
+  if (value.type === "command") return { ...value, command: [...value.command] }
   return {
     type: value.type,
     id: value.id,
@@ -308,10 +343,17 @@ function method(value: Integration.Method) {
 }
 
 function internalMethod(
-  value: IntegrationOAuthMethod | IntegrationKeyMethod | IntegrationEnvMethod,
+  value: IntegrationOAuthMethod | IntegrationCommandMethod | IntegrationKeyMethod | IntegrationEnvMethod,
 ): Integration.Method {
   if (value.type === "env") return value
   if (value.type === "key") return value
+  if (value.type === "command") {
+    return {
+      ...value,
+      id: Integration.MethodID.make(value.id),
+      command: [...value.command],
+    }
+  }
   return {
     ...value,
     id: Integration.MethodID.make(value.id),

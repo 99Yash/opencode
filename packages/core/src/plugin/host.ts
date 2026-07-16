@@ -63,6 +63,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
   return {
     options: {},
     agent: {
+      get: (id) => agents.get(AgentV2.ID.make(id)),
       list: (input) => {
         const ref = locationRef(input)
         if (ref && !isCurrentLocation(ref)) return runtime.location.agent.list(ref)
@@ -79,9 +80,6 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
             remove: (id) => draft.remove(AgentV2.ID.make(id)),
           })
         }),
-    },
-    ai: {
-      hook: (name, callback) => hooks.register("ai", name, callback),
     },
     aisdk: {
       hook: (name, callback) => {
@@ -126,6 +124,8 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
             ),
       },
       model: {
+        get: (providerID, modelID) =>
+          catalog.model.get(ProviderV2.ID.make(providerID), ModelV2.ID.make(modelID)),
         list: () => response(catalog.model.available()),
         default: () => response(catalog.model.default()),
       },
@@ -176,21 +176,57 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
             key: input.key,
             label: input.label,
           }),
-        oauth: (input) =>
+      },
+      oauth: {
+        connect: (input) =>
           response(
-            integration.connection.oauth({
+            integration.oauth.connect({
               integrationID: Integration.ID.make(input.integrationID),
               methodID: Integration.MethodID.make(input.methodID),
               inputs: input.inputs,
               label: input.label,
             }),
           ),
-      },
-      attempt: {
-        status: (input) => response(integration.attempt.status(Integration.AttemptID.make(input.attemptID))),
+        status: (input) =>
+          response(
+            integration.oauth.status({
+              integrationID: Integration.ID.make(input.integrationID),
+              attemptID: Integration.AttemptID.make(input.attemptID),
+            }),
+          ),
         complete: (input) =>
-          integration.attempt.complete({ attemptID: Integration.AttemptID.make(input.attemptID), code: input.code }),
-        cancel: (input) => integration.attempt.cancel(Integration.AttemptID.make(input.attemptID)),
+          integration.oauth.complete({
+            integrationID: Integration.ID.make(input.integrationID),
+            attemptID: Integration.AttemptID.make(input.attemptID),
+            code: input.code,
+          }),
+        cancel: (input) =>
+          integration.oauth.cancel({
+            integrationID: Integration.ID.make(input.integrationID),
+            attemptID: Integration.AttemptID.make(input.attemptID),
+          }),
+      },
+      command: {
+        connect: (input) =>
+          response(
+            integration.command.connect({
+              integrationID: Integration.ID.make(input.integrationID),
+              methodID: Integration.MethodID.make(input.methodID),
+              label: input.label,
+            }),
+          ),
+        status: (input) =>
+          response(
+            integration.command.status({
+              integrationID: Integration.ID.make(input.integrationID),
+              attemptID: Integration.AttemptID.make(input.attemptID),
+            }),
+          ),
+        cancel: (input) =>
+          integration.command.cancel({
+            integrationID: Integration.ID.make(input.integrationID),
+            attemptID: Integration.AttemptID.make(input.attemptID),
+          }),
       },
       reload: integration.reload,
       connection: {
@@ -267,6 +303,13 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
                   draft.method.update({
                     integrationID: Integration.ID.make(input.integrationID),
                     method: { type: "env", names: input.method.names },
+                  })
+                  return
+                }
+                if (input.method.type === "command") {
+                  draft.method.update({
+                    integrationID: Integration.ID.make(input.integrationID),
+                    method: Schema.decodeUnknownSync(Integration.CommandMethod)(input.method),
                   })
                   return
                 }
@@ -370,6 +413,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
       },
     },
     session: {
+      hook: (name, callback) => hooks.register("session", name, callback),
       create: (input) =>
         runtime.session.create({
           id: input?.id,
@@ -381,6 +425,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: PluginV2.Int
       get: (input) => runtime.session.get(input.sessionID),
       prompt: runtime.session.prompt,
       command: runtime.session.command,
+      synthetic: runtime.session.synthetic,
       interrupt: (input) => runtime.session.interrupt(input.sessionID),
     },
   } satisfies Plugin.Context

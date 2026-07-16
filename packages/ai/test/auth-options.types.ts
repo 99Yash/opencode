@@ -11,7 +11,9 @@ import * as Cloudflare from "../src/providers/cloudflare"
 import * as GitHubCopilot from "../src/providers/github-copilot"
 import * as Google from "../src/providers/google"
 import * as GoogleVertex from "../src/providers/google-vertex"
-import * as GoogleVertexAnthropic from "../src/providers/google-vertex-anthropic"
+import * as GoogleVertexChat from "../src/providers/google-vertex-chat"
+import * as GoogleVertexMessages from "../src/providers/google-vertex-messages"
+import * as GoogleVertexResponses from "../src/providers/google-vertex-responses"
 import * as OpenAI from "../src/providers/openai"
 import * as OpenAICompatible from "../src/providers/openai-compatible"
 import * as OpenRouter from "../src/providers/openrouter"
@@ -171,20 +173,56 @@ GoogleVertex.configure({ accessToken: "vertex-token", apiKey: "vertex-key", proj
 // @ts-expect-error Vertex Gemini package settings accept only one auth source.
 GoogleVertex.model("gemini-3.5-flash", { accessToken: "vertex-token", apiKey: "vertex-key", project: "project" })
 
-GoogleVertexAnthropic.configure({ accessToken: "vertex-token", project: "project" }).model("claude-sonnet-4-6")
-// @ts-expect-error Vertex Anthropic package settings do not accept API keys.
-GoogleVertexAnthropic.model("claude-sonnet-4-6", { apiKey: "vertex-key", project: "project" })
-GoogleVertexAnthropic.configure({ auth: RuntimeAuth.bearer("vertex-token"), project: "project" }).model(
-  "claude-sonnet-4-6",
+GoogleVertexChat.configure({ accessToken: "vertex-token", project: "project" }).model("deepseek-ai/deepseek-v3.2-maas")
+GoogleVertexChat.configure({ auth: RuntimeAuth.bearer("vertex-token"), project: "project" }).model(
+  "deepseek-ai/deepseek-v3.2-maas",
 )
-GoogleVertexAnthropic.configure({ accessToken: "vertex-token", project: "project" }).model(
-  "claude-sonnet-4-6",
-  // @ts-expect-error Vertex Anthropic model selectors only accept model ids.
+// @ts-expect-error Vertex Chat package settings do not accept API keys.
+GoogleVertexChat.model("deepseek-ai/deepseek-v3.2-maas", { apiKey: "vertex-key", project: "project" })
+GoogleVertexChat.configure({ accessToken: "vertex-token", project: "project" }).model(
+  "deepseek-ai/deepseek-v3.2-maas",
+  // @ts-expect-error Vertex Chat model selectors only accept model ids.
   {},
 )
-GoogleVertexAnthropic.configure({
+GoogleVertexChat.configure({
   accessToken: "vertex-token",
-  // @ts-expect-error Vertex Anthropic config accepts only one auth source.
+  // @ts-expect-error Vertex Chat config accepts only one auth source.
+  auth: RuntimeAuth.bearer("vertex-token"),
+  project: "project",
+})
+
+GoogleVertexResponses.configure({ accessToken: "vertex-token", project: "project" }).model("xai/grok-4.20-reasoning")
+GoogleVertexResponses.configure({ auth: RuntimeAuth.bearer("vertex-token"), project: "project" }).model(
+  "xai/grok-4.20-reasoning",
+)
+// @ts-expect-error Vertex Responses package settings do not accept API keys.
+GoogleVertexResponses.model("xai/grok-4.20-reasoning", { apiKey: "vertex-key", project: "project" })
+GoogleVertexResponses.configure({ accessToken: "vertex-token", project: "project" }).model(
+  "xai/grok-4.20-reasoning",
+  // @ts-expect-error Vertex Responses model selectors only accept model ids.
+  {},
+)
+GoogleVertexResponses.configure({
+  accessToken: "vertex-token",
+  // @ts-expect-error Vertex Responses config accepts only one auth source.
+  auth: RuntimeAuth.bearer("vertex-token"),
+  project: "project",
+})
+
+GoogleVertexMessages.configure({ accessToken: "vertex-token", project: "project" }).model("claude-sonnet-4-6")
+// @ts-expect-error Vertex Messages package settings do not accept API keys.
+GoogleVertexMessages.model("claude-sonnet-4-6", { apiKey: "vertex-key", project: "project" })
+GoogleVertexMessages.configure({ auth: RuntimeAuth.bearer("vertex-token"), project: "project" }).model(
+  "claude-sonnet-4-6",
+)
+GoogleVertexMessages.configure({ accessToken: "vertex-token", project: "project" }).model(
+  "claude-sonnet-4-6",
+  // @ts-expect-error Vertex Messages model selectors only accept model ids.
+  {},
+)
+GoogleVertexMessages.configure({
+  accessToken: "vertex-token",
+  // @ts-expect-error Vertex Messages config accepts only one auth source.
   auth: RuntimeAuth.bearer("vertex-token"),
   project: "project",
 })

@@ -6,15 +6,19 @@ export type HueStep = Schema.Schema.Type<typeof HueStep>
 export const BaseHue = Schema.Literals(["gray", "red", "orange", "yellow", "green", "cyan", "blue", "purple"])
 export type BaseHue = Schema.Schema.Type<typeof BaseHue>
 
-export const HueAlias = Schema.Literals(["accent", "neutral"])
+export const HueAlias = Schema.Literals(["accent", "interactive", "neutral"])
 export type HueAlias = Schema.Schema.Type<typeof HueAlias>
 
 export const ActionVariant = Schema.Literals(["primary", "secondary", "destructive"])
 export type ActionVariant = Schema.Schema.Type<typeof ActionVariant>
 
-export const ActionState = Schema.Literals(["hovered", "pressed", "selected", "focused", "disabled"])
+export const ActionState = Schema.Literals(["focused", "pressed", "disabled"])
 export type ActionState = Schema.Schema.Type<typeof ActionState>
 export type ActionStateKey = `$${ActionState}`
+
+export const FormfieldState = Schema.Literals(["focused", "pressed", "disabled", "selected"])
+export type FormfieldState = Schema.Schema.Type<typeof FormfieldState>
+export type FormfieldStateKey = `$${FormfieldState}`
 
 export const FeedbackKind = Schema.Literals(["error", "warning", "success", "info"])
 export type FeedbackKind = Schema.Schema.Type<typeof FeedbackKind>
@@ -24,7 +28,11 @@ export type Mode = Schema.Schema.Type<typeof Mode>
 
 const HexColor = Schema.String.check(Schema.isPattern(/^#(?:[\da-f]{3}|[\da-f]{4}|[\da-f]{6}|[\da-f]{8})$/i))
 
-const ColorValue = Schema.Union([HexColor, Schema.TemplateLiteral(["$", Schema.NonEmptyString])])
+const ColorValue = Schema.Union([
+  HexColor,
+  Schema.Literal("transparent"),
+  Schema.TemplateLiteral(["$", Schema.NonEmptyString]),
+])
 
 const HueName = Schema.Union([BaseHue, HueAlias])
 const HueColorValue = Schema.Union([HexColor, Schema.TemplateLiteral(["$hue.", HueName, ".", HueStep])])
@@ -33,45 +41,54 @@ const ContextKey = Schema.Literals(["@context:elevated", "@context:overlay"])
 export type ContextKey = Schema.Schema.Type<typeof ContextKey>
 
 const HueScaleDefinition = Schema.Record(HueStep, HexColor)
-const HueAliasDefinition = Schema.Union([Schema.TemplateLiteral(["$hue.", HueName]), HueScaleDefinition])
+const HueValueDefinition = Schema.Union([Schema.TemplateLiteral(["$hue.", HueName]), HueScaleDefinition])
 
 const HueDefinition = Schema.Struct({
-  gray: HueScaleDefinition,
-  red: HueScaleDefinition,
-  orange: HueScaleDefinition,
-  yellow: HueScaleDefinition,
-  green: HueScaleDefinition,
-  cyan: HueScaleDefinition,
-  blue: HueScaleDefinition,
-  purple: HueScaleDefinition,
-  accent: HueAliasDefinition,
-  neutral: HueAliasDefinition,
+  gray: HueValueDefinition,
+  red: HueValueDefinition,
+  orange: HueValueDefinition,
+  yellow: HueValueDefinition,
+  green: HueValueDefinition,
+  cyan: HueValueDefinition,
+  blue: HueValueDefinition,
+  purple: HueValueDefinition,
+  accent: HueValueDefinition,
+  interactive: HueValueDefinition,
+  neutral: HueValueDefinition,
 })
 export type HueDefinition = Schema.Schema.Type<typeof HueDefinition>
 
 const HueOverrideDefinition = Schema.Struct({
-  gray: Schema.optional(HueScaleDefinition),
-  red: Schema.optional(HueScaleDefinition),
-  orange: Schema.optional(HueScaleDefinition),
-  yellow: Schema.optional(HueScaleDefinition),
-  green: Schema.optional(HueScaleDefinition),
-  cyan: Schema.optional(HueScaleDefinition),
-  blue: Schema.optional(HueScaleDefinition),
-  purple: Schema.optional(HueScaleDefinition),
-  accent: Schema.optional(HueAliasDefinition),
-  neutral: Schema.optional(HueAliasDefinition),
+  gray: Schema.optional(HueValueDefinition),
+  red: Schema.optional(HueValueDefinition),
+  orange: Schema.optional(HueValueDefinition),
+  yellow: Schema.optional(HueValueDefinition),
+  green: Schema.optional(HueValueDefinition),
+  cyan: Schema.optional(HueValueDefinition),
+  blue: Schema.optional(HueValueDefinition),
+  purple: Schema.optional(HueValueDefinition),
+  accent: Schema.optional(HueValueDefinition),
+  interactive: Schema.optional(HueValueDefinition),
+  neutral: Schema.optional(HueValueDefinition),
 })
 export type HueOverrideDefinition = Schema.Schema.Type<typeof HueOverrideDefinition>
 
 const StatefulColorDefinition = Schema.Struct({
   default: Schema.optional(ColorValue),
-  $hovered: Schema.optional(ColorValue),
-  $pressed: Schema.optional(ColorValue),
-  $selected: Schema.optional(ColorValue),
   $focused: Schema.optional(ColorValue),
+  $pressed: Schema.optional(ColorValue),
   $disabled: Schema.optional(ColorValue),
 })
 export type StatefulColorDefinition = Schema.Schema.Type<typeof StatefulColorDefinition>
+
+const FormfieldColorDefinition = Schema.Struct({
+  default: Schema.optional(ColorValue),
+  $focused: Schema.optional(ColorValue),
+  $pressed: Schema.optional(ColorValue),
+  $disabled: Schema.optional(ColorValue),
+  $selected: Schema.optional(ColorValue),
+})
+export type FormfieldColorDefinition = Schema.Schema.Type<typeof FormfieldColorDefinition>
 
 const ActionColorDefinition = Schema.Struct({
   primary: Schema.optional(StatefulColorDefinition),
@@ -92,6 +109,7 @@ const TextDefinition = Schema.Struct({
   default: Schema.optional(ColorValue),
   subdued: Schema.optional(ColorValue),
   action: Schema.optional(ActionColorDefinition),
+  formfield: Schema.optional(FormfieldColorDefinition),
   feedback: Schema.optional(
     Schema.Struct({
       error: Schema.optional(TextFeedbackDefinition),
@@ -105,7 +123,14 @@ export type TextDefinition = Schema.Schema.Type<typeof TextDefinition>
 
 const BackgroundDefinition = Schema.Struct({
   default: Schema.optional(ColorValue),
+  surface: Schema.optional(
+    Schema.Struct({
+      offset: Schema.optional(ColorValue),
+      overlay: Schema.optional(ColorValue),
+    }),
+  ),
   action: Schema.optional(ActionColorDefinition),
+  formfield: Schema.optional(FormfieldColorDefinition),
   feedback: Schema.optional(
     Schema.Struct({
       error: Schema.optional(BackgroundFeedbackDefinition),
@@ -163,17 +188,13 @@ const DiffDefinition = Schema.Struct({
 export type DiffDefinition = Schema.Schema.Type<typeof DiffDefinition>
 
 const ThemeTokensDefinition = Schema.Struct({
-  color: Schema.optional(
-    Schema.Struct({
-      text: Schema.optional(TextDefinition),
-      background: Schema.optional(BackgroundDefinition),
-      border: Schema.optional(Schema.Struct({ default: Schema.optional(ColorValue) })),
-      scrollbar: Schema.optional(Schema.Struct({ default: Schema.optional(ColorValue) })),
-      diff: Schema.optional(DiffDefinition),
-      syntax: Schema.optional(SyntaxDefinition),
-      markdown: Schema.optional(MarkdownDefinition),
-    }),
-  ),
+  text: Schema.optional(TextDefinition),
+  background: Schema.optional(BackgroundDefinition),
+  border: Schema.optional(Schema.Struct({ default: Schema.optional(ColorValue) })),
+  scrollbar: Schema.optional(Schema.Struct({ default: Schema.optional(ColorValue) })),
+  diff: Schema.optional(DiffDefinition),
+  syntax: Schema.optional(SyntaxDefinition),
+  markdown: Schema.optional(MarkdownDefinition),
 })
 export type ThemeTokensDefinition = Schema.Schema.Type<typeof ThemeTokensDefinition>
 

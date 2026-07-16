@@ -15,6 +15,7 @@ import {
   type LLMRequest,
 } from "@opencode-ai/ai"
 import * as OpenAIChat from "@opencode-ai/ai/protocols/openai-chat"
+import { Catalog } from "@opencode-ai/core/catalog"
 import { Database } from "@opencode-ai/core/database/database"
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -41,10 +42,10 @@ import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator
 import { SessionRunner } from "@opencode-ai/core/session/runner"
 import * as SessionRunnerLLM from "@opencode-ai/core/session/runner/llm"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
-import { SessionRunnerSystemPrompt } from "@opencode-ai/core/session/runner/system-prompt"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
+import { SystemPromptPlugin } from "@opencode-ai/core/plugin/system-prompt"
 import { QuestionTool } from "@opencode-ai/core/tool/question"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -62,9 +63,9 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { Instructions } from "@opencode-ai/core/instructions"
 import { InstructionBuiltIns } from "@opencode-ai/core/instructions/builtins"
 import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
-import { SkillGuidance } from "@opencode-ai/core/skill/guidance"
-import { ReferenceGuidance } from "@opencode-ai/core/reference/guidance"
-import { McpGuidance } from "@opencode-ai/core/mcp/guidance"
+import { SkillInstructions } from "@opencode-ai/core/skill/instructions"
+import { ReferenceInstructions } from "@opencode-ai/core/reference/instructions"
+import { McpInstructions } from "@opencode-ai/core/mcp/instructions"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -72,6 +73,8 @@ import { Cause, DateTime, Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, S
 import { TestClock } from "effect/testing"
 import { asc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { agentHost, catalogHost, host } from "./plugin/host"
+import PROMPT_DEFAULT from "../src/session/runner/prompt/base.txt"
 
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
@@ -137,7 +140,7 @@ const reply = {
   ],
 }
 const model = Model.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route })
-const defaultSystem = SessionRunnerSystemPrompt.provider(model)
+const defaultSystem = PROMPT_DEFAULT
 const replacementModel = Model.make({ id: "replacement", provider: "fake", route: OpenAIChat.route })
 const compactModel = Model.make({
   id: "compact",
@@ -315,7 +318,7 @@ const systemContext = Layer.mock(InstructionBuiltIns.Service, {
     ),
 })
 const instructionContext = Layer.mock(InstructionDiscovery.Service, { load: () => Effect.succeed(Instructions.empty) })
-const skillGuidance = Layer.mock(SkillGuidance.Service, {
+const skillInstructions = Layer.mock(SkillInstructions.Service, {
   load: (agent) =>
     Effect.succeed(
       skillBaselines.has(agent.id)
@@ -332,8 +335,10 @@ const skillGuidance = Layer.mock(SkillGuidance.Service, {
         : Instructions.empty,
     ),
 })
-const referenceGuidance = Layer.mock(ReferenceGuidance.Service, { load: () => Effect.succeed(Instructions.empty) })
-const mcpGuidance = Layer.mock(McpGuidance.Service, { load: () => Effect.succeed(Instructions.empty) })
+const referenceInstructions = Layer.mock(ReferenceInstructions.Service, {
+  load: () => Effect.succeed(Instructions.empty),
+})
+const mcpInstructions = Layer.mock(McpInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const config = Layer.succeed(
   Config.Service,
   Config.Service.of({
@@ -358,6 +363,20 @@ const pluginSupervisor = Layer.succeed(
     flush: Effect.suspend(() => pluginFlushHook),
   }),
 )
+const promptCatalog = Layer.mock(Catalog.Service, {
+  provider: {
+    get: () => Effect.succeed(undefined),
+    all: () => Effect.succeed([]),
+    available: () => Effect.succeed([]),
+  },
+  model: {
+    get: () => Effect.succeed(undefined),
+    all: () => Effect.succeed([]),
+    available: () => Effect.succeed([]),
+    default: () => Effect.succeed(undefined),
+    small: () => Effect.succeed(undefined),
+  },
+})
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [Snapshot.node, Snapshot.noopLayer],
   [LayerNodePlatform.llmClient, client],
@@ -365,11 +384,11 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [InstructionBuiltIns.node, systemContext],
   [InstructionDiscovery.node, instructionContext],
   [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
-  [SkillGuidance.node, skillGuidance],
-  [ReferenceGuidance.node, referenceGuidance],
+  [SkillInstructions.node, skillInstructions],
+  [ReferenceInstructions.node, referenceInstructions],
   [PermissionV2.node, permission],
   [Config.node, config],
-  [McpGuidance.node, mcpGuidance],
+  [McpInstructions.node, mcpInstructions],
   [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
   [PluginSupervisor.node, pluginSupervisor],
 ])
@@ -398,6 +417,7 @@ const it = testEffect(
       SessionProjector.node,
       SessionStore.node,
       AgentV2.node,
+      Catalog.node,
       ToolRegistry.node,
       ToolRegistry.toolsNode,
       PluginHooks.node,
@@ -406,8 +426,8 @@ const it = testEffect(
       InstructionBuiltIns.node,
       InstructionDiscovery.node,
       InstructionEntry.node,
-      SkillGuidance.node,
-      ReferenceGuidance.node,
+      SkillInstructions.node,
+      ReferenceInstructions.node,
       Config.node,
       Snapshot.node,
       SessionRunnerLLM.node,
@@ -417,12 +437,13 @@ const it = testEffect(
     [
       [LayerNodePlatform.llmClient, client],
       [PermissionV2.node, permission],
+      [Catalog.node, promptCatalog],
       [SessionRunnerModel.node, models],
       [InstructionBuiltIns.node, systemContext],
       [InstructionDiscovery.node, instructionContext],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
-      [SkillGuidance.node, skillGuidance],
-      [ReferenceGuidance.node, referenceGuidance],
+      [SkillInstructions.node, skillInstructions],
+      [ReferenceInstructions.node, referenceInstructions],
       [Snapshot.node, Snapshot.noopLayer],
       [SessionExecution.node, execution],
       [Config.node, config],
@@ -455,6 +476,17 @@ const insertSession = (id: SessionV2.ID) =>
 
 const setup = Effect.gen(function* () {
   const { db } = yield* Database.Service
+  const agents = yield* AgentV2.Service
+  const catalog = yield* Catalog.Service
+  const hooks = yield* PluginHooks.Service
+  const pluginHost = host({
+    agent: agentHost(agents),
+    catalog: catalogHost(catalog),
+    session: { hook: (name, callback) => hooks.register("session", name, callback) },
+  })
+  yield* Effect.forEach(SystemPromptPlugin.Plugins, (plugin) => plugin.effect(pluginHost), {
+    discard: true,
+  })
   requests.length = 0
   authorizations.length = 0
   executions.length = 0
@@ -478,7 +510,6 @@ const setup = Effect.gen(function* () {
   toolExecutionsReady = 5
   activeToolExecutions = 0
   maxActiveToolExecutions = 0
-  const agents = yield* AgentV2.Service
   yield* agents.transform((draft) =>
     draft.update(AgentV2.ID.make("build"), (agent) => {
       agent.mode = "primary"
@@ -777,11 +808,11 @@ const verifyPartialFlushOnInterruption = (kind: FragmentKind) =>
   })
 
 describe("SessionRunnerLLM", () => {
-  it.effect("applies AI request hooks without exposing unavailable tools", () =>
+  it.effect("applies session context hooks without exposing unavailable tools", () =>
     Effect.gen(function* () {
       const session = yield* setup
       const hooks = yield* PluginHooks.Service
-      yield* hooks.register("ai", "request", (event) =>
+      yield* hooks.register("session", "context", (event) =>
         Effect.sync(() => {
           event.system = [SystemPart.make("Hooked system")]
           event.messages = [Message.user("Hooked message")]
@@ -1395,7 +1426,7 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("updates selected-agent skill guidance after an agent switch", () =>
+  it.effect("updates selected-agent skill instructions after an agent switch", () =>
     Effect.gen(function* () {
       const session = yield* setup
       const events = yield* EventV2.Service
@@ -3997,11 +4028,19 @@ describe("SessionRunnerLLM", () => {
         { attempt: 5, at: 30_000 },
       ])
       expect((yield* recordedEventTypes(sessionID)).filter((type) => type === "session.step.started.1")).toHaveLength(5)
-      expect((yield* session.context(sessionID)).filter((message) => message.type === "assistant")).toHaveLength(1)
+      const assistant = requireAssistant(yield* session.context(sessionID))
+      expect(yield* recordedStepSettlementEvents(sessionID, assistant.id)).toMatchObject([
+        { type: "session.step.started.1" },
+        { type: "session.step.started.1" },
+        { type: "session.step.started.1" },
+        { type: "session.step.started.1" },
+        { type: "session.step.started.1" },
+        { type: "session.step.failed.1" },
+      ])
     }),
   )
 
-  it.effect("counts retry attempts against the agent step allowance", () =>
+  it.effect("retries a physical attempt without consuming the logical agent step", () =>
     Effect.gen(function* () {
       const session = yield* setup
       const agents = yield* AgentV2.Service
@@ -4010,21 +4049,36 @@ describe("SessionRunnerLLM", () => {
           agent.steps = 2
         }),
       )
-      yield* admit(session, "Bound retries by steps")
+      yield* admit(session, "Retry without consuming a step")
       const failure = providerUnavailable()
       responseStream = Stream.fail(failure)
-      streamFailure = failure
+      responses = [reply.tool("call-after-retry", "echo", { text: "recovered" }), reply.stop()]
 
       const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
       while (requests.length < 1) yield* Effect.yieldNow
       yield* TestClock.adjust("2 seconds")
-      expect(yield* Fiber.join(run).pipe(Effect.flip)).toBe(failure)
+      yield* Fiber.join(run)
 
-      expect(requests).toHaveLength(2)
+      expect(requests).toHaveLength(3)
+      expect(requests[0]?.toolChoice).toBeUndefined()
+      expect(requests[0]?.tools.map((tool) => tool.name)).toContain("echo")
+      expect(requests[1]?.toolChoice).toBeUndefined()
+      expect(requests[1]?.tools.map((tool) => tool.name)).toContain("echo")
+      expect(requests[1]?.messages.at(-1)).not.toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: expect.stringContaining("MAXIMUM STEPS REACHED") }],
+      })
+      expect(requests[2]?.toolChoice).toMatchObject({ type: "none" })
+      expect(requests[2]?.tools).toEqual([])
+      expect(requests[2]?.messages.at(-1)).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: expect.stringContaining("MAXIMUM STEPS REACHED") }],
+      })
+      expect(executions).toEqual(["recovered"])
       const eventTypes = yield* recordedEventTypes(sessionID)
-      expect(eventTypes.filter((type) => type === "session.step.started.1")).toHaveLength(2)
+      expect(eventTypes.filter((type) => type === "session.step.started.1")).toHaveLength(3)
       expect(eventTypes.filter((type) => type === "session.retry.scheduled.1")).toHaveLength(1)
-      expect((yield* session.context(sessionID)).filter((message) => message.type === "assistant")).toHaveLength(1)
+      expect((yield* session.context(sessionID)).filter((message) => message.type === "assistant")).toHaveLength(2)
     }),
   )
 
