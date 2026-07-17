@@ -10,6 +10,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { ProcessLock } from "@opencode-ai/core/util/process-lock"
 import { expect, test } from "bun:test"
 import { Effect, Schedule, Schema } from "effect"
 import fs from "node:fs/promises"
@@ -142,15 +143,23 @@ test("concurrent service processes elect one server", async () => {
 
     expect(exited).toEqual(losers.map(() => true))
     expect(winner?.exitCode).toBe(null)
-    expect(
-      await fetch(new URL("/api/health", info.url), {
-        headers: { authorization: "Basic " + btoa(`opencode:${info.password}`) },
-      }).then((response) => response.json()),
-    ).toEqual({
-      healthy: true,
-      version: info.version,
-      pid: info.pid,
-    })
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ProcessLock.acquire(registration + ".lock")
+        expect(winner?.exitCode).toBe(null)
+        expect(
+          yield* Effect.promise(() =>
+            fetch(new URL("/api/health", info.url), {
+              headers: { authorization: "Basic " + btoa(`opencode:${info.password}`) },
+            }).then((response) => response.json()),
+          ),
+        ).toEqual({
+          healthy: true,
+          version: info.version,
+          pid: info.pid,
+        })
+      }).pipe(Effect.scoped),
+    )
     const blockedTemp = registration + "." + info.id + ".tmp"
     await fs.mkdir(blockedTemp)
     await fs.rm(registration)
@@ -172,6 +181,7 @@ test("concurrent service processes elect one server", async () => {
         Bun.sleep(10_000).then(() => false),
       ])
       expect(contenderExited).toBe(true)
+      expect(contender.exitCode).toBe(0)
       expect((await waitForInfo(registration)).id).toBe(info.id)
     } finally {
       contender.kill("SIGTERM")

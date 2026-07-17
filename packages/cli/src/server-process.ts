@@ -10,7 +10,7 @@ import { AppProcess } from "@opencode-ai/core/process"
 import { ProcessLock } from "@opencode-ai/core/util/process-lock"
 import { randomBytes, randomUUID } from "node:crypto"
 import path from "node:path"
-import { Effect, FileSystem, Logger, Option, Redacted, Schedule, Schema } from "effect"
+import { Effect, Exit, FileSystem, Logger, Option, Redacted, Schedule, Schema, Scope } from "effect"
 import { HttpServer } from "effect/unstable/http"
 import { Env } from "./env"
 import { ServiceConfig } from "./services/service-config"
@@ -38,8 +38,12 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const serviceOptions = options.mode === "service" ? yield* ServiceConfig.options() : undefined
-      if (serviceOptions !== undefined) {
+      const lockScope = serviceOptions === undefined ? undefined : yield* Scope.make()
+      if (lockScope !== undefined) yield* Effect.addFinalizer((exit) => Scope.close(lockScope, exit))
+      if (serviceOptions !== undefined && lockScope !== undefined) {
+        if ((yield* Service.discover(serviceOptions)) !== undefined) return yield* Effect.void
         const acquired = yield* ProcessLock.acquire(serviceOptions.file + ".lock").pipe(
+          Effect.provideService(Scope.Scope, lockScope),
           Effect.as(true),
           Effect.catchTag("ProcessLockHeldError", () => Effect.succeed(false)),
         )
@@ -72,6 +76,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
             ? undefined
             : { onListen: (address) => register(address, password, instanceID, serviceOptions.file) },
       }).pipe(Effect.provide(Logger.layer([], { mergeWithExisting: false })))
+      if (lockScope !== undefined) yield* Scope.close(lockScope, Exit.void)
       const url = HttpServer.formatAddress(server.address)
       console.log(options.mode === "stdio" ? JSON.stringify({ url }) : `server listening on ${url}`)
       if (options.mode === "default" && !environmentPassword) console.log(`server password ${password}`)
