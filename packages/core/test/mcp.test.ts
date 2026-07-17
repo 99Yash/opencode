@@ -188,6 +188,7 @@ function resourceMcpLayer(url: string, onFormCreated?: (form: Form.Info) => Effe
           connection: {
             active: unusedIntegration,
             resolve: unusedIntegration,
+            resolveWithRefresh: unusedIntegration,
             key: unusedIntegration,
             update: unusedIntegration,
             remove: unusedIntegration,

@@ -168,6 +168,12 @@ export interface Interface extends State.Transformable<Draft> {
     readonly resolve: (
       connection: IntegrationConnection.Info,
     ) => Effect.Effect<Credential.Value | undefined, AuthorizationError>
+    /** Resolves with a refresh implementation that may not be materialized in the registry yet. */
+    readonly resolveWithRefresh: (
+      connection: IntegrationConnection.Info,
+      methodID: MethodID,
+      refresh: NonNullable<OAuthImplementation["refresh"]>,
+    ) => Effect.Effect<Credential.Value | undefined, AuthorizationError>
     /** Runs a key method and stores the resulting credential. */
     readonly key: (input: {
       /** Integration receiving the credential. */
@@ -656,6 +662,34 @@ const layer = Layer.effect(
       return CommandAttempt.make({ attemptID, time })
     })
 
+    const resolveConnection = Effect.fnUntraced(function* (
+      connection: IntegrationConnection.Info,
+      fallback?: {
+        readonly methodID: MethodID
+        readonly refresh: NonNullable<OAuthImplementation["refresh"]>
+      },
+    ) {
+      if (connection.type === "env") {
+        const key = process.env[connection.name]
+        return key ? Credential.Key.make({ type: "key", key }) : undefined
+      }
+      const credential = yield* credentials.get(connection.id)
+      if (!credential) return undefined
+      if (credential.value.type === "key") return credential.value
+      const implementation = state
+        .get()
+        .integrations.get(credential.integrationID)
+        ?.implementations.get(credential.value.methodID)
+      const refresh =
+        implementation?.refresh ?? (fallback?.methodID === credential.value.methodID ? fallback.refresh : undefined)
+      if (!refresh) return credential.value
+      const now = yield* Clock.currentTimeMillis
+      if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
+      const value = yield* authorize(refresh(credential.value))
+      yield* credentials.update(credential.id, { value })
+      return value
+    })
+
     return Service.of({
       transform: state.transform,
       reload: state.reload,
@@ -675,25 +709,10 @@ const layer = Layer.effect(
           const entry = state.get().integrations.get(id)
           return resolveConnections(entry, yield* credentials.list(id))[0]
         }),
-        resolve: Effect.fn("Integration.connection.resolve")(function* (connection) {
-          if (connection.type === "env") {
-            const key = process.env[connection.name]
-            return key ? Credential.Key.make({ type: "key", key }) : undefined
-          }
-          const credential = yield* credentials.get(connection.id)
-          if (!credential) return undefined
-          if (credential.value.type === "key") return credential.value
-          const implementation = state
-            .get()
-            .integrations.get(credential.integrationID)
-            ?.implementations.get(credential.value.methodID)
-          if (!implementation?.refresh) return credential.value
-          const now = yield* Clock.currentTimeMillis
-          if (credential.value.expires > now + Duration.toMillis(Duration.minutes(5))) return credential.value
-          const value = yield* authorize(implementation.refresh(credential.value))
-          yield* credentials.update(credential.id, { value })
-          return value
-        }),
+        resolve: Effect.fn("Integration.connection.resolve")((connection) => resolveConnection(connection)),
+        resolveWithRefresh: Effect.fn("Integration.connection.resolveWithRefresh")((connection, methodID, refresh) =>
+          resolveConnection(connection, { methodID, refresh }),
+        ),
         key: Effect.fn("Integration.connection.key")(function* (input) {
           const method = state
             .get()

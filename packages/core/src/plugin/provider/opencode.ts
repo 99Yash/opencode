@@ -2,7 +2,7 @@ import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/v2/effect/integration"
 import { define } from "@opencode-ai/plugin/v2/effect/plugin"
-import type { CredentialValue } from "@opencode-ai/sdk/v2/types"
+import type { CredentialOAuth, CredentialValue } from "@opencode-ai/sdk/v2/types"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { EventV2 } from "../../event"
 import { Credential } from "../../credential"
@@ -79,24 +79,40 @@ function oauth(http: HttpClient.HttpClient) {
     label: (credential) => {
       return typeof credential.metadata?.orgName === "string" ? credential.metadata.orgName : undefined
     },
-  } satisfies IntegrationOAuthMethodRegistration
+  } satisfies Integration.OAuthImplementation
 }
 
-export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | Scope.Scope>({
+export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | Integration.Service | Scope.Scope>({
   id: "opencode.provider.opencode",
   effect: Effect.fn(function* (ctx) {
     const events = yield* EventV2.Service
     const http = yield* HttpClient.HttpClient
+    const integrations = yield* Integration.Service
+    const method = oauth(http)
+    const coreCredential = (credential: CredentialOAuth) =>
+      Credential.OAuth.make({ ...credential, methodID: Integration.MethodID.make(credential.methodID) })
+    const registration = {
+      ...method,
+      refresh: (credential: CredentialOAuth) => method.refresh(coreCredential(credential)),
+      label: (credential: CredentialOAuth) => method.label(coreCredential(credential)),
+    } satisfies IntegrationOAuthMethodRegistration
     const loading = Semaphore.makeUnsafe(1)
     let connected = false
+    let remoteConfigRequired = false
     let providers: typeof ConfigV1.Info.Type.provider | undefined
 
     const load = Effect.fn("OpencodePlugin.load")(function* () {
-      const connection = yield* ctx.integration.connection.active("opencode")
+      const connection = yield* integrations.connection.active(Integration.ID.make("opencode"))
       const credential = connection
-        ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        ? yield* integrations.connection
+            .resolveWithRefresh(connection, method.method.id, method.refresh)
+            .pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
       connected = connection !== undefined
+      // Console credentials require its provider overlay; only legacy Zen `sk-` keys may use the models.dev fallback.
+      remoteConfigRequired =
+        connection !== undefined &&
+        (credential === undefined || credential.type === "oauth" || credential.key.startsWith("oc_sk_"))
       providers = credential
         ? yield* fetchProviders(http, credential).pipe(
             Effect.catch((cause) =>
@@ -110,7 +126,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | S
       draft.update("opencode", (integration) => {
         integration.name = "OpenCode"
       })
-      draft.method.update(oauth(http))
+      draft.method.update(registration)
       draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
     })
 
@@ -175,6 +191,12 @@ export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | S
 
       const item = catalog.provider.get(ProviderV2.ID.opencode)
       if (!item) return
+      if (remoteConfigRequired && providers?.[ProviderV2.ID.opencode] === undefined) {
+        catalog.provider.update(item.provider.id, (provider) => {
+          provider.disabled = true
+        })
+        return
+      }
       const hasKey = Boolean(process.env.OPENCODE_API_KEY || connected || item.provider.settings?.apiKey)
       catalog.provider.update(item.provider.id, (provider) => {
         if (!hasKey) provider.settings = { ...provider.settings, apiKey: "public" }

@@ -10,6 +10,7 @@ import { PluginV2 } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { OpencodePlugin } from "@opencode-ai/core/plugin/provider/opencode"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { State } from "@opencode-ai/core/state"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -20,9 +21,11 @@ const addPlugin = Effect.fn(function* () {
   const host = yield* PluginHost.make(plugin)
   const events = yield* EventV2.Service
   const integration = yield* Integration.Service
-  yield* OpencodePlugin.effect(host).pipe(
-    Effect.provideService(EventV2.Service, events),
-    Effect.provideService(Integration.Service, integration),
+  yield* State.batch(
+    OpencodePlugin.effect(host).pipe(
+      Effect.provideService(EventV2.Service, events),
+      Effect.provideService(Integration.Service, integration),
+    ),
   )
 })
 
@@ -76,6 +79,50 @@ const cost = (input: number, output = 0) => [
     },
   },
 ]
+
+const fableID = ModelV2.ID.make("claude-fable-5")
+
+const seedFallback = Effect.fnUntraced(function* () {
+  const catalog = yield* Catalog.Service
+  const provider = ProviderV2.Info.make({
+    ...ProviderV2.Info.empty(ProviderV2.ID.opencode),
+    integrationID: Integration.ID.make("opencode"),
+    package: ProviderV2.aisdk("@ai-sdk/openai-compatible"),
+    settings: { baseURL: "https://opencode.ai/zen/v1" },
+  })
+  const model = ModelV2.Info.make({
+    ...ModelV2.Info.empty(provider.id, fableID),
+    modelID: fableID,
+    package: ProviderV2.aisdk("@ai-sdk/anthropic"),
+    cost: cost(1, 1),
+  })
+  yield* catalog.transform((draft) => {
+    draft.provider.update(provider.id, (current) => Object.assign(current, provider))
+    draft.model.update(provider.id, model.id, (current) => Object.assign(current, model))
+  })
+})
+
+const remoteConfig = (origin: string) => ({
+  config: {
+    enterprise: { url: origin },
+    provider: {
+      opencode: {
+        name: "OpenCode",
+        npm: "@ai-sdk/openai-compatible",
+        api: `${origin}/inference/openai/v1`,
+        env: ["OPENCODE_API_KEY"],
+        options: { apiKey: "{env:OPENCODE_API_KEY}" },
+        models: {
+          "claude-fable-5": {
+            name: "Claude Fable 5",
+            provider: { npm: "@ai-sdk/anthropic", api: `${origin}/inference/anthropic/v1` },
+            cost: { input: 1, output: 1 },
+          },
+        },
+      },
+    },
+  },
+})
 
 describe("OpencodePlugin", () => {
   it.effect("registers account and service account methods", () =>
@@ -280,6 +327,176 @@ describe("OpencodePlugin", () => {
           expect(yield* catalog.model.get(ProviderV2.ID.make("remote"), ModelV2.ID.make("stale"))).toBeDefined()
         }),
       ({ server }) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("refreshes expired OAuth before loading the Console catalog", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const requests: Array<{ path: string; authorization: string | null }> = []
+        const server = Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            const path = new URL(request.url).pathname
+            requests.push({ path, authorization: request.headers.get("authorization") })
+            if (path === "/auth/device/token")
+              return Response.json({
+                access_token: "fresh-access",
+                refresh_token: "fresh-refresh",
+                expires_in: 3600,
+              })
+            if (path === "/api/config") {
+              if (request.headers.get("authorization") !== "Bearer fresh-access")
+                return new Response("Unauthorized", { status: 401 })
+              return Response.json(remoteConfig(new URL(request.url).origin))
+            }
+            return new Response("Not found", { status: 404 })
+          },
+        })
+        return { requests, server }
+      }),
+      ({ requests, server }) =>
+        Effect.gen(function* () {
+          const credentials = yield* Credential.Service
+          yield* seedFallback()
+          yield* credentials.create({
+            integrationID: Integration.ID.make("opencode"),
+            value: Credential.OAuth.make({
+              type: "oauth",
+              methodID: Integration.MethodID.make("device"),
+              access: "expired-access",
+              refresh: "expired-refresh",
+              expires: 1,
+              metadata: { server: server.url.origin },
+            }),
+          })
+
+          yield* addPlugin()
+
+          expect(requests).toEqual([
+            { path: "/auth/device/token", authorization: null },
+            { path: "/api/config", authorization: "Bearer fresh-access" },
+          ])
+          expect((yield* credentials.list(Integration.ID.make("opencode")))[0]?.value).toMatchObject({
+            type: "oauth",
+            access: "fresh-access",
+            refresh: "fresh-refresh",
+          })
+          expect(
+            required(yield* (yield* Catalog.Service).model.get(ProviderV2.ID.opencode, fableID)).settings?.baseURL,
+          ).toBe(`${server.url.origin}/inference/anthropic/v1`)
+        }),
+      ({ server }) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("does not expose the legacy fallback when Console OAuth config is unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: () => new Response("Unavailable", { status: 503 }),
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const credentials = yield* Credential.Service
+          const catalog = yield* Catalog.Service
+          yield* seedFallback()
+          yield* credentials.create({
+            integrationID: Integration.ID.make("opencode"),
+            value: Credential.OAuth.make({
+              type: "oauth",
+              methodID: Integration.MethodID.make("device"),
+              access: "access",
+              refresh: "refresh",
+              expires: Date.now() + 60 * 60 * 1000,
+              metadata: { server: server.url.origin },
+            }),
+          })
+
+          yield* addPlugin()
+
+          expect((yield* catalog.provider.available()).some((provider) => provider.id === ProviderV2.ID.opencode)).toBe(
+            false,
+          )
+          expect(
+            (yield* catalog.model.available()).some(
+              (model) => model.providerID === ProviderV2.ID.opencode && model.id === fableID,
+            ),
+          ).toBe(false)
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("does not expose the legacy fallback when Console service-account config is unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: () => new Response("Unavailable", { status: 503 }),
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const credentials = yield* Credential.Service
+          const catalog = yield* Catalog.Service
+          yield* seedFallback()
+          yield* credentials.create({
+            integrationID: Integration.ID.make("opencode"),
+            value: Credential.Key.make({
+              type: "key",
+              key: "oc_sk_0123456789ab_secret",
+              metadata: { server: server.url.origin },
+            }),
+          })
+
+          yield* addPlugin()
+
+          expect((yield* catalog.provider.available()).some((provider) => provider.id === ProviderV2.ID.opencode)).toBe(
+            false,
+          )
+          expect(
+            (yield* catalog.model.available()).some(
+              (model) => model.providerID === ProviderV2.ID.opencode && model.id === fableID,
+            ),
+          ).toBe(false)
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("keeps the legacy fallback for an API key when remote provider config is unavailable", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: () => new Response("Unauthorized", { status: 401 }),
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          const credentials = yield* Credential.Service
+          const catalog = yield* Catalog.Service
+          yield* seedFallback()
+          yield* credentials.create({
+            integrationID: Integration.ID.make("opencode"),
+            value: Credential.Key.make({
+              type: "key",
+              key: "sk-legacy-key",
+              metadata: { server: server.url.origin },
+            }),
+          })
+
+          yield* addPlugin()
+
+          expect(required(yield* catalog.provider.get(ProviderV2.ID.opencode)).disabled).toBeUndefined()
+          expect(required(yield* catalog.model.get(ProviderV2.ID.opencode, fableID)).settings?.baseURL).toBe(
+            "https://opencode.ai/zen/v1",
+          )
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
     ),
   )
 
