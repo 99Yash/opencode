@@ -1,5 +1,6 @@
 import { RGBA, type TerminalColors } from "@opentui/core"
 import { ansiToRgba, tint } from "./color"
+import { HueStep, type Mode, type ThemeFile } from "./v2"
 
 export function terminalMode(colors: TerminalColors): "dark" | "light" | undefined {
   const bg = colors.defaultBackground
@@ -9,6 +10,97 @@ export function terminalMode(colors: TerminalColors): "dark" | "light" | undefin
 }
 
 export function generateSystem(colors: TerminalColors, mode: "dark" | "light") {
+  const value = resolveSystem(colors, mode)
+
+  return {
+    theme: {
+      primary: value.ansi.cyan,
+      secondary: value.ansi.magenta,
+      accent: value.ansi.cyan,
+      error: value.ansi.red,
+      warning: value.ansi.yellow,
+      success: value.ansi.green,
+      info: value.ansi.cyan,
+      text: value.fg,
+      textMuted: value.textMuted,
+      selectedListItemText: value.bg,
+      background: value.transparent,
+      backgroundPanel: value.grays[2],
+      backgroundElement: value.grays[3],
+      backgroundMenu: value.grays[3],
+      borderSubtle: value.grays[6],
+      border: value.grays[7],
+      borderActive: value.grays[8],
+      diffAdded: value.ansi.green,
+      diffRemoved: value.ansi.red,
+      diffContext: value.grays[7],
+      diffHunkHeader: value.grays[7],
+      diffHighlightAdded: value.ansi.greenBright,
+      diffHighlightRemoved: value.ansi.redBright,
+      diffAddedBg: value.diffAddedBg,
+      diffRemovedBg: value.diffRemovedBg,
+      diffContextBg: value.diffContextBg,
+      diffLineNumber: value.textMuted,
+      diffAddedLineNumberBg: value.diffAddedLineNumberBg,
+      diffRemovedLineNumberBg: value.diffRemovedLineNumberBg,
+      markdownText: value.fg,
+      markdownHeading: value.fg,
+      markdownLink: value.ansi.blue,
+      markdownLinkText: value.ansi.cyan,
+      markdownCode: value.ansi.green,
+      markdownBlockQuote: value.ansi.yellow,
+      markdownEmph: value.ansi.yellow,
+      markdownStrong: value.fg,
+      markdownHorizontalRule: value.grays[7],
+      markdownListItem: value.ansi.blue,
+      markdownListEnumeration: value.ansi.cyan,
+      markdownImage: value.ansi.blue,
+      markdownImageText: value.ansi.cyan,
+      markdownCodeBlock: value.fg,
+      syntaxComment: value.textMuted,
+      syntaxKeyword: value.ansi.magenta,
+      syntaxFunction: value.ansi.blue,
+      syntaxVariable: value.fg,
+      syntaxString: value.ansi.green,
+      syntaxNumber: value.ansi.yellow,
+      syntaxType: value.ansi.cyan,
+      syntaxOperator: value.ansi.cyan,
+      syntaxPunctuation: value.fg,
+    },
+  }
+}
+
+export function generateSystemV2(colors: TerminalColors): ThemeFile {
+  return {
+    version: 2,
+    light: generateSystemMode(colors, "light"),
+    dark: generateSystemMode(colors, "dark"),
+  }
+}
+
+function generateSystemMode(colors: TerminalColors, mode: Mode): ThemeFile["light"] {
+  const value = resolveSystem(colors, mode)
+  const scale = (color: RGBA) =>
+    Object.fromEntries(HueStep.literals.map((step) => [step, hex(color)])) as Record<HueStep, string>
+
+  return {
+    hue: {
+      gray: neutralScale(value, mode),
+      red: scale(value.ansi.red),
+      orange: scale(value.ansi.yellow),
+      yellow: scale(value.ansi.yellow),
+      green: scale(value.ansi.green),
+      cyan: scale(value.ansi.cyan),
+      blue: scale(value.ansi.blue),
+      purple: scale(value.ansi.magenta),
+      accent: scale(value.ansi.cyan),
+      interactive: scale(value.ansi.cyan),
+      neutral: "$hue.gray",
+    },
+  }
+}
+
+function resolveSystem(colors: TerminalColors, mode: Mode) {
   const bg = RGBA.fromHex(colors.defaultBackground ?? colors.palette[0]!)
   const fg = RGBA.fromHex(colors.defaultForeground ?? colors.palette[7]!)
   const transparent = RGBA.fromValues(bg.r, bg.g, bg.b, 0)
@@ -22,7 +114,7 @@ export function generateSystem(colors: TerminalColors, mode: "dark" | "light") {
 
   const grays = generateGrayScale(bg, isDark)
   const textMuted = generateMutedTextColor(bg, isDark)
-  const ansiColors = {
+  const ansi = {
     red: col(1),
     green: col(2),
     yellow: col(3),
@@ -34,67 +126,24 @@ export function generateSystem(colors: TerminalColors, mode: "dark" | "light") {
   }
 
   const diffAlpha = isDark ? 0.22 : 0.14
-  const diffAddedBg = tint(bg, ansiColors.green, diffAlpha)
-  const diffRemovedBg = tint(bg, ansiColors.red, diffAlpha)
+  const diffAddedBg = tint(bg, ansi.green, diffAlpha)
+  const diffRemovedBg = tint(bg, ansi.red, diffAlpha)
   const diffContextBg = grays[2]
-  const diffAddedLineNumberBg = tint(diffContextBg, ansiColors.green, diffAlpha)
-  const diffRemovedLineNumberBg = tint(diffContextBg, ansiColors.red, diffAlpha)
+  const diffAddedLineNumberBg = tint(diffContextBg, ansi.green, diffAlpha)
+  const diffRemovedLineNumberBg = tint(diffContextBg, ansi.red, diffAlpha)
 
   return {
-    theme: {
-      primary: ansiColors.cyan,
-      secondary: ansiColors.magenta,
-      accent: ansiColors.cyan,
-      error: ansiColors.red,
-      warning: ansiColors.yellow,
-      success: ansiColors.green,
-      info: ansiColors.cyan,
-      text: fg,
-      textMuted,
-      selectedListItemText: bg,
-      background: transparent,
-      backgroundPanel: grays[2],
-      backgroundElement: grays[3],
-      backgroundMenu: grays[3],
-      borderSubtle: grays[6],
-      border: grays[7],
-      borderActive: grays[8],
-      diffAdded: ansiColors.green,
-      diffRemoved: ansiColors.red,
-      diffContext: grays[7],
-      diffHunkHeader: grays[7],
-      diffHighlightAdded: ansiColors.greenBright,
-      diffHighlightRemoved: ansiColors.redBright,
-      diffAddedBg,
-      diffRemovedBg,
-      diffContextBg,
-      diffLineNumber: textMuted,
-      diffAddedLineNumberBg,
-      diffRemovedLineNumberBg,
-      markdownText: fg,
-      markdownHeading: fg,
-      markdownLink: ansiColors.blue,
-      markdownLinkText: ansiColors.cyan,
-      markdownCode: ansiColors.green,
-      markdownBlockQuote: ansiColors.yellow,
-      markdownEmph: ansiColors.yellow,
-      markdownStrong: fg,
-      markdownHorizontalRule: grays[7],
-      markdownListItem: ansiColors.blue,
-      markdownListEnumeration: ansiColors.cyan,
-      markdownImage: ansiColors.blue,
-      markdownImageText: ansiColors.cyan,
-      markdownCodeBlock: fg,
-      syntaxComment: textMuted,
-      syntaxKeyword: ansiColors.magenta,
-      syntaxFunction: ansiColors.blue,
-      syntaxVariable: fg,
-      syntaxString: ansiColors.green,
-      syntaxNumber: ansiColors.yellow,
-      syntaxType: ansiColors.cyan,
-      syntaxOperator: ansiColors.cyan,
-      syntaxPunctuation: fg,
-    },
+    bg,
+    fg,
+    transparent,
+    grays,
+    textMuted,
+    ansi,
+    diffAddedBg,
+    diffRemovedBg,
+    diffContextBg,
+    diffAddedLineNumberBg,
+    diffRemovedLineNumberBg,
   }
 }
 
@@ -141,4 +190,42 @@ function generateMutedTextColor(bg: RGBA, isDark: boolean): RGBA {
 
   const gray = luminance > 245 ? 75 : Math.max(Math.floor(100 - (255 - luminance) * 0.2), 60)
   return RGBA.fromInts(gray, gray, gray)
+}
+
+function neutralScale(value: ReturnType<typeof resolveSystem>, mode: Mode) {
+  const light: { step: HueStep; color: RGBA }[] = [
+    { step: 100, color: value.transparent },
+    { step: 200, color: value.grays[2] },
+    { step: 300, color: value.grays[3] },
+    { step: 700, color: value.textMuted },
+    { step: 900, color: value.fg },
+  ]
+  const anchors =
+    mode === "light"
+      ? light
+      : light.toReversed().map((source) => ({ ...source, step: (1000 - source.step) as HueStep }))
+  return Object.fromEntries(
+    HueStep.literals.map((step) => {
+      const exact = anchors.find((anchor) => anchor.step === step)
+      if (exact) return [step, hex(exact.color)]
+      const lower = anchors.filter((anchor) => anchor.step < step).at(-1)!
+      const upper = anchors.find((anchor) => anchor.step > step)!
+      return [step, interpolate(lower.color, upper.color, (step - lower.step) / (upper.step - lower.step))]
+    }),
+  ) as Record<HueStep, string>
+}
+
+function interpolate(first: RGBA, second: RGBA, amount: number) {
+  const start = first.toInts()
+  const end = second.toInts()
+  return `#${start.map((value, index) => byte(Math.round(value + (end[index]! - value) * amount))).join("")}`
+}
+
+function hex(color: RGBA) {
+  const [red, green, blue, alpha] = color.toInts()
+  return `#${byte(red)}${byte(green)}${byte(blue)}${alpha === 255 ? "" : byte(alpha)}`
+}
+
+function byte(value: number) {
+  return value.toString(16).padStart(2, "0")
 }

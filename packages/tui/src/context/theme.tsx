@@ -16,7 +16,8 @@ import {
   type Theme,
   type ThemeJson,
 } from "../theme"
-import { generateSystem, terminalMode } from "../theme/system"
+import { generateSystem, generateSystemV2, terminalMode } from "../theme/system"
+import type { ThemeFile } from "../theme/v2"
 import { createComponentTheme, type ComponentTheme } from "../theme/v2/component"
 import { resolveThemeFile } from "../theme/v2/resolve"
 import { migrateV1 } from "../theme/v2/v1-migrate"
@@ -78,6 +79,7 @@ const THEME_REFRESH_DELAYS = [250, 1000] as const
 
 type State = {
   themes: Record<string, ThemeJson>
+  systemV2: ThemeFile | undefined
   mode: "dark" | "light"
   lock: "dark" | "light" | undefined
   active: string
@@ -104,6 +106,7 @@ type ThemeService = {
 
 const [store, setStore] = createStore<State>({
   themes: allThemes(),
+  systemV2: undefined,
   mode: "dark",
   lock: undefined,
   active: "opencode",
@@ -181,6 +184,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
         .then((colors: TerminalColors) => {
           if (!colors.palette[0]) {
             if (hasResolvedSystemTheme) return
+            setStore("systemV2", undefined)
             setSystemTheme(undefined)
             if (store.active === "system") setStore("active", "opencode")
             return
@@ -192,10 +196,12 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           if (store.themes.system && systemThemeSignature === signature && systemThemeMode === next) return
           systemThemeSignature = signature
           systemThemeMode = next
+          setStore("systemV2", generateSystemV2(colors))
           setSystemTheme(generateSystem(colors, next))
         })
         .catch(() => {
           if (hasResolvedSystemTheme) return
+          setStore("systemV2", undefined)
           setSystemTheme(undefined)
           if (store.active === "system") setStore("active", "opencode")
         })
@@ -290,7 +296,7 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     const values = createMemo(() => resolveTheme(source(), store.mode))
     const valuesV2 = createMemo(() => {
       const started = performance.now()
-      const file = migrateV1(source())
+      const file = sourceName() === "system" && store.systemV2 ? store.systemV2 : migrateV1(source())
       themePerformance.set("Convert V1 to V2", duration(performance.now() - started))
       const resolveStarted = performance.now()
       const result = resolveThemeFile(file, store.mode, sourceName())
