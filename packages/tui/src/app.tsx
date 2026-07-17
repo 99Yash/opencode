@@ -78,7 +78,7 @@ import open from "open"
 import { PromptRefProvider, usePromptRef } from "./context/prompt"
 import { Config, ConfigProvider, useConfig } from "./config"
 import { createPluginRuntime, PluginRuntimeProvider, usePluginRuntime } from "./plugin/runtime"
-import { PluginProvider, PluginRoute, PluginSlot, usePlugin, type PackageResolver } from "./plugin/context"
+import { PluginProvider, PluginRoute, PluginSlot, usePlugin, type PluginHost } from "./plugin/context"
 import { CommandPaletteDialog } from "./component/command-palette"
 import { COMMAND_PALETTE_COMMAND, Keymap, type KeymapCommand } from "./context/keymap"
 
@@ -149,7 +149,7 @@ export type TuiInput = {
   }
   args: Args
   config: Config.Interface
-  packages: PackageResolver
+  pluginHost: PluginHost
   terminalHandoff?: () => Promise<
     | {
         readonly renderer: CliRenderer
@@ -346,7 +346,7 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                                                             <PromptHistoryProvider>
                                                               <PromptRefProvider>
                                                                 <EditorContextProvider>
-                                                                  <PluginProvider packages={input.packages}>
+                                                                  <PluginProvider pluginHost={input.pluginHost}>
                                                                     <App
                                                                       started={appStarted}
                                                                       pair={

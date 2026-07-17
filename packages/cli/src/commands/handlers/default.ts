@@ -9,6 +9,7 @@ import { ServerConnection } from "../../services/server-connection"
 import { Updater } from "../../services/updater"
 import { UpdatePreflight } from "../../services/update-preflight"
 import { Npm } from "@opencode-ai/core/npm"
+import { createPluginHost } from "../../plugin-host"
 
 export default Runtime.handler(Commands, (input) =>
   Effect.gen(function* () {
@@ -59,10 +60,9 @@ export default Runtime.handler(Commands, (input) =>
         get: () => runPromise(config.get()),
         update: (update) => runPromise(config.update(update)),
       },
-      packages: {
-        resolve: (spec) =>
-          runPromise(npm.add(spec, { subpaths: ["tui"] }).pipe(Effect.map((result) => result.entrypoint))),
-      },
+      pluginHost: createPluginHost((spec) =>
+        runPromise(npm.add(spec, { subpaths: ["tui"] }).pipe(Effect.map((result) => result.entrypoint))),
+      ),
       terminalHandoff: () => preflight.finish(),
       log: (level, message, tags) => {
         const effect =

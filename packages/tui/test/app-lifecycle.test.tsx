@@ -30,7 +30,7 @@ test("SIGHUP clears title and disposes scoped resources once", async () => {
       run({
         server: { endpoint: { url: server.url.toString() } },
         config: { get: async () => ({}), update: async () => ({}) },
-        packages: { resolve: async () => undefined },
+        pluginHost: { load: async () => undefined },
         args: {},
         log: () => {},
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
@@ -102,7 +102,7 @@ test("session lifecycle updates the terminal title and prints the epilogue after
       run({
         server: { endpoint: { url: server.url.toString() } },
         config: { get: async () => ({}), update: async () => ({}) },
-        packages: { resolve: async () => undefined },
+        pluginHost: { load: async () => undefined },
         args: { sessionID: "dummy" },
         log: () => {},
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),

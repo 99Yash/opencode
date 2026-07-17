@@ -34,6 +34,7 @@
     "./prompt/content": "./src/prompt/content.ts",
     "./prompt/display": "./src/prompt/display.ts",
     "./plugin/runtime": "./src/plugin/runtime.tsx",
+    "./plugin/context": "./src/plugin/context.tsx",
     "./plugin/slots": "./src/plugin/slots.tsx",
     "./plugin/command-shim": "./src/plugin/command-shim.ts",
     "./parsers-config": "./src/parsers-config.ts",

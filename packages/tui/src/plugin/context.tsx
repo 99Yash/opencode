@@ -11,8 +11,6 @@ import {
   type ParentProps,
 } from "solid-js"
 import path from "path"
-import { stat } from "fs/promises"
-import { fileURLToPath, pathToFileURL } from "url"
 import type { Context, Page, Slot } from "@opencode-ai/plugin/v2/tui/context"
 import { createStore, produce, reconcile as reconcileStore } from "solid-js/store"
 import { useConfig } from "../config"
@@ -24,8 +22,8 @@ import { useTuiLifecycle } from "../context/runtime"
 import { useLocation } from "../context/location"
 import { builtins } from "./builtins"
 
-export interface PackageResolver {
-  readonly resolve: (spec: string) => Promise<string | undefined>
+export interface PluginHost {
+  readonly load: (spec: string, directory: string) => Promise<Plugin.Definition | undefined>
 }
 
 type State =
@@ -56,7 +54,7 @@ type Registration = {
 
 const PluginContext = createContext<Value>()
 
-export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>) {
+export function PluginProvider(props: ParentProps<{ pluginHost: PluginHost }>) {
   const client = useClient()
   const data = useData()
   const route = useRoute()
@@ -231,7 +229,7 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
 
       const options = typeof entry === "string" ? undefined : entry.options
       setStore("states", (items) => [...items, { target, status: "loading" }])
-      const plugin = await loadPlugin(target, directory, props.packages).catch((error) => {
+      const plugin = await props.pluginHost.load(target, directory).catch((error) => {
         setStore("states", (items) =>
           items.map((state) =>
             state.target === target
@@ -331,46 +329,6 @@ async function setup(plugin: Plugin.Definition, context: Plugin.Context, owned: 
 
 function matches(selector: string, id: string) {
   return selector === "*" || selector === id || (selector.endsWith(".*") && id.startsWith(selector.slice(0, -1)))
-}
-
-async function loadPlugin(spec: string, directory: string, packages: PackageResolver) {
-  const local = spec.startsWith("file://")
-    ? new URL(spec)
-    : spec.startsWith("./") || spec.startsWith("../") || path.isAbsolute(spec)
-      ? pathToFileURL(path.resolve(directory, spec))
-      : undefined
-  const entrypoint = local ? await resolveLocal(local) : await packages.resolve(spec)
-  if (!entrypoint) return
-  const mod: { readonly default?: unknown } = await import(entrypoint)
-  if (!isPlugin(mod.default)) throw new Error(`Invalid V2 TUI plugin module: ${spec}`)
-  return mod.default
-}
-
-async function resolveLocal(url: URL) {
-  const info = await stat(url)
-  if (info.isFile()) return url.href
-  if (!info.isDirectory()) return
-  return resolve(pathToFileURL(path.join(fileURLToPath(url), "tui")).href)
-}
-
-function resolve(specifier: string) {
-  try {
-    return import.meta.resolve(specifier)
-  } catch {
-    return undefined
-  }
-}
-
-function isPlugin(value: unknown): value is Plugin.Definition {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    typeof value.id === "string" &&
-    value.id.length > 0 &&
-    "setup" in value &&
-    typeof value.setup === "function"
-  )
 }
 
 export function usePlugin() {
