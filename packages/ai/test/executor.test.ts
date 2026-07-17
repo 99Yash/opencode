@@ -121,6 +121,7 @@ describe("RequestExecutor", () => {
       yield* classify("Request rate increased too quickly")
       yield* classify('{"type":"error","error":{"type":"too_many_requests"}}')
       yield* classify('{"type":"error","error":{"code":"rate_limit_exceeded"}}')
+      yield* classify('{"code":"resource_exhausted"}')
     }),
   )
 
@@ -135,7 +136,6 @@ describe("RequestExecutor", () => {
           expect(error.reason).toMatchObject({ _tag: "ProviderInternal" })
         }).pipe(Effect.provide(responsesLayer([new Response(body, { status: 400 })])))
 
-      yield* classify('{"code":"resource_exhausted"}')
       yield* classify('{"code":"service_unavailable"}')
     }),
   )

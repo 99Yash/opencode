@@ -47,6 +47,7 @@ import {
   type UsageInput,
 } from "@opencode-ai/ai"
 import { Auth, Endpoint, type AnyRoute } from "@opencode-ai/ai/route"
+import { BedrockEventStream } from "@opencode-ai/ai/protocols/bedrock-event-stream"
 import { Cause, Context, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
 import { ModelV2 } from "./model"
 import { ProviderV2 } from "./provider"
@@ -172,8 +173,9 @@ function prepareOptions(model: ModelV2.Info, pkg: string) {
       ...opts,
       timeout: false,
     })
-    if (!chunkAbortCtl || typeof chunkTimeout !== "number") return res
-    return wrapSSE(res, chunkTimeout, chunkAbortCtl)
+    const response = pkg === "@ai-sdk/amazon-bedrock" ? BedrockEventStream.monitorExceptions(res) : res
+    if (!chunkAbortCtl || typeof chunkTimeout !== "number") return response
+    return wrapSSE(response, chunkTimeout, chunkAbortCtl)
   }
 
   return options
@@ -739,10 +741,12 @@ function llmError(method: string, error: unknown) {
   const cause = error instanceof Error ? error.cause : undefined
   const failures = [error, cause]
   const code = failures.map(machineCode).find((value) => value !== undefined)
+  const providerCode = apiFailureCode(error)?.toLowerCase()
   const reason = (() => {
     if (
       error instanceof ChunkTimeoutError ||
       failures.some((failure) => failure instanceof Error && failure.name === "TimeoutError") ||
+      providerCode === "timeout_error" ||
       (code !== undefined && TRANSPORT_TIMEOUT_CODES.has(code))
     )
       return new TransportReason({ message: errorMessage(error), kind: code ?? "Timeout" })
@@ -751,8 +755,7 @@ function llmError(method: string, error: unknown) {
       return new TransportReason({ message: errorMessage(error), kind: code })
     const malformed = failures.find(isMalformedError)
     if (malformed) return new InvalidProviderOutputReason({ message: malformed.message })
-    if (LoadAPIKeyError.isInstance(error))
-      return new AuthenticationReason({ message: error.message, kind: "missing" })
+    if (LoadAPIKeyError.isInstance(error)) return new AuthenticationReason({ message: error.message, kind: "missing" })
     if (NoSuchModelError.isInstance(error)) return new InvalidRequestReason({ message: error.message })
     if (
       LoadSettingError.isInstance(error) ||
@@ -780,12 +783,13 @@ function apiCallReason(error: APICallError) {
   const malformed = isMalformedError(error.cause) ? error.cause : undefined
   if (error.statusCode !== undefined && error.statusCode < 400 && malformed)
     return new InvalidProviderOutputReason({ message: malformed.message })
-  const code = apiFailureCode(error.data) ?? apiFailureCode(error.responseBody)
+  const evidence = apiFailureEvidence(error.responseBody)
+  const code = apiFailureCode(error.data) ?? apiFailureCode(evidence)
   if (error.statusCode === undefined) {
     const reason =
-      code === undefined && error.responseBody === undefined
+      code === undefined && evidence === undefined
         ? undefined
-        : classifyProviderFailure({ message: error.message, code, evidence: error.responseBody })
+        : classifyProviderFailure({ message: error.message, code, evidence })
     if (reason && reason._tag !== "UnknownProvider") return reason
     if (error.isRetryable) return new TransportReason({ message: error.message })
     return reason ?? new UnknownProviderReason({ message: error.message })
@@ -793,16 +797,13 @@ function apiCallReason(error: APICallError) {
   const retryAfter = retryAfterMs(error.responseHeaders)
   const reason = classifyProviderFailure({
     message: error.message,
-    evidence: error.responseBody,
+    evidence,
     status: error.statusCode,
     code,
     retryAfterMs: retryAfter,
   })
   if (!error.isRetryable || (reason._tag !== "UnknownProvider" && reason._tag !== "InvalidRequest")) return reason
-  if (
-    classifyProviderFailure({ message: error.message, evidence: error.responseBody, code })._tag !== "UnknownProvider"
-  )
-    return reason
+  if (classifyProviderFailure({ message: error.message, evidence, code })._tag !== "UnknownProvider") return reason
   return new ProviderInternalReason({ message: error.message, status: error.statusCode, retryAfterMs: retryAfter })
 }
 
@@ -825,6 +826,7 @@ const TRANSPORT_CONNECTION_CODES = new Set([
   "FAILEDTOOPENSOCKET",
   "UND_ERR_SOCKET",
 ])
+const FAILURE_EVIDENCE_LIMIT = 65_536
 
 function field(error: unknown, name: string) {
   return typeof error === "object" && error !== null ? Reflect.get(error, name) : undefined
@@ -843,6 +845,8 @@ function apiFailureCode(error: unknown): string | undefined {
   const nested = field(error, "error") ?? field(field(error, "response"), "error")
   const nestedCode = nested === undefined || nested === error ? undefined : apiFailureCode(nested)
   if (nestedCode) return nestedCode
+  if (typeof field(error, "originalMessage") === "string" && typeof field(error, "originalStatusCode") === "number")
+    return "modelstreamerrorexception"
   const code = field(error, "code")
   if (typeof code === "string" || typeof code === "number") return String(code)
   const status = field(error, "status")
@@ -854,19 +858,27 @@ function apiFailureCode(error: unknown): string | undefined {
 function apiFailureMessage(error: unknown): string {
   const message = field(error, "message")
   if (typeof message === "string") return message
+  const originalMessage = field(error, "originalMessage")
+  if (typeof originalMessage === "string") return originalMessage
   const nested = field(error, "error") ?? field(field(error, "response"), "error")
   return nested === undefined || nested === error ? String(error) : apiFailureMessage(nested)
 }
 
 function apiFailureStatus(error: unknown): number | undefined {
   const status = field(error, "status")
+  const statusCode = field(error, "statusCode")
+  const originalStatusCode = field(error, "originalStatusCode")
   const code = field(error, "code")
-  const value = [status, code]
+  const value = [status, statusCode, originalStatusCode, code]
     .map((value) => (typeof value === "number" ? value : typeof value === "string" ? Number(value) : undefined))
     .find((value) => value !== undefined && Number.isInteger(value) && value >= 400 && value < 600)
   if (value !== undefined) return value
   const nested = field(error, "error") ?? field(field(error, "response"), "error")
   return nested === undefined || nested === error ? undefined : apiFailureStatus(nested)
+}
+
+function apiFailureEvidence(error: string | undefined) {
+  return error === undefined ? undefined : error.slice(0, FAILURE_EVIDENCE_LIMIT)
 }
 
 function retryAfterMs(headers: Record<string, string> | undefined) {

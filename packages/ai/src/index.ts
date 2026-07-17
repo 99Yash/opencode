@@ -3,6 +3,7 @@ export { Auth } from "./route/auth"
 export { Provider } from "./provider"
 export { ProviderPackage } from "./provider-package"
 export { classifyProviderFailure, isContextOverflow, isContextOverflowFailure } from "./provider-error"
+export type { ProviderFailure } from "./provider-error"
 export type {
   RouteModelInput,
   RouteRoutedModelInput,

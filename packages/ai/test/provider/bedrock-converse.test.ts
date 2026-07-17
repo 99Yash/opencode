@@ -6,6 +6,7 @@ import { CacheHint, LLM, Message, ToolCallPart, ToolChoice } from "../../src"
 import { LLMClient } from "../../src/route"
 import { AmazonBedrock } from "../../src/providers"
 import * as BedrockConverse from "../../src/protocols/bedrock-converse"
+import { BedrockEventStream } from "../../src/protocols/bedrock-event-stream"
 import { it } from "../lib/effect"
 import { fixedResponse } from "../lib/http"
 import {
@@ -34,6 +35,16 @@ const eventFrame = (type: string, payload: object) =>
     body: utf8Encoder.encode(JSON.stringify(payload)),
   })
 
+const exceptionFrame = (type: string, payload: object) =>
+  codec.encode({
+    headers: {
+      ":message-type": { type: "string", value: "exception" },
+      ":exception-type": { type: "string", value: type },
+      ":content-type": { type: "string", value: "application/json" },
+    },
+    body: utf8Encoder.encode(JSON.stringify(payload)),
+  })
+
 const concat = (frames: ReadonlyArray<Uint8Array>) => {
   const total = frames.reduce((sum, frame) => sum + frame.length, 0)
   const out = new Uint8Array(total)
@@ -47,6 +58,8 @@ const concat = (frames: ReadonlyArray<Uint8Array>) => {
 
 const eventStreamBody = (...payloads: ReadonlyArray<readonly [string, object]>) =>
   concat(payloads.map(([type, payload]) => eventFrame(type, payload)))
+
+const exceptionStreamBody = (type: string, payload: object) => exceptionFrame(type, payload)
 
 // Override the default SSE content-type with the binary event-stream type so
 // the cassette layer treats the body as bytes when recording.
@@ -357,10 +370,10 @@ describe("Bedrock Converse route", () => {
 
   it.effect("classifies throttlingException as a rate limit", () =>
     Effect.gen(function* () {
-      const body = eventStreamBody(
-        ["messageStart", { role: "assistant" }],
-        ["throttlingException", { message: "Slow down" }],
-      )
+      const body = concat([
+        eventStreamBody(["messageStart", { role: "assistant" }]),
+        exceptionStreamBody("throttlingException", { message: "Slow down" }),
+      ])
       const error = yield* LLMClient.generate(baseRequest).pipe(Effect.provide(fixedBytes(body)), Effect.flip)
 
       expect(error.reason).toMatchObject({ _tag: "RateLimit", message: "Slow down" })
@@ -371,7 +384,7 @@ describe("Bedrock Converse route", () => {
     Effect.gen(function* () {
       const error = yield* LLMClient.generate(baseRequest).pipe(
         Effect.provide(
-          fixedBytes(eventStreamBody(["validationException", { message: "Input is too long for requested model" }])),
+          fixedBytes(exceptionStreamBody("validationException", { message: "Input is too long for requested model" })),
         ),
         Effect.flip,
       )
@@ -381,6 +394,35 @@ describe("Bedrock Converse route", () => {
         message: "Input is too long for requested model",
         classification: "context-overflow",
       })
+    }),
+  )
+
+  it.effect("fails monitored AI SDK bodies on exception wire frames", () =>
+    Effect.gen(function* () {
+      const response = BedrockEventStream.monitorExceptions(
+        new Response(exceptionStreamBody("throttlingException", { message: "Slow down" }), {
+          headers: { "content-type": "application/vnd.amazon.eventstream" },
+        }),
+      )
+      const error = yield* Effect.tryPromise({
+        try: () => response.arrayBuffer(),
+        catch: (error) => error,
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ code: "throttlingException", message: "Slow down" })
+    }),
+  )
+
+  it.effect("classifies serviceUnavailableException wire frames as provider failures", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.generate(baseRequest).pipe(
+        Effect.provide(
+          fixedBytes(exceptionStreamBody("serviceUnavailableException", { message: "Service unavailable" })),
+        ),
+        Effect.flip,
+      )
+
+      expect(error.reason).toMatchObject({ _tag: "ProviderInternal", message: "Service unavailable" })
     }),
   )
 

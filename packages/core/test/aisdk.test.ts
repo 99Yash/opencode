@@ -492,11 +492,52 @@ it.effect("classifies structured AI SDK stream errors", () =>
   }),
 )
 
-it.effect("classifies structured stream messages without codes", () =>
+it.effect("classifies AI Gateway errors with statusCode", () =>
   Effect.gen(function* () {
     const error = yield* streamFailure(
-      streamingLanguage({ type: "error", error: { message: "Rate limit exceeded" } }),
+      streamingLanguage({
+        type: "error",
+        error: { type: "internal_server_error", message: "Gateway failed", statusCode: 503 },
+      }),
     )
+
+    expect(error).toMatchObject({ reason: { _tag: "ProviderInternal", status: 503 } })
+  }),
+)
+
+it.effect("classifies AI Gateway timeouts as retryable", () =>
+  Effect.gen(function* () {
+    const error = yield* streamFailure(
+      streamingLanguage({
+        type: "error",
+        error: { type: "timeout_error", message: "Gateway timed out", statusCode: 408 },
+      }),
+    )
+
+    expect(error).toMatchObject({ reason: { _tag: "Transport", kind: "Timeout" } })
+  }),
+)
+
+it.effect("classifies stripped Bedrock model stream errors", () =>
+  Effect.gen(function* () {
+    const error = yield* streamFailure(
+      streamingLanguage({
+        type: "error",
+        error: {
+          message: "The model stream failed",
+          originalMessage: "Upstream provider failed",
+          originalStatusCode: 424,
+        },
+      }),
+    )
+
+    expect(error).toMatchObject({ reason: { _tag: "ProviderInternal", status: 424 } })
+  }),
+)
+
+it.effect("classifies structured stream messages without codes", () =>
+  Effect.gen(function* () {
+    const error = yield* streamFailure(streamingLanguage({ type: "error", error: { message: "Rate limit exceeded" } }))
 
     expect(error).toMatchObject({ reason: { _tag: "RateLimit" } })
   }),
@@ -528,11 +569,81 @@ it.effect("classifies numeric string stream statuses", () =>
   }),
 )
 
+it.effect("classifies readable stream failures", () =>
+  Effect.gen(function* () {
+    const error = yield* streamFailure({
+      ...failingLanguage(new Error("unused")),
+      doStream: async () => ({
+        stream: new ReadableStream<LanguageModelV3StreamPart>({
+          start(controller) {
+            controller.error(Object.assign(new Error("connection reset"), { code: "ECONNRESET" }))
+          },
+        }),
+        request: { body: {} },
+      }),
+    })
+
+    expect(error).toMatchObject({ method: "readStream", reason: { _tag: "Transport", kind: "ECONNRESET" } })
+  }),
+)
+
+it.live("times out stalled SSE chunks", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() =>
+      Bun.serve({
+        port: 0,
+        fetch: () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode(": connected\n\n"))
+              },
+            }),
+            { headers: { "content-type": "text/event-stream" } },
+          ),
+      }),
+    ),
+    (server) =>
+      Effect.gen(function* () {
+        const aisdk = yield* AISDK.Service
+        let wrappedFetch: typeof fetch | undefined
+        yield* aisdk.hook.sdk((event) => {
+          wrappedFetch = event.options.fetch
+          event.sdk = {}
+        })
+        yield* aisdk.hook.language((event) => {
+          event.language = {
+            ...failingLanguage(new Error("unused")),
+            doStream: async () => {
+              const fetcher = wrappedFetch
+              if (!fetcher) throw new Error("AI SDK fetch was not configured")
+              const response = await fetcher(server.url, { method: "POST" })
+              if (!response.body) throw new Error("AI SDK response body was missing")
+              return {
+                stream: response.body.pipeThrough(
+                  new TransformStream<Uint8Array, LanguageModelV3StreamPart>({ transform() {} }),
+                ),
+                request: { body: {} },
+              }
+            },
+          }
+        })
+        const resolved = yield* aisdk.model(model("@ai-sdk/openai", { chunkTimeout: 10 }))
+        const request = LLM.request({ model: resolved, prompt: "Hello" })
+        const prepared = yield* LLMClient.prepare<LanguageModelV3CallOptions>(request)
+        const error = yield* resolved.route
+          .streamPrepared(prepared.body, request, { http: { execute: () => Effect.die("unused") } })
+          .pipe(Stream.runDrain, Effect.flip)
+
+        expect(error).toMatchObject({ method: "readStream", reason: { _tag: "Transport", kind: "Timeout" } })
+      }),
+    (server) => Effect.promise(() => server.stop(true)),
+  ),
+)
+
 it.effect("classifies missing AI SDK API keys", () =>
   Effect.gen(function* () {
-    const error = yield* streamFailure(
-      failingLanguage(new LoadAPIKeyError({ message: "API key is missing" })),
-    )
+    const error = yield* streamFailure(failingLanguage(new LoadAPIKeyError({ message: "API key is missing" })))
 
     expect(error).toMatchObject({ reason: { _tag: "Authentication", kind: "missing" } })
   }),

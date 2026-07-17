@@ -46,26 +46,40 @@ export const isContextOverflowFailure = (failure: unknown) =>
     : Schema.is(ProviderErrorEvent)(failure) && failure.classification === "context-overflow"
 
 const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
+const CONTENT_POLICY_CODES = new Set(["content_filter", "content_policy_violation", "safety"])
 const QUOTA_CODES = new Set(["insufficient_quota", "usage_not_included", "billing_error"])
+const RATE_LIMIT_CODES = new Set(["resource_exhausted", "throttlingexception", "too_many_requests"])
 const SERVER_CODES = new Set([
   "api_error",
+  "internal",
   "internal_error",
+  "internal_server_error",
   "internalserverexception",
   "modelstreamerrorexception",
+  "modeltimeoutexception",
   "overloaded_error",
+  "response_error",
   "server_error",
   "server_is_overloaded",
   "serviceunavailableexception",
 ])
 const INVALID_REQUEST_CODES = new Set([
+  "invalid_argument",
   "invalid_prompt",
   "invalid_request_error",
+  "model_not_found",
+  "not_found",
+  "not_found_error",
+  "resourcenotfoundexception",
   "request_too_large",
   "validationexception",
 ])
-const RATE_LIMIT_TEXT = /rate increased too quickly|rate[-_\s]?limit|too[_\s]?many[_\s]?requests/i
+const RATE_LIMIT_TEXT = /rate increased too quickly|rate[-_\s]?limit|throttl|too[_\s]?many[_\s]?requests/i
 const QUOTA_TEXT = /insufficient[-_\s]?quota|quota[-_\s]?exceeded/i
-const CONTENT_POLICY_TEXT = /content[-_\s]?policy|content_filter|safety/i
+const CONTENT_POLICY_TEXT =
+  /content[-_\s]?(?:filter|policy)|safety (?:filter|policy|rating)|blocked (?:by|due to) safety/i
+const INVALID_REQUEST_TEXT = /validation (?:error|exception)/i
+const SERVER_TEXT = /internal server error|service unavailable/i
 
 export interface ProviderFailure {
   readonly message: string
@@ -98,7 +112,8 @@ export function classifyProviderFailure(input: ProviderFailure): LLMError["reaso
       texts.some(isContextOverflow))
   )
     return new InvalidRequestReason({ ...common, classification: "context-overflow" })
-  if (texts.some((text) => CONTENT_POLICY_TEXT.test(text))) return new ContentPolicyReason(common)
+  if (codes.some((code) => CONTENT_POLICY_CODES.has(code)) || texts.some((text) => CONTENT_POLICY_TEXT.test(text)))
+    return new ContentPolicyReason(common)
   if (
     codes.some((code) => QUOTA_CODES.has(code)) ||
     (input.status === 429 && texts.some((text) => QUOTA_TEXT.test(text)))
@@ -106,12 +121,15 @@ export function classifyProviderFailure(input: ProviderFailure): LLMError["reaso
     return new QuotaExceededReason(common)
   if (input.status === 401) return new AuthenticationReason({ ...common, kind: "invalid" })
   if (input.status === 403) return new AuthenticationReason({ ...common, kind: "insufficient-permissions" })
-  if (codes.includes("authentication_error")) return new AuthenticationReason({ ...common, kind: "invalid" })
-  if (codes.includes("permission_error"))
-    return new AuthenticationReason({ ...common, kind: "insufficient-permissions" })
+  if (codes.some((code) => code === "authentication_error" || code === "unauthenticated"))
+    return new AuthenticationReason({ ...common, kind: "invalid" })
   if (
-    codes.some((code) => code.includes("rate_limit") || code === "too_many_requests" || code === "throttlingexception")
+    codes.some(
+      (code) => code === "accessdeniedexception" || code === "permission_error" || code === "permission_denied",
+    )
   )
+    return new AuthenticationReason({ ...common, kind: "insufficient-permissions" })
+  if (codes.some((code) => code.includes("rate_limit") || RATE_LIMIT_CODES.has(code)))
     return new RateLimitReason({
       ...common,
       retryAfterMs: input.retryAfterMs,
@@ -123,8 +141,12 @@ export function classifyProviderFailure(input: ProviderFailure): LLMError["reaso
       retryAfterMs: input.retryAfterMs,
       rateLimit: input.rateLimit,
     })
-  if (codes.some((code) => INVALID_REQUEST_CODES.has(code))) return new InvalidRequestReason(common)
-  if (codes.some((code) => SERVER_CODES.has(code) || code.includes("exhausted") || code.includes("unavailable")))
+  if (codes.some((code) => INVALID_REQUEST_CODES.has(code)) || texts.some((text) => INVALID_REQUEST_TEXT.test(text)))
+    return new InvalidRequestReason(common)
+  if (
+    codes.some((code) => SERVER_CODES.has(code) || code.includes("unavailable")) ||
+    texts.some((text) => SERVER_TEXT.test(text))
+  )
     return new ProviderInternalReason({
       ...common,
       status: input.status,
@@ -160,8 +182,15 @@ function providerCodes(value: string) {
   const error = isRecord(decoded.error) ? decoded.error : undefined
   const response = isRecord(decoded.response) ? decoded.response : undefined
   const responseError = isRecord(response?.error) ? response.error : undefined
-  return [decoded.code, decoded.status, error?.code, error?.type, error?.status, responseError?.code, responseError?.type]
-    .filter((value): value is string => typeof value === "string")
+  return [
+    decoded.code,
+    decoded.status,
+    error?.code,
+    error?.type,
+    error?.status,
+    responseError?.code,
+    responseError?.type,
+  ].filter((value): value is string => typeof value === "string")
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

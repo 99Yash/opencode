@@ -26,6 +26,14 @@ describe("provider error classification", () => {
     )
   })
 
+  test("does not treat incidental safety text as a content-policy failure", () => {
+    expect(classifyProviderFailure({ message: "Internal safety check failed", status: 500 })._tag).toBe(
+      "ProviderInternal",
+    )
+    expect(classifyProviderFailure({ message: "Blocked by safety policy", status: 400 })._tag).toBe("ContentPolicy")
+    expect(classifyProviderFailure({ message: "Blocked", status: 400, code: "SAFETY" })._tag).toBe("ContentPolicy")
+  })
+
   test("classifies V1 plain-text rate limit fallbacks", () => {
     expect(
       [
@@ -47,12 +55,48 @@ describe("provider error classification", () => {
     ).toEqual(["RateLimit", "RateLimit", "RateLimit", "RateLimit"])
   })
 
-  test("classifies V1 overloaded provider codes", () => {
+  test("classifies canonical provider retry codes", () => {
     expect(
       ['{"code":"resource_exhausted"}', '{"code":"service_unavailable"}'].map(
         (message) => classifyProviderFailure({ message })._tag,
       ),
-    ).toEqual(["ProviderInternal", "ProviderInternal"])
+    ).toEqual(["RateLimit", "ProviderInternal"])
+  })
+
+  test("keeps temporary per-minute quota wording retryable", () => {
+    expect(classifyProviderFailure({ message: "You exceeded your per-minute quota", status: 429 })._tag).toBe(
+      "RateLimit",
+    )
+  })
+
+  test("classifies canonical Google error codes", () => {
+    expect(
+      ["UNAUTHENTICATED", "PERMISSION_DENIED", "INVALID_ARGUMENT", "NOT_FOUND", "INTERNAL"].map(
+        (code) => classifyProviderFailure({ message: "Provider failed", code })._tag,
+      ),
+    ).toEqual(["Authentication", "Authentication", "InvalidRequest", "InvalidRequest", "ProviderInternal"])
+  })
+
+  test("classifies stripped Bedrock stream errors from their messages", () => {
+    expect(
+      ["Internal server error", "Throttling exception", "Validation error: invalid input"].map(
+        (message) => classifyProviderFailure({ message })._tag,
+      ),
+    ).toEqual(["ProviderInternal", "RateLimit", "InvalidRequest"])
+  })
+
+  test("classifies documented Bedrock exception codes", () => {
+    expect(
+      ["accessDeniedException", "modelTimeoutException", "resourceNotFoundException"].map(
+        (code) => classifyProviderFailure({ message: "Bedrock failed", code })._tag,
+      ),
+    ).toEqual(["Authentication", "ProviderInternal", "InvalidRequest"])
+  })
+
+  test("classifies Anthropic not-found stream errors as invalid requests", () => {
+    expect(classifyProviderFailure({ message: "Model unavailable", code: "not_found_error" })._tag).toBe(
+      "InvalidRequest",
+    )
   })
 
   test("classifies nested provider codes when a top-level code is also present", () => {

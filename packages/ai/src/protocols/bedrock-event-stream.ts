@@ -1,6 +1,6 @@
 import { EventStreamCodec } from "@smithy/eventstream-codec"
 import { fromUtf8, toUtf8 } from "@smithy/util-utf8"
-import { Effect, Stream } from "effect"
+import { Effect, Option, Schema, Stream } from "effect"
 import { Framing } from "../route/framing"
 import { ProviderShared } from "./shared"
 
@@ -53,8 +53,13 @@ const consumeFrames = (route: string) => (state: FrameBufferState, chunk: Uint8A
       })
       cursor = { buffer: cursor.buffer, offset: cursor.offset + totalLength }
 
-      if (decoded.headers[":message-type"]?.value !== "event") continue
-      const eventType = decoded.headers[":event-type"]?.value
+      const messageType = decoded.headers[":message-type"]?.value
+      const eventType =
+        messageType === "event"
+          ? decoded.headers[":event-type"]?.value
+          : messageType === "exception"
+            ? decoded.headers[":exception-type"]?.value
+            : undefined
       if (typeof eventType !== "string") continue
       const payload = utf8.decode(decoded.body)
       if (!payload) continue
@@ -83,5 +88,53 @@ export const framing = (route: string): Framing.Definition<object> => ({
   id: "aws-event-stream",
   frame: (bytes) => bytes.pipe(Stream.mapAccumEffect(() => initialFrameBuffer, consumeFrames(route))),
 })
+
+class StreamExceptionError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
+    super(message)
+  }
+}
+
+// The AI SDK Bedrock decoder ignores AWS exception frames before its language
+// model stream can expose them. Fail the byte stream first so the shared AI SDK
+// adapter can classify the transport error instead of accepting a false finish.
+export function monitorExceptions(response: Response) {
+  if (!response.body || !response.headers.get("content-type")?.includes("application/vnd.amazon.eventstream"))
+    return response
+  let state = initialFrameBuffer
+  const body = response.body.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        state = appendChunk(state, chunk)
+        while (state.buffer.length - state.offset >= 4) {
+          const view = state.buffer.subarray(state.offset)
+          const totalLength = new DataView(view.buffer, view.byteOffset, view.byteLength).getUint32(0, false)
+          if (view.length < totalLength) break
+          const decoded = eventCodec.decode(view.subarray(0, totalLength))
+          state = { buffer: state.buffer, offset: state.offset + totalLength }
+          const exceptionType = decoded.headers[":exception-type"]?.value
+          if (decoded.headers[":message-type"]?.value === "exception" && typeof exceptionType === "string") {
+            const payload = Option.getOrUndefined(
+              Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(utf8.decode(decoded.body)),
+            )
+            const message =
+              ProviderShared.isRecord(payload) && typeof payload.message === "string" ? payload.message : undefined
+            controller.error(new StreamExceptionError(message ?? `Bedrock ${exceptionType}`, exceptionType))
+            return
+          }
+        }
+        controller.enqueue(chunk)
+      },
+    }),
+  )
+  return new Response(body, {
+    headers: new Headers(response.headers),
+    status: response.status,
+    statusText: response.statusText,
+  })
+}
 
 export * as BedrockEventStream from "./bedrock-event-stream"
