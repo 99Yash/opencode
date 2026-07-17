@@ -1,6 +1,6 @@
 export * as SessionRunnerLLM from "./llm"
 
-import { LLMClient, LLMError, LLMEvent, isContextOverflowFailure, type ProviderErrorEvent } from "@opencode-ai/ai"
+import { LLMError, LLMEvent, isContextOverflowFailure, type ProviderErrorEvent } from "@opencode-ai/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
 import { Cause, Effect, Exit, Fiber, FiberSet, Layer, Option, Semaphore, Stream } from "effect"
 import { Database } from "../../database/database"
@@ -14,6 +14,7 @@ import { SessionContext } from "../context"
 import { SessionEvent } from "../event"
 import { SessionPending } from "../pending"
 import { SessionModelRequest } from "../model-request"
+import { SessionModelStream } from "../model-stream"
 import { SessionMessage } from "../message"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
@@ -22,7 +23,6 @@ import { Service } from "./index"
 import { createLLMEventPublisher } from "./publish-llm-event"
 import { Snapshot } from "../../snapshot"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { llmClient } from "../../effect/app-node-platform"
 import { StepFailedError } from "../error"
 import { toSessionError } from "../to-session-error"
 import { SessionRunnerRetry } from "./retry"
@@ -32,7 +32,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
-    const llm = yield* LLMClient.Service
+    const llm = yield* SessionModelStream.Service
     const store = yield* SessionStore.Service
     const context = yield* SessionContext.Service
     const modelRequests = yield* SessionModelRequest.Service
@@ -132,7 +132,9 @@ const layer = Layer.effect(
       const serialized = <A, E, R>(effect: Effect.Effect<A, E, R>) => publication.withPermit(effect)
       const publish = (event: LLMEvent, error?: SessionError.Error) => serialized(publisher.publish(event, error))
       let overflowFailure: ProviderErrorEvent | undefined
-      const providerStream = llm.stream(prepared.request).pipe(
+      const providerStream = llm
+        .stream({ sessionID: session.id, agent: agent.id, model: resolved.ref, request: prepared.request })
+        .pipe(
         Stream.runForEach((event) =>
           Effect.gen(function* () {
             if (overflowFailure || publisher.hasProviderError()) return
@@ -493,7 +495,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     EventV2.node,
-    llmClient,
+    SessionModelStream.node,
     SessionContext.node,
     SessionModelRequest.node,
     SessionStore.node,

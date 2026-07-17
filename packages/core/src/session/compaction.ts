@@ -1,16 +1,18 @@
 export * as SessionCompaction from "./compaction"
 
-import { LLM, LLMClient, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@opencode-ai/ai"
+import { LLM, LLMEvent, Message, type LLMRequest } from "@opencode-ai/ai"
+import type { Agent } from "@opencode-ai/schema/agent"
+import type { Model } from "@opencode-ai/schema/model"
 import { SessionError } from "@opencode-ai/schema/session-error"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Config } from "../config"
 import { EventV2 } from "../event"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { llmClient } from "../effect/app-node-platform"
+import { Client } from "@opencode-ai/util/client"
 import { SessionEvent } from "./event"
 import type { SessionMessage } from "./message"
 import { SessionModelHeaders } from "./model-headers"
-import { Client } from "@opencode-ai/util/client"
+import { SessionModelStream } from "./model-stream"
 import { SessionRunnerModel } from "./runner/model"
 import { SessionSchema } from "./schema"
 import { toSessionError } from "./to-session-error"
@@ -63,9 +65,7 @@ type Settings = {
 type Dependencies = {
   readonly client: string
   readonly events: EventV2.Interface
-  readonly llm: {
-    readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
-  }
+  readonly llm: SessionModelStream.Interface
   readonly models: SessionRunnerModel.Interface
   readonly config: Settings
 }
@@ -73,7 +73,9 @@ type Dependencies = {
 export type AutoInput = {
   readonly session: SessionSchema.Info
   readonly messages: readonly SessionMessage.Info[]
-  readonly model: Model
+  readonly model: LLMRequest["model"]
+  readonly agent: Agent.ID
+  readonly modelRef: Model.Ref
   readonly cost: ModelV2.Info["cost"]
 }
 
@@ -81,11 +83,14 @@ export type ManualInput = {
   readonly session: SessionSchema.Info
   readonly messages: readonly SessionMessage.Info[]
   readonly inputID: SessionMessage.ID
+  readonly agent: Agent.ID
 }
 
 type Plan = {
   readonly session: SessionSchema.Info
-  readonly model: Model
+  readonly model: LLMRequest["model"]
+  readonly agent: Agent.ID
+  readonly modelRef: Model.Ref
   readonly cost: ModelV2.Info["cost"]
   readonly reason: SessionMessage.Compaction["reason"]
   readonly prompt: string
@@ -257,14 +262,17 @@ const make = (dependencies: Dependencies) => {
         : Effect.void,
     )
     yield* dependencies.llm
-      .stream(
-        LLM.request({
+      .stream({
+        sessionID: plan.session.id,
+        agent: plan.agent,
+        model: plan.modelRef,
+        request: LLM.request({
           model: plan.model,
           http: { headers: SessionModelHeaders.make(plan.session, dependencies.client) },
           messages: [Message.user(plan.prompt)],
           tools: [],
         }),
-      )
+      })
       .pipe(
         Stream.runForEach((event) => {
           if (LLMEvent.is.providerError(event))
@@ -331,6 +339,8 @@ const make = (dependencies: Dependencies) => {
         session: input.session,
         model: input.model,
         cost: input.cost,
+        agent: input.agent,
+        modelRef: input.modelRef,
         reason: "auto",
         ...content,
       })
@@ -380,6 +390,8 @@ const make = (dependencies: Dependencies) => {
       session: input.session,
       model: resolved.model,
       cost: resolved.cost,
+      agent: input.agent,
+      modelRef: resolved.ref,
       reason: "manual",
       inputID: input.inputID,
       ...content,
@@ -396,7 +408,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
-    const llm = yield* LLMClient.Service
+    const llm = yield* SessionModelStream.Service
     const config = yield* Config.Service
     const models = yield* SessionRunnerModel.Service
     const client = yield* Client.Name
@@ -407,5 +419,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [EventV2.node, llmClient, Config.node, SessionRunnerModel.node, Client.node],
+  deps: [EventV2.node, SessionModelStream.node, Config.node, SessionRunnerModel.node, Client.node],
 })

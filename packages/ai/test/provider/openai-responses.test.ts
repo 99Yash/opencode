@@ -251,16 +251,34 @@ describe("OpenAI Responses route", () => {
           }),
         ),
       )
-      const response = yield* LLMClient.generate(
+      const text: string[] = []
+      yield* LLMClient.stream(
         LLM.request({
           model: OpenAI.configure({ baseURL: "https://api.openai.test/v1/", apiKey: "test" }).responsesWebSocket(
             "gpt-4.1-mini",
           ),
           prompt: "Say hello.",
         }),
-      ).pipe(Effect.provide(LLMClient.layer.pipe(Layer.provide(deps))))
+        {
+          transformRequest: (request) =>
+            Effect.sync(() => {
+              expect(request.body.type).toBe("response.create")
+              expect(request.body.stream).toBeUndefined()
+              const body = { ...request.body, plugin: true }
+              delete body.store
+              return { headers: { ...request.headers, "x-plugin": "enabled" }, body }
+            }),
+        },
+      ).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            if (LLMEvent.is.textDelta(event)) text.push(event.text)
+          }),
+        ),
+        Effect.provide(LLMClient.layer.pipe(Layer.provide(deps))),
+      )
 
-      expect(response.text).toBe("Hi")
+      expect(text.join("")).toBe("Hi")
       expect(opened).toEqual([{ url: "wss://api.openai.test/v1/responses", authorization: "Bearer test" }])
       expect(closed).toBe(true)
       expect(sent).toHaveLength(1)
@@ -268,7 +286,7 @@ describe("OpenAI Responses route", () => {
         type: "response.create",
         model: "gpt-4.1-mini",
         input: [{ role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
-        store: false,
+        plugin: true,
       })
     }),
   )
