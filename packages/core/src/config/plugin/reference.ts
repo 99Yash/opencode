@@ -9,6 +9,8 @@ import { Reference } from "../../reference"
 import { AbsolutePath } from "../../schema"
 import { Global } from "../../global"
 import { Location } from "../../location"
+import { allowExternalDirectories } from "../../permission/defaults"
+import { Repository } from "../../repository"
 
 export const Plugin = define({
   id: "opencode.config.reference",
@@ -18,35 +20,20 @@ export const Plugin = define({
     const global = yield* Global.Service
     const loaded = { entries: yield* config.entries() }
     yield* ctx.reference.transform((draft) => {
-      const entries = new Map<string, Reference.Source>()
-      for (const doc of loaded.entries.filter((entry): entry is Config.Document => entry.type === "document")) {
-        const directory = doc.path ? path.dirname(doc.path) : location.directory
-        for (const [name, entry] of Object.entries(doc.info.references ?? {})) {
-          if (!validAlias(name)) continue
-          const description = typeof entry === "string" ? undefined : entry.description
-          const hidden = typeof entry === "string" ? undefined : entry.hidden
-          entries.set(
-            name,
-            local(entry)
-              ? Reference.LocalSource.make({
-                  type: "local",
-                  path: AbsolutePath.make(
-                    localPath(directory, global.home, typeof entry === "string" ? entry : entry.path),
-                  ),
-                  ...(description === undefined ? {} : { description }),
-                  ...(hidden === undefined ? {} : { hidden }),
-                })
-              : Reference.GitSource.make({
-                  type: "git",
-                  repository: typeof entry === "string" ? entry : entry.repository,
-                  ...(entry.branch === undefined ? {} : { branch: entry.branch }),
-                  ...(description === undefined ? {} : { description }),
-                  ...(hidden === undefined ? {} : { hidden }),
-                }),
-          )
-        }
+      for (const [name, source] of sources(loaded.entries, location.directory, global.home)) draft.add(name, source)
+    })
+    yield* ctx.agent.transform((draft) => {
+      const permissions = allowExternalDirectories(
+        Array.from(sources(loaded.entries, location.directory, global.home)).flatMap(([, source]) => {
+          if (source.type === "local") return [path.join(source.path, "*")]
+          const repository = Repository.parse(source.repository)
+          if (!repository || !Repository.isRemote(repository)) return []
+          return [path.join(Repository.cachePath(global.repos, repository), "*")]
+        }),
+      )
+      for (const current of draft.list()) {
+        draft.update(current.id, (agent) => agent.permissions.push(...permissions))
       }
-      for (const [name, source] of entries) draft.add(name, source)
     })
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),
@@ -54,12 +41,43 @@ export const Plugin = define({
         config.entries().pipe(
           Effect.tap((entries) => Effect.sync(() => (loaded.entries = entries))),
           Effect.andThen(ctx.reference.reload()),
+          Effect.andThen(ctx.agent.reload()),
         ),
       ),
       Effect.forkScoped({ startImmediately: true }),
     )
   }),
 })
+
+function sources(entries: readonly Config.Entry[], location: string, home: string) {
+  const result = new Map<string, Reference.Source>()
+  for (const doc of entries.filter((entry): entry is Config.Document => entry.type === "document")) {
+    const directory = doc.path ? path.dirname(doc.path) : location
+    for (const [name, entry] of Object.entries(doc.info.references ?? {})) {
+      if (!validAlias(name)) continue
+      const description = typeof entry === "string" ? undefined : entry.description
+      const hidden = typeof entry === "string" ? undefined : entry.hidden
+      result.set(
+        name,
+        local(entry)
+          ? Reference.LocalSource.make({
+              type: "local",
+              path: AbsolutePath.make(localPath(directory, home, typeof entry === "string" ? entry : entry.path)),
+              ...(description === undefined ? {} : { description }),
+              ...(hidden === undefined ? {} : { hidden }),
+            })
+          : Reference.GitSource.make({
+              type: "git",
+              repository: typeof entry === "string" ? entry : entry.repository,
+              ...(entry.branch === undefined ? {} : { branch: entry.branch }),
+              ...(description === undefined ? {} : { description }),
+              ...(hidden === undefined ? {} : { hidden }),
+            }),
+      )
+    }
+  }
+  return result
+}
 
 function validAlias(name: string) {
   return name.length > 0 && !/[\/\s`,]/.test(name)

@@ -18,6 +18,7 @@ import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { PermissionV2 } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
@@ -107,6 +108,70 @@ describe("LocationServiceMap", () => {
 
           expect(explorer).toBeDefined()
           expect(explorer?.permissions.length).toBeGreaterThan(0)
+        }),
+      ),
+    ),
+  )
+
+  it.live("allows external skill and reference directories by default", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => Promise.all([tmpdir(), tmpdir()])),
+      (dirs) => Effect.promise(() => Promise.all(dirs.map((dir) => dir[Symbol.asyncDispose]())).then(() => undefined)),
+    ).pipe(
+      Effect.flatMap(([project, external]) =>
+        Effect.gen(function* () {
+          const skill = path.join(external.path, "skills", "example")
+          const reference = path.join(external.path, "reference")
+          yield* Effect.promise(() =>
+            Promise.all([
+              fs.mkdir(skill, { recursive: true }),
+              fs.mkdir(reference, { recursive: true }),
+              fs.writeFile(
+                path.join(project.path, "opencode.json"),
+                JSON.stringify({
+                  skills: [path.join(external.path, "skills")],
+                  references: { docs: reference },
+                }),
+              ),
+            ]),
+          )
+          yield* Effect.promise(() =>
+            fs.writeFile(
+              path.join(skill, "SKILL.md"),
+              "---\nname: example\ndescription: Example skill.\n---\n\n# Example\n",
+            ),
+          )
+
+          const locations = yield* LocationServiceMap.Service
+          const context = locations.get(Location.Ref.make({ directory: AbsolutePath.make(project.path) }))
+          const permissions = yield* Effect.gen(function* () {
+            const supervisor = yield* PluginSupervisor.Service
+            const agents = yield* AgentV2.Service
+            yield* supervisor.flush
+            for (let attempt = 0; attempt < 100; attempt++) {
+              const build = yield* agents.resolve("build")
+              if (
+                build &&
+                PermissionV2.evaluate(
+                  "external_directory",
+                  path.join(skill, "reference", "notes.md"),
+                  build.permissions,
+                ).effect === "allow" &&
+                PermissionV2.evaluate("external_directory", path.join(reference, "notes.md"), build.permissions)
+                  .effect === "allow"
+              )
+                return build.permissions
+              yield* Effect.sleep("20 millis")
+            }
+            return (yield* agents.resolve("build"))?.permissions ?? []
+          }).pipe(Effect.scoped, Effect.provide(context))
+
+          expect(
+            PermissionV2.evaluate("external_directory", path.join(skill, "reference", "notes.md"), permissions).effect,
+          ).toBe("allow")
+          expect(
+            PermissionV2.evaluate("external_directory", path.join(reference, "notes.md"), permissions).effect,
+          ).toBe("allow")
         }),
       ),
     ),

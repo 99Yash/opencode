@@ -147,9 +147,9 @@ const pre = [
 
 const post = [
   ConfigReferencePlugin.Plugin,
+  ConfigSkillPlugin.Plugin,
   ConfigAgentPlugin.Plugin,
   ConfigCommandPlugin.Plugin,
-  ConfigSkillPlugin.Plugin,
   ConfigProviderPlugin.Plugin,
   VariantPlugin.Plugin,
   ConfigPolicyPlugin.Plugin,

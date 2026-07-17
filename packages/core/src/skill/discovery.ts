@@ -69,6 +69,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SkillDiscovery") {}
 
+export function cachePath(cache: string, url: string) {
+  return path.resolve(cache, "skills", Hash.fast(url.endsWith("/") ? url : `${url}/`))
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -111,7 +115,7 @@ const layer = Layer.effect(
         )
         if (!data) return []
 
-        const sourceRoot = path.resolve(global.cache, "skills", Hash.fast(base))
+        const sourceRoot = cachePath(global.cache, base)
         return yield* Effect.forEach(
           data.skills.flatMap((skill) => {
             if (!isSafeSegment(skill.name)) {

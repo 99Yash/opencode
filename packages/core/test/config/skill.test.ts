@@ -34,8 +34,10 @@ describe("ConfigSkillPlugin.Plugin", () => {
         return { dispose }
       })
 
+      const agent = host().agent
       yield* ConfigSkillPlugin.Plugin.effect(
         host({
+          agent: { ...agent, transform: () => Effect.succeed({ dispose: Effect.void }) },
           skill: { list: () => Effect.die("unused skill.list"), transform, reload: () => Effect.void },
         }),
       ).pipe(

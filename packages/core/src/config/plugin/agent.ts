@@ -12,6 +12,7 @@ import { ConfigAgentV1 } from "../../v1/config/agent"
 import { ConfigMigrateV1 } from "../../v1/config/migrate"
 import { Global } from "../../global"
 import { PermissionV2 } from "../../permission"
+import { SHELL_OUTPUT_GLOB } from "../../permission/defaults"
 import type { LocationMutation } from "../../location-mutation"
 import type { ReadTool } from "../../tool/read"
 import type { EditTool } from "../../tool/edit"
@@ -111,6 +112,23 @@ export const Plugin = define({
             }
           })
         }
+      }
+
+      // Internal shell output remains readable through broad external-directory denials.
+      // An exact deny still lets users explicitly revoke access to these files.
+      for (const current of draft.list()) {
+        draft.update(current.id, (agent) => {
+          const denied = agent.permissions.some(
+            (rule) =>
+              rule.action === "external_directory" && rule.resource === SHELL_OUTPUT_GLOB && rule.effect === "deny",
+          )
+          if (
+            denied ||
+            PermissionV2.evaluate("external_directory", SHELL_OUTPUT_GLOB, agent.permissions).effect === "allow"
+          )
+            return
+          agent.permissions.push({ action: "external_directory", resource: SHELL_OUTPUT_GLOB, effect: "allow" })
+        })
       }
     })
     yield* ctx.event.subscribe().pipe(

@@ -10,6 +10,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { PermissionV2 } from "@opencode-ai/core/permission"
+import { SHELL_OUTPUT_GLOB } from "@opencode-ai/core/permission/defaults"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { ConfigMigrateV1 } from "@opencode-ai/core/v1/config/migrate"
 import { tmpdir } from "../fixture/tmpdir"
@@ -22,6 +23,11 @@ const defaultPermissions = [
   { action: "*", resource: "*", effect: "allow" },
   { action: "external_directory", resource: "*", effect: "ask" },
 ] satisfies PermissionV2.Ruleset
+const shellOutputPermission = {
+  action: "external_directory",
+  resource: SHELL_OUTPUT_GLOB,
+  effect: "allow",
+} satisfies PermissionV2.Rule
 
 describe("ConfigAgentPlugin.Plugin", () => {
   it.effect("matches POSIX paths against home-relative permissions", () =>
@@ -114,6 +120,7 @@ describe("ConfigAgentPlugin.Plugin", () => {
         { action: "bash", resource: "*", effect: "ask" },
         { action: "read", resource: "*", effect: "allow" },
         { action: "bash", resource: "git *", effect: "allow" },
+        shellOutputPermission,
       ])
       expect(PermissionV2.evaluate("bash", "git status", buildAgent.permissions).effect).toBe("allow")
       expect(PermissionV2.evaluate("bash", "bun test", buildAgent.permissions).effect).toBe("ask")
@@ -132,6 +139,7 @@ describe("ConfigAgentPlugin.Plugin", () => {
         { action: "read", resource: "*", effect: "allow" },
         { action: "edit", resource: "*", effect: "deny" },
         { action: "read", resource: "*", effect: "deny" },
+        shellOutputPermission,
       ])
       expect(PermissionV2.evaluate("read", "README.md", reviewer.permissions).effect).toBe("deny")
       expect((yield* agents.get(AgentV2.ID.make("late")))?.permissions).toEqual([
@@ -139,8 +147,28 @@ describe("ConfigAgentPlugin.Plugin", () => {
         { action: "bash", resource: "*", effect: "ask" },
         { action: "read", resource: "*", effect: "allow" },
         { action: "edit", resource: "*", effect: "allow" },
+        shellOutputPermission,
       ])
       expect(yield* agents.get(AgentV2.ID.make("removed"))).toBeUndefined()
+    }),
+  )
+
+  it.effect("keeps shell output readable through a broad external-directory deny", () =>
+    Effect.gen(function* () {
+      const permissions = yield* loadConfiguredPermissions([
+        { action: "external_directory", resource: "*", effect: "deny" },
+      ])
+      expect(PermissionV2.evaluate("external_directory", SHELL_OUTPUT_GLOB, permissions).effect).toBe("allow")
+    }),
+  )
+
+  it.effect("respects an exact shell output deny", () =>
+    Effect.gen(function* () {
+      const permissions = yield* loadConfiguredPermissions([
+        { action: "external_directory", resource: "*", effect: "deny" },
+        { action: "external_directory", resource: SHELL_OUTPUT_GLOB, effect: "deny" },
+      ])
+      expect(PermissionV2.evaluate("external_directory", SHELL_OUTPUT_GLOB, permissions).effect).toBe("deny")
     }),
   )
 
@@ -294,13 +322,21 @@ Use native v2 fields.`,
             system: "Review carefully.",
             description: "Markdown description",
             request: { body: { temperature: 0.5 } },
-            permissions: [...defaultPermissions, { action: "edit", resource: "*", effect: "deny" }],
+            permissions: [
+              ...defaultPermissions,
+              { action: "edit", resource: "*", effect: "deny" },
+              shellOutputPermission,
+            ],
           })
           expect(yield* agents.get(AgentV2.ID.make("team/helper"))).toMatchObject({ system: "Help the team." })
           expect(yield* agents.get(AgentV2.ID.make("native"))).toMatchObject({
             system: "Use native v2 fields.",
             request: { headers: { "x-agent": "native" }, body: { effort: "high" } },
-            permissions: [...defaultPermissions, { action: "edit", resource: "*", effect: "deny" }],
+            permissions: [
+              ...defaultPermissions,
+              { action: "edit", resource: "*", effect: "deny" },
+              shellOutputPermission,
+            ],
           })
           expect(yield* agents.get(AgentV2.ID.make("disabled"))).toBeUndefined()
           expect(yield* agents.get(AgentV2.ID.make("plan"))).toMatchObject({ system: "Make a plan.", mode: "primary" })
@@ -352,6 +388,29 @@ function loadHomePermissions(home: string) {
       Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home })),
     )
 
+    const agent = yield* agents.get(build)
+    if (!agent) throw new Error("expected configured build agent")
+    return agent.permissions
+  })
+}
+
+function loadConfiguredPermissions(permissions: PermissionV2.Ruleset) {
+  return Effect.gen(function* () {
+    const agents = yield* AgentV2.Service
+    const build = AgentV2.ID.make("build")
+    yield* agents.transform((draft) => draft.update(build, () => {}))
+    const config = Config.Service.of({
+      entries: () =>
+        Effect.succeed([
+          new Config.Document({
+            type: "document",
+            info: decode({ permissions }),
+          }),
+        ]),
+    })
+    yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) })).pipe(
+      Effect.provideService(Config.Service, config),
+    )
     const agent = yield* agents.get(build)
     if (!agent) throw new Error("expected configured build agent")
     return agent.permissions
