@@ -14,8 +14,29 @@ import { useConfig } from "../../config"
 import { Keymap } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { SimulationSemantics } from "../../simulation/semantics"
+import { useSlot } from "@opencode-ai/quark/solid"
 
 type PermissionStage = "permission" | "always" | "reject"
+
+/** Resolved tool input for a permission request, once input streaming settles. */
+export function usePermissionInput(request: PermissionV2Request): () => Record<string, unknown> {
+  const source = usePermissionSource(request)
+  return createMemo(() => source().input ?? {})
+}
+
+function usePermissionSource(request: PermissionV2Request) {
+  const data = useData()
+  const tool = request.source
+  if (!tool) return () => ({ input: undefined, structured: undefined })
+  const part = useSlot(data.session.message.parts(request.sessionID, tool.messageID), () => tool.callID)
+  return createMemo(() => {
+    const item = part()
+    if (item?.type === "tool" && item.state.status !== "streaming") {
+      return { input: item.state.input, structured: item.state.structured }
+    }
+    return { input: undefined, structured: undefined }
+  })
+}
 
 function EditBody(props: { file?: string; diff?: string; patch?: string }) {
   const themeState = useTheme()
@@ -116,15 +137,7 @@ export function PermissionPrompt(props: { request: PermissionV2Request; director
   const pathFormatter = usePathFormatter()
   const session = createMemo(() => data.session.get(props.request.sessionID))
 
-  const source = createMemo(() => {
-    const tool = props.request.source
-    if (!tool) return { input: undefined, structured: undefined }
-    const part = data.session.message.parts(props.request.sessionID, tool.messageID).get(tool.callID)?.()
-    if (part?.type === "tool" && part.state.status !== "streaming") {
-      return { input: part.state.input, structured: part.state.structured }
-    }
-    return { input: undefined, structured: undefined }
-  })
+  const source = usePermissionSource(props.request)
 
   const { themeV2 } = useTheme()
 
