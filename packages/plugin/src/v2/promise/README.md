@@ -94,6 +94,17 @@ await ctx.session.hook("context", (event) => {
 })
 ```
 
+Resolved generation and provider options are mutable before provider lowering:
+
+```ts
+await ctx.session.hook("options", (event) => {
+  event.generation.temperature = 0.2
+  event.generation.topP = 0.9
+  event.providerOptions.openai ??= {}
+  event.providerOptions.openai.reasoningEffort = "high"
+})
+```
+
 Promise tools use plain object declarations with async executors:
 
 ```ts

@@ -694,4 +694,47 @@ describe("OpenAI Chat route", () => {
       expect(events.map((event) => event.type)).toEqual(["step-start"])
     }),
   )
+
+  it.effect("transforms resolved options before provider lowering", () =>
+    Effect.gen(function* () {
+      const llm = yield* LLMClient.Service
+      const resolvedModel = OpenAIChat.route
+        .with({
+          endpoint: { baseURL: "https://api.openai.test/v1/" },
+          auth: Auth.bearer("test"),
+          generation: { topP: 0.8 },
+        })
+        .model({ id: "gpt-4o-mini", defaults: { generation: { topK: 4 } } })
+      let seen: typeof request.generation
+      const transformed = LLM.request({
+        model: resolvedModel,
+        prompt: "Say hello.",
+        generation: { maxTokens: 20, temperature: 0.1 },
+      })
+
+      yield* llm
+        .withOptionsTransform((request) =>
+          Effect.sync(() => {
+            seen = request.generation
+            const generation = { ...request.generation, temperature: 0.7 }
+            delete generation.topP
+            return LLM.updateRequest(request, { generation })
+          }),
+        )
+        .stream(transformed)
+        .pipe(Stream.runDrain)
+
+      expect(seen).toMatchObject({ maxTokens: 20, temperature: 0.1, topP: 0.8, topK: 4 })
+    }).pipe(
+      Effect.provide(
+        dynamicResponse((input) => {
+          expect(JSON.parse(input.text)).toMatchObject({ max_tokens: 20, temperature: 0.7 })
+          expect(JSON.parse(input.text)).not.toHaveProperty("top_p")
+          return Effect.succeed(
+            input.respond(sseEvents(deltaChunk({}, "stop")), { headers: { "content-type": "text/event-stream" } }),
+          )
+        }),
+      ),
+    ),
+  )
 })

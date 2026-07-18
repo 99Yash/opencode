@@ -218,6 +218,38 @@ describe("fromPromise", () => {
     }),
   )
 
+  it.effect("forwards session option hooks", () =>
+    Effect.gen(function* () {
+      const plugin = yield* PluginV2.Service
+      const hooks = yield* PluginHooks.Service
+      const host = yield* PluginHost.make(plugin)
+      yield* PluginPromise.fromPromise(
+        Plugin.define({
+          id: "promise-session-options",
+          setup: async (ctx) => {
+            await ctx.session.hook("options", (event) => {
+              event.generation.temperature = 0.3
+              event.providerOptions.openai ??= {}
+              event.providerOptions.openai.reasoningEffort = "high"
+            })
+          },
+        }),
+      ).effect(host)
+      const event: SessionHooks["options"] = {
+        sessionID: SessionV2.ID.make("ses_promise_session_options"),
+        agent: AgentV2.ID.make("build"),
+        model: Model.Ref.make({ providerID: Provider.ID.make("test"), id: Model.ID.make("model") }),
+        generation: { temperature: 0.7 },
+        providerOptions: {},
+      }
+
+      yield* hooks.trigger("session", "options", event)
+
+      expect(event.generation.temperature).toBe(0.3)
+      expect(event.providerOptions).toEqual({ openai: { reasoningEffort: "high" } })
+    }),
+  )
+
   it.effect("disposes a hook registration on request", () =>
     Effect.gen(function* () {
       const agents = yield* AgentV2.Service

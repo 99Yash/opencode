@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { LLMClient, LLMEvent, Model, type LLMRequest } from "@opencode-ai/ai"
 import { OpenAIChat } from "@opencode-ai/ai/protocols"
+import type { LLMClientShape } from "@opencode-ai/ai/route"
 import { Config } from "@opencode-ai/core/config"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -40,14 +41,16 @@ const projects = Layer.succeed(
   }),
 )
 let requests: LLMRequest[] = []
-const client = Layer.mock(LLMClient.Service)({
+const clientValue: LLMClientShape = {
   prepare: () => Effect.die("unused"),
   stream: (request: LLMRequest) => {
     requests.push(request)
     return Stream.make(LLMEvent.textDelta({ id: "summary", text: "manual session summary" }))
   },
   generate: () => Effect.die("unused"),
-})
+  withOptionsTransform: () => clientValue,
+}
+const client = Layer.mock(LLMClient.Service)(clientValue)
 const config = Layer.mock(Config.Service)({ entries: () => Effect.succeed([]) })
 const models = SessionRunnerModel.layerWith(() => Effect.succeed(SessionRunnerModel.resolved(model)))
 const locations = Layer.effect(

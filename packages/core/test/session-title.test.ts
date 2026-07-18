@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import { LLMClient, LLMEvent, Model, type LLMRequest } from "@opencode-ai/ai"
 import { OpenAIChat } from "@opencode-ai/ai/protocols"
+import type { LLMClientShape } from "@opencode-ai/ai/route"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -40,7 +41,7 @@ const cost = [
     },
   },
 ]
-const client = Layer.mock(LLMClient.Service)({
+const clientValue: LLMClientShape = {
   prepare: () => Effect.die("unused"),
   stream: (request: LLMRequest) => {
     requests.push(request)
@@ -64,7 +65,9 @@ const client = Layer.mock(LLMClient.Service)({
     )
   },
   generate: () => Effect.die("unused"),
-})
+  withOptionsTransform: () => clientValue,
+}
+const client = Layer.mock(LLMClient.Service)(clientValue)
 const models = Layer.mock(SessionRunnerModel.Service)({
   resolve: () => Effect.succeed(SessionRunnerModel.resolved(model, undefined, cost)),
 })

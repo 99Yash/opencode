@@ -10,6 +10,7 @@ import { SessionContext } from "./context"
 import { SessionGenerate } from "./generate"
 import { SessionHistory } from "./history"
 import { SessionModelHeaders } from "./model-headers"
+import { SessionOptionsHook } from "./options-hook"
 import { SessionRunnerModel } from "./runner/model"
 import PROMPT_DEFAULT from "./runner/prompt/base.txt"
 import { toLLMMessages } from "./runner/to-llm-message"
@@ -46,7 +47,11 @@ const layer = Layer.effect(
           ],
           tools: {},
         })
-        return (yield* llm.generate(
+        return (yield* SessionOptionsHook.client(llm, hooks, {
+          sessionID: selection.session.id,
+          agent: selection.agent.id,
+          model: model.ref,
+        }).generate(
           LLM.request({
             model: model.model,
             http: { headers: SessionModelHeaders.make(selection.session) },

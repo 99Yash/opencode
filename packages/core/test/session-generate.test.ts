@@ -1,6 +1,7 @@
 import { expect } from "bun:test"
 import { LLMClient, LLMEvent, LLMResponse, Model, SystemPart, type LLMRequest } from "@opencode-ai/ai"
 import { OpenAIChat } from "@opencode-ai/ai/protocols"
+import type { LLMClientShape } from "@opencode-ai/ai/route"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -47,7 +48,7 @@ let instruction: string | Instructions.Unavailable = "Initial context"
 const sessionID = SessionSchema.ID.make("ses_generate_test")
 
 const model = Model.make({ id: "generate-model", provider: "test", route: OpenAIChat.route })
-const client = Layer.mock(LLMClient.Service)({
+const clientValue: LLMClientShape = {
   prepare: () => Effect.die(new Error("unused")),
   stream: () => Stream.die(new Error("unused")),
   generate: (request) =>
@@ -64,7 +65,9 @@ const client = Layer.mock(LLMClient.Service)({
       if (!response) throw new Error("Incomplete generate response")
       return response
     }),
-})
+  withOptionsTransform: () => clientValue,
+}
+const client = Layer.mock(LLMClient.Service)(clientValue)
 const models = SessionRunnerModel.layerWith(() => Effect.succeed(SessionRunnerModel.resolved(model)))
 const builtins = Layer.mock(InstructionBuiltIns.Service, {
   load: () =>

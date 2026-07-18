@@ -92,6 +92,20 @@ yield *
   )
 ```
 
+Resolved generation and provider options are mutable before provider lowering:
+
+```ts
+yield *
+  ctx.session.hook("options", (event) =>
+    Effect.sync(() => {
+      event.generation.temperature = 0.2
+      event.generation.topP = 0.9
+      event.providerOptions.openai ??= {}
+      event.providerOptions.openai.reasoningEffort = "high"
+    }),
+  )
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:
