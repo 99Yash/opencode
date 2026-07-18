@@ -79,7 +79,7 @@ async function renderSelect(
   return app
 }
 
-async function mountSelect(root: string, initial: DialogSelectOption<string>[]) {
+async function mountSelect(root: string, initial: DialogSelectOption<string>[], trackCurrent = false) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
   const config = createTuiResolvedConfig()
@@ -105,6 +105,7 @@ async function mountSelect(root: string, initial: DialogSelectOption<string>[]) 
 
   function Harness() {
     const [options, setOptions] = createSignal(initial)
+    const [current, setCurrent] = createSignal(initial[0]?.value)
     replaceOptions = setOptions
 
     function Fixture() {
@@ -114,7 +115,11 @@ async function mountSelect(root: string, initial: DialogSelectOption<string>[]) 
           <DialogSelect
             title="Mutable options"
             options={options()}
-            onMove={(option) => moved.push(option.value)}
+            current={trackCurrent ? current() : undefined}
+            onMove={(option) => {
+              moved.push(option.value)
+              if (trackCurrent) setCurrent(option.value)
+            }}
             onSelect={(option) => selected.push(option.value)}
           />
         )),
@@ -268,6 +273,33 @@ test("selects a repopulated option after removing the only option", async () => 
     await select.app.waitFor(() => select.selected.length === 1)
 
     expect(select.selected).toEqual(["replacement"])
+  } finally {
+    select.app.renderer.destroy()
+  }
+})
+
+test("hover stays on the row when current follows selection", async () => {
+  await using tmp = await tmpdir()
+  const select = await mountSelect(
+    tmp.path,
+    ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth"].map((value) => ({
+      title: value,
+      value,
+    })),
+    true,
+  )
+
+  try {
+    await select.app.mockMouse.moveTo(20, 11)
+    await select.app.flush()
+    await select.app.mockMouse.moveTo(20, 12)
+    await select.app.waitFor(() => select.moved.includes("second"))
+    select.moved.length = 0
+    await select.app.mockMouse.moveTo(20, 14)
+    await select.app.waitFor(() => select.moved.length > 0)
+    await select.app.waitForVisualIdle()
+
+    expect(select.moved).toEqual(["fourth"])
   } finally {
     select.app.renderer.destroy()
   }
