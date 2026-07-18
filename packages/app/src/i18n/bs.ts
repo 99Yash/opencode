@@ -81,7 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "Omogući ili onemogući više radnih prostora u bočnoj traci",
   "command.session.undo": "Poništi",
   "command.session.undo.description": "Poništi posljednju poruku",
-  "command.session.undo.gitRequired": "Poništavanje nije dostupno jer ovaj projekat ne koristi Git.",
+  "command.session.undo.gitRequired": "Git repozitorij nije otkriven",
   "command.session.redo": "Vrati",
   "command.session.redo.description": "Vrati posljednju poništenu poruku",
   "command.session.compact": "Sažmi sesiju",

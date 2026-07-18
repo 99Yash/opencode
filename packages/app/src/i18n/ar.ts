@@ -75,7 +75,7 @@ export const dict = {
   "command.workspace.toggle.description": "تمكين أو تعطيل مساحات العمل المتعددة في الشريط الجانبي",
   "command.session.undo": "تراجع",
   "command.session.undo.description": "تراجع عن الرسالة الأخيرة",
-  "command.session.undo.gitRequired": "التراجع غير متاح لأن هذا المشروع لا يستخدم Git.",
+  "command.session.undo.gitRequired": "لم يتم اكتشاف مستودع Git",
   "command.session.redo": "إعادة",
   "command.session.redo.description": "إعادة الرسالة التي تم التراجع عنها",
   "command.session.compact": "ضغط الجلسة",

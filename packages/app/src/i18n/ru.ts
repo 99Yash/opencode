@@ -81,7 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "Включить или отключить несколько рабочих пространств в боковой панели",
   "command.session.undo": "Отменить",
   "command.session.undo.description": "Отменить последнее сообщение",
-  "command.session.undo.gitRequired": "Отмена недоступна, потому что этот проект не использует Git.",
+  "command.session.undo.gitRequired": "Репозиторий Git не обнаружен",
   "command.session.redo": "Повторить",
   "command.session.redo.description": "Повторить отменённое сообщение",
   "command.session.compact": "Сжать сессию",

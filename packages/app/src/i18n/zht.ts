@@ -85,7 +85,7 @@ export const dict = {
   "command.workspace.toggle.description": "在側邊欄啟用或停用多個工作區",
   "command.session.undo": "復原",
   "command.session.undo.description": "復原上一則訊息",
-  "command.session.undo.gitRequired": "此專案未使用 Git，因此無法復原。",
+  "command.session.undo.gitRequired": "未偵測到 Git 儲存庫",
   "command.session.redo": "重做",
   "command.session.redo.description": "重做上一則復原的訊息",
   "command.session.compact": "精簡工作階段",

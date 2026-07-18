@@ -75,7 +75,7 @@ export const dict = {
   "command.workspace.toggle.description": "Habilitar ou desabilitar múltiplos espaços de trabalho na barra lateral",
   "command.session.undo": "Desfazer",
   "command.session.undo.description": "Desfazer a última mensagem",
-  "command.session.undo.gitRequired": "Desfazer não está disponível porque este projeto não usa Git.",
+  "command.session.undo.gitRequired": "Nenhum repositório Git detectado",
   "command.session.redo": "Refazer",
   "command.session.redo.description": "Refazer a última mensagem desfeita",
   "command.session.compact": "Compactar sessão",

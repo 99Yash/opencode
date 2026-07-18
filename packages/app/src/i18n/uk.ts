@@ -81,7 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "Увімкнути або вимкнути декілька робочих областей на бічній панелі",
   "command.session.undo": "Скасувати",
   "command.session.undo.description": "Скасувати останнє повідомлення",
-  "command.session.undo.gitRequired": "Скасування недоступне, оскільки цей проєкт не використовує Git.",
+  "command.session.undo.gitRequired": "Репозиторій Git не виявлено",
   "command.session.redo": "Повторити",
   "command.session.redo.description": "Повторити останнє скасоване повідомлення",
   "command.session.compact": "Стиснути сесію",

@@ -75,7 +75,7 @@ export const dict = {
   "command.workspace.toggle.description": "Włącz lub wyłącz wiele przestrzeni roboczych na pasku bocznym",
   "command.session.undo": "Cofnij",
   "command.session.undo.description": "Cofnij ostatnią wiadomość",
-  "command.session.undo.gitRequired": "Cofanie jest niedostępne, ponieważ ten projekt nie używa Git.",
+  "command.session.undo.gitRequired": "Nie wykryto repozytorium Git",
   "command.session.redo": "Ponów",
   "command.session.redo.description": "Ponów ostatnią cofniętą wiadomość",
   "command.session.compact": "Kompaktuj sesję",

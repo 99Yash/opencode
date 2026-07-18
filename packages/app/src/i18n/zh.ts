@@ -108,7 +108,7 @@ export const dict = {
 
   "command.session.undo": "撤销",
   "command.session.undo.description": "撤销上一条消息",
-  "command.session.undo.gitRequired": "此项目未使用 Git，因此无法撤销。",
+  "command.session.undo.gitRequired": "未检测到 Git 仓库",
   "command.session.redo": "重做",
   "command.session.redo.description": "重做上一条撤销的消息",
   "command.session.compact": "精简会话",

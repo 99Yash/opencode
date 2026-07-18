@@ -81,7 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "Enable or disable multiple workspaces in the sidebar",
   "command.session.undo": "Undo",
   "command.session.undo.description": "Undo the last message",
-  "command.session.undo.gitRequired": "Undo is unavailable because this project does not use Git.",
+  "command.session.undo.gitRequired": "No Git repository detected",
   "command.session.redo": "Redo",
   "command.session.redo.description": "Redo the last undone message",
   "command.session.compact": "Compact session",

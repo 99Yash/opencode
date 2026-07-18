@@ -79,7 +79,7 @@ export const dict = {
   "command.workspace.toggle.description": "Mehrere Arbeitsbereiche in der Seitenleiste aktivieren oder deaktivieren",
   "command.session.undo": "Rückgängig",
   "command.session.undo.description": "Letzte Nachricht rückgängig machen",
-  "command.session.undo.gitRequired": "Rückgängig ist nicht verfügbar, da dieses Projekt Git nicht verwendet.",
+  "command.session.undo.gitRequired": "Kein Git-Repository erkannt",
   "command.session.redo": "Wiederherstellen",
   "command.session.redo.description": "Letzte rückgängig gemachte Nachricht wiederherstellen",
   "command.session.compact": "Sitzung komprimieren",
