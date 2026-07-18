@@ -5,34 +5,81 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 // MFJS specification and reference validator: https://github.com/MoonshotAI/walle
 
 type JsonRecord = Record<string, unknown>
+type Context = {
+  root: JsonRecord
+  definitions: JsonRecord
+  properties: number
+}
+type Position = {
+  depth: number
+  definition: boolean
+  root: boolean
+}
 
 const TYPES = new Set(["string", "number", "boolean", "integer", "object", "array", "null"])
 const RESERVED_PROPERTIES = new Set(["$defs", "$ref", "anyOf", "required", "additionalProperties"])
 const MAX_ANY_OF = 500
 const MAX_ENUM = 1000
+const MAX_DEPTH = 30
+const MAX_PROPERTIES = 3000
+const MAX_SCHEMA_SIZE = 120_000
 
 // Moonshot accepts MFJS, a strict and intentionally smaller JSON Schema dialect.
 // Lower broader schemas here so one incompatible tool cannot reject the whole request.
 export function sanitize(value: unknown): JSONSchema7 {
   const root = isPlainObject(value) ? value : {}
-  const result = sanitizeNode(root, root, true)
-  if (result.type === "object") return result as JSONSchema7
-  if (typeof result.$ref === "string" && refIsObject(result.$ref, root)) return result as JSONSchema7
-  if (Array.isArray(result.anyOf)) {
-    const branches = result.anyOf.filter(isPlainObject)
-    if (branches.length > 0 && branches.every((branch) => branch.type === "object")) {
-      return withMetadata(mergeObjectUnion(branches), result) as JSONSchema7
-    }
-  }
-  return withMetadata({ type: "object", properties: {} }, result) as JSONSchema7
+  const definitions = collectDefinitions(root)
+  const context = { root, definitions: referencedDefinitions(root, definitions), properties: 0 }
+  const lowered = sanitizeNode(root, context, { depth: 0, definition: false, root: true })
+  const rooted = forceObjectRoot(lowered, context)
+  const referenced = pruneInvalidRefs(rooted, rooted)
+  const terminating = ensureTermination(forceObjectRoot(referenced, context))
+  const depthBounded =
+    schemaDepth(terminating, terminating, new Set()) <= MAX_DEPTH ? terminating : emptyRoot(terminating)
+  return fitSchemaSize(forceObjectRoot(depthBounded, context)) as JSONSchema7
 }
 
-function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRecord {
-  if (!isPlainObject(value)) return { type: isRoot ? "object" : "string" }
+function forceObjectRoot(result: JsonRecord, context: Context) {
+  if (result.type === "object") return result
+  if (typeof result.$ref === "string" && refIsObject(result.$ref, context)) return result
+  if (Array.isArray(result.anyOf)) {
+    const branches = result.anyOf.filter(isPlainObject).map((branch) => {
+      if (branch.type === "object" || typeof branch.$ref !== "string" || !refIsObject(branch.$ref, context)) {
+        return branch
+      }
+      const target = resolveRef(branch.$ref, context)
+      return isPlainObject(target)
+        ? sanitizeNode(target, context, { depth: 0, definition: false, root: false })
+        : branch
+    })
+    if (branches.length > 0 && branches.every((branch) => branch.type === "object")) {
+      return withMetadata(mergeObjectUnion(branches), result)
+    }
+  }
+  return withMetadata({ type: "object", properties: {} }, result)
+}
 
-  const source = lowerAllOf(value, root)
+function sanitizeNode(value: unknown, context: Context, position: Position): JsonRecord {
+  if (position.depth >= MAX_DEPTH) return {}
+  if (value === true || value === false) return position.root ? { type: "object", properties: {} } : {}
+  if (!isPlainObject(value)) return position.root ? { type: "object", properties: {} } : {}
+  if (Object.keys(value).length === 0) return position.root ? { type: "object", properties: {} } : {}
+
+  const source = lowerAllOf(value, context)
   const ref = rewriteRef(source.$ref)
-  if (ref && refExists(ref, root)) return withRootMetadata({ $ref: ref }, source, root, isRoot)
+  if (ref && refExists(ref, context)) {
+    const siblings = Object.fromEntries(
+      Object.entries(source).filter(([key]) => !["$ref", "description", "title", "default"].includes(key)),
+    )
+    if (Object.keys(siblings).length === 0) return withRootMetadata({ $ref: ref }, source, context, position)
+    if (Object.keys(siblings).length === 1 && siblings.nullable === true) {
+      return withRootMetadata({ anyOf: [{ $ref: ref }, { type: "null" }] }, source, context, position)
+    }
+    const target = resolveRef(ref, context)
+    if (isPlainObject(target)) {
+      return sanitizeNode({ ...target, ...siblings }, context, position)
+    }
+  }
 
   const typeList = Array.isArray(source.type)
     ? source.type.filter((item): item is string => typeof item === "string" && TYPES.has(item))
@@ -64,7 +111,7 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
     if (source.nullable === true && !branches.some((branch) => branch.type === "null")) branches.push({ type: "null" })
 
     const sanitized = branches
-      .map((branch) => sanitizeNode(branch, root))
+      .map((branch) => sanitizeNode(branch, context, child(position)))
       .flatMap((branch) => (Object.keys(branch).length === 1 && Array.isArray(branch.anyOf) ? branch.anyOf : [branch]))
     const unique = [...new Map(sanitized.map((branch) => [JSON.stringify(branch), branch])).values()]
     const result =
@@ -72,8 +119,8 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
         ? (unique[0] ?? {})
         : unique.length > 1
           ? { anyOf: unique.slice(0, MAX_ANY_OF) }
-          : sanitizeNode(unionBase, root)
-    return withRootMetadata(result, source, root, isRoot)
+          : sanitizeNode(unionBase, context, position)
+    return withRootMetadata(result, source, context, position)
   }
 
   const explicitType =
@@ -89,23 +136,31 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
     const base = Object.fromEntries(
       Object.entries(source).filter(([key]) => !["type", "enum", "const", "$defs", "definitions", "$id"].includes(key)),
     )
-    const branches = enumGroups.map((group) => sanitizeNode({ ...base, type: group.type, enum: group.values }, root))
+    const branches = enumGroups.map((group) =>
+      sanitizeNode({ ...base, type: group.type, enum: group.values }, context, child(position)),
+    )
     const result = branches.length === 1 ? (branches[0] ?? {}) : { anyOf: branches }
-    return withRootMetadata(result, source, root, isRoot)
+    return withRootMetadata(result, source, context, position)
   }
 
   const type = explicitType ?? inferType(source, enumGroups)
   const result: JsonRecord = { type }
   if (typeof source.description === "string") result.description = source.description
   if (typeof source.title === "string") result.title = source.title
-  if ("default" in source) result.default = source.default
+  if ("default" in source && !position.definition) result.default = source.default
 
   if (type === "object") {
     if (isPlainObject(source.properties)) {
+      const remaining = Math.max(0, MAX_PROPERTIES - context.properties)
+      const entries = Object.entries(source.properties)
+        .filter(
+          ([name]) =>
+            name.length > 0 && !RESERVED_PROPERTIES.has(name) && (!position.definition || !name.includes("/")),
+        )
+        .slice(0, remaining)
+      context.properties += entries.length
       result.properties = Object.fromEntries(
-        Object.entries(source.properties)
-          .filter(([name]) => !RESERVED_PROPERTIES.has(name) && !name.includes("/"))
-          .map(([name, schema]) => [name, sanitizeNode(schema, root)]),
+        entries.map(([name, schema]) => [name, sanitizeNode(schema, context, child(position))]),
       )
     }
     const properties = isPlainObject(result.properties) ? result.properties : undefined
@@ -122,7 +177,9 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
     if (typeof source.additionalProperties === "boolean") result.additionalProperties = source.additionalProperties
     if (isPlainObject(source.additionalProperties)) {
       result.additionalProperties =
-        Object.keys(source.additionalProperties).length === 0 ? {} : sanitizeNode(source.additionalProperties, root)
+        Object.keys(source.additionalProperties).length === 0
+          ? {}
+          : sanitizeNode(source.additionalProperties, context, child(position))
     }
   }
 
@@ -135,7 +192,9 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
           ? source.prefixItems.filter(isPlainObject)
           : []
     const sanitized = [
-      ...new Map(items.map((item) => sanitizeNode(item, root)).map((item) => [JSON.stringify(item), item])).values(),
+      ...new Map(
+        items.map((item) => sanitizeNode(item, context, child(position))).map((item) => [JSON.stringify(item), item]),
+      ).values(),
     ]
     if (sanitized.length === 1) result.items = sanitized[0]
     if (sanitized.length > 1) result.items = { anyOf: sanitized.slice(0, MAX_ANY_OF) }
@@ -144,18 +203,20 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
 
   if (type === "string") copyRange(result, source, "minLength", "maxLength", true, true)
   if (type === "number" || type === "integer") {
-    const minimum =
-      typeof source.minimum === "number"
-        ? source.minimum
-        : type === "integer" && typeof source.exclusiveMinimum === "number"
-          ? Math.floor(source.exclusiveMinimum) + 1
-          : undefined
-    const maximum =
-      typeof source.maximum === "number"
-        ? source.maximum
-        : type === "integer" && typeof source.exclusiveMaximum === "number"
-          ? Math.ceil(source.exclusiveMaximum) - 1
-          : undefined
+    const minimums = [
+      ...(typeof source.minimum === "number" ? [source.minimum] : []),
+      ...(type === "integer" && typeof source.exclusiveMinimum === "number"
+        ? [Math.floor(source.exclusiveMinimum) + 1]
+        : []),
+    ]
+    const maximums = [
+      ...(typeof source.maximum === "number" ? [source.maximum] : []),
+      ...(type === "integer" && typeof source.exclusiveMaximum === "number"
+        ? [Math.ceil(source.exclusiveMaximum) - 1]
+        : []),
+    ]
+    const minimum = minimums.length > 0 ? Math.max(...minimums) : undefined
+    const maximum = maximums.length > 0 ? Math.min(...maximums) : undefined
     copyRange(result, { minimum, maximum }, "minimum", "maximum", type === "integer", false)
   }
 
@@ -166,17 +227,17 @@ function sanitizeNode(value: unknown, root: JsonRecord, isRoot = false): JsonRec
     if (values.length > 0) result.enum = values
   }
 
-  return withRootMetadata(result, source, root, isRoot)
+  return withRootMetadata(result, source, context, position)
 }
 
-function withRootMetadata(result: JsonRecord, source: JsonRecord, root: JsonRecord, isRoot: boolean) {
-  if (!isRoot) return result
+function withRootMetadata(result: JsonRecord, source: JsonRecord, context: Context, position: Position) {
+  if (!position.root) return result
   if (typeof source.$id === "string") result.$id = source.$id
 
   const sanitized = Object.fromEntries(
-    Object.entries(definitions(root))
+    Object.entries(context.definitions)
       .filter(([name, schema]) => name.length > 0 && !name.includes("/") && isPlainObject(schema))
-      .map(([name, schema]) => [name, sanitizeNode(schema, root)]),
+      .map(([name, schema]) => [name, sanitizeNode(schema, context, { depth: 0, definition: true, root: false })]),
   )
   if (Object.keys(sanitized).length > 0) result.$defs = sanitized
   return result
@@ -186,6 +247,188 @@ function withMetadata(result: JsonRecord, source: JsonRecord) {
   if (typeof source.$id === "string") result.$id = source.$id
   if (isPlainObject(source.$defs)) result.$defs = source.$defs
   return result
+}
+
+function child(position: Position): Position {
+  return { depth: position.depth + 1, definition: position.definition, root: false }
+}
+
+function pruneInvalidRefs(schema: JsonRecord, root: JsonRecord): JsonRecord {
+  if (typeof schema.$ref === "string" && !resolveOutputRef(schema.$ref, root)) return {}
+
+  const result = { ...schema }
+  if (isPlainObject(schema.properties)) {
+    result.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([name, property]) => [
+        name,
+        isPlainObject(property) ? pruneInvalidRefs(property, root) : {},
+      ]),
+    )
+  }
+  if (isPlainObject(schema.items)) result.items = pruneInvalidRefs(schema.items, root)
+  if (isPlainObject(schema.additionalProperties)) {
+    result.additionalProperties = pruneInvalidRefs(schema.additionalProperties, root)
+  }
+  if (Array.isArray(schema.anyOf)) {
+    const branches = schema.anyOf.filter(isPlainObject).map((branch) => pruneInvalidRefs(branch, root))
+    if (branches.length === 1) return withMetadata(branches[0] ?? {}, result)
+    result.anyOf = branches
+  }
+  if (isPlainObject(schema.$defs)) {
+    result.$defs = Object.fromEntries(
+      Object.entries(schema.$defs).map(([name, definition]) => [
+        name,
+        isPlainObject(definition) ? pruneInvalidRefs(definition, root) : {},
+      ]),
+    )
+  }
+  return result
+}
+
+function resolveOutputRef(ref: string, root: JsonRecord): JsonRecord | undefined {
+  if (ref === "#") return root
+  if (!ref.startsWith("#/$defs/") || ref === "#/$defs/") return
+  const parts = ref
+    .slice("#/$defs/".length)
+    .split("/")
+    .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"))
+  return parts.reduce<JsonRecord | undefined>((current, part, index) => {
+    const value = index === 0 ? (isPlainObject(root.$defs) ? root.$defs[part] : undefined) : current?.[part]
+    return isPlainObject(value) ? value : undefined
+  }, undefined)
+}
+
+function ensureTermination(schema: JsonRecord) {
+  if (terminates(schema, schema, new Set())) return schema
+  if (schema.type === "object") {
+    const { required: _, ...result } = schema
+    return result
+  }
+  if (schema.type === "array") {
+    const { items: _, ...result } = schema
+    return result
+  }
+  return emptyRoot(schema)
+}
+
+function emptyRoot(source: JsonRecord) {
+  return {
+    type: "object",
+    properties: {},
+    ...(typeof source.$id === "string" ? { $id: source.$id } : {}),
+  }
+}
+
+function terminates(schema: JsonRecord, root: JsonRecord, refs: Set<string>): boolean {
+  const types = schemaTypes(schema.type)
+  if (types.some((type) => type !== "object" && type !== "array")) return true
+
+  if (types.includes("array")) {
+    if (!isPlainObject(schema.items) || Object.keys(schema.items).length === 0) return true
+    if (terminates(schema.items, root, new Set(refs))) return true
+  }
+
+  if (types.includes("object")) {
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === "string")
+      : []
+    const properties = isPlainObject(schema.properties) ? schema.properties : undefined
+    if (required.length === 0 || !properties || Object.keys(properties).length === 0) return true
+    if (
+      required.some((name) => {
+        const property = properties[name]
+        return isPlainObject(property) && terminates(property, root, new Set(refs))
+      })
+    ) {
+      return true
+    }
+  }
+
+  if (Array.isArray(schema.anyOf)) {
+    if (schema.anyOf.some((branch) => isPlainObject(branch) && terminates(branch, root, new Set(refs)))) return true
+  }
+
+  if (typeof schema.$ref === "string") {
+    if (refs.has(schema.$ref)) return false
+    const target = resolveOutputRef(schema.$ref, root)
+    if (!target) return false
+    const next = new Set(refs)
+    next.add(schema.$ref)
+    return terminates(target, root, next)
+  }
+  return Object.keys(schema).length === 0
+}
+
+function fitSchemaSize(schema: JsonRecord) {
+  if (schemaSize(schema) <= MAX_SCHEMA_SIZE) return schema
+  const compact = stripAnnotations(schema)
+  if (schemaSize(compact) <= MAX_SCHEMA_SIZE) return compact
+  return { type: "object", properties: {} }
+}
+
+function schemaDepth(schema: JsonRecord, root: JsonRecord, refs: Set<string>): number {
+  const properties = isPlainObject(schema.properties)
+    ? Math.max(
+        0,
+        ...Object.values(schema.properties).map((item) =>
+          isPlainObject(item) ? 1 + schemaDepth(item, root, refs) : 0,
+        ),
+      )
+    : 0
+  const items = isPlainObject(schema.items) ? schemaDepth(schema.items, root, refs) : 0
+  const additionalProperties = isPlainObject(schema.additionalProperties)
+    ? schemaDepth(schema.additionalProperties, root, refs)
+    : 0
+  const anyOf = Array.isArray(schema.anyOf)
+    ? Math.max(0, ...schema.anyOf.map((item) => (isPlainObject(item) ? schemaDepth(item, root, refs) : 0)))
+    : 0
+  const definitions = isPlainObject(schema.$defs)
+    ? Math.max(
+        0,
+        ...Object.values(schema.$defs).map((item) => (isPlainObject(item) ? schemaDepth(item, root, refs) : 0)),
+      )
+    : 0
+  const ref = (() => {
+    if (typeof schema.$ref !== "string" || refs.has(schema.$ref)) return 0
+    const target = resolveOutputRef(schema.$ref, root)
+    if (!target) return 0
+    const next = new Set(refs)
+    next.add(schema.$ref)
+    return schemaDepth(target, root, next)
+  })()
+  return Math.max(properties, items, additionalProperties, anyOf, definitions, ref)
+}
+
+function stripAnnotations(value: JsonRecord): JsonRecord {
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => {
+      if (["description", "title", "default"].includes(key)) return []
+      if ((key === "properties" || key === "$defs") && isPlainObject(item)) {
+        return [
+          [
+            key,
+            Object.fromEntries(
+              Object.entries(item).map(([name, schema]) => [
+                name,
+                isPlainObject(schema) ? stripAnnotations(schema) : schema,
+              ]),
+            ),
+          ],
+        ]
+      }
+      if (Array.isArray(item)) {
+        return [[key, item.map((entry) => (isPlainObject(entry) ? stripAnnotations(entry) : entry))]]
+      }
+      return [[key, isPlainObject(item) ? stripAnnotations(item) : item]]
+    }),
+  )
+}
+
+function schemaSize(schema: JsonRecord) {
+  const json = JSON.stringify(schema).replace(/[<>&\u2028\u2029]/g, (char) => {
+    return `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`
+  })
+  return new TextEncoder().encode(json).byteLength
 }
 
 function mergeObjectUnion(branches: JsonRecord[]) {
@@ -225,12 +468,12 @@ function mergeObjectUnion(branches: JsonRecord[]) {
   }
 }
 
-function lowerAllOf(source: JsonRecord, root: JsonRecord) {
+function lowerAllOf(source: JsonRecord, context: Context) {
   if (!Array.isArray(source.allOf)) return source
   const base = Object.fromEntries(Object.entries(source).filter(([key]) => key !== "allOf"))
   return source.allOf.filter(isPlainObject).reduce((result, branch) => {
     const ref = rewriteRef(branch.$ref)
-    const target = ref ? resolveRef(ref, root) : undefined
+    const target = ref ? resolveRef(ref, context) : undefined
     const next = isPlainObject(target) ? { ...target, ...branch, $ref: undefined } : branch
     return intersect(result, next) ?? merge(result, next)
   }, base)
@@ -333,36 +576,61 @@ function rewriteRef(value: unknown) {
   if (ref === "#" || ref.startsWith("#/$defs/")) return ref
 }
 
-function refExists(ref: string, root: JsonRecord) {
+function refExists(ref: string, context: Context) {
   if (ref === "#") return true
-  return isPlainObject(resolveRef(ref, root))
+  return ref !== "#/$defs/" && isPlainObject(resolveRef(ref, context))
 }
 
-function refIsObject(ref: string, root: JsonRecord) {
-  const target = resolveRef(ref, root)
+function refIsObject(ref: string, context: Context) {
+  const target = resolveRef(ref, context)
   if (!isPlainObject(target)) return false
-  const lowered = lowerAllOf(target, root)
+  const lowered = lowerAllOf(target, context)
   return lowered.type === "object" || isPlainObject(lowered.properties)
 }
 
-function resolveRef(ref: string, root: JsonRecord): unknown {
-  if (ref === "#") return root
+function resolveRef(ref: string, context: Context): unknown {
+  if (ref === "#") return context.root
   return ref
     .slice("#/$defs/".length)
     .split("/")
     .map((part) => part.replaceAll("~1", "/").replaceAll("~0", "~"))
     .reduce<unknown>((current, part, index) => {
-      if (index === 0) return definitions(root)[part]
+      if (index === 0) return context.definitions[part]
       if (!isPlainObject(current)) return
       return current[part]
     }, undefined)
 }
 
-function definitions(root: JsonRecord) {
+function collectDefinitions(root: JsonRecord) {
   return {
     ...(isPlainObject(root.definitions) ? root.definitions : {}),
     ...(isPlainObject(root.$defs) ? root.$defs : {}),
   }
+}
+
+function referencedDefinitions(root: JsonRecord, definitions: JsonRecord) {
+  const names = new Set<string>()
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit)
+      return
+    }
+    if (!isPlainObject(value)) return
+
+    const ref = rewriteRef(value.$ref)
+    if (ref?.startsWith("#/$defs/")) {
+      const name = ref.slice("#/$defs/".length).split("/", 1)[0]?.replaceAll("~1", "/").replaceAll("~0", "~")
+      if (name && !names.has(name) && isPlainObject(definitions[name])) {
+        names.add(name)
+        visit(definitions[name])
+      }
+    }
+    Object.entries(value).forEach(([key, item]) => {
+      if (key !== "$defs" && key !== "definitions") visit(item)
+    })
+  }
+  visit(root)
+  return Object.fromEntries([...names].map((name) => [name, definitions[name]]))
 }
 
 function schemaTypes(value: unknown) {

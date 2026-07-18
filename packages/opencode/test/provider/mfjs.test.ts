@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { MFJS } from "@/provider/mfjs"
 
+function asObject(value: unknown) {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) return value as Record<string, unknown>
+  throw new Error("expected object")
+}
+
 describe("MFJS.sanitize", () => {
   test("removes siblings from references while preserving definitions", () => {
     expect(
@@ -260,6 +265,21 @@ describe("MFJS.sanitize", () => {
     })
   })
 
+  test("omits unreferenced definitions", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: { value: { type: "string" } },
+        $defs: {
+          Unused: { type: "object", properties: { ignored: { type: "string" } } },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: { value: { type: "string" } },
+    })
+  })
+
   test("drops references to missing definitions", () => {
     expect(
       MFJS.sanitize({
@@ -292,6 +312,186 @@ describe("MFJS.sanitize", () => {
         list: { type: "array", maxItems: 3 },
       },
     })
+  })
+
+  test("preserves unconstrained child schemas", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: {
+          empty: {},
+          truthy: true,
+          falsy: false,
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        empty: {},
+        truthy: {},
+        falsy: {},
+      },
+    })
+  })
+
+  test("removes empty property names and references to filtered definitions", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: {
+          "": { type: "string" },
+          value: { $ref: "#/$defs/Bad~1Name" },
+        },
+        required: ["", "value"],
+        $defs: {
+          "Bad/Name": { type: "object" },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: { value: {} },
+      required: ["value"],
+    })
+  })
+
+  test("makes required recursive roots terminable", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: { node: { $ref: "#/$defs/Node" } },
+        required: ["node"],
+        $defs: {
+          Node: {
+            type: "object",
+            properties: { next: { $ref: "#/$defs/Node" } },
+            required: ["next"],
+          },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: { next: { $ref: "#/$defs/Node" } },
+          required: ["next"],
+        },
+      },
+    })
+  })
+
+  test("preserves nullable reference semantics", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: {
+          value: { $ref: "#/$defs/Value", nullable: true },
+        },
+        $defs: {
+          Value: { type: "object", properties: { label: { type: "string" } } },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        value: { anyOf: [{ $ref: "#/$defs/Value" }, { type: "null" }] },
+      },
+      $defs: {
+        Value: { type: "object", properties: { label: { type: "string" } } },
+      },
+    })
+  })
+
+  test("merges referenced object branches at the root", () => {
+    expect(
+      MFJS.sanitize({
+        anyOf: [{ $ref: "#/$defs/Left" }, { $ref: "#/$defs/Right" }],
+        $defs: {
+          Left: { type: "object", properties: { left: { type: "string" } }, required: ["left"] },
+          Right: { type: "object", properties: { right: { type: "number" } }, required: ["right"] },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        left: { type: "string" },
+        right: { type: "number" },
+      },
+      $defs: {
+        Left: { type: "object", properties: { left: { type: "string" } }, required: ["left"] },
+        Right: { type: "object", properties: { right: { type: "number" } }, required: ["right"] },
+      },
+    })
+  })
+
+  test("combines inclusive and exclusive integer bounds", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: {
+          value: {
+            type: "integer",
+            minimum: 0,
+            exclusiveMinimum: 5,
+            maximum: 10,
+            exclusiveMaximum: 8,
+          },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: { value: { type: "integer", minimum: 6, maximum: 7 } },
+    })
+  })
+
+  test("enforces Walle property and size limits", () => {
+    const properties = Object.fromEntries(
+      Array.from({ length: 3001 }, (_, index) => [`property_${index}`, { type: "string" }]),
+    )
+    const limited = asObject(MFJS.sanitize({ type: "object", properties }))
+
+    expect(Object.keys(asObject(limited.properties))).toHaveLength(3000)
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        description: "<".repeat(20_000),
+        properties: {
+          description: { type: "string" },
+          default: { type: "string" },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        description: { type: "string" },
+        default: { type: "string" },
+      },
+    })
+  })
+
+  test("enforces Walle depth limits", () => {
+    const deep = Array.from({ length: 35 }).reduce<Record<string, unknown>>(
+      (schema) => ({ type: "object", properties: { next: schema }, required: ["next"] }),
+      { type: "string" },
+    )
+
+    expect(JSON.stringify(MFJS.sanitize(deep)).match(/properties/g)?.length).toBe(30)
+  })
+
+  test("enforces depth limits across references", () => {
+    const definition = Array.from({ length: 30 }).reduce<Record<string, unknown>>(
+      (schema) => ({ type: "object", properties: { next: schema } }),
+      { type: "string" },
+    )
+
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: { value: { $ref: "#/$defs/Value" } },
+        $defs: { Value: definition },
+      }),
+    ).toEqual({ type: "object", properties: {} })
   })
 
   test("is idempotent", () => {
