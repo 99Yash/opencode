@@ -106,6 +106,8 @@ export class InvalidProviderOutputReason extends Schema.Class<InvalidProviderOut
   message: Schema.String,
   route: Schema.optional(Schema.String),
   raw: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.Literal("tool-input")),
+  toolName: Schema.optional(Schema.String),
   providerMetadata: Schema.optional(ProviderMetadata),
 }) {}
 

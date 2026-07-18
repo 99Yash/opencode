@@ -153,7 +153,21 @@ export const wrappedSystemUpdate = Effect.fn("ProviderShared.wrappedSystemUpdate
  * routes: `Invalid JSON input for <route> tool call <name>`.
  */
 export const parseToolInput = (route: string, name: string, raw: string) =>
-  parseJson(route, raw || "{}", `Invalid JSON input for ${route} tool call ${name}`)
+  Effect.try({
+    try: () => decodeJson(raw || "{}"),
+    catch: () =>
+      new LLMError({
+        module: "ProviderShared",
+        method: "stream",
+        reason: new InvalidProviderOutputReason({
+          route,
+          message: `Invalid JSON input for ${route} tool call ${name}`,
+          raw,
+          source: "tool-input",
+          toolName: name,
+        }),
+      }),
+  })
 
 export const IMAGE_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const
 export const VIDEO_MIMES = ["video/mp4", "video/webm", "video/quicktime"] as const

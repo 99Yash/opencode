@@ -396,6 +396,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
                 status: "error",
                 error: event.data.error,
                 input: typeof match.state.input === "string" ? {} : match.state.input,
+                raw: typeof match.state.input === "string" ? match.state.input : undefined,
                 structured: match.state.status === "running" ? match.state.structured : {},
                 content: match.state.status === "running" ? match.state.content : [],
                 result: event.data.result,

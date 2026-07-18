@@ -1839,6 +1839,7 @@ export type SessionMessageToolStateCompleted = {
 export type SessionMessageToolStateError = {
   status: "error"
   input: { [x: string]: JsonValue }
+  raw?: string
   content: Array<LLMToolContent>
   structured: { [x: string]: JsonValue }
   error: SessionStructuredError

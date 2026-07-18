@@ -64,6 +64,25 @@ describe("ToolStream", () => {
     }),
   )
 
+  it.effect("classifies malformed tool input with its raw arguments", () =>
+    Effect.gen(function* () {
+      const tools = ToolStream.start(ToolStream.empty<number>(), 0, {
+        id: "call_1",
+        name: "lookup",
+        input: '{"query":"partial',
+      })
+      const error = yield* ToolStream.finish(ADAPTER, tools, 0).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(LLMError)
+      expect(error.reason).toMatchObject({
+        _tag: "InvalidProviderOutput",
+        source: "tool-input",
+        toolName: "lookup",
+        raw: '{"query":"partial',
+      })
+    }),
+  )
+
   it.effect("preserves providerExecuted and clears all tools", () =>
     Effect.gen(function* () {
       const first: ToolStream.State<number> = ToolStream.start(ToolStream.empty<number>(), 0, {

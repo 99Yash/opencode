@@ -4125,27 +4125,69 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("settles malformed streamed tool input before the provider failure", () =>
+  it.effect("continues after malformed streamed tool input without executing it", () =>
     Effect.gen(function* () {
       const session = yield* setup
       yield* admit(session, "Call a malformed tool")
       const failure = new LLMError({
         module: "test",
         method: "stream",
-        reason: new InvalidProviderOutputReason({ message: "Invalid JSON input for tool call echo" }),
+        reason: new InvalidProviderOutputReason({
+          message: "Invalid JSON input for tool call echo",
+          raw: '{"text":"partial',
+          source: "tool-input",
+          toolName: "echo",
+        }),
       })
-      responseStream = Stream.fromIterable([
-        LLMEvent.stepStart({ index: 0 }),
-        LLMEvent.toolInputStart({ id: "call-malformed", name: "echo" }),
-        LLMEvent.toolInputDelta({ id: "call-malformed", name: "echo", text: '{"text":"partial' }),
-      ]).pipe(Stream.concat(Stream.fail(failure)))
+      responseStreams = [
+        Stream.fromIterable([
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolInputStart({ id: "call-malformed", name: "echo" }),
+          LLMEvent.toolInputDelta({ id: "call-malformed", name: "echo", text: '{"text":"partial' }),
+        ]).pipe(Stream.concat(Stream.fail(failure))),
+        Stream.fromIterable(reply.stop()),
+      ]
 
-      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toBe(failure)
+      yield* session.resume(sessionID)
       const assistant = requireAssistant(yield* session.context(sessionID))
 
-      response = reply.stop()
-      yield* admit(session, "Continue")
-      yield* session.resume(sessionID)
+      expect(requests).toHaveLength(2)
+      expect(assistant.content).toMatchObject([
+        {
+          type: "tool",
+          id: "call-malformed",
+          executed: false,
+          state: {
+            status: "error",
+            input: {},
+            raw: '{"text":"partial',
+            error: {
+              message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+            },
+          },
+        },
+      ])
+      expect(requests[1].messages).toMatchObject([
+        { role: "user" },
+        { role: "assistant", content: [{ type: "tool-call", id: "call-malformed", input: {} }] },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              id: "call-malformed",
+              result: {
+                type: "error",
+                value: {
+                  error: {
+                    message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ])
 
       expect(yield* recordedStepSettlementEvents(sessionID, assistant.id)).toMatchObject([
         { type: "session.step.started.1" },
@@ -4153,7 +4195,10 @@ describe("SessionRunnerLLM", () => {
           type: "session.tool.failed.1",
           data: {
             callID: "call-malformed",
-            error: { type: "provider.invalid-output", message: "Invalid JSON input for tool call echo" },
+            error: {
+              type: "provider.invalid-output",
+              message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+            },
           },
         },
         {

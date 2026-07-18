@@ -243,6 +243,16 @@ const layer = Layer.effect(
           // already recorded from the stream. Terminal publication waits for owned tools.
           if (overflowFailure) yield* publish(overflowFailure)
           const llmFailure = streamFailure instanceof LLMError ? streamFailure : undefined
+          const malformedToolInput =
+            llmFailure?.reason._tag === "InvalidProviderOutput" && llmFailure.reason.source === "tool-input"
+          const recoveredMalformedToolInput = malformedToolInput
+            ? yield* serialized(
+                publisher.failUnsettledTools({
+                  type: "provider.invalid-output",
+                  message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+                }),
+              )
+            : false
           if (llmFailure && !publisher.hasProviderError()) {
             const error = toSessionError(llmFailure)
             if (SessionRunnerRetry.isRetryable(llmFailure) && !publisher.hasRetryEvidence()) {
@@ -327,15 +337,15 @@ const layer = Layer.effect(
           if (stepFailure)
             yield* serialized(publisher.publishStepFailure(stepSettlement ? stepUsage(stepSettlement) : undefined))
 
-          if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
+          if (stream._tag === "Failure" && !recoveredMalformedToolInput) return yield* Effect.failCause(stream.cause)
           if (userDeclined) return yield* Effect.interrupt
           if ((toolsInterrupted || infraError !== undefined) && settledFailure)
             return yield* Effect.failCause(settledFailure)
           if (toolsInterrupted && settled._tag === "Failure") return yield* Effect.failCause(settled.cause)
-          if (stepFailure) return yield* new StepFailedError({ error: stepFailure })
+          if (stepFailure && !recoveredMalformedToolInput) return yield* new StepFailedError({ error: stepFailure })
           return {
             _tag: "Completed",
-            needsContinuation,
+            needsContinuation: needsContinuation || recoveredMalformedToolInput,
             step: currentStep,
           } as const
         }),

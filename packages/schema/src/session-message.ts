@@ -127,6 +127,7 @@ export interface ToolStateError extends Schema.Schema.Type<typeof ToolStateError
 export const ToolStateError = Schema.Struct({
   status: Schema.tag("error"),
   input: Schema.Record(Schema.String, Schema.Unknown),
+  raw: Schema.String.pipe(optional),
   content: ToolContent.pipe(Schema.Array),
   structured: Schema.Record(Schema.String, Schema.Unknown),
   error: SessionError.Error,
