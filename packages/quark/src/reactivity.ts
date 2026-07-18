@@ -1,3 +1,11 @@
+/**
+ * A callable reactive value.
+ *
+ * `subscribe`, `set`, and `update` are shared this-based methods, not
+ * per-instance closures: invoke them as methods (`readable.subscribe(f)`) or
+ * bind before detaching (`readable.subscribe.bind(readable)`). A detached
+ * bare reference loses its node and throws.
+ */
 export interface Readable<A> {
   (): A
   subscribe(listener: (value: A) => void): () => void
@@ -188,8 +196,7 @@ function readComputed<A>(node: ComputedNode<A>): A {
   }
   if (
     flags & Flags.Dirty ||
-    (flags & Flags.Pending &&
-      (checkDirty(node.deps!, node) || ((node.flags = flags & ~Flags.Pending), false))) ||
+    (flags & Flags.Pending && (checkDirty(node.deps!, node) || ((node.flags = flags & ~Flags.Pending), false))) ||
     !flags
   ) {
     if (updateComputed(node) && node.subs !== undefined) {
@@ -255,8 +262,7 @@ function runWatcher(watcher: WatcherNode): void {
   const flags = watcher.flags
   watcher.flags = flags & ~(Flags.Queued | Flags.Dirty | Flags.Pending)
   if (!(flags & Flags.Watching)) return
-  const dirty =
-    !!(flags & Flags.Dirty) || (!!(flags & Flags.Pending) && checkDirty(watcher.deps!, watcher))
+  const dirty = !!(flags & Flags.Dirty) || (!!(flags & Flags.Pending) && checkDirty(watcher.deps!, watcher))
   // Revalidation runs user code in computed evaluations, which may dispose
   // this watcher; a disposed watcher must not deliver.
   if (!dirty || !(watcher.flags & Flags.Watching)) return

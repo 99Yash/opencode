@@ -9,8 +9,8 @@ import {
   parseDiagnostics,
   parseQuestionAnswers,
   parseQuestions,
-  toolDisplay,
 } from "../../../src/routes/session"
+import { toolDisplay } from "../../../src/util/tool-display"
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined
 

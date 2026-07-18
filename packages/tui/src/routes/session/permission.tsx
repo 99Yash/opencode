@@ -28,7 +28,7 @@ function usePermissionSource(request: PermissionV2Request) {
   const data = useData()
   const tool = request.source
   if (!tool) return () => ({ input: undefined, structured: undefined })
-  const part = useSlot(data.session.message.parts(request.sessionID, tool.messageID), () => tool.callID)
+  const part = useSlot(data.session.message.parts(request.sessionID, tool.messageID), tool.callID)
   return createMemo(() => {
     const item = part()
     if (item?.type === "tool" && item.state.status !== "streaming") {

@@ -42,9 +42,9 @@ import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
 import { FilePath } from "../../ui/file-path"
 import {
-  canonicalToolName,
   finiteNumber,
   primitiveInputSummary,
+  toolDisplay,
   toolDisplayMetadata,
   webSearchProviderLabel,
 } from "../../util/tool-display"
@@ -1120,24 +1120,13 @@ function BackgroundToolHint(props: {
       (message): message is SessionMessageAssistant => message.type === "assistant" && !message.time.completed,
     ),
   )
-  // Track the part structure (publishes only on part insert/remove) and the
-  // individual tool slots; text and reasoning deltas never reach this memo.
-  const toolSlots = createMemo(() => {
+  // The collection maintains the first-match index; text and reasoning deltas
+  // never publish it, so this memo re-runs only on background-tool changes.
+  const visible = createMemo(() => {
     const message = current()
-    if (!message) return []
-    const parts = props.parts(message.id)
-    return useValue(parts.slots)()
-      .filter((slot) => slot().type === "tool")
-      .map((slot) => useValue(slot))
+    if (!message) return false
+    return useValue(props.parts(message.id).first("backgroundRunning"))() !== undefined
   })
-  const visible = createMemo(() =>
-    toolSlots().some((tool) => {
-      const part = tool()
-      if (part.type !== "tool" || part.state.status !== "running") return false
-      const display = toolDisplay(part.name)
-      return display === "shell" || display === "subagent"
-    }),
-  )
   return (
     <Show when={visible() && shortcut()}>
       {(value) => (
@@ -1182,7 +1171,7 @@ function SessionMessageView(props: { message: SessionMessageInfo }) {
 // instead of rebuilding the whole accessor list; value changes flow through
 // the individual slots.
 function usePartSlots(parts: (messageID: string) => SessionContent.PartsView, refs: () => readonly PartRef[]) {
-  return mapArray(refs, (ref) => ({ ref, part: useSlot(parts(ref.messageID), () => ref.partID) }))
+  return mapArray(refs, (ref) => ({ ref, part: useSlot(parts(ref.messageID), ref.partID) }))
 }
 
 function SessionPartView(props: {
@@ -1298,7 +1287,7 @@ function SessionReasoningGroupView(props: {
             <box paddingLeft={3}>
               <For each={props.refs}>
                 {(ref) => {
-                  const slot = useSlot(props.parts(ref.messageID), () => ref.partID)
+                  const slot = useSlot(props.parts(ref.messageID), ref.partID)
                   const part = createMemo(() => {
                     const item = slot()
                     return item?.type === "reasoning" ? item : undefined
@@ -2947,27 +2936,6 @@ function Diagnostics(props: { diagnostics: unknown; filePath: string }) {
 
 function stringValue(value: unknown) {
   return typeof value === "string" ? value : undefined
-}
-
-const toolDisplays = new Set([
-  "shell",
-  "glob",
-  "read",
-  "grep",
-  "webfetch",
-  "websearch",
-  "write",
-  "edit",
-  "subagent",
-  "execute",
-  "patch",
-  "question",
-  "skill",
-])
-
-export function toolDisplay(tool: string) {
-  const normalized = canonicalToolName(tool)
-  return toolDisplays.has(normalized) ? normalized : "generic"
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {

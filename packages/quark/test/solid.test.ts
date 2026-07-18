@@ -33,12 +33,27 @@ describe("Solid adapter", () => {
 
     createRoot((dispose) => {
       const current = useValue(state)
-      createComputed(() => value = current())
+      createComputed(() => (value = current()))
       state.set(second)
       dispose()
     })
 
     expect(value).toBe(second)
+  })
+
+  it("accepts a plain constant key", () => {
+    const keyed = Keyed.make<{ readonly id: number; readonly value: string }, number>({ key: (value) => value.id })
+    keyed.set([{ id: 1, value: "one" }])
+    const values: Array<string | undefined> = []
+
+    createRoot((dispose) => {
+      const value = useSlot(keyed, 1)
+      createComputed(() => values.push(value()?.value))
+      keyed.modify(1, (item) => ({ ...item, value: "ONE" }))
+      dispose()
+    })
+
+    expect(values).toEqual(["one", "ONE"])
   })
 
   it("switches keyed slots and releases obsolete subscriptions", () => {

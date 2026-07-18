@@ -10,12 +10,17 @@ export function useValue<A>(readable: Readable<A>): Accessor<A> {
  * Reactive accessor for one keyed slot. Structural changes re-resolve the
  * slot, while memo equality prevents an unchanged slot from propagating to the
  * consumer. Value changes flow through the slot itself.
+ *
+ * The key is usually constant and may be passed plainly; pass an accessor when
+ * the key itself is reactive. (A key that is itself a function value is
+ * indistinguishable from an accessor and must be wrapped.)
  */
-export function useSlot<A, Key>(keyed: Pick<Keyed.Keyed<A, Key>, "slots" | "get">, key: () => Key): Accessor<A | undefined> {
+export function useSlot<A, Key>(keyed: Keyed.ReadOnly<A, Key>, key: Key | (() => Key)): Accessor<A | undefined> {
+  const resolve = typeof key === "function" ? (key as () => Key) : () => key
   const structure = useValue(keyed.slots)
   const slot = createMemo(() => {
     structure()
-    return keyed.get(key())
+    return keyed.get(resolve())
   })
   const value = createMemo(() => {
     const current = slot()

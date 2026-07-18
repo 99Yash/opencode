@@ -1,5 +1,5 @@
 import { Keyed } from "./keyed"
-import { Transaction, type Readable } from "./reactivity"
+import { Computed, State, Transaction, type Readable } from "./reactivity"
 
 export namespace Layout {
   export interface Field<A> {
@@ -41,10 +41,8 @@ export namespace Layout {
     readonly fields: StructFields
   }
 
-  export interface Union<
-    Tag extends PropertyKey,
-    Variants extends Readonly<Record<string, Field<unknown>>>,
-  > extends Field<Variant<Tag, Variants>> {
+  export interface Union<Tag extends PropertyKey, Variants extends Readonly<Record<string, Field<unknown>>>>
+    extends Field<Variant<Tag, Variants>> {
     readonly type: "union"
     readonly tag: Tag
     readonly variants: Variants
@@ -135,7 +133,8 @@ export namespace Layout {
   export interface Collection<A, Key, Definitions extends Indexes<A>> extends Keyed.Keyed<A, Key> {
     modify(key: Key, f: (value: A) => A, changes?: { readonly members?: MemberChanges<Definitions> }): boolean
     hasMember<Name extends MembersNames<Definitions>>(name: Name, member: Member<Definitions[Name]>): boolean
-    first<Name extends FirstNames<Definitions>>(name: Name): Readable<A> | undefined
+    /** Reactive first match of the named index; publishes when the first match changes identity or value. */
+    first<Name extends FirstNames<Definitions>>(name: Name): Readable<A | undefined>
   }
 
   export interface CollectionPlan<A, Key, Definitions extends Indexes<A>> extends Plan<A, Key> {
@@ -223,7 +222,8 @@ export namespace Layout {
   >(layout: KeyedUnion<Name, A, Tag, Variants>, options?: CompileOptions): Plan<KeyedVariant<Name, A, Tag, Variants>, A>
   export function compile(input: unknown, options: CompileOptions = {}): unknown {
     const layout = input as
-      Struct<Fields> | KeyedUnion<PropertyKey, unknown, PropertyKey, Readonly<Record<string, Field<unknown>>>>
+      | Struct<Fields>
+      | KeyedUnion<PropertyKey, unknown, PropertyKey, Readonly<Record<string, Field<unknown>>>>
     if (layout.type === "keyed-union") {
       const model = unionDiffModel(layout.key.name, layout.tag, layout.variants)
       return makePlan(
@@ -276,11 +276,17 @@ export namespace Layout {
   export function collection(input: unknown, define: unknown, options?: CompileOptions): unknown {
     const plan = compile(input as never, options) as Plan<unknown, unknown>
     const definitions = (define as (index: IndexBuilder<unknown>) => Indexes<unknown>)({
-      members: ((fieldsOrExtract: readonly PropertyKey[] | ((value: unknown) => Iterable<unknown>), extract?: (value: unknown) => Iterable<unknown>) =>
+      members: ((
+        fieldsOrExtract: readonly PropertyKey[] | ((value: unknown) => Iterable<unknown>),
+        extract?: (value: unknown) => Iterable<unknown>,
+      ) =>
         typeof fieldsOrExtract === "function"
           ? { type: "members", extract: fieldsOrExtract }
           : { type: "members", fields: fieldsOrExtract, extract: extract! }) as IndexBuilder<unknown>["members"],
-      first: ((fieldsOrMatches: readonly PropertyKey[] | ((value: unknown) => boolean), matches?: (value: unknown) => boolean) =>
+      first: ((
+        fieldsOrMatches: readonly PropertyKey[] | ((value: unknown) => boolean),
+        matches?: (value: unknown) => boolean,
+      ) =>
         typeof fieldsOrMatches === "function"
           ? { type: "first", matches: fieldsOrMatches }
           : { type: "first", fields: fieldsOrMatches, matches: matches! }) as IndexBuilder<unknown>["first"],
@@ -290,6 +296,28 @@ export namespace Layout {
       make(initial: readonly unknown[] = [], makeOptions?: { readonly metrics?: Keyed.Metrics }) {
         return makeCollection(plan, definitions, initial, makeOptions)
       },
+    }
+  }
+
+  /**
+   * Explicit-target collection compiler for keyed-union layouts whose derived
+   * value type intentionally under-describes the real one (e.g. reference
+   * fields typed `unknown`, optional fields omitted). The layout's key name,
+   * key type, and tag values are checked against `Target`; field-level shapes
+   * are trusted at this single boundary.
+   */
+  export function collectionOf<Target>() {
+    return function <
+      const Name extends keyof Target & PropertyKey,
+      const Tag extends keyof Target & PropertyKey,
+      const Variants extends Readonly<Record<Extract<Target[Tag], string>, Field<unknown>>>,
+      const Definitions extends Indexes<Target>,
+    >(
+      layout: KeyedUnion<Name, Target[Name], Tag, Variants>,
+      define: (index: IndexBuilder<Target>) => Definitions,
+      options?: CompileOptions,
+    ): CollectionPlan<Target, Target[Name], Definitions> {
+      return collection(layout as never, define as never, options) as CollectionPlan<Target, Target[Name], Definitions>
     }
   }
 
@@ -358,7 +386,7 @@ export namespace Layout {
       afterPlacement?(slot: Readable<A>): void
       afterRebuild?(): void
       member?(candidate: unknown): boolean
-      firstSlot?(): Readable<A> | undefined
+      readonly first?: Readable<A | undefined>
     }
 
     function membersEntry(
@@ -421,29 +449,34 @@ export namespace Layout {
       matches: (value: A) => boolean,
     ): Entry {
       const matching = new Set<Key>()
-      let slot: Readable<A> | undefined
+      // The current first-matching slot is reactive state so `first` readers
+      // observe identity changes; the flattening computed below also tracks
+      // the slot itself, so value changes of the first match publish too.
+      const slot = State.make<Readable<A> | undefined>(undefined)
+      const first = Computed.make<A | undefined>(() => slot()?.())
 
       function findFirst() {
-        slot = values.slots().find((candidate) => matching.has(plan.keyOf(candidate())))
+        slot.set(values.slots().find((candidate) => matching.has(plan.keyOf(candidate()))))
       }
 
       function afterPlacement(candidate: Readable<A>) {
         if (!matching.has(plan.keyOf(candidate()))) return
-        if (!slot) {
-          slot = candidate
+        const current = slot()
+        if (!current) {
+          slot.set(candidate)
           return
         }
-        if (slot === candidate) {
+        if (current === candidate) {
           findFirst()
           return
         }
         // Single pass: whichever of the two slots appears first wins.
-        for (const current of values.slots()) {
-          if (current === candidate) {
-            slot = candidate
+        for (const item of values.slots()) {
+          if (item === candidate) {
+            slot.set(candidate)
             return
           }
-          if (current === slot) return
+          if (item === current) return
         }
       }
 
@@ -457,20 +490,20 @@ export namespace Layout {
             if (matched) matching.add(key)
             if (!matched) matching.delete(key)
             if (mode === "add") return
-            if (slot === valueSlot && !matched) {
+            if (slot() === valueSlot && !matched) {
               findFirst()
               return
             }
-            if (slot !== valueSlot && !previous && matched) afterPlacement(valueSlot)
+            if (slot() !== valueSlot && !previous && matched) afterPlacement(valueSlot)
           }
         },
         remove(key, removedSlot) {
           matching.delete(key)
-          if (removedSlot && slot === removedSlot) findFirst()
+          if (removedSlot && slot() === removedSlot) findFirst()
         },
         afterPlacement,
         afterRebuild: findFirst,
-        firstSlot: () => slot,
+        first,
       }
     }
 
@@ -628,7 +661,9 @@ export namespace Layout {
         return byName.get(normalizeName(name))?.member?.(member) ?? false
       },
       first(name) {
-        return byName.get(normalizeName(name))?.firstSlot?.()
+        const entry = byName.get(normalizeName(name))
+        if (!entry?.first) throw new Error(`Unknown first index: ${String(name)}`)
+        return entry.first
       },
     }
     collection.set(initial)

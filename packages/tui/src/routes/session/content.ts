@@ -1,5 +1,6 @@
 import type { SessionMessageAssistant } from "@opencode-ai/client"
 import { Keyed, Layout } from "@opencode-ai/quark"
+import { toolDisplay } from "../../util/tool-display"
 
 /**
  * Stable per-part reactive slots for assistant message content.
@@ -12,9 +13,9 @@ import { Keyed, Layout } from "@opencode-ai/quark"
 export namespace SessionContent {
   type ContentPart = SessionMessageAssistant["content"][number]
   export type Part = ContentPart & { readonly partID: string }
-  export type Parts = Keyed.Keyed<Part, string>
+  export type Parts = ReturnType<typeof PartPlan.make>
   /** Read surface for view components; mutation stays with the data layer. */
-  export type PartsView = Pick<Parts, "slots" | "values" | "get" | "has">
+  export type PartsView = Keyed.ReadOnly<Part, string> & Pick<Parts, "first">
 
   // Streamed sub-objects are replaced immutably on change, so reference
   // equality is the correct (and cheapest) field comparator for them.
@@ -38,8 +39,16 @@ export namespace SessionContent {
     },
   })
   // The layout describes the reactive fields of the client content shapes;
-  // the plan is typed against those shapes at this single boundary.
-  const PartPlan = Layout.compile(PartLayout) as unknown as Layout.Plan<Part, string>
+  // collectionOf types the plan against those shapes at this single boundary.
+  const PartPlan = Layout.collectionOf<Part>()(PartLayout, ({ first }) => ({
+    // First running shell/subagent tool; drives the background-work hint
+    // without subscribing views to whole-collection values.
+    backgroundRunning: first(["type", "state"], (part) => {
+      if (part.type !== "tool" || part.state.status !== "running") return false
+      const display = toolDisplay(part.name)
+      return display === "shell" || display === "subagent"
+    }),
+  }))
 
   export function textID(ordinal: number) {
     return `text:${ordinal}`
