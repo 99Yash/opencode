@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Effect, Exit } from "effect"
+import { Deferred, Effect, Exit, Fiber, Scope } from "effect"
 import { adjust } from "effect/testing/TestClock"
 import { eq } from "drizzle-orm"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -29,7 +29,17 @@ describe("WorkspaceV2", () => {
       const id = WorkspaceV2.ID.make("wrk_hosted")
       const projectID = Project.ID.make("hosted-project")
       const directory = AbsolutePath.make("/workspace/repo")
-      const lifecycle = { connected: 0, reconciled: 0, released: 0 }
+      const lifecycle = {
+        created: [] as string[],
+        connected: [] as Sandbox.Binding[],
+        reconciled: 0,
+        released: 0,
+        suspended: 0,
+        deleted: [] as Sandbox.Binding[],
+        failDelete: false,
+      }
+      const suspendStarted = yield* Deferred.make<void>()
+      const finishSuspend = yield* Deferred.make<void>()
       const unsupported = (operation: string) => Effect.fail(new WorkspaceEnvironment.Error({ operation }))
       const environment = WorkspaceEnvironment.Service.of({
         platform: "linux",
@@ -79,20 +89,38 @@ describe("WorkspaceV2", () => {
         .run()
       yield* registry.register({
         key: "fake",
+        create: (input) =>
+          Effect.sync(() => {
+            lifecycle.created.push(input.identity)
+            return { sandbox: input.identity }
+          }),
         decode: Effect.succeed,
-        connect: () =>
+        connect: (binding) =>
           Effect.acquireRelease(
             Effect.sync(() => {
-              lifecycle.connected++
+              lifecycle.connected.push(binding)
               return { binding: { sandbox: "live", retired: "one" }, environment }
             }),
             () => Effect.sync(() => lifecycle.released++),
           ),
-        reconcile: () =>
+        suspend: () =>
+          Deferred.succeed(suspendStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(finishSuspend)),
+            Effect.tap(() => Effect.sync(() => lifecycle.suspended++)),
+            Effect.as({ snapshot: "snap-one", retired: "live" }),
+          ),
+        reconcile: (binding) =>
           Effect.sync(() => {
             lifecycle.reconciled++
-            return { sandbox: "live" }
+            const next: Sandbox.Binding = "snapshot" in binding ? { snapshot: binding.snapshot } : { sandbox: "live" }
+            return next
           }),
+        delete: (binding) => {
+          if (lifecycle.failDelete) {
+            return Effect.fail(new Sandbox.Error({ provider: "fake", operation: "delete" }))
+          }
+          return Effect.sync(() => lifecycle.deleted.push(binding))
+        },
       })
 
       expect(yield* workspace.get(id)).toEqual({
@@ -101,12 +129,12 @@ describe("WorkspaceV2", () => {
         directory,
         project: { id: projectID, directory },
       })
-      expect(lifecycle.connected).toBe(0)
+      expect(lifecycle.connected).toHaveLength(0)
 
       const borrowed = yield* Effect.all([workspace.borrow(id), workspace.borrow(id)]).pipe(Effect.scoped)
       expect(borrowed[0]).toBe(environment)
       expect(borrowed[1]).toBe(environment)
-      expect(lifecycle.connected).toBe(1)
+      expect(lifecycle.connected).toHaveLength(1)
       expect(lifecycle.reconciled).toBe(1)
       expect(lifecycle.released).toBe(0)
       const placement = yield* db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, id)).get()
@@ -135,7 +163,7 @@ describe("WorkspaceV2", () => {
         .run()
       const invalid = yield* workspace.borrow(invalidID).pipe(Effect.scoped, Effect.flip)
       expect(invalid._tag).toBe("Workspace.InvalidError")
-      expect(lifecycle.connected).toBe(1)
+      expect(lifecycle.connected).toHaveLength(1)
 
       const retryID = WorkspaceV2.ID.make("wrk_retry")
       const retry = { attempts: 0 }
@@ -153,6 +181,7 @@ describe("WorkspaceV2", () => {
         .run()
       yield* registry.register({
         key: "flaky",
+        create: () => Effect.die("Unexpected create"),
         decode: Effect.succeed,
         connect: (binding) =>
           Effect.sync(() => ++retry.attempts).pipe(
@@ -160,12 +189,87 @@ describe("WorkspaceV2", () => {
               attempt === 1 ? Effect.die("Transient provider defect") : Effect.succeed({ binding, environment }),
             ),
           ),
+        suspend: () => Effect.die("Unexpected suspend"),
         reconcile: Effect.succeed,
+        delete: () => Effect.die("Unexpected delete"),
       })
 
       expect(Exit.isFailure(yield* workspace.borrow(retryID).pipe(Effect.scoped, Effect.exit))).toBe(true)
       expect(yield* workspace.borrow(retryID).pipe(Effect.scoped)).toBe(environment)
       expect(retry.attempts).toBe(2)
+
+      const created = yield* workspace.create({
+        provider: "fake",
+        name: "Created",
+        directory,
+        projectID,
+      })
+      expect(created).toEqual({
+        id: created.id,
+        name: "Created",
+        directory,
+        project: { id: projectID, directory },
+      })
+      expect(lifecycle.created.at(-1)).toBe(created.id)
+
+      const failedCreate = yield* workspace
+        .create({
+          provider: "fake",
+          name: "Invalid project",
+          directory,
+          projectID: Project.ID.make("missing-project"),
+        })
+        .pipe(Effect.exit)
+      expect(Exit.isFailure(failedCreate)).toBe(true)
+      const failedIdentity = lifecycle.created.at(-1)
+      if (!failedIdentity) return yield* Effect.die("Missing failed create identity")
+      expect(lifecycle.deleted).toContainEqual({ sandbox: failedIdentity })
+
+      const active = yield* Scope.make()
+      yield* workspace.borrow(id).pipe(Scope.provide(active))
+      const suspendInvoked = yield* Deferred.make<void>()
+      const suspendFiber = yield* Deferred.succeed(suspendInvoked, undefined).pipe(
+        Effect.andThen(workspace.suspend(id)),
+        Effect.forkChild,
+      )
+      yield* Deferred.await(suspendInvoked)
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(suspendStarted)).toBe(false)
+
+      const admitted = yield* Deferred.make<void>()
+      const borrowFiber = yield* workspace.borrow(id).pipe(
+        Effect.tap(() => Deferred.succeed(admitted, undefined)),
+        Effect.scoped,
+        Effect.forkChild,
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(admitted)).toBe(false)
+
+      yield* Scope.close(active, Exit.void)
+      yield* Deferred.await(suspendStarted)
+      expect(yield* Deferred.isDone(admitted)).toBe(false)
+
+      yield* Deferred.succeed(finishSuspend, undefined)
+      yield* Fiber.join(suspendFiber)
+      yield* Fiber.join(borrowFiber)
+      expect(lifecycle.suspended).toBe(1)
+      expect(lifecycle.connected).toContainEqual({ snapshot: "snap-one" })
+      expect((yield* db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, id)).get())?.extra).toEqual({
+        kind: "sandbox",
+        version: 1,
+        binding: { sandbox: "live" },
+      })
+
+      lifecycle.failDelete = true
+      const deleteError = yield* workspace.remove(created.id).pipe(Effect.flip)
+      expect(deleteError._tag).toBe("Sandbox.Error")
+      if (deleteError._tag !== "Sandbox.Error") return yield* Effect.die("Unexpected delete error")
+      expect(deleteError.operation).toBe("delete")
+      expect((yield* workspace.get(created.id)).id).toBe(created.id)
+      lifecycle.failDelete = false
+      yield* workspace.remove(created.id)
+      expect((yield* workspace.get(created.id).pipe(Effect.flip))._tag).toBe("Workspace.NotFoundError")
+      expect(lifecycle.deleted).toContainEqual({ sandbox: "live" })
     }),
   )
 })

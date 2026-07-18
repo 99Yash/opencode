@@ -92,6 +92,7 @@ describe("Location", () => {
         const workspaceLayer = Layer.succeed(
           WorkspaceV2.Service,
           WorkspaceV2.Service.of({
+            create: () => Effect.die("Unsupported fake Workspace operation"),
             get: () =>
               Effect.succeed(
                 WorkspaceV2.Info.make({
@@ -109,6 +110,9 @@ describe("Location", () => {
                 connections.count++
                 return providerEnvironment
               }),
+            connect: () => Effect.die("Unsupported fake Workspace operation"),
+            suspend: () => Effect.die("Unsupported fake Workspace operation"),
+            remove: () => Effect.die("Unsupported fake Workspace operation"),
           }),
         )
         const hostedRef = { directory, workspaceID }

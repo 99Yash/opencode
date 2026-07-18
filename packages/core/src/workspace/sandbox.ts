@@ -25,11 +25,18 @@ export interface Connection {
   readonly environment: WorkspaceEnvironment.Interface
 }
 
+export interface CreateInput {
+  readonly identity: string
+}
+
 export interface Provider {
   readonly key: string
+  readonly create: (input: CreateInput) => Effect.Effect<Binding, Error>
   readonly decode: (binding: Binding) => Effect.Effect<Binding, Error>
   readonly connect: (binding: Binding) => Effect.Effect<Connection, Error, Scope.Scope>
+  readonly suspend: (connection: Connection) => Effect.Effect<Binding, Error>
   readonly reconcile: (binding: Binding) => Effect.Effect<Binding, Error>
+  readonly delete: (binding: Binding) => Effect.Effect<void, Error>
 }
 
 export class DuplicateProviderError extends Schema.TaggedErrorClass<DuplicateProviderError>()(
