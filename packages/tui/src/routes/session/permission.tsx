@@ -24,7 +24,7 @@ export function usePermissionInput(request: PermissionV2Request): () => Record<s
   const data = useData()
   const tool = request.source
   if (!tool) return () => ({})
-  const part = useSlot(data.session.message.parts(request.sessionID, tool.messageID), () => tool.callID)
+  const part = useSlot(data.session.message.parts(request.sessionID, tool.messageID), tool.callID)
   return createMemo(() => {
     const item = part()
     if (item?.type === "tool" && item.state.status !== "streaming") return item.state.input

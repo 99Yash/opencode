@@ -9,19 +9,23 @@ export namespace Keyed {
     equivalenceSuppressions: number
   }
 
-  export interface Keyed<A, Key> {
+  /** Read surface of a keyed collection; hand this to consumers that must not mutate. */
+  export interface ReadOnly<A, Key> {
     readonly slots: Readable<readonly Readable<A>[]>
     readonly values: Readable<readonly A[]>
     has(key: Key): boolean
     get(key: Key): Readable<A> | undefined
+    before(key: Key): Readable<A> | undefined
+    after(key: Key): Readable<A> | undefined
+  }
+
+  export interface Keyed<A, Key> extends ReadOnly<A, Key> {
     set(values: readonly A[]): boolean
     update(value: A): boolean
     modify(key: Key, f: (value: A) => A): boolean
     insert(value: A, position?: Position<Key>): Readable<A>
     remove(key: Key): boolean
     move(key: Key, position?: Position<Key>): boolean
-    before(key: Key): Readable<A> | undefined
-    after(key: Key): Readable<A> | undefined
   }
 
   export function make<A, Key>(options: {

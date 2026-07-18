@@ -1,3 +1,26 @@
+const toolDisplays = new Set([
+  "shell",
+  "glob",
+  "read",
+  "grep",
+  "webfetch",
+  "websearch",
+  "write",
+  "edit",
+  "subagent",
+  "execute",
+  "patch",
+  "question",
+  "skill",
+])
+
+export function toolDisplay(tool: string) {
+  // Legacy transcripts recorded the shell tool as "bash" and the subagent tool as "task"; render
+  // them with the renamed views.
+  const normalized = tool === "bash" ? "shell" : tool === "task" ? "subagent" : tool === "apply_patch" ? "patch" : tool
+  return toolDisplays.has(normalized) ? normalized : "generic"
+}
+
 export function webSearchProviderLabel(provider: unknown) {
   if (provider === "parallel") return "Parallel Web Search"
   if (provider === "exa") return "Exa Web Search"

@@ -224,19 +224,40 @@ describe("Layout", () => {
 
     expect(jobs.hasMember("labels", "billing")).toBe(true)
     expect(jobs.hasMember("labels", "missing")).toBe(false)
-    expect(jobs.first("nextRetry")?.().id).toBe("two")
+    expect(jobs.first("nextRetry")()?.id).toBe("two")
     expect(jobs.before("two")?.().id).toBe("one")
     expect(jobs.after("two")?.().id).toBe("three")
 
     jobs.modify("one", (job) => ({ ...job, labels: [], status: "retrying" }))
     expect(jobs.hasMember("labels", "urgent")).toBe(false)
     expect(jobs.hasMember("labels", "billing")).toBe(true)
-    expect(jobs.first("nextRetry")?.().id).toBe("one")
+    expect(jobs.first("nextRetry")()?.id).toBe("one")
 
     jobs.remove("two")
     expect(jobs.hasMember("labels", "billing")).toBe(false)
     jobs.move("three", { before: "one" })
-    expect(jobs.first("nextRetry")?.().id).toBe("three")
+    expect(jobs.first("nextRetry")()?.id).toBe("three")
+  })
+
+  it("publishes first-index changes to subscribers", () => {
+    const jobs = Jobs.make([
+      { id: "one", labels: [], status: "running" },
+      { id: "two", labels: [], status: "retrying" },
+    ])
+    const seen: (string | undefined)[] = []
+    const dispose = jobs.first("nextRetry").subscribe((job) => seen.push(job?.id))
+
+    // Identity change: a match earlier in slot order becomes the first.
+    jobs.modify("one", (job) => ({ ...job, status: "retrying" }))
+    // Value change of the current first match publishes through the slot.
+    jobs.modify("one", (job) => ({ ...job, labels: ["late"] }))
+    // The first match stops matching; the next one takes over.
+    jobs.modify("one", (job) => ({ ...job, status: "done" }))
+    // No match left.
+    jobs.remove("two")
+
+    expect(seen).toEqual(["one", "one", "two", undefined])
+    dispose()
   })
 
   it("keeps indexes synchronized across inserts, updates, and replacement", () => {
@@ -244,14 +265,14 @@ describe("Layout", () => {
 
     jobs.insert({ id: "three", labels: ["shared"], status: "retrying" })
     jobs.insert({ id: "two", labels: ["shared"], status: "retrying" }, { before: "three" })
-    expect(jobs.first("nextRetry")?.().id).toBe("two")
+    expect(jobs.first("nextRetry")()?.id).toBe("two")
 
     jobs.update({ id: "two", labels: [], status: "done" })
-    expect(jobs.first("nextRetry")?.().id).toBe("three")
+    expect(jobs.first("nextRetry")()?.id).toBe("three")
     expect(jobs.hasMember("labels", "shared")).toBe(true)
 
     jobs.remove("three")
-    expect(jobs.first("nextRetry")).toBeUndefined()
+    expect(jobs.first("nextRetry")()).toBeUndefined()
     expect(jobs.hasMember("labels", "shared")).toBe(false)
 
     jobs.set([
@@ -260,7 +281,7 @@ describe("Layout", () => {
     ])
     expect(jobs.hasMember("labels", "replacement")).toBe(true)
     expect(jobs.hasMember("labels", "one")).toBe(false)
-    expect(jobs.first("nextRetry")?.().id).toBe("four")
+    expect(jobs.first("nextRetry")()?.id).toBe("four")
   })
 
   it("skips index projection when the change is disjoint from its declared fields", () => {
@@ -284,7 +305,7 @@ describe("Layout", () => {
     jobs.update({ id: "one", labels, status: "retrying" })
     expect(extractions).toBe(baseline.extractions)
     expect(matchChecks).toBe(baseline.matchChecks + 1)
-    expect(jobs.first("nextRetry")?.().id).toBe("one")
+    expect(jobs.first("nextRetry")()?.id).toBe("one")
 
     // Labels-only change: the first-match check reads only `status`, so it skips.
     jobs.update({ id: "one", labels: ["urgent"], status: "retrying" })
@@ -340,14 +361,11 @@ describe("Layout", () => {
     const jobs = CountedJobs.make([one, two])
     comparisons = 0
 
-    jobs.set([
-      { ...one },
-      { ...two, value: "after" },
-    ])
+    jobs.set([{ ...one }, { ...two, value: "after" }])
 
     expect(comparisons).toBe(4)
     expect(jobs.get("one")?.()).toBe(one)
-    expect(jobs.first("changed")?.().id).toBe("two")
+    expect(jobs.first("changed")()?.id).toBe("two")
 
     comparisons = 0
     jobs.update({ ...jobs.get("one")!(), status: "busy" })
@@ -356,7 +374,7 @@ describe("Layout", () => {
     comparisons = 0
     jobs.modify("two", (job) => ({ ...job, value: "done" }))
     expect(comparisons).toBe(1)
-    expect(jobs.first("changed")).toBeUndefined()
+    expect(jobs.first("changed")()).toBeUndefined()
   })
 
   it("refreshes indexes that read a changed union discriminant", () => {
@@ -379,7 +397,7 @@ describe("Layout", () => {
     expect(rows.get(1)?.().type).toBe("ready")
     expect(rows.hasMember("types", "waiting")).toBe(false)
     expect(rows.hasMember("types", "ready")).toBe(true)
-    expect(rows.first("firstReady")?.().type).toBe("ready")
+    expect(rows.first("firstReady")()?.type).toBe("ready")
   })
 
   it("tracks lazy member iterables while they are consumed", () => {
@@ -470,7 +488,7 @@ describe("Layout", () => {
     expect(jobs.values()).toEqual([{ id: "one", labels: ["safe"], status: "running" }])
     expect(jobs.hasMember("labels", "safe")).toBe(true)
     expect(jobs.hasMember("labels", "boom")).toBe(false)
-    expect(jobs.first("nextRetry")).toBeUndefined()
+    expect(jobs.first("nextRetry")()).toBeUndefined()
 
     expect(() => jobs.insert({ id: "two", labels: ["boom"], status: "retrying" }, { before: "missing" })).toThrow(
       "Keyed value does not exist: missing",
