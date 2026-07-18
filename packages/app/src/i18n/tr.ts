@@ -85,6 +85,7 @@ export const dict = {
   "command.workspace.toggle.description": "Kenar çubuğunda birden fazla çalışma alanını göster veya gizle",
   "command.session.undo": "Geri al",
   "command.session.undo.description": "Son mesajı geri al",
+  "command.session.undo.gitRequired": "Bu proje Git kullanmadığı için geri alma kullanılamıyor.",
   "command.session.redo": "Yinele",
   "command.session.redo.description": "Son geri alınan mesajı yinele",
   "command.session.compact": "Oturumu sıkıştır",

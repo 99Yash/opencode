@@ -6,6 +6,8 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
+import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 
@@ -13,6 +15,7 @@ export function SessionRevertDock(props: {
   items: { id: string; text: string }[]
   restoring?: string
   disabled?: boolean
+  disabledReason?: string
   onRestore: (id: string) => void
 }) {
   const language = useLanguage()
@@ -89,15 +92,17 @@ export function SessionRevertDock(props: {
                 {(item) => (
                   <div class="flex items-center gap-2 min-w-0 py-1">
                     <span class="min-w-0 flex-1 truncate text-13-regular text-text-strong">{item.text}</span>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      class="shrink-0"
-                      disabled={props.disabled || !!props.restoring}
-                      onClick={() => props.onRestore(item.id)}
-                    >
-                      {language.t("session.revertDock.restore")}
-                    </Button>
+                    <Tooltip inactive={!props.disabledReason} value={props.disabledReason} placement="top">
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        class="shrink-0"
+                        disabled={props.disabled || !!props.restoring}
+                        onClick={() => props.onRestore(item.id)}
+                      >
+                        {language.t("session.revertDock.restore")}
+                      </Button>
+                    </Tooltip>
                   </div>
                 )}
               </For>
@@ -167,15 +172,17 @@ export function SessionRevertDock(props: {
                   <span class="min-w-0 flex-1 truncate text-[13px] font-[400] leading-5 tracking-[-0.04px] text-v2-text-text-muted">
                     {item.text}
                   </span>
-                  <ButtonV2
-                    size="small"
-                    variant="neutral"
-                    class="shrink-0"
-                    disabled={props.disabled || !!props.restoring}
-                    onClick={() => props.onRestore(item.id)}
-                  >
-                    {language.t("session.revertDock.restore")}
-                  </ButtonV2>
+                  <TooltipV2 inactive={!props.disabledReason} value={props.disabledReason} placement="top">
+                    <ButtonV2
+                      size="small"
+                      variant="neutral"
+                      class="shrink-0"
+                      disabled={props.disabled || !!props.restoring}
+                      onClick={() => props.onRestore(item.id)}
+                    >
+                      {language.t("session.revertDock.restore")}
+                    </ButtonV2>
+                  </TooltipV2>
                 </div>
               )}
             </For>

@@ -178,6 +178,8 @@ export type SessionAction = (input: { sessionID: string; messageID: string }) =>
 export type UserActions = {
   fork?: SessionAction
   revert?: SessionAction
+  revertDisabled?: boolean
+  revertDisabledReason?: JSX.Element
   openAttachment?: (file: FilePart) => void
 }
 
@@ -1380,9 +1382,9 @@ export function UserMessageDisplay(props: {
           <Show when={props.actions?.revert}>
             <MessageActionButton
               icon="reset"
-              label={i18n.t("ui.message.revertMessage")}
+              label={props.actions?.revertDisabledReason ?? i18n.t("ui.message.revertMessage")}
               useV2={props.useV2Actions}
-              disabled={!!busy()}
+              disabled={!!busy() || props.actions?.revertDisabled}
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => {
                 event.stopPropagation()

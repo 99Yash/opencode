@@ -92,6 +92,7 @@ import { TerminalPanel } from "@/pages/session/terminal-panel"
 import { TerminalPanelV2 } from "@/pages/session/terminal-panel-v2"
 import { useComposerCommands } from "@/pages/session/use-composer-commands"
 import { useSessionCommands } from "@/pages/session/use-session-commands"
+import { supportsSessionHistory } from "@/pages/session/session-history-actions"
 import { useSessionHashScroll } from "@/pages/session/use-session-hash-scroll"
 import { Identifier } from "@/utils/id"
 import { diffs as list } from "@/utils/diffs"
@@ -650,6 +651,7 @@ export default function Page() {
   }, desktopReviewOpen())
 
   const turnDiffs = createMemo(() => list(lastUserMessage()?.summary?.diffs))
+  const git = createMemo(() => supportsSessionHistory(sync().project?.vcs))
   const nogit = createMemo(() => {
     const project = sync().project
     return !!project && project.vcs !== "git"
@@ -1915,12 +1917,12 @@ export default function Page() {
   const restoring = createMemo(() => (restoreMutation.isPending ? restoreMutation.variables : undefined))
 
   const revert = (input: { sessionID: string; messageID: string }) => {
-    if (reverting()) return
+    if (reverting() || !git()) return
     return revertMutation.mutateAsync(input)
   }
 
   const restore = (id: string) => {
-    if (!params.id || reverting()) return
+    if (!params.id || reverting() || !git()) return
     return restoreMutation.mutateAsync(id)
   }
 
@@ -1955,7 +1957,16 @@ export default function Page() {
     download()
   }
 
-  const actions = { revert, openAttachment }
+  const actions = {
+    revert,
+    get revertDisabled() {
+      return !git()
+    },
+    get revertDisabledReason() {
+      return nogit() ? language.t("command.session.undo.gitRequired") : undefined
+    },
+    openAttachment,
+  }
 
   createEffect(() => {
     const sessionID = params.id
@@ -2187,7 +2198,8 @@ export default function Page() {
                 ? {
                     items: rolled(),
                     restoring: restoring(),
-                    disabled: reverting(),
+                    disabled: reverting() || !git(),
+                    disabledReason: nogit() ? language.t("command.session.undo.gitRequired") : undefined,
                     onRestore: restore,
                   }
                 : undefined,

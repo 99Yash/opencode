@@ -18,6 +18,7 @@ export type SessionComposerRevertDock = {
   items: { id: string; text: string }[]
   restoring?: string
   disabled?: boolean
+  disabledReason?: string
   onRestore: (id: string) => void
 }
 

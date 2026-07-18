@@ -71,6 +71,7 @@ export const dict = {
   "command.workspace.toggle.description": "사이드바에서 다중 작업 공간 활성화 또는 비활성화",
   "command.session.undo": "실행 취소",
   "command.session.undo.description": "마지막 메시지 실행 취소",
+  "command.session.undo.gitRequired": "이 프로젝트는 Git을 사용하지 않으므로 실행 취소를 사용할 수 없습니다.",
   "command.session.redo": "다시 실행",
   "command.session.redo.description": "마지막 실행 취소된 메시지 다시 실행",
   "command.session.compact": "세션 압축",

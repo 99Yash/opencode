@@ -75,6 +75,7 @@ export const dict = {
   "command.workspace.toggle.description": "サイドバーでの複数のワークスペースの有効化・無効化",
   "command.session.undo": "元に戻す",
   "command.session.undo.description": "最後のメッセージを元に戻す",
+  "command.session.undo.gitRequired": "このプロジェクトは Git を使用していないため、元に戻すは利用できません。",
   "command.session.redo": "やり直す",
   "command.session.redo.description": "元に戻したメッセージをやり直す",
   "command.session.compact": "セッションを圧縮",

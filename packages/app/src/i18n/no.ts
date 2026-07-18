@@ -80,6 +80,7 @@ export const dict = {
   "command.workspace.toggle.description": "Aktiver eller deaktiver flere arbeidsområder i sidefeltet",
   "command.session.undo": "Angre",
   "command.session.undo.description": "Angre siste melding",
+  "command.session.undo.gitRequired": "Angre er utilgjengelig fordi dette prosjektet ikke bruker Git.",
   "command.session.redo": "Gjør om",
   "command.session.redo.description": "Gjør om siste angrede melding",
   "command.session.compact": "Komprimer sesjon",

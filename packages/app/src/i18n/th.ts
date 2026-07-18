@@ -81,6 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "เปิดหรือปิดใช้งานพื้นที่ทำงานหลายรายการในแถบด้านข้าง",
   "command.session.undo": "ยกเลิก",
   "command.session.undo.description": "ยกเลิกข้อความล่าสุด",
+  "command.session.undo.gitRequired": "ไม่สามารถเลิกทำได้เนื่องจากโปรเจกต์นี้ไม่ได้ใช้ Git",
   "command.session.redo": "ทำซ้ำ",
   "command.session.redo.description": "ทำซ้ำข้อความที่ถูกยกเลิกล่าสุด",
   "command.session.compact": "บีบอัดเซสชัน",

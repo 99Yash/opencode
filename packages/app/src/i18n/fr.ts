@@ -75,6 +75,7 @@ export const dict = {
   "command.workspace.toggle.description": "Activer ou désactiver plusieurs espaces de travail dans la barre latérale",
   "command.session.undo": "Annuler",
   "command.session.undo.description": "Annuler le dernier message",
+  "command.session.undo.gitRequired": "Annuler n’est pas disponible car ce projet n’utilise pas Git.",
   "command.session.redo": "Rétablir",
   "command.session.redo.description": "Rétablir le dernier message annulé",
   "command.session.compact": "Compacter la session",

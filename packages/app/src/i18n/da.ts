@@ -81,6 +81,7 @@ export const dict = {
   "command.workspace.toggle.description": "Aktiver eller deaktiver flere arbejdsområder i sidebjælken",
   "command.session.undo": "Fortryd",
   "command.session.undo.description": "Fortryd den sidste besked",
+  "command.session.undo.gitRequired": "Fortryd er ikke tilgængelig, fordi dette projekt ikke bruger Git.",
   "command.session.redo": "Omgør",
   "command.session.redo.description": "Omgør den sidste fortrudte besked",
   "command.session.compact": "Komprimér session",

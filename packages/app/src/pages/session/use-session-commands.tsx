@@ -19,6 +19,7 @@ import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@opencode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionOwnership } from "./session-ownership"
+import { sessionHistoryActions } from "./session-history-actions"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -101,6 +102,13 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     if (!revert) return userMessages()
     return userMessages().filter((m) => m.id < revert)
   }
+  const historyActions = () =>
+    sessionHistoryActions({
+      vcs: sync().project?.vcs,
+      sessionID: params.id,
+      hasVisibleUserMessage: visibleUserMessages().length > 0,
+      hasRevert: !!info()?.revert?.messageID,
+    })
 
   const showAllFiles = () => {
     if (layout.fileTree.tab() !== "changes") return
@@ -303,6 +311,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const undo = async () => {
+    if (!historyActions().undo) return
     const sessionID = params.id
     if (!sessionID) return
     const owner = sessionOwnership.capture()
@@ -331,6 +340,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const redo = async () => {
+    if (!historyActions().redo) return
     const sessionID = params.id
     if (!sessionID) return
     const owner = sessionOwnership.capture()
@@ -430,9 +440,12 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
     sessionCommand({
       id: "session.undo",
       title: language.t("command.session.undo"),
-      description: language.t("command.session.undo.description"),
+      description:
+        sync().project && sync().project?.vcs !== "git"
+          ? language.t("command.session.undo.gitRequired")
+          : language.t("command.session.undo.description"),
       slash: "undo",
-      disabled: !params.id || visibleUserMessages().length === 0,
+      disabled: !historyActions().undo,
       onSelect: undo,
     }),
     sessionCommand({
@@ -440,7 +453,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
       title: language.t("command.session.redo"),
       description: language.t("command.session.redo.description"),
       slash: "redo",
-      disabled: !params.id || !info()?.revert?.messageID,
+      disabled: !historyActions().redo,
       onSelect: redo,
     }),
     sessionCommand({
