@@ -73,7 +73,8 @@ import { PluginSlot } from "../../plugin/context"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"
-import { createSessionRows, messageBoundaryIDs, resolvePart, type PartRef, type SessionRow } from "./rows"
+import { createSessionRows } from "./rows"
+import { messageBoundaryIDs, resolvePart, type PartRef, type SessionRow } from "./timeline"
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
@@ -206,7 +207,12 @@ export function Session() {
   })
   const editor = useEditorContext()
   const rows = createSessionRows(() => route.sessionID)
-  const boundaries = createMemo(() => messageBoundaryIDs(rows.slots().map((slot) => slot()), messages()))
+  const boundaries = createMemo(() =>
+    messageBoundaryIDs(
+      rows.slots().map((slot) => slot()),
+      messages(),
+    ),
+  )
   const [navigationMessage, setNavigationMessage] = createSignal<string>()
   const [navigationSlack, setNavigationSlack] = createSignal(0)
 
@@ -1152,7 +1158,7 @@ function SessionPartView(props: { partRef: PartRef; message: (messageID: string)
 }
 
 function SessionReasoningGroupView(props: {
-  refs: PartRef[]
+  refs: readonly PartRef[]
   completed: boolean
   message: (messageID: string) => SessionMessageInfo | undefined
 }) {
@@ -1273,8 +1279,8 @@ function SessionReasoningGroupView(props: {
 }
 
 function SessionGroupView(props: {
-  refs: PartRef[]
-  pending: PartRef[]
+  refs: readonly PartRef[]
+  pending: readonly PartRef[]
   completed: boolean
   message: (messageID: string) => SessionMessageInfo | undefined
 }) {
@@ -1283,7 +1289,7 @@ function SessionGroupView(props: {
   const renderer = useRenderer()
   const [expanded, setExpanded] = createSignal(false)
   const [hover, setHover] = createSignal(false)
-  const parts = (refs: PartRef[]) =>
+  const parts = (refs: readonly PartRef[]) =>
     refs.flatMap((ref) => {
       const message = props.message(ref.messageID)
       if (message?.type !== "assistant") return []
@@ -1808,7 +1814,9 @@ function AssistantMessage(props: { message: SessionMessageAssistant; last: boole
         <Match when={props.last || final() || props.message.error}>
           <box paddingLeft={3}>
             <text>
-              <span style={{ fg: props.message.error ? themeV2.text.subdued() : local.agent.color(props.message.agent) }}>
+              <span
+                style={{ fg: props.message.error ? themeV2.text.subdued() : local.agent.color(props.message.agent) }}
+              >
                 {Locale.titlecase(props.message.agent)}
               </span>
               <span style={{ fg: themeV2.text.subdued() }}> · {model()}</span>
@@ -2361,9 +2369,7 @@ function BlockTool(props: {
       paddingBottom={1}
       paddingLeft={2}
       gap={1}
-      backgroundColor={
-        hover() ? themeV2.raise(themeV2.background()) : themeV2.background()
-      }
+      backgroundColor={hover() ? themeV2.raise(themeV2.background()) : themeV2.background()}
       customBorderChars={SplitBorder.customBorderChars}
       borderColor={themeV2.background()}
       onMouseOver={() => props.onClick && setHover(true)}
@@ -2380,9 +2386,13 @@ function BlockTool(props: {
             {(title) => (
               <Show
                 when={props.spinner}
-                fallback={<text fg={permission() ? themeV2.text.feedback.warning() : themeV2.text.subdued()}>{title()}</text>}
+                fallback={
+                  <text fg={permission() ? themeV2.text.feedback.warning() : themeV2.text.subdued()}>{title()}</text>
+                }
               >
-                <Spinner color={permission() ? themeV2.text.feedback.warning() : themeV2.text.subdued()}>{title().replace(/^# /, "")}</Spinner>
+                <Spinner color={permission() ? themeV2.text.feedback.warning() : themeV2.text.subdued()}>
+                  {title().replace(/^# /, "")}
+                </Spinner>
               </Show>
             )}
           </Show>
