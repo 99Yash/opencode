@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
 import type { OpenCodeEvent, PermissionV2Request } from "@opencode-ai/client"
-import { createEffect, type ParentProps } from "solid-js"
+import { createEffect, createSignal, type ParentProps } from "solid-js"
 import { ClientProvider, useClient } from "../../../src/context/client"
 import { DataProvider as DataProviderBase, useData } from "../../../src/context/data"
 import { LocationProvider, useLocation } from "../../../src/context/location"
@@ -50,15 +50,18 @@ test("permission input tracks the tool part slot as input settles", async () => 
   let client!: ReturnType<typeof useClient>
   let input!: () => unknown
 
-  const request = {
-    id: "perm_1",
-    sessionID,
-    permission: "shell",
-    resources: [],
-    metadata: {},
-    source: { messageID: "message-assistant", callID: "call-permission" },
-    time: { created: 1 },
-  } as unknown as PermissionV2Request
+  const permissionRequest = (id: string, callID: string) =>
+    ({
+      id,
+      sessionID,
+      permission: "shell",
+      resources: [],
+      metadata: {},
+      source: { messageID: "message-assistant", callID },
+      time: { created: 1 },
+    }) as unknown as PermissionV2Request
+
+  const [request, setRequest] = createSignal(permissionRequest("perm_1", "call-permission"))
 
   function Probe() {
     data = useData()
@@ -108,6 +111,36 @@ test("permission input tracks the tool part slot as input settles", async () => 
     await wait(() => {
       const value = input()
       return typeof value === "object" && value !== null && (value as { command?: string }).command === "rm -rf ./dist"
+    })
+
+    // The prompt stays mounted while requests queue: when the next request
+    // becomes current, the input must re-resolve against its tool call.
+    emitEvent(events, {
+      id: "evt_perm_tool_started_2",
+      created: 3,
+      type: "session.tool.input.started",
+      durable: { aggregateID: `session_${sessionID}`, seq: 2, version: 1 },
+      data: { sessionID, assistantMessageID: "message-assistant", callID: "call-permission-2", name: "shell" },
+    } as unknown as OpenCodeEvent)
+    emitEvent(events, {
+      id: "evt_perm_tool_called_2",
+      created: 4,
+      type: "session.tool.called",
+      durable: { aggregateID: `session_${sessionID}`, seq: 3, version: 1 },
+      data: {
+        sessionID,
+        assistantMessageID: "message-assistant",
+        callID: "call-permission-2",
+        input: { command: "git push" },
+        timestamp: 4,
+      },
+    } as unknown as OpenCodeEvent)
+    await wait(() => data.session.message.parts(sessionID, "message-assistant").has("call-permission-2"))
+
+    setRequest(permissionRequest("perm_2", "call-permission-2"))
+    await wait(() => {
+      const value = input()
+      return typeof value === "object" && value !== null && (value as { command?: string }).command === "git push"
     })
   } finally {
     app.renderer.destroy()
