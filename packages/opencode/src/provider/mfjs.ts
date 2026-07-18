@@ -17,9 +17,9 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
  * `oneOf`, `allOf`, conditionals, `prefixItems`, and other constraints pass
  * through recursively.
  *
- * `script/kimi-tool-schema-matrix.ts` compares raw and projected schemas across
- * Kimi 3, Kimi 2.7 Code, and Kimi 2.6. Keep this projection evidence-driven as
- * provider behavior evolves.
+ * `script/tool-schema-compatibility-matrix.ts` compares raw and MFJS-projected
+ * schemas across configured providers and models. Keep this projection
+ * evidence-driven as provider behavior evolves.
  *
  * MFJS specification and reference implementation:
  * https://github.com/MoonshotAI/walle
