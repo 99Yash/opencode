@@ -81,7 +81,8 @@ import { PluginSlot } from "../../plugin/context"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"
-import { createSessionRows, messageBoundaryIDs, resolvePart, type PartRef, type SessionRow } from "./rows"
+import { createSessionRows } from "./rows"
+import { messageBoundaryIDs, resolvePart, type PartRef, type SessionRow } from "./timeline"
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
@@ -214,7 +215,12 @@ export function Session() {
   })
   const editor = useEditorContext()
   const rows = createSessionRows(() => route.sessionID)
-  const boundaries = createMemo(() => messageBoundaryIDs(rows.slots().map((slot) => slot()), messages()))
+  const boundaries = createMemo(() =>
+    messageBoundaryIDs(
+      rows.slots().map((slot) => slot()),
+      messages(),
+    ),
+  )
   const [navigationMessage, setNavigationMessage] = createSignal<string>()
   const [navigationSlack, setNavigationSlack] = createSignal(0)
 
@@ -1165,7 +1171,7 @@ function SessionPartView(props: { partRef: PartRef; message: (messageID: string)
 }
 
 function SessionReasoningGroupView(props: {
-  refs: PartRef[]
+  refs: readonly PartRef[]
   completed: boolean
   message: (messageID: string) => SessionMessageInfo | undefined
 }) {
@@ -1286,8 +1292,8 @@ function SessionReasoningGroupView(props: {
 }
 
 function SessionGroupView(props: {
-  refs: PartRef[]
-  pending: PartRef[]
+  refs: readonly PartRef[]
+  pending: readonly PartRef[]
   completed: boolean
   message: (messageID: string) => SessionMessageInfo | undefined
 }) {
@@ -1296,7 +1302,7 @@ function SessionGroupView(props: {
   const renderer = useRenderer()
   const [expanded, setExpanded] = createSignal(false)
   const [hover, setHover] = createSignal(false)
-  const parts = (refs: PartRef[]) =>
+  const parts = (refs: readonly PartRef[]) =>
     refs.flatMap((ref) => {
       const message = props.message(ref.messageID)
       if (message?.type !== "assistant") return []
