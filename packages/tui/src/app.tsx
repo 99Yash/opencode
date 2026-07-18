@@ -81,6 +81,10 @@ import { createPluginRuntime, PluginRuntimeProvider, usePluginRuntime } from "./
 import { PluginProvider, PluginRoute, PluginSlot, usePlugin, type PackageResolver } from "./plugin/context"
 import { CommandPaletteDialog } from "./component/command-palette"
 import { COMMAND_PALETTE_COMMAND, Keymap, type KeymapCommand } from "./context/keymap"
+import { ServerProvider, decodeServerURLs, useServer, type ServerConnection } from "./context/server"
+import { DialogServer } from "./component/dialog-server"
+import { readJson, writeJsonAtomic } from "./util/persistence"
+import path from "path"
 
 import { DialogVariant } from "./component/dialog-variant"
 import { win32DisableProcessedInput, win32FlushInputBuffer } from "./terminal-win32"
@@ -94,6 +98,7 @@ registerOpencodeSpinner()
 const appGlobalBindingCommands = [
   "session.list",
   "session.new",
+  "server.switch",
   "session.quick_switch.1",
   "session.quick_switch.2",
   "session.quick_switch.3",
@@ -142,6 +147,7 @@ const appBindingCommands = [
 export type TuiInput = {
   server: {
     endpoint: Endpoint
+    connect: (url: string, signal?: AbortSignal) => Promise<Endpoint>
     service?: {
       reconnect: (signal: AbortSignal) => Promise<Endpoint>
       restart: () => Promise<void>
@@ -182,24 +188,16 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
   const config = Config.resolve(yield* Effect.tryPromise(() => input.config.get()), {
     terminalSuspend: process.platform !== "win32",
   })
-  const options = { baseUrl: input.server.endpoint.url, headers: Service.headers(input.server.endpoint) }
-  const api = OpenCode.make(options)
-  const directory = yield* Effect.tryPromise(() => api.file.list({ location: { directory: process.cwd() } })).pipe(
-    Effect.map((response) => response.location.directory),
-    Effect.catch(() => Effect.tryPromise(() => api.location.get()).pipe(Effect.map((response) => response.directory))),
+  const initialAPI = OpenCode.make({
+    baseUrl: input.server.endpoint.url,
+    headers: Service.headers(input.server.endpoint),
+  })
+  yield* Effect.tryPromise(() => initialAPI.file.list({ location: { directory: process.cwd() } })).pipe(
+    Effect.catch(() => Effect.tryPromise(() => initialAPI.location.get())),
   )
+  const serverFile = path.join(global.state, "tui-servers.json")
+  const serverURLs = decodeServerURLs(yield* Effect.promise(() => readJson<unknown>(serverFile).catch(() => undefined)))
   const handoff = input.terminalHandoff ? yield* Effect.promise(input.terminalHandoff) : undefined
-  const managed = input.server.service
-  const service = managed
-    ? {
-        reconnect: async (signal: AbortSignal) => {
-          const endpoint = await managed.reconnect(signal)
-          const next = { baseUrl: endpoint.url, headers: Service.headers(endpoint) }
-          return { api: OpenCode.make(next) }
-        },
-        restart: managed.restart,
-      }
-    : undefined
   const exit = { epilogue: undefined as string | undefined, reason: undefined as unknown }
   const result = yield* Effect.scoped(
     Effect.gen(function* () {
@@ -315,68 +313,36 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
                             }}
                           >
                             <ClipboardProvider>
-                              <ArgsProvider {...input.args}>
-                                <ConfigProvider
-                                  config={config}
-                                  service={input.config}
-                                  options={{ terminalSuspend: process.platform !== "win32" }}
-                                >
-                                  <Keymap.Provider>
-                                    <ToastProvider>
-                                      <RouteProvider
-                                        initialRoute={
-                                          input.args.continue
-                                            ? {
-                                                type: "session",
-                                                sessionID: "dummy",
-                                              }
-                                            : undefined
-                                        }
+                              <ConfigProvider
+                                config={config}
+                                service={input.config}
+                                options={{ terminalSuspend: process.platform !== "win32" }}
+                              >
+                                <Keymap.Provider>
+                                  <ToastProvider>
+                                    <ThemeProvider mode={mode}>
+                                      <ServerProvider
+                                        initial={{ endpoint: input.server.endpoint, service: input.server.service }}
+                                        urls={serverURLs}
+                                        connect={input.server.connect}
+                                        prepare={(endpoint) => {
+                                          const api = OpenCode.make({
+                                            baseUrl: endpoint.url,
+                                            headers: Service.headers(endpoint),
+                                          })
+                                          return api.file
+                                            .list({ location: { directory: process.cwd() } })
+                                            .catch(() => api.location.get())
+                                            .then(() => undefined)
+                                        }}
+                                        save={(servers) => writeJsonAtomic(serverFile, { servers })}
                                       >
-                                        <PluginRuntimeProvider value={pluginRuntime}>
-                                          <ClientProvider api={api} service={service}>
-                                            <PermissionProvider>
-                                              <DataProvider>
-                                                <LocationProvider>
-                                                  <ThemeProvider mode={mode}>
-                                                    <LocalProvider>
-                                                      <PromptStashProvider>
-                                                        <DialogProvider>
-                                                          <FrecencyProvider>
-                                                            <PromptHistoryProvider>
-                                                              <PromptRefProvider>
-                                                                <EditorContextProvider>
-                                                                  <PluginProvider packages={input.packages}>
-                                                                    <App
-                                                                      started={appStarted}
-                                                                      pair={
-                                                                        input.server.endpoint.auth
-                                                                          ? input.server.endpoint.auth
-                                                                          : {
-                                                                              username: "opencode",
-                                                                              password: "",
-                                                                            }
-                                                                      }
-                                                                    />
-                                                                  </PluginProvider>
-                                                                </EditorContextProvider>
-                                                              </PromptRefProvider>
-                                                            </PromptHistoryProvider>
-                                                          </FrecencyProvider>
-                                                        </DialogProvider>
-                                                      </PromptStashProvider>
-                                                    </LocalProvider>
-                                                  </ThemeProvider>
-                                                </LocationProvider>
-                                              </DataProvider>
-                                            </PermissionProvider>
-                                          </ClientProvider>
-                                        </PluginRuntimeProvider>
-                                      </RouteProvider>
-                                    </ToastProvider>
-                                  </Keymap.Provider>
-                                </ConfigProvider>
-                              </ArgsProvider>
+                                        <ServerScope input={input} pluginRuntime={pluginRuntime} started={appStarted} />
+                                      </ServerProvider>
+                                    </ThemeProvider>
+                                  </ToastProvider>
+                                </Keymap.Provider>
+                              </ConfigProvider>
                             </ClipboardProvider>
                           </TuiStartupProvider>
                         </TuiTerminalEnvironmentProvider>
@@ -404,6 +370,91 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
     if (result.epilogue) process.stdout.write(result.epilogue + "\n")
   })
 })
+
+type ServerScopeProps = {
+  input: TuiInput
+  pluginRuntime: ReturnType<typeof createPluginRuntime>
+  started: number
+}
+
+function ServerScope(props: ServerScopeProps) {
+  const server = useServer()
+  let startup = true
+  return (
+    <Show when={server.current} keyed>
+      {(connection) => {
+        const initial = startup
+        startup = false
+        return <ServerApp {...props} connection={connection} startup={initial} />
+      }}
+    </Show>
+  )
+}
+
+function ServerApp(props: ServerScopeProps & { connection: ServerConnection; startup: boolean }) {
+  const api = OpenCode.make({
+    baseUrl: props.connection.endpoint.url,
+    headers: Service.headers(props.connection.endpoint),
+  })
+  const managed = props.connection.service
+  const service = managed
+    ? {
+        reconnect: async (signal: AbortSignal) => {
+          const endpoint = await managed.reconnect(signal)
+          return {
+            api: OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) }),
+          }
+        },
+        restart: managed.restart,
+      }
+    : undefined
+  const args = props.startup ? props.input.args : {}
+  return (
+    <ArgsProvider {...args}>
+      <RouteProvider
+        initialRoute={
+          args.continue ? { type: "session", sessionID: "dummy" } : props.startup ? undefined : { type: "home" }
+        }
+      >
+        <PluginRuntimeProvider value={props.pluginRuntime}>
+          <ClientProvider api={api} service={service}>
+            <PermissionProvider>
+              <DataProvider>
+                <LocationProvider>
+                  <LocalProvider>
+                    <PromptStashProvider>
+                      <DialogProvider>
+                        <FrecencyProvider>
+                          <PromptHistoryProvider>
+                            <PromptRefProvider>
+                              <EditorContextProvider>
+                                <PluginProvider packages={props.input.packages}>
+                                  <App
+                                    started={props.started}
+                                    pair={
+                                      props.connection.endpoint.auth ?? {
+                                        username: "opencode",
+                                        password: "",
+                                      }
+                                    }
+                                  />
+                                </PluginProvider>
+                              </EditorContextProvider>
+                            </PromptRefProvider>
+                          </PromptHistoryProvider>
+                        </FrecencyProvider>
+                      </DialogProvider>
+                    </PromptStashProvider>
+                  </LocalProvider>
+                </LocationProvider>
+              </DataProvider>
+            </PermissionProvider>
+          </ClientProvider>
+        </PluginRuntimeProvider>
+      </RouteProvider>
+    </ArgsProvider>
+  )
+}
 
 function App(props: { pair?: DialogPairCredentials; started: number }) {
   const log = useLog({ component: "app" })
@@ -763,6 +814,15 @@ function App(props: { pair?: DialogPairCredentials; started: number }) {
         slash: { name: "status" },
         run: () => {
           dialog.replace(() => <DialogStatus />)
+        },
+        category: "System",
+      },
+      {
+        name: "server.switch",
+        title: "Switch server",
+        slash: { name: "servers" },
+        run: () => {
+          dialog.replace(() => <DialogServer />)
         },
         category: "System",
       },

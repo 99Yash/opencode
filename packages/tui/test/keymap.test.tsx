@@ -115,3 +115,34 @@ test("global commands stay reachable when the mode changes", async () => {
     app.renderer.destroy()
   }
 })
+
+test("server switch has a default global shortcut", async () => {
+  let shortcut = () => ""
+
+  function Harness() {
+    const shortcuts = Keymap.useShortcuts()
+    Keymap.createLayer(() => ({
+      mode: "global",
+      commands: [{ id: "server.switch", run() {} }],
+    }))
+    Keymap.createLayer(() => ({
+      mode: "global",
+      bindings: ["server.switch"],
+    }))
+    shortcut = () => shortcuts.get("server.switch") ?? ""
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <ConfigProvider config={createTuiResolvedConfig()}>
+      <Keymap.Provider>
+        <Harness />
+      </Keymap.Provider>
+    </ConfigProvider>
+  ))
+  try {
+    expect(shortcut()).toBe("ctrl+x w")
+  } finally {
+    app.renderer.destroy()
+  }
+})

@@ -28,7 +28,7 @@ test("SIGHUP clears title and disposes scoped resources once", async () => {
     const { run } = await import("../src/app")
     const task = Effect.runPromise(
       run({
-        server: { endpoint: { url: server.url.toString() } },
+        server: { endpoint: { url: server.url.toString() }, connect: async (url) => ({ url }) },
         config: { get: async () => ({}), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         args: {},
@@ -100,7 +100,7 @@ test("session lifecycle updates the terminal title and prints the epilogue after
     const { run } = await import("../src/app")
     const task = Effect.runPromise(
       run({
-        server: { endpoint: { url: server.url.toString() } },
+        server: { endpoint: { url: server.url.toString() }, connect: async (url) => ({ url }) },
         config: { get: async () => ({}), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         args: { sessionID: "dummy" },

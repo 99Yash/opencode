@@ -21,23 +21,7 @@ export type Resolved = {
 export const resolve = Effect.fn("cli.server-connection.resolve")(function* (args: Args) {
   if (args.server !== undefined && args.standalone)
     return yield* Effect.fail(new Error("--server and --standalone cannot be combined"))
-  if (args.server !== undefined) {
-    const password = yield* Env.password
-    const endpoint = {
-      url: args.server,
-      auth: password ? { type: "basic" as const, username: "opencode", password: Redacted.value(password) } : undefined,
-    } satisfies Endpoint
-    const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
-    const health = yield* Effect.tryPromise({
-      try: () => client.health.get({ signal: AbortSignal.timeout(5_000) }),
-      catch: (cause) => connectError(endpoint, cause),
-    })
-    if (health.version !== InstallationVersion)
-      process.stderr.write(
-        `Warning: Server at ${endpoint.url} has version ${health.version}; this client is ${InstallationVersion}. Continuing anyway.\n`,
-      )
-    return { endpoint } satisfies Resolved
-  }
+  if (args.server !== undefined) return { endpoint: yield* connect(args.server) } satisfies Resolved
   if (args.standalone) {
     return { endpoint: yield* Standalone.start() } satisfies Resolved
   }
@@ -47,6 +31,24 @@ export const resolve = Effect.fn("cli.server-connection.resolve")(function* (arg
     endpoint: yield* resolveManaged({ ...options, onStart: args.onStart }, args.mismatch ?? "replace"),
     service: managedService(options),
   } satisfies Resolved
+})
+
+export const connect = Effect.fn("cli.server-connection.connect")(function* (url: string) {
+  const password = yield* Env.password
+  const endpoint = {
+    url,
+    auth: password ? { type: "basic" as const, username: "opencode", password: Redacted.value(password) } : undefined,
+  } satisfies Endpoint
+  const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
+  const health = yield* Effect.tryPromise({
+    try: () => client.health.get({ signal: AbortSignal.timeout(5_000) }),
+    catch: (cause) => connectError(endpoint, cause),
+  })
+  if (health.version !== InstallationVersion)
+    process.stderr.write(
+      `Warning: Server at ${endpoint.url} has version ${health.version}; this client is ${InstallationVersion}. Continuing anyway.\n`,
+    )
+  return endpoint
 })
 
 function managedService(options: EnsureOptions) {
@@ -61,10 +63,7 @@ function managedService(options: EnsureOptions) {
   }
 }
 
-const resolveManaged = Effect.fnUntraced(function* (
-  options: EnsureOptions,
-  mismatch: NonNullable<Args["mismatch"]>,
-) {
+const resolveManaged = Effect.fnUntraced(function* (options: EnsureOptions, mismatch: NonNullable<Args["mismatch"]>) {
   if (mismatch === "replace") return yield* Service.ensure(options)
   if (mismatch === "ignore") return yield* Service.ensure({ ...options, version: undefined })
 

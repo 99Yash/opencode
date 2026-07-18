@@ -46,6 +46,7 @@ export default Runtime.handler(Commands, (input) =>
     yield* run({
       server: {
         endpoint: server.endpoint,
+        connect: (url, signal) => runServicePromise(ServerConnection.connect(url), { signal }),
         service: service
           ? {
               reconnect: (signal) => runServicePromise(service.reconnect(), { signal }),
