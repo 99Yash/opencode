@@ -102,7 +102,9 @@ function project(value: unknown, context: Context, depth: number, recursion: num
   const inferredTypes =
     declaredTypes.length > 0
       ? declaredTypes
-      : groupEnum(enumValues("const" in value ? [value.const] : value.enum)).map((group) => group.type)
+      : hasUnprojectableEnumValue("const" in value ? [value.const] : value.enum, [])
+        ? []
+        : groupEnum(enumValues("const" in value ? [value.const] : value.enum)).map((group) => group.type)
   if (Array.isArray(value.anyOf) && inferredTypes.length > 0) {
     return projectTypedAnyOf(
       { ...value, type: inferredTypes.length === 1 ? inferredTypes[0] : inferredTypes },
@@ -240,7 +242,8 @@ function project(value: unknown, context: Context, depth: number, recursion: num
 function projectTypedAnyOf(source: JsonRecord, context: Context, depth: number, recursion: number): Projection {
   const base = omit(source, ["anyOf", "type", "enum", "const", "$defs", "definitions"])
   const parentTypes = schemaTypes(source.type)
-  const parentEnum = enumValues("const" in source ? [source.const] : source.enum)
+  const parentValues = "const" in source ? [source.const] : source.enum
+  const parentEnum = hasUnprojectableEnumValue(parentValues, parentTypes) ? [] : enumValues(parentValues)
   const variants = Array.isArray(source.anyOf) ? source.anyOf : []
   if (variants.length > MAX_ANY_OF) {
     const projected = project(omit(source, ["anyOf", "unevaluatedProperties"]), context, depth, recursion + 1)
@@ -252,7 +255,8 @@ function projectTypedAnyOf(source: JsonRecord, context: Context, depth: number, 
     if (!item) return []
     const types = intersectTypes(parentTypes, schemaTypes(item.type))
     if (types.length === 0) return []
-    const branchEnum = enumValues("const" in item ? [item.const] : item.enum)
+    const branchValues = "const" in item ? [item.const] : item.enum
+    const branchEnum = hasUnprojectableEnumValue(branchValues, types) ? [] : enumValues(branchValues)
     const values = intersectEnums(parentEnum, branchEnum).filter((value) =>
       types.some((type) => matchesType(value, type)),
     )
@@ -275,6 +279,11 @@ function projectTypedAnyOf(source: JsonRecord, context: Context, depth: number, 
 
 function projectEnum(source: JsonRecord): Projection {
   const result = { ...source }
+  const types = schemaTypes(result.type)
+  if (hasUnprojectableEnumValue(result.enum, types)) {
+    delete result.enum
+    return { schema: result, unsafe: true }
+  }
   const values = enumValues(result.enum)
   if (values.length === 0) {
     const unsafe = "enum" in result
@@ -282,7 +291,6 @@ function projectEnum(source: JsonRecord): Projection {
     return { schema: result, unsafe }
   }
 
-  const types = schemaTypes(result.type)
   if (types.length > 0) {
     const compatible = values.filter((value) => types.some((type) => matchesType(value, type)))
     if (compatible.length === 0) {
@@ -458,9 +466,9 @@ function terminates(schema: JsonRecord, root: JsonRecord, refs: Set<string>): bo
     const properties = isRecord(schema.properties) ? schema.properties : undefined
     if (!properties || Object.keys(properties).length === 0) return true
     if (
-      schema.required.some((name) => {
+      schema.required.every((name) => {
         const property = typeof name === "string" ? properties[name] : undefined
-        return isRecord(property) && terminates(property, root, refs)
+        return !isRecord(property) || terminates(property, root, refs)
       })
     ) {
       return true
@@ -564,6 +572,15 @@ function enumValues(value: unknown) {
   if (!Array.isArray(value)) return []
   const values = unique(value.filter((item) => valueType(item) !== undefined))
   return values.length > MAX_ENUM ? [] : values
+}
+
+function hasUnprojectableEnumValue(value: unknown, types: string[]) {
+  if (!Array.isArray(value)) return false
+  return value.some((item) => {
+    if (valueType(item)) return false
+    const type = Array.isArray(item) ? "array" : isRecord(item) ? "object" : undefined
+    return type !== undefined && (types.length === 0 || types.includes(type))
+  })
 }
 
 function intersectEnums(parent: unknown[], child: unknown[]) {

@@ -1532,6 +1532,7 @@ describe("ProviderTransform.schema - MFJS selection", () => {
   const models = [
     ["Moonshot providers", { providerID: "moonshotai", api: { id: "kimi-k2" } }],
     ["Kimi API IDs", { providerID: "openrouter", api: { id: "moonshotai/kimi-k2" } }],
+    ["Kimi model families", { providerID: "custom", family: "kimi-k2", api: { id: "alias" } }],
   ] as const
 
   for (const [name, model] of models) {

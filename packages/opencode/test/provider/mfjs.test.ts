@@ -100,6 +100,30 @@ describe("MFJS.sanitize", () => {
     })
   })
 
+  test("widens enums when structured values remain possible", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: {
+          untyped: { enum: ["text", { kind: "legacy" }] },
+          excluded: { type: "string", enum: ["text", { kind: "legacy" }] },
+          union: {
+            type: ["string", "object"],
+            enum: ["text", { kind: "legacy" }],
+            anyOf: [{ type: "string" }, { type: "object" }],
+          },
+        },
+      }),
+    ).toEqual({
+      type: "object",
+      properties: {
+        untyped: {},
+        excluded: { type: "string", enum: ["text"] },
+        union: { anyOf: [{ type: "string" }, { type: "object" }] },
+      },
+    })
+  })
+
   test("drops tuple items instead of narrowing positional schemas", () => {
     expect(
       MFJS.sanitize({
@@ -214,6 +238,26 @@ describe("MFJS.sanitize", () => {
       type: "object",
       properties: { value: {} },
     })
+  })
+
+  test("drops recursive schemas with no finite instance", () => {
+    expect(
+      MFJS.sanitize({
+        type: "object",
+        properties: { node: { $ref: "#/$defs/Node" } },
+        required: ["node"],
+        $defs: {
+          Node: {
+            type: "object",
+            properties: {
+              value: { type: "string" },
+              next: { $ref: "#/$defs/Node" },
+            },
+            required: ["value", "next"],
+          },
+        },
+      }),
+    ).toEqual({ type: "object", properties: {} })
   })
 
   test("adds unconstrained schemas for dangling required properties", () => {

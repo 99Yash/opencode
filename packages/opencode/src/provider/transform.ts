@@ -1463,7 +1463,11 @@ export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 
     // Codex also applies lossy compaction above 4 KB; defer that until OpenCode needs the same schema budget.
   }
 
-  if (model.providerID === "moonshotai" || model.api.id.toLowerCase().includes("kimi")) {
+  if (
+    model.providerID === "moonshotai" ||
+    model.family?.toLowerCase().startsWith("kimi") ||
+    model.api.id.toLowerCase().includes("kimi")
+  ) {
     schema = MFJS.sanitize(schema)
   }
 
