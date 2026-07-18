@@ -9,7 +9,6 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
  * - Preserve schema features accepted by Kimi without rewriting them.
  * - Apply model-agnostic adaptations only for reproduced provider rejections.
  * - Keep explicit types authoritative; lossy fallbacks may widen but never narrow.
- * - Leave the original tool schema as the execution-time validation authority.
  *
  * Adapted families include enum/type conflicts, untyped enums, tuple `items`,
  * typed `anyOf`, boolean schemas, dangling `required`, references, and observed
@@ -29,7 +28,13 @@ type JsonRecord = Record<string, unknown>
 type Context = {
   root: JsonRecord
   definitions: JsonRecord
+  legacy: Record<string, string>
   properties: number
+}
+type Projection = {
+  schema: JsonRecord
+  // Unsafe projections cannot stay under non-monotonic applicators without risking narrowing.
+  unsafe: boolean
 }
 
 const TYPES = new Set(["string", "number", "boolean", "integer", "object", "array", "null"])
@@ -44,11 +49,12 @@ const SCHEMA_NODES = new Set([
   "propertyNames",
   "unevaluatedProperties",
 ])
-const SCHEMA_LISTS = new Set(["oneOf", "allOf", "prefixItems"])
+const SCHEMA_LISTS = new Set(["allOf", "prefixItems"])
 const MAX_ANY_OF = 500
 const MAX_DEPTH = 30
 const MAX_ENUM = 1000
 const MAX_PROPERTIES = 3000
+const MAX_RECURSION = 1000
 const MAX_SCHEMA_SIZE = 120_000
 
 /**
@@ -58,45 +64,132 @@ const MAX_SCHEMA_SIZE = 120_000
  */
 export function sanitize(value: unknown): JSONSchema7 {
   const root = isRecord(value) ? value : {}
-  const context = { root, definitions: definitions(root), properties: 0 }
-  const projected = project(root, context, 0)
+  const sourceDefinitions = definitions(root)
+  const context = { root, definitions: sourceDefinitions.schemas, legacy: sourceDefinitions.legacy, properties: 0 }
+  const projected = project(root, context, 0, 0).schema
   const defs = Object.fromEntries(
     Object.entries(context.definitions)
       .filter(([name, schema]) => name.length > 0 && !name.includes("/") && isRecord(schema))
-      .map(([name, schema]) => [name, project(schema, context, 0)]),
+      .map(([name, schema]) => [name, containsSlashKey(schema) ? {} : project(schema, context, 0, 0).schema]),
   )
   if (Object.keys(defs).length > 0) projected.$defs = defs
+  const resolved = dropDanglingRefs(projected, projected)
   const bounded =
-    schemaDepth(projected, projected, new Set()) > MAX_DEPTH ? { type: "object", properties: {} } : projected
+    (containsRef(resolved) && !terminates(resolved, resolved, new Set())) ||
+    schemaDepth(resolved, resolved, new Set()) > MAX_DEPTH
+      ? { type: "object", properties: {} }
+      : resolved
   return fitSize(bounded) as JSONSchema7
 }
 
-function project(value: unknown, context: Context, depth: number): JsonRecord {
-  if (depth >= MAX_DEPTH) return {}
-  if (value === true || value === false || !isRecord(value) || Object.keys(value).length === 0) return {}
+function project(value: unknown, context: Context, depth: number, recursion: number): Projection {
+  if (depth >= MAX_DEPTH || recursion >= MAX_RECURSION) return { schema: {}, unsafe: true }
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    return { schema: {}, unsafe: !isRecord(value) }
+  }
 
   const ref = canonicalRef(value.$ref, context)
   if (ref) {
-    if (value.nullable === true) return { anyOf: [{ $ref: ref }, { type: "null" }] }
-    return { $ref: ref }
+    const schema = value.nullable === true ? { anyOf: [{ $ref: ref }, { type: "null" }] } : { $ref: ref }
+    return {
+      schema,
+      // References are conservative here because their projected targets may widen later.
+      unsafe: true,
+    }
   }
 
-  if (Array.isArray(value.anyOf) && schemaTypes(value.type).length > 0) {
-    return projectTypedAnyOf(value, context, depth)
+  const declaredTypes = schemaTypes(value.type)
+  const inferredTypes =
+    declaredTypes.length > 0
+      ? declaredTypes
+      : groupEnum(enumValues("const" in value ? [value.const] : value.enum)).map((group) => group.type)
+  if (Array.isArray(value.anyOf) && inferredTypes.length > 0) {
+    return projectTypedAnyOf(
+      { ...value, type: inferredTypes.length === 1 ? inferredTypes[0] : inferredTypes },
+      context,
+      depth,
+      recursion,
+    )
   }
 
   const result: JsonRecord = {}
+  let unsafe = "$ref" in value || "$defs" in value || "definitions" in value
   let truncatedProperties = false
+  let widenedContains = false
+  const child = (item: unknown, nextDepth = depth, nextContext = context) =>
+    project(item, nextContext, nextDepth, recursion + 1)
+  const keep = (projection: Projection) => {
+    unsafe ||= projection.unsafe
+    return projection.schema
+  }
+  const condition = (() => {
+    if (!isRecord(value.if)) return
+    const nested = { ...context }
+    const projection = child(value.if, depth, nested)
+    if (!projection.unsafe) context.properties = nested.properties
+    return projection
+  })()
   for (const [key, item] of Object.entries(value)) {
     if (key === "$defs" || key === "definitions") continue
     if (key === "$ref") continue
-    if (key === "items" && Array.isArray(item)) continue
+    if (key === "items" && Array.isArray(item)) {
+      unsafe = true
+      continue
+    }
+    if (key === "items" && (item === true || item === false)) {
+      result.items = {}
+      unsafe = true
+      continue
+    }
     if (key === "anyOf" && Array.isArray(item)) {
-      if (item.length <= MAX_ANY_OF) result.anyOf = item.map((branch) => project(branch, context, depth + 1))
+      if (item.length > 0 && item.length <= MAX_ANY_OF) {
+        result.anyOf = item.map((branch) => keep(child(branch)))
+      } else {
+        unsafe = true
+      }
+      continue
+    }
+    if (key === "oneOf" && Array.isArray(item)) {
+      const nested = { ...context }
+      const branches = item.map((branch) => child(branch, depth, nested))
+      const risky = branches.some((branch) => branch.unsafe)
+      const useBranches =
+        !risky || (!Array.isArray(value.anyOf) && branches.length > 0 && branches.length <= MAX_ANY_OF)
+      if (!risky) result.oneOf = branches.map((branch) => branch.schema)
+      if (risky && useBranches) result.anyOf = branches.map((branch) => branch.schema)
+      if (useBranches) context.properties = nested.properties
+      unsafe ||= risky
       continue
     }
     if (SCHEMA_LISTS.has(key) && Array.isArray(item)) {
-      result[key] = item.map((schema) => project(schema, context, depth + 1))
+      result[key] = item.map((schema) => keep(child(schema)))
+      continue
+    }
+    if (key === "not" && isRecord(item)) {
+      const nested = { ...context }
+      const schema = child(item, depth, nested)
+      if (!schema.unsafe) {
+        result.not = schema.schema
+        context.properties = nested.properties
+      } else {
+        unsafe = true
+      }
+      continue
+    }
+    if (key === "if" || key === "then" || key === "else") {
+      if (condition?.unsafe) {
+        unsafe = true
+        continue
+      }
+      if (key === "if" && condition) {
+        result.if = condition.schema
+        continue
+      }
+      if (isRecord(item)) {
+        result[key] = keep(child(item))
+        continue
+      }
+      result[key] = item
       continue
     }
     if (key === "properties" && isRecord(item)) {
@@ -104,89 +197,134 @@ function project(value: unknown, context: Context, depth: number): JsonRecord {
       const entries = Object.entries(item).slice(0, remaining)
       context.properties += entries.length
       truncatedProperties = entries.length !== Object.keys(item).length
-      result.properties = Object.fromEntries(
-        entries.map(([name, schema]) => [name, project(schema, context, depth + 1)]),
-      )
+      result.properties = Object.fromEntries(entries.map(([name, schema]) => [name, keep(child(schema, depth + 1))]))
+      unsafe ||= truncatedProperties
       continue
     }
     if (SCHEMA_MAPS.has(key) && isRecord(item)) {
+      const schemas = Object.entries(item).map(([name, schema]) => [name, child(schema)] as const)
       result[key] = Object.fromEntries(
-        Object.entries(item).map(([name, schema]) => [name, project(schema, context, depth + 1)]),
+        schemas.map(([name, schema]) => [name, typeof schema.schema.$ref === "string" ? {} : schema.schema]),
       )
+      unsafe ||= schemas.some(([, schema]) => schema.unsafe)
+      continue
+    }
+    if (key === "contains" && isRecord(item)) {
+      const schema = child(item)
+      result.contains = schema.schema
+      widenedContains = schema.unsafe
+      keep(schema)
       continue
     }
     if ((key === "items" || SCHEMA_NODES.has(key)) && isRecord(item)) {
-      result[key] = project(item, context, depth + 1)
+      result[key] = keep(child(item))
       continue
     }
     result[key] = item
   }
-  projectRequired(result, context)
+  unsafe ||= projectRequired(result, context)
   if (truncatedProperties) delete result.additionalProperties
-  return projectEnum(result)
+  if (widenedContains && "maxContains" in result) {
+    delete result.maxContains
+    unsafe = true
+  }
+  const projected = projectEnum(result)
+  unsafe ||= projected.unsafe
+  if ("unevaluatedProperties" in projected.schema && unsafe) {
+    delete projected.schema.unevaluatedProperties
+    unsafe = true
+  }
+  return { schema: projected.schema, unsafe }
 }
 
-function projectTypedAnyOf(source: JsonRecord, context: Context, depth: number) {
+function projectTypedAnyOf(source: JsonRecord, context: Context, depth: number, recursion: number): Projection {
   const base = omit(source, ["anyOf", "type", "enum", "const", "$defs", "definitions"])
   const parentTypes = schemaTypes(source.type)
   const parentEnum = enumValues("const" in source ? [source.const] : source.enum)
   const variants = Array.isArray(source.anyOf) ? source.anyOf : []
-  if (variants.length > MAX_ANY_OF) return project(omit(source, ["anyOf"]), context, depth)
-  const branches = variants.filter(isRecord).flatMap((branch) => {
-    const types = intersectTypes(parentTypes, schemaTypes(branch.type))
+  if (variants.length > MAX_ANY_OF) {
+    const projected = project(omit(source, ["anyOf", "unevaluatedProperties"]), context, depth, recursion + 1)
+    return { ...projected, unsafe: true }
+  }
+  const branches = variants.flatMap((branch) => {
+    if (branch === false) return []
+    const item = branch === true ? {} : isRecord(branch) ? branch : undefined
+    if (!item) return []
+    const types = intersectTypes(parentTypes, schemaTypes(item.type))
     if (types.length === 0) return []
-    const branchEnum = enumValues("const" in branch ? [branch.const] : branch.enum)
+    const branchEnum = enumValues("const" in item ? [item.const] : item.enum)
     const values = intersectEnums(parentEnum, branchEnum).filter((value) =>
       types.some((type) => matchesType(value, type)),
     )
     if ((parentEnum.length > 0 || branchEnum.length > 0) && values.length === 0) return []
-    const merged = omit({ ...base, ...branch }, ["type", "enum", "const"])
-    return [
-      project(
-        {
-          ...merged,
-          type: types.length === 1 ? types[0] : types,
-          ...(values.length > 0 ? { enum: values } : {}),
-        },
-        context,
-        depth + 1,
-      ),
-    ]
+    const merged = omit({ ...base, ...item }, ["type", "enum", "const"])
+    const projected = project(
+      {
+        ...merged,
+        type: types.length === 1 ? types[0] : types,
+        ...(values.length > 0 ? { enum: values } : {}),
+      },
+      context,
+      depth,
+      recursion + 1,
+    )
+    return [projected.schema]
   })
-  return collapse(branches)
+  return { schema: collapse(branches), unsafe: true }
 }
 
-function projectEnum(source: JsonRecord) {
+function projectEnum(source: JsonRecord): Projection {
   const result = { ...source }
   const values = enumValues(result.enum)
   if (values.length === 0) {
+    const unsafe = "enum" in result
     delete result.enum
-    return result
+    return { schema: result, unsafe }
   }
 
   const types = schemaTypes(result.type)
   if (types.length > 0) {
     const compatible = values.filter((value) => types.some((type) => matchesType(value, type)))
-    if (compatible.length > 0) result.enum = compatible
-    else delete result.enum
-    return result
+    if (compatible.length === 0) {
+      delete result.enum
+      return { schema: result, unsafe: true }
+    }
+    const nullable =
+      types.length === 2 && types.includes("null") && !types.includes("object") && !types.includes("array")
+    if (types.length === 1 || nullable) {
+      result.enum = compatible
+      return { schema: result, unsafe: !same(result.enum, source.enum) }
+    }
+    const base = omit(result, ["enum", "type"])
+    return {
+      schema: collapse(groupEnum(compatible).map((group) => ({ ...base, type: group.type, enum: group.values }))),
+      unsafe: true,
+    }
   }
 
   const groups = groupEnum(values)
   if (groups.length === 1) {
     result.type = groups[0]?.type
     result.enum = groups[0]?.values
-    return result
+    return { schema: result, unsafe: true }
   }
   const base = omit(result, ["enum", "type"])
   return {
-    anyOf: groups.map((group) => ({ ...base, type: group.type, enum: group.values })),
+    schema: { anyOf: groups.map((group) => ({ ...base, type: group.type, enum: group.values })) },
+    unsafe: true,
   }
 }
 
 function projectRequired(schema: JsonRecord, context: Context) {
-  if (schema.type !== "object" || !Array.isArray(schema.required)) return
-  const properties = isRecord(schema.properties) ? { ...schema.properties } : {}
+  if (!Array.isArray(schema.required)) return false
+  const types = schemaTypes(schema.type)
+  if (types.length > 0 && !types.includes("object")) {
+    delete schema.required
+    return true
+  }
+  const sourceProperties = isRecord(schema.properties) ? schema.properties : undefined
+  const properties = { ...sourceProperties }
+  const sourceRequired = schema.required
   const required = [...new Set(schema.required.filter((item): item is string => typeof item === "string"))].filter(
     (name) => {
       if (Object.hasOwn(properties, name)) return true
@@ -198,20 +336,25 @@ function projectRequired(schema: JsonRecord, context: Context) {
   )
   schema.properties = properties
   schema.required = required
+  return (
+    !sourceProperties ||
+    !same(Object.keys(sourceProperties), Object.keys(properties)) ||
+    !same(sourceRequired, required)
+  )
 }
 
 function fitSize(schema: JsonRecord) {
   if (schemaSize(schema) <= MAX_SCHEMA_SIZE) return schema
   const compact = stripAnnotations(schema)
   if (schemaSize(compact) <= MAX_SCHEMA_SIZE) return compact
-  return { type: "object", properties: {} }
+  return {}
 }
 
 function stripAnnotations(schema: JsonRecord): JsonRecord {
   return Object.fromEntries(
     Object.entries(schema).flatMap(([key, value]) => {
       if (["description", "title", "default", "examples", "$comment"].includes(key)) return []
-      if ((key === "properties" || key === "$defs") && isRecord(value)) {
+      if ((key === "properties" || key === "$defs" || SCHEMA_MAPS.has(key)) && isRecord(value)) {
         return [
           [
             key,
@@ -221,10 +364,13 @@ function stripAnnotations(schema: JsonRecord): JsonRecord {
           ],
         ]
       }
-      if (Array.isArray(value)) {
+      if ((key === "anyOf" || key === "oneOf" || SCHEMA_LISTS.has(key)) && Array.isArray(value)) {
         return [[key, value.map((item) => (isRecord(item) ? stripAnnotations(item) : item))]]
       }
-      return [[key, isRecord(value) ? stripAnnotations(value) : value]]
+      if ((key === "items" || SCHEMA_NODES.has(key)) && isRecord(value)) {
+        return [[key, stripAnnotations(value)]]
+      }
+      return [[key, value]]
     }),
   )
 }
@@ -260,7 +406,30 @@ function schemaDepth(schema: JsonRecord, root: JsonRecord, refs: Set<string>): n
     next.add(schema.$ref)
     return schemaDepth(target, root, next)
   })()
-  return Math.max(properties, ...nodes, ...lists, ...definitions, ref)
+  return [...nodes, ...lists, ...definitions, ref].reduce((max, value) => Math.max(max, value), properties)
+}
+
+function dropDanglingRefs(schema: JsonRecord, root: JsonRecord): JsonRecord {
+  if (typeof schema.$ref === "string" && !resolveOutputRef(schema.$ref, root)) return {}
+  return Object.fromEntries(
+    Object.entries(schema).map(([key, value]) => {
+      if ((key === "properties" || key === "$defs" || SCHEMA_MAPS.has(key)) && isRecord(value)) {
+        return [
+          key,
+          Object.fromEntries(
+            Object.entries(value).map(([name, item]) => [name, isRecord(item) ? dropDanglingRefs(item, root) : item]),
+          ),
+        ]
+      }
+      if ((key === "anyOf" || key === "oneOf" || SCHEMA_LISTS.has(key)) && Array.isArray(value)) {
+        return [key, value.map((item) => (isRecord(item) ? dropDanglingRefs(item, root) : item))]
+      }
+      if ((key === "items" || SCHEMA_NODES.has(key)) && isRecord(value)) {
+        return [key, dropDanglingRefs(value, root)]
+      }
+      return [key, value]
+    }),
+  )
 }
 
 function resolveOutputRef(ref: string, root: JsonRecord): JsonRecord | undefined {
@@ -277,9 +446,56 @@ function resolveOutputRef(ref: string, root: JsonRecord): JsonRecord | undefined
     }, undefined)
 }
 
+function terminates(schema: JsonRecord, root: JsonRecord, refs: Set<string>): boolean {
+  const types = schemaTypes(schema.type)
+  if (types.some((type) => type !== "object" && type !== "array")) return true
+  if (types.includes("array")) {
+    if (!isRecord(schema.items) || Object.keys(schema.items).length === 0) return true
+    if (terminates(schema.items, root, refs)) return true
+  }
+  if (types.includes("object")) {
+    if (!Array.isArray(schema.required) || schema.required.length === 0) return true
+    const properties = isRecord(schema.properties) ? schema.properties : undefined
+    if (!properties || Object.keys(properties).length === 0) return true
+    if (
+      schema.required.some((name) => {
+        const property = typeof name === "string" ? properties[name] : undefined
+        return isRecord(property) && terminates(property, root, refs)
+      })
+    ) {
+      return true
+    }
+  }
+  if (
+    Array.isArray(schema.anyOf) &&
+    (schema.anyOf.length === 0 || schema.anyOf.some((item) => isRecord(item) && terminates(item, root, new Set(refs))))
+  ) {
+    return true
+  }
+  if (typeof schema.$ref === "string") {
+    if (refs.has(schema.$ref)) return false
+    const target = resolveOutputRef(schema.$ref, root)
+    if (!target) return true
+    const next = new Set(refs)
+    next.add(schema.$ref)
+    return terminates(target, root, next)
+  }
+  return Object.keys(schema).length === 0
+}
+
 function canonicalRef(value: unknown, context: Context) {
   if (typeof value !== "string") return
-  const ref = value.replace("#/definitions/", "#/$defs/")
+  if (value.includes("~0") || value.includes("~1")) return
+  const ref = (() => {
+    if (!value.startsWith("#/definitions/")) return value
+    const parts = value.slice("#/definitions/".length).split("/")
+    const name = parts[0]?.replaceAll("~1", "/").replaceAll("~0", "~")
+    if (!name || !context.legacy[name]) return
+    return `#/$defs/${context.legacy[name]?.replaceAll("~", "~0").replaceAll("/", "~1")}${
+      parts.length > 1 ? `/${parts.slice(1).join("/")}` : ""
+    }`
+  })()
+  if (!ref) return
   if (ref === "#") return ref
   if (!ref.startsWith("#/$defs/") || ref === "#/$defs/") return
   const name = ref.slice("#/$defs/".length).split("/", 1)[0]?.replaceAll("~1", "/").replaceAll("~0", "~")
@@ -300,10 +516,29 @@ function resolveRef(ref: string, context: Context): unknown {
 }
 
 function definitions(root: JsonRecord) {
-  return {
-    ...(isRecord(root.definitions) ? root.definitions : {}),
-    ...(isRecord(root.$defs) ? root.$defs : {}),
-  }
+  const modern = isRecord(root.$defs) ? root.$defs : {}
+  const schemas = { ...modern }
+  const legacy = Object.fromEntries(
+    Object.entries(isRecord(root.definitions) ? root.definitions : {}).map(([name, schema]) => {
+      const target =
+        !Object.hasOwn(schemas, name) || same(schemas[name], schema) ? name : uniqueDefinition(name, schemas)
+      schemas[target] = schema
+      return [name, target]
+    }),
+  )
+  return { schemas, legacy }
+}
+
+function uniqueDefinition(name: string, schemas: JsonRecord, index = 1): string {
+  const candidate = `${name}__definitions${index === 1 ? "" : `_${index}`}`
+  if (!Object.hasOwn(schemas, candidate)) return candidate
+  return uniqueDefinition(name, schemas, index + 1)
+}
+
+function containsSlashKey(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsSlashKey)
+  if (!isRecord(value)) return false
+  return Object.entries(value).some(([key, item]) => key.includes("/") || containsSlashKey(item))
 }
 
 function schemaTypes(value: unknown) {
@@ -371,6 +606,22 @@ function collapse(branches: JsonRecord[]) {
 
 function unique<T>(values: T[]) {
   return [...new Map(values.map((value) => [JSON.stringify(value), value])).values()]
+}
+
+function same(left: unknown, right: unknown) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function containsRef(value: unknown): boolean {
+  if (!isRecord(value)) return false
+  if (typeof value.$ref === "string") return true
+  const maps = [value.properties, value.$defs, value.definitions, ...[...SCHEMA_MAPS].map((key) => value[key])]
+  if (maps.some((map) => isRecord(map) && Object.values(map).some(containsRef))) return true
+  const nodes = [value.items, ...[...SCHEMA_NODES].map((key) => value[key])]
+  if (nodes.some(containsRef)) return true
+  return [value.anyOf, value.oneOf, ...[...SCHEMA_LISTS].map((key) => value[key])].some(
+    (items) => Array.isArray(items) && items.some(containsRef),
+  )
 }
 
 function omit(source: JsonRecord, keys: string[]) {
