@@ -2,6 +2,7 @@ import type { ModelMessage, ToolResultPart } from "ai"
 import { mergeDeep, unique } from "remeda"
 import type { JSONSchema7 } from "@ai-sdk/provider"
 import type * as Provider from "./provider"
+import { MFJS } from "./mfjs"
 import type * as ModelsDev from "@opencode-ai/core/models-dev"
 import { iife } from "@/util/iife"
 
@@ -1463,21 +1464,7 @@ export function schema(model: Provider.Model, schema: JSONSchema7): JSONSchema7 
   }
 
   if (model.providerID === "moonshotai" || model.api.id.toLowerCase().includes("kimi")) {
-    const sanitizeMoonshot = (obj: unknown): unknown => {
-      if (obj === null || typeof obj !== "object") return obj
-      if (Array.isArray(obj)) return obj.map(sanitizeMoonshot)
-      // Moonshot expands $ref before validation and rejects sibling keywords like description on the same node.
-      if ("$ref" in obj && typeof obj.$ref === "string") return { $ref: obj.$ref }
-      const result = Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, sanitizeMoonshot(value)]))
-      // MFJS does not support tuple-style `items` arrays; it requires one schema object for all array items.
-      if (Array.isArray(result.items)) result.items = result.items[0] ?? {}
-      return result
-    }
-
-    const sanitized = sanitizeMoonshot(schema)
-    if (typeof sanitized === "object" && sanitized !== null && !Array.isArray(sanitized)) {
-      schema = sanitized
-    }
+    schema = MFJS.sanitize(schema)
   }
 
   // Convert integer enums to string enums for Google/Gemini
