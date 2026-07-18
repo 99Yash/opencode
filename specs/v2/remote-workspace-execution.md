@@ -255,6 +255,9 @@ Daytona is the next comparison because its public API directly supports
 filesystem operations, command sessions, interruption, and durable stop/pause
 semantics. Modal follows with an intentionally different binding transition:
 suspension snapshots the filesystem and reconnection creates a new Sandbox.
+Its process handles do not expose per-process termination, so an adapter needs
+an explicit provider-side mechanism that terminates a command and its children;
+client fiber interruption alone is insufficient.
 E2B can provide a fourth validation through pause/resume if the first three
 leave meaningful ambiguity.
 
@@ -491,5 +494,11 @@ The following concerns are real but do not expand the first milestone:
 Disposable Daytona, Modal, and Vercel tracer experiments informed this plan and
 were removed after review. Vercel was exercised live through create, reconnect,
 file I/O, foreground command interruption, stop, resume with retained files,
-and deletion. Daytona and Modal adapters were type-checked but not run because
+and deletion. A later Modal live tracer exercised create, reconnect by Sandbox
+ID, the direct filesystem API, foreground commands, command timeout cleanup,
+filesystem snapshot, restoration into a new Sandbox, files that survived
+restoration and remained writable, and Sandbox deletion. In the timeout check,
+the command was no longer running and the Python SDK resolved with `-1` rather
+than raising. Neither the current Python nor JavaScript process handle exposes
+direct per-process termination. Daytona was type-checked but not run because
 credentials were unavailable.
