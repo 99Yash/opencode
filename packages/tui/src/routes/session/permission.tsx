@@ -119,9 +119,7 @@ export function PermissionPrompt(props: { request: PermissionV2Request; director
   const source = createMemo(() => {
     const tool = props.request.source
     if (!tool) return { input: undefined, structured: undefined }
-    const message = data.session.message.get(props.request.sessionID, tool.messageID)
-    if (message?.type !== "assistant") return { input: undefined, structured: undefined }
-    const part = message.content.find((part) => part.type === "tool" && part.id === tool.callID)
+    const part = data.session.message.parts(props.request.sessionID, tool.messageID).get(tool.callID)?.()
     if (part?.type === "tool" && part.state.status !== "streaming") {
       return { input: part.state.input, structured: part.state.structured }
     }
