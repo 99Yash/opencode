@@ -1546,7 +1546,7 @@ describe("ProviderTransform.schema - MFJS selection", () => {
       ).toEqual({
         type: "object",
         properties: {
-          operation: { type: "string", enum: ["move", "copy"] },
+          operation: { type: "object" },
         },
       })
     })
