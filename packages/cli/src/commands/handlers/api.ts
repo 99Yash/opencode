@@ -20,6 +20,7 @@ export default Runtime.handler(
   Effect.fn("cli.api")(function* (input) {
     const server = yield* ServerConnection.resolve({
       server: Option.getOrUndefined(input.server),
+      remote: Option.getOrUndefined(input.remote),
       standalone: input.standalone,
       mismatch: "ignore",
     })

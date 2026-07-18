@@ -2,12 +2,14 @@ import { Service, type Endpoint, type EnsureOptions } from "@opencode-ai/client/
 import { ClientError, isUnauthorizedError, OpenCode } from "@opencode-ai/client/promise"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { Effect, Redacted } from "effect"
+import { Config } from "../config"
 import { Env } from "../env"
 import { ServiceConfig } from "./service-config"
 import { Standalone } from "./standalone"
 
 export type Args = {
   readonly server?: string
+  readonly remote?: string
   readonly standalone?: boolean
   readonly mismatch?: "replace" | "ignore" | "error"
   readonly onStart?: EnsureOptions["onStart"]
@@ -19,13 +21,28 @@ export type Resolved = {
 }
 
 export const resolve = Effect.fn("cli.server-connection.resolve")(function* (args: Args) {
-  if (args.server !== undefined && args.standalone)
-    return yield* Effect.fail(new Error("--server and --standalone cannot be combined"))
-  if (args.server !== undefined) {
-    const password = yield* Env.password
+  if (args.server !== undefined && args.remote !== undefined)
+    return yield* Effect.fail(new Error("--server and --remote cannot be combined"))
+  if ((args.server !== undefined || args.remote !== undefined) && args.standalone)
+    return yield* Effect.fail(new Error("--server, --remote, and --standalone cannot be combined"))
+  if (args.server !== undefined || args.remote !== undefined) {
+    const config = yield* Config.Service
+    const profile = args.remote === undefined ? undefined : (yield* config.get()).servers?.[args.remote]
+    if (args.remote !== undefined && profile === undefined)
+      return yield* Effect.fail(new Error(`Saved server "${args.remote}" not found`))
+    const environmentPassword = yield* Env.password
+    const password = environmentPassword ? Redacted.value(environmentPassword) : profile?.password
+    const url = profile?.url ?? args.server
+    if (url === undefined) return yield* Effect.fail(new Error("Missing server URL"))
     const endpoint = {
-      url: args.server,
-      auth: password ? { type: "basic" as const, username: "opencode", password: Redacted.value(password) } : undefined,
+      url,
+      auth: password
+        ? {
+            type: "basic" as const,
+            username: profile?.username ?? "opencode",
+            password,
+          }
+        : undefined,
     } satisfies Endpoint
     const client = OpenCode.make({ baseUrl: endpoint.url, headers: Service.headers(endpoint) })
     const health = yield* Effect.tryPromise({

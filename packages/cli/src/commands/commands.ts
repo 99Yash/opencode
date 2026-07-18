@@ -12,6 +12,11 @@ const ServerParams = {
     Flag.withDescription("Connect to a server URL instead of the background service"),
     Flag.optional,
   ),
+  remote: Flag.string("remote").pipe(
+    Flag.withAlias("r"),
+    Flag.withDescription("Connect to a saved remote server"),
+    Flag.optional,
+  ),
 }
 
 export const Commands = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME : "opencode", {
@@ -200,6 +205,27 @@ export const Commands = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCO
         ),
         yolo: Flag.boolean("yolo").pipe(Flag.withDefault(false), Flag.withHidden),
       },
+    }),
+    Spec.make("server", {
+      description: "Manage saved server connections",
+      commands: [
+        Spec.make("list", { description: "List saved server connections" }),
+        Spec.make("add", {
+          description: "Save a server connection (and OPENCODE_PASSWORD when set)",
+          params: {
+            name: Argument.string("name").pipe(Argument.withDescription("Name for the saved server")),
+            url: Argument.string("url").pipe(Argument.withDescription("Server URL")),
+            username: Flag.string("username").pipe(
+              Flag.withDescription("Basic authentication username"),
+              Flag.optional,
+            ),
+          },
+        }),
+        Spec.make("remove", {
+          description: "Remove a saved server connection",
+          params: { name: Argument.string("name").pipe(Argument.withDescription("Saved server name")) },
+        }),
+      ],
     }),
     Spec.make("service", {
       description: "Manage the background server",

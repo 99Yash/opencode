@@ -9,6 +9,7 @@ export default Runtime.handler(Commands.commands.run, (input) =>
     const separator = process.argv.indexOf("--", 2)
     const server = yield* ServerConnection.resolve({
       server: Option.getOrUndefined(input.server),
+      remote: Option.getOrUndefined(input.remote),
       standalone: input.standalone,
     })
     yield* Effect.promise(() =>

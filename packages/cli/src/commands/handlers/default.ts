@@ -20,6 +20,7 @@ export default Runtime.handler(Commands, (input) =>
     yield* Effect.addFinalizer(() => Effect.promise(() => preflight.close()))
     const server = yield* ServerConnection.resolve({
       server: Option.getOrUndefined(input.server),
+      remote: Option.getOrUndefined(input.remote),
       standalone: input.standalone,
       onStart: (reason, previousVersion) => {
         if (reason === "version-mismatch" && preflight.begin(previousVersion)) return
