@@ -12,6 +12,12 @@ export type VariantID = typeof VariantID.Type
 export const Family = Model.Family
 export type Family = Model.Family
 
+export const InterleavedField = Model.InterleavedField
+export type InterleavedField = Model.InterleavedField
+
+export const Interleaved = Model.Interleaved
+export type Interleaved = Model.Interleaved
+
 export const Capabilities = Model.Capabilities
 export type Capabilities = Model.Capabilities
 

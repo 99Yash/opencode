@@ -1,6 +1,7 @@
 export * as ConfigProviderV1 from "./provider"
 
 import { Schema } from "effect"
+import { Interleaved } from "@opencode-ai/schema/model"
 import { PositiveInt } from "../../schema"
 
 export const ModelStatus = Schema.Literals(["alpha", "beta", "deprecated", "active"])
@@ -14,14 +15,7 @@ export const Model = Schema.Struct({
   reasoning: Schema.optional(Schema.Boolean),
   temperature: Schema.optional(Schema.Boolean),
   tool_call: Schema.optional(Schema.Boolean),
-  interleaved: Schema.optional(
-    Schema.Union([
-      Schema.Literal(true),
-      Schema.Struct({
-        field: Schema.Literals(["reasoning", "reasoning_content", "reasoning_details"]),
-      }),
-    ]),
-  ),
+  interleaved: Schema.optional(Interleaved),
   cost: Schema.optional(
     Schema.Struct({
       input: Schema.Finite,

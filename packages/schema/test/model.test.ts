@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { Schema } from "effect"
 import { Model } from "../src/model.js"
 
 describe("Model.Ref", () => {
@@ -18,5 +19,15 @@ describe("Model.Ref", () => {
     expect(() => Model.Ref.parse("gpt-5")).toThrow()
     expect(() => Model.Ref.parse("openai/gpt-5#")).toThrow()
     expect(() => Model.Ref.parse("openai/gpt-5#high#extra")).toThrow()
+  })
+})
+
+describe("Model.Interleaved", () => {
+  test("accepts known and provider-specific fields", () => {
+    const decode = Schema.decodeUnknownSync(Model.Interleaved)
+    const fields = ["reasoning", "reasoning_content", "reasoning_text", "reasoning_details", "vendor_reasoning"]
+
+    for (const field of fields) expect(decode({ field })).toEqual({ field })
+    expect(decode(true)).toBe(true)
   })
 })

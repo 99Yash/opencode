@@ -69,6 +69,9 @@ export const Plugin = define({
                   tools: config.capabilities.tools,
                   input: [...config.capabilities.input],
                   output: [...config.capabilities.output],
+                  ...(config.capabilities.interleaved !== undefined
+                    ? { interleaved: config.capabilities.interleaved }
+                    : {}),
                 }
               }
               if (config.variants !== undefined) {

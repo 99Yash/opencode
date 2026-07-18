@@ -46,7 +46,7 @@ type SourceModel = {
   readonly reasoning_options?: readonly ReasoningOption[]
   readonly temperature?: boolean
   readonly tool_call: boolean
-  readonly interleaved?: true | { readonly field: "reasoning" | "reasoning_content" | "reasoning_details" }
+  readonly interleaved?: ModelV2.Interleaved
   readonly cost?: Cost
   readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
   readonly modalities?: { readonly input: readonly Modality[]; readonly output: readonly Modality[] }
@@ -505,6 +505,7 @@ function modelInfo(
       tools: model.tool_call,
       input: [...(model.modalities?.input ?? [])],
       output: [...(model.modalities?.output ?? [])],
+      ...(model.interleaved !== undefined ? { interleaved: model.interleaved } : {}),
     },
     variants: [...(input.variants ?? [])],
     time: { released: released(model.release_date) },

@@ -47,6 +47,7 @@ const fixture = {
         reasoning: false,
         temperature: true,
         tool_call: true,
+        interleaved: { field: "vendor_reasoning" },
         limit: { context: 128000, output: 8192 },
       },
     },
@@ -69,7 +70,7 @@ const fixtureSnapshot = [
         family: undefined,
         package: undefined,
         settings: undefined,
-        capabilities: { tools: true, input: [], output: [] },
+        capabilities: { tools: true, input: [], output: [], interleaved: { field: "vendor_reasoning" } },
         variants: [],
         time: { released: Date.parse("2026-01-01") },
         cost: [

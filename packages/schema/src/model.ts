@@ -41,11 +41,29 @@ export interface Ref extends Schema.Schema.Type<typeof Ref> {}
 export const Family = Schema.String.pipe(Schema.brand("Model.Family"))
 export type Family = typeof Family.Type
 
+export type InterleavedField =
+  | "reasoning"
+  | "reasoning_content"
+  | "reasoning_text"
+  | "reasoning_details"
+  | (string & {})
+export const InterleavedField: Schema.Codec<InterleavedField> = Schema.Union([
+  Schema.Literals(["reasoning", "reasoning_content", "reasoning_text", "reasoning_details"]),
+  Schema.String,
+]).annotate({ identifier: "Model.InterleavedField" })
+
+export type Interleaved = true | { readonly field: InterleavedField }
+export const Interleaved: Schema.Codec<Interleaved> = Schema.Union([
+  Schema.Literal(true),
+  Schema.Struct({ field: InterleavedField }),
+]).annotate({ identifier: "Model.Interleaved" })
+
 export interface Capabilities extends Schema.Schema.Type<typeof Capabilities> {}
 export const Capabilities = Schema.Struct({
   tools: Schema.Boolean,
   input: Schema.Array(Schema.String),
   output: Schema.Array(Schema.String),
+  interleaved: Interleaved.pipe(optional),
 }).annotate({ identifier: "Model.Capabilities" })
 
 export interface Cost extends Schema.Schema.Type<typeof Cost> {}

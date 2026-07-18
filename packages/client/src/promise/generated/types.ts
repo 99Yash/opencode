@@ -163,7 +163,12 @@ export type SessionMessageProviderState7 = { [x: string]: any }
 
 export type EventLogSynced = { type: "log.synced"; aggregateID: string; seq?: number }
 
-export type ModelCapabilities = { tools: boolean; input: Array<string>; output: Array<string> }
+export type ModelInterleavedField =
+  | "reasoning"
+  | "reasoning_content"
+  | "reasoning_text"
+  | "reasoning_details"
+  | (string & {})
 
 export type ModelVariant = {
   id: string
@@ -1094,7 +1099,7 @@ export type TuiCommandExecute = {
       | "prompt.clear"
       | "prompt.submit"
       | "agent.cycle"
-      | string
+      | (string & {})
   }
 }
 
@@ -1400,6 +1405,8 @@ export type SessionToolFailed = {
     resultState?: SessionMessageProviderState7
   }
 }
+
+export type ModelInterleaved = true | { field: ModelInterleavedField }
 
 export type ModelCost = {
   tier?: { type: "context"; size: number }
@@ -1885,23 +1892,11 @@ export type SessionMessageCompaction =
   | SessionMessageCompactionCompleted
   | SessionMessageCompactionFailed
 
-export type ModelInfo = {
-  id: string
-  modelID: string
-  providerID: string
-  family?: string
-  name: string
-  package?: string
-  settings?: { [x: string]: JsonValue }
-  headers?: { [x: string]: string }
-  body?: { [x: string]: JsonValue }
-  capabilities: ModelCapabilities
-  variants: Array<ModelVariant>
-  time: { released: number }
-  cost: Array<ModelCost>
-  status: "alpha" | "beta" | "deprecated" | "active"
-  enabled: boolean
-  limit: { context: number; input?: number; output: number }
+export type ModelCapabilities = {
+  tools: boolean
+  input: Array<string>
+  output: Array<string>
+  interleaved?: ModelInterleaved
 }
 
 export type IntegrationOAuthMethod = {
@@ -2029,6 +2024,25 @@ export type SessionMessageAssistantTool = {
     | SessionMessageToolStateCompleted
     | SessionMessageToolStateError
   time: { created: number; ran?: number; completed?: number }
+}
+
+export type ModelInfo = {
+  id: string
+  modelID: string
+  providerID: string
+  family?: string
+  name: string
+  package?: string
+  settings?: { [x: string]: JsonValue }
+  headers?: { [x: string]: string }
+  body?: { [x: string]: JsonValue }
+  capabilities: ModelCapabilities
+  variants: Array<ModelVariant>
+  time: { released: number }
+  cost: Array<ModelCost>
+  status: "alpha" | "beta" | "deprecated" | "active"
+  enabled: boolean
+  limit: { context: number; input?: number; output: number }
 }
 
 export type IntegrationMethod =

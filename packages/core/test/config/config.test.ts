@@ -289,6 +289,24 @@ describe("Config", () => {
     }),
   )
 
+  it.effect("migrates provider-specific interleaved reasoning fields", () =>
+    Effect.sync(() => {
+      const migrated = ConfigMigrateV1.migrate({
+        provider: {
+          custom: {
+            models: {
+              chat: { interleaved: { field: "vendor_reasoning" } },
+            },
+          },
+        },
+      })
+
+      expect(migrated.providers?.custom?.models?.chat?.capabilities?.interleaved).toEqual({
+        field: "vendor_reasoning",
+      })
+    }),
+  )
+
   it.effect("migrates v1 provider lists to policies", () =>
     Effect.sync(() => {
       expect(
