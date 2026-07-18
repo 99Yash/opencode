@@ -779,7 +779,7 @@
       },
     },
     "packages/quark": {
-      "name": "effect-quark",
+      "name": "@opencode-ai/quark",
       "version": "0.0.0",
       "dependencies": {
         "solid-js": "catalog:",
@@ -1036,6 +1036,7 @@
         "@opencode-ai/client": "workspace:*",
         "@opencode-ai/core": "workspace:*",
         "@opencode-ai/plugin": "workspace:*",
+        "@opencode-ai/quark": "workspace:*",
         "@opencode-ai/simulation": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
         "@opentui/core": "catalog:",
@@ -1045,7 +1046,6 @@
         "clipboardy": "4.0.0",
         "diff": "catalog:",
         "effect": "catalog:",
-        "effect-quark": "workspace:*",
         "fuzzysort": "catalog:",
         "get-east-asian-width": "catalog:",
         "open": "10.1.2",
@@ -2249,6 +2249,8 @@
     "@opencode-ai/plugin": ["@opencode-ai/plugin@workspace:packages/plugin"],
 
     "@opencode-ai/protocol": ["@opencode-ai/protocol@workspace:packages/protocol"],
+
+    "@opencode-ai/quark": ["@opencode-ai/quark@workspace:packages/quark"],
 
     "@opencode-ai/schema": ["@opencode-ai/schema@workspace:packages/schema"],
 
@@ -4055,8 +4057,6 @@
     "ee-first": ["ee-first@1.1.1", "", {}, "sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow=="],
 
     "effect": ["effect@4.0.0-beta.98", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "fast-check": "^4.9.0", "find-my-way-ts": "^0.1.6", "ini": "^7.0.0", "kubernetes-types": "^1.30.0", "msgpackr": "^2.0.4", "multipasta": "^0.2.8", "toml": "^4.1.2", "uuid": "^14.0.1", "yaml": "^2.9.0" } }, "sha512-oz+bsG5h+6RNrw4t5GMfQrk/xBS8ROoqkYsuvRhBr5O7mCOrpvH/hbw+QrDzvKIpX4HJClwm86F94c87W0sJxg=="],
-
-    "effect-quark": ["effect-quark@workspace:packages/quark"],
 
     "ejs": ["ejs@3.1.10", "", { "dependencies": { "jake": "^10.8.5" }, "bin": { "ejs": "bin/cli.js" } }, "sha512-UeJmFfOrAQS8OJWPZ4qtgHyWExa088/MtK5UEyoJGFH67cDEXkZSviOiKRCZ4Xij0zxI3JECgYs3oKx+AizQBA=="],
 
