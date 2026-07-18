@@ -53,6 +53,7 @@ const inputStart = (tool: PendingTool) =>
   LLMEvent.toolInputStart({
     id: tool.id,
     name: tool.name,
+    providerExecuted: tool.providerExecuted ? true : undefined,
     providerMetadata: tool.providerMetadata,
   })
 
@@ -63,8 +64,9 @@ const inputDelta = (tool: PendingTool, text: string) =>
     text,
   })
 
-const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
-  parseToolInput(route, tool.name, inputOverride ?? tool.input).pipe(
+const toolCall = (route: string, tool: PendingTool, inputOverride?: string) => {
+  const raw = inputOverride ?? tool.input
+  return parseToolInput(route, tool, raw).pipe(
     Effect.map(
       (input): ToolCall =>
         LLMEvent.toolCall({
@@ -75,7 +77,20 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) =>
           providerMetadata: tool.providerMetadata,
         }),
     ),
+    Effect.match({
+      onFailure: (error) =>
+        LLMEvent.toolInputError({
+          id: tool.id,
+          name: tool.name,
+          raw,
+          message: error.reason.message,
+          providerExecuted: tool.providerExecuted ? true : undefined,
+          providerMetadata: tool.providerMetadata,
+        }),
+      onSuccess: (event) => event,
+    }),
   )
+}
 
 /** Store the updated tool and produce the optional public delta event. */
 const appendTool = <K extends StreamKey>(
@@ -158,8 +173,8 @@ export const appendExisting = <K extends StreamKey>(
 
 /**
  * Finalize one pending tool call: parse the accumulated raw JSON, remove it
- * from state, and return the optional public `tool-call` event. Missing keys are
- * a no-op because some providers emit stop events for non-tool content blocks.
+ * from state, and emit either `tool-call` or `tool-input-error`. Missing keys
+ * are a no-op because some providers emit stop events for non-tool blocks.
  */
 export const finish = <K extends StreamKey>(route: string, tools: State<K>, key: K) =>
   Effect.gen(function* () {
@@ -186,7 +201,12 @@ export const finishWithInput = <K extends StreamKey>(route: string, tools: State
     return {
       tools: withoutTool(tools, key),
       events: [
-        LLMEvent.toolInputEnd({ id: tool.id, name: tool.name, providerMetadata: tool.providerMetadata }),
+        LLMEvent.toolInputEnd({
+          id: tool.id,
+          name: tool.name,
+          input,
+          providerMetadata: tool.providerMetadata,
+        }),
         yield* toolCall(route, tool, input),
       ],
     }

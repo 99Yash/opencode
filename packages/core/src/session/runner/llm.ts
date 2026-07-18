@@ -28,6 +28,8 @@ import { toSessionError } from "../to-session-error"
 import { SessionRunnerRetry } from "./retry"
 import { SessionUsage } from "../usage"
 
+const MAX_MALFORMED_TOOL_RETRIES = 4
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -80,6 +82,7 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionPending.Delivery | undefined,
       step: number,
+      recoverMalformedToolInput: boolean,
       recoverOverflow?: typeof compaction.compact,
       assistantMessageID?: SessionMessage.ID,
     ) {
@@ -143,7 +146,7 @@ const layer = Layer.effect(
               }
             }
             yield* publish(event)
-            if (event.type !== "tool-call" || event.providerExecuted) return
+            if (event.type !== "tool-call" || publisher.isProviderExecuted(event.id)) return
             const tool = prepared.resolveToolCall(event.name)
             if (tool.type === "reject") {
               yield* serialized(publisher.failUnsettledTools(tool.error))
@@ -244,13 +247,35 @@ const layer = Layer.effect(
           if (overflowFailure) yield* publish(overflowFailure)
           const llmFailure = streamFailure instanceof LLMError ? streamFailure : undefined
           const malformedToolInput =
-            llmFailure?.reason._tag === "InvalidProviderOutput" && llmFailure.reason.source === "tool-input"
-          const recoveredMalformedToolInput = malformedToolInput
+            llmFailure?.reason._tag === "InvalidProviderOutput" &&
+            llmFailure.reason.source === "tool-input" &&
+            llmFailure.reason.toolCallID !== undefined &&
+            llmFailure.reason.toolName !== undefined &&
+            llmFailure.reason.raw !== undefined
+              ? {
+                  id: llmFailure.reason.toolCallID,
+                  name: llmFailure.reason.toolName,
+                  raw: llmFailure.reason.raw,
+                  providerExecuted: llmFailure.reason.providerExecuted,
+                  providerMetadata: llmFailure.reason.providerMetadata,
+                }
+              : undefined
+          const failedMalformedToolInput = malformedToolInput
             ? yield* serialized(
-                publisher.failUnsettledTools({
-                  type: "provider.invalid-output",
-                  message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
-                }),
+                publisher.failMalformedToolInput(
+                  {
+                    id: malformedToolInput.id,
+                    name: malformedToolInput.name,
+                    raw: malformedToolInput.raw,
+                    providerExecuted: malformedToolInput.providerExecuted,
+                    providerMetadata: malformedToolInput.providerMetadata,
+                  },
+                  {
+                    type: "provider.invalid-output",
+                    message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+                  },
+                  toSessionError(llmFailure),
+                ),
               )
             : false
           if (llmFailure && !publisher.hasProviderError()) {
@@ -267,6 +292,11 @@ const layer = Layer.effect(
           }
           // Provider error events only arrive from the stream, so the flag is final here.
           const providerFailed = publisher.hasProviderError()
+          const recoveredMalformedToolInput =
+            recoverMalformedToolInput &&
+            !providerFailed &&
+            !streamInterrupted &&
+            (failedMalformedToolInput || (stream._tag === "Success" && publisher.hasMalformedToolInput()))
 
           // Settle every owned tool fiber. FiberSet.join returns on the first failure, so retain
           // the individual fibers and await all exits before publishing the terminal step event.
@@ -346,6 +376,7 @@ const layer = Layer.effect(
           return {
             _tag: "Completed",
             needsContinuation: needsContinuation || recoveredMalformedToolInput,
+            malformedToolInput: recoveredMalformedToolInput,
             step: currentStep,
           } as const
         }),
@@ -356,6 +387,7 @@ const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       promotion: SessionPending.Delivery | undefined,
       step: number,
+      recoverMalformedToolInput: boolean,
     ) {
       // Compaction restarts rebuild the request from compacted history without re-promoting.
       // Overflow recovery is one-shot: a post-compaction attempt must not recover another
@@ -366,7 +398,14 @@ const layer = Layer.effect(
       let assistantMessageID: SessionMessage.ID | undefined
       while (true) {
         const attempt = yield* Effect.suspend(() =>
-          attemptStep(sessionID, currentPromotion, currentStep, recoverOverflow, assistantMessageID),
+          attemptStep(
+            sessionID,
+            currentPromotion,
+            currentStep,
+            recoverMalformedToolInput,
+            recoverOverflow,
+            assistantMessageID,
+          ),
         ).pipe(
           Effect.tapError((error) =>
             error instanceof SessionRunnerRetry.RetryableFailure
@@ -388,7 +427,12 @@ const layer = Layer.effect(
               .pipe(Effect.andThen(Effect.fail(error.cause)))
           }),
         )
-        if (attempt._tag === "Completed") return { needsContinuation: attempt.needsContinuation, step: attempt.step }
+        if (attempt._tag === "Completed")
+          return {
+            needsContinuation: attempt.needsContinuation,
+            malformedToolInput: attempt.malformedToolInput,
+            step: attempt.step,
+          }
         if (attempt._tag === "RestartAfterOverflowCompaction") recoverOverflow = undefined
         yield* Effect.yieldNow
         currentPromotion = undefined
@@ -446,12 +490,19 @@ const layer = Layer.effect(
       while (shouldRun) {
         let needsContinuation = true
         let step = 1
+        let malformedToolRetries = 0
         // Repeat steps while continuation is needed. A step needs continuation only
         // when it recorded local tool calls whose results the model has not yet seen;
-        // a provider error suppresses it. Pending steers also continue the loop so
-        // interjections are answered before the session goes idle.
+        // malformed tool input can also continue within its bounded recovery budget.
+        // A provider error suppresses continuation. Pending steers also continue the
+        // loop so interjections are answered before the session goes idle.
         while (needsContinuation) {
-          const result = yield* runStep(input.sessionID, promotion, step)
+          const result = yield* runStep(
+            input.sessionID,
+            promotion,
+            step,
+            malformedToolRetries < MAX_MALFORMED_TOOL_RETRIES,
+          )
           // Steer/queue promotion inside runStep has already made the pending input a visible
           // user message by this point, so the first-user-message check below is reliable.
           if (!titleAttempted.has(input.sessionID)) {
@@ -459,6 +510,7 @@ const layer = Layer.effect(
             forkTitle(title.generateForFirstPrompt(yield* getSession(input.sessionID)).pipe(Effect.ignore))
           }
           needsContinuation = result.needsContinuation
+          malformedToolRetries = result.malformedToolInput ? malformedToolRetries + 1 : 0
           step = result.step + 1
           if (needsContinuation) {
             yield* runPendingCompaction(input.sessionID)

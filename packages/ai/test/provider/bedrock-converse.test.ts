@@ -303,6 +303,36 @@ describe("Bedrock Converse route", () => {
     }),
   )
 
+  it.effect("emits malformed streamed tool input without a tool call", () =>
+    Effect.gen(function* () {
+      const body = eventStreamBody(
+        ["messageStart", { role: "assistant" }],
+        [
+          "contentBlockStart",
+          {
+            contentBlockIndex: 0,
+            start: { toolUse: { toolUseId: "tool_malformed", name: "lookup" } },
+          },
+        ],
+        ["contentBlockDelta", { contentBlockIndex: 0, delta: { toolUse: { input: '{"query":"partial' } } }],
+        ["contentBlockStop", { contentBlockIndex: 0 }],
+        ["messageStop", { stopReason: "tool_use" }],
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(baseRequest, {
+          tools: [{ name: "lookup", description: "Lookup", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedBytes(body)))
+
+      expect(response.toolCalls).toEqual([])
+      expect(response.events.find((event) => event.type === "tool-input-error")).toMatchObject({
+        type: "tool-input-error",
+        id: "tool_malformed",
+        raw: '{"query":"partial',
+      })
+    }),
+  )
+
   it.effect("decodes reasoning deltas", () =>
     Effect.gen(function* () {
       const body = eventStreamBody(

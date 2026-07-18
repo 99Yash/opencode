@@ -53,6 +53,7 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
       called: boolean
       settled: boolean
       providerExecuted: boolean
+      rawInput: string
     }
   >()
   let assistantMessageID = input.assistantMessageID
@@ -60,6 +61,7 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
   let stepFailed = false
   let providerFailed = false
   let retryEvidence = false
+  let malformedToolInput = false
   let stepFailure: SessionError.Error | undefined
   let stepSettlement:
     | {
@@ -112,12 +114,12 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
         if (state !== undefined) current.state = { ...current.state, ...state }
         return Effect.succeed(current.ordinal)
       })
-    const end = Effect.fnUntraced(function* (id: string, state?: Record<string, unknown>) {
+    const end = Effect.fnUntraced(function* (id: string, state?: Record<string, unknown>, value?: string) {
       const current = chunks.get(id)
       if (!current) return yield* Effect.die(new Error(`${name} end before start: ${id}`))
       yield* ended(
         id,
-        current.values.join(""),
+        value ?? current.values.join(""),
         current.ordinal,
         state === undefined ? current.state : { ...current.state, ...state },
       )
@@ -175,7 +177,12 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
     yield* toolInput.flush()
   })
 
-  const startToolInput = Effect.fnUntraced(function* (event: { readonly id: string; readonly name: string }) {
+  const startToolInput = Effect.fnUntraced(function* (event: {
+    readonly id: string
+    readonly name: string
+    readonly providerExecuted?: boolean
+    readonly providerMetadata?: ProviderMetadata
+  }) {
     if (tools.has(event.id)) return yield* Effect.die(new Error(`Duplicate tool input start: ${event.id}`))
     const assistantMessageID = yield* startAssistant()
     tools.set(event.id, {
@@ -183,7 +190,8 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
       name: event.name,
       called: false,
       settled: false,
-      providerExecuted: false,
+      providerExecuted: event.providerExecuted === true,
+      rawInput: "",
     })
     yield* toolInput.start(event.id)
     yield* events.publish(SessionEvent.Tool.Input.Started, {
@@ -191,16 +199,60 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
       assistantMessageID,
       callID: event.id,
       name: event.name,
+      executed: event.providerExecuted,
+      state: providerState(event.providerMetadata),
     })
   })
 
-  const endToolInput = Effect.fnUntraced(function* (event: { readonly id: string; readonly name: string }) {
+  const endToolInput = Effect.fnUntraced(function* (event: {
+    readonly id: string
+    readonly name: string
+    readonly input?: string
+  }) {
     const tool = tools.get(event.id)
     if (!tool) return yield* Effect.die(new Error(`Tool input end before start: ${event.id}`))
     if (tool.name !== event.name)
       return yield* Effect.die(new Error(`Tool input name changed for ${event.id}: ${tool.name} -> ${event.name}`))
     if (!toolInput.has(event.id)) return yield* Effect.die(new Error(`Duplicate tool input end: ${event.id}`))
-    yield* toolInput.end(event.id)
+    tool.rawInput = event.input ?? tool.rawInput
+    yield* toolInput.end(event.id, undefined, event.input)
+  })
+
+  const failMalformedToolInput = Effect.fnUntraced(function* (
+    event: {
+      readonly id: string
+      readonly name: string
+      readonly raw: string
+      readonly providerExecuted?: boolean
+      readonly providerMetadata?: ProviderMetadata
+    },
+    error: SessionError.Error,
+    assistantError: SessionError.Error,
+  ) {
+    if (!tools.has(event.id)) yield* startToolInput(event)
+    const tool = tools.get(event.id)
+    if (!tool || tool.called || tool.settled) return false
+    if (tool.name !== event.name)
+      return yield* Effect.die(new Error(`Tool input name changed for ${event.id}: ${tool.name} -> ${event.name}`))
+    tool.providerExecuted = event.providerExecuted === true || tool.providerExecuted
+    const correctedRaw = !toolInput.has(event.id) && tool.rawInput !== event.raw ? event.raw : undefined
+    if (toolInput.has(event.id)) {
+      tool.rawInput = event.raw
+      yield* toolInput.end(event.id, undefined, event.raw)
+    }
+    tool.settled = true
+    malformedToolInput = true
+    yield* events.publish(SessionEvent.Tool.Failed, {
+      sessionID: input.sessionID,
+      assistantMessageID: tool.assistantMessageID,
+      callID: event.id,
+      error,
+      raw: correctedRaw,
+      executed: tool.providerExecuted,
+    })
+    yield* startAssistant()
+    if (stepFailure === undefined) stepFailure = assistantError
+    return true
   })
 
   const flush = Effect.fn("SessionRunner.flush")(function* () {
@@ -210,11 +262,7 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
   const failTools = Effect.fnUntraced(function* (error: SessionError.Error, mode: "all" | "hosted" | "uncalled") {
     let failed = false
     for (const [callID, tool] of tools) {
-      if (
-        tool.settled ||
-        (mode === "hosted" && !tool.providerExecuted) ||
-        (mode === "uncalled" && tool.called)
-      )
+      if (tool.settled || (mode === "hosted" && !tool.providerExecuted) || (mode === "uncalled" && tool.called))
         continue
       tool.settled = true
       failed = true
@@ -325,6 +373,7 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
         if (tool.name !== event.name)
           return yield* Effect.die(new Error(`Tool input name changed for ${event.id}: ${tool.name} -> ${event.name}`))
         if (!toolInput.has(event.id)) return yield* Effect.die(new Error(`Tool input delta after end: ${event.id}`))
+        tool.rawInput += event.text
         yield* toolInput.append(event.id, event.text)
         yield* events.publish(SessionEvent.Tool.Input.Delta, {
           sessionID: input.sessionID,
@@ -337,16 +386,30 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
       case "tool-input-end":
         yield* endToolInput(event)
         return
+      case "tool-input-error":
+        retryEvidence = true
+        if (
+          !(yield* failMalformedToolInput(
+            event,
+            {
+              type: "provider.invalid-output",
+              message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
+            },
+            { type: "provider.invalid-output", message: event.message },
+          ))
+        )
+          return yield* Effect.die(new Error(`Malformed tool input after call settlement: ${event.id}`))
+        return
       case "tool-call": {
         retryEvidence = true
         if (!tools.has(event.id)) yield* startToolInput(event)
         const tool = tools.get(event.id)!
-        if (toolInput.has(event.id)) yield* endToolInput(event)
+        if (toolInput.has(event.id)) yield* endToolInput({ id: event.id, name: event.name })
         if (tool.name !== event.name)
           return yield* Effect.die(new Error(`Tool call name changed for ${event.id}: ${tool.name} -> ${event.name}`))
         if (tool.called) return yield* Effect.die(new Error(`Duplicate tool call: ${event.id}`))
         tool.called = true
-        tool.providerExecuted = event.providerExecuted === true
+        tool.providerExecuted = event.providerExecuted === true || tool.providerExecuted
         yield* events.publish(SessionEvent.Tool.Called, {
           sessionID: input.sessionID,
           assistantMessageID: tool.assistantMessageID,
@@ -436,10 +499,13 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
     publish,
     flush,
     failAssistant,
+    failMalformedToolInput,
     publishStepFailure,
     failUnsettledTools,
     hasProviderError: () => providerFailed,
+    hasMalformedToolInput: () => malformedToolInput,
     hasRetryEvidence: () => retryEvidence,
+    isProviderExecuted: (callID: string) => tools.get(callID)?.providerExecuted === true,
     stepFailure: () => stepFailure,
     stepSettlement: () => stepSettlement,
     startAssistant,

@@ -57,29 +57,58 @@ describe("ToolStream", () => {
       expect(finished).toEqual({
         tools: {},
         events: [
-          { type: "tool-input-end", id: "call_1", name: "lookup" },
+          { type: "tool-input-end", id: "call_1", name: "lookup", input: '{"query":"final"}' },
           { type: "tool-call", id: "call_1", name: "lookup", input: { query: "final" } },
         ],
       })
     }),
   )
 
-  it.effect("classifies malformed tool input with its raw arguments", () =>
+  it.effect("emits malformed tool input with stable identity and raw arguments", () =>
     Effect.gen(function* () {
       const tools = ToolStream.start(ToolStream.empty<number>(), 0, {
         id: "call_1",
         name: "lookup",
         input: '{"query":"partial',
       })
-      const error = yield* ToolStream.finish(ADAPTER, tools, 0).pipe(Effect.flip)
+      const finished = yield* ToolStream.finish(ADAPTER, tools, 0)
 
-      expect(error).toBeInstanceOf(LLMError)
-      expect(error.reason).toMatchObject({
-        _tag: "InvalidProviderOutput",
-        source: "tool-input",
-        toolName: "lookup",
-        raw: '{"query":"partial',
+      expect(finished).toMatchObject({
+        tools: {},
+        events: [
+          { type: "tool-input-end", id: "call_1", name: "lookup" },
+          {
+            type: "tool-input-error",
+            id: "call_1",
+            name: "lookup",
+            raw: '{"query":"partial',
+            message: "Invalid JSON input for test-route tool call lookup",
+          },
+        ],
       })
+    }),
+  )
+
+  it.effect("preserves valid sibling calls when one input is malformed", () =>
+    Effect.gen(function* () {
+      const first = ToolStream.start(ToolStream.empty<number>(), 0, {
+        id: "call_valid",
+        name: "lookup",
+        input: '{"query":"weather"}',
+      })
+      const tools = ToolStream.start(first, 1, {
+        id: "call_malformed",
+        name: "lookup",
+        input: '{"query":"partial',
+      })
+      const finished = yield* ToolStream.finishAll(ADAPTER, tools)
+
+      expect(
+        finished.events.filter((event) => event.type === "tool-call" || event.type === "tool-input-error"),
+      ).toMatchObject([
+        { type: "tool-call", id: "call_valid", input: { query: "weather" } },
+        { type: "tool-input-error", id: "call_malformed", raw: '{"query":"partial' },
+      ])
     }),
   )
 

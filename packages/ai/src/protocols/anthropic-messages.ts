@@ -316,7 +316,21 @@ const lowerServerToolResult = Effect.fn("AnthropicMessages.lowerServerToolResult
   const wireType = serverToolResultType(part.name)
   if (!wireType)
     return yield* invalid(`Anthropic Messages does not know how to round-trip server tool result for ${part.name}`)
-  return { type: wireType, tool_use_id: part.id, content: part.result.value } satisfies AnthropicServerToolResultBlock
+  const errorType = `${wireType}_error`
+  const syntheticErrorCode =
+    ProviderShared.isRecord(part.result.value) &&
+    ProviderShared.isRecord(part.result.value.error) &&
+    part.result.value.error.type === "provider.invalid-output"
+      ? "invalid_tool_input"
+      : "unavailable"
+  const content =
+    part.result.type !== "error" ||
+    (ProviderShared.isRecord(part.result.value) &&
+      part.result.value.type === errorType &&
+      typeof part.result.value.error_code === "string")
+      ? part.result.value
+      : { type: errorType, error_code: syntheticErrorCode }
+  return { type: wireType, tool_use_id: part.id, content } satisfies AnthropicServerToolResultBlock
 })
 
 const lowerImage = Effect.fn("AnthropicMessages.lowerImage")(function* (part: MediaPart) {
@@ -703,7 +717,14 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
           providerExecuted: block.type === "server_tool_use",
         }),
       },
-      [...events, LLMEvent.toolInputStart({ id: block.id ?? String(event.index), name: block.name ?? "" })],
+      [
+        ...events,
+        LLMEvent.toolInputStart({
+          id: block.id ?? String(event.index),
+          name: block.name ?? "",
+          providerExecuted: block.type === "server_tool_use" ? true : undefined,
+        }),
+      ],
     ]
   }
 

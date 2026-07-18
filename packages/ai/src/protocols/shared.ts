@@ -9,6 +9,7 @@ import {
   type ContentPart,
   type LLMRequest,
   type MediaPart,
+  type ProviderMetadata,
   type ToolFileContent,
   type TextPart,
   type ToolResultPart,
@@ -152,7 +153,16 @@ export const wrappedSystemUpdate = Effect.fn("ProviderShared.wrappedSystemUpdate
  * input deltas (e.g. zero-arg tools). The error message is uniform across
  * routes: `Invalid JSON input for <route> tool call <name>`.
  */
-export const parseToolInput = (route: string, name: string, raw: string) =>
+export const parseToolInput = (
+  route: string,
+  tool: {
+    readonly id: string
+    readonly name: string
+    readonly providerExecuted?: boolean
+    readonly providerMetadata?: ProviderMetadata
+  },
+  raw: string,
+) =>
   Effect.try({
     try: () => decodeJson(raw || "{}"),
     catch: () =>
@@ -161,10 +171,13 @@ export const parseToolInput = (route: string, name: string, raw: string) =>
         method: "stream",
         reason: new InvalidProviderOutputReason({
           route,
-          message: `Invalid JSON input for ${route} tool call ${name}`,
+          message: `Invalid JSON input for ${route} tool call ${tool.name}`,
           raw,
           source: "tool-input",
-          toolName: name,
+          toolCallID: tool.id,
+          toolName: tool.name,
+          providerExecuted: tool.providerExecuted,
+          providerMetadata: tool.providerMetadata,
         }),
       }),
   })

@@ -110,7 +110,12 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
       result:
         tool.executed === true && tool.state.result !== undefined
           ? tool.state.result
-          : { error: tool.state.error, content: tool.state.content, structured: tool.state.structured },
+          : {
+              error: tool.state.error,
+              content: tool.state.content,
+              structured: tool.state.structured,
+              ...(tool.state.raw === undefined ? {} : { raw: tool.state.raw }),
+            },
       resultType: "error",
       providerExecuted: tool.executed,
       providerMetadata,

@@ -441,6 +441,9 @@ const step = (state: ParserState, event: GeminiEvent) => {
     if ("functionCall" in part) {
       const input = part.functionCall.args
       const id = `tool_${nextToolCallId++}`
+      const providerMetadata = part.thoughtSignature
+        ? googleMetadata({ thoughtSignature: part.thoughtSignature })
+        : undefined
       lifecycle = Lifecycle.reasoningEnd(
         lifecycle,
         events,
@@ -448,14 +451,27 @@ const step = (state: ParserState, event: GeminiEvent) => {
         reasoningSignature ? googleMetadata({ thoughtSignature: reasoningSignature }) : undefined,
       )
       lifecycle = Lifecycle.stepStart(lifecycle, events)
+      if (typeof input === "string") {
+        events.push(
+          LLMEvent.toolInputStart({ id, name: part.functionCall.name, providerMetadata }),
+          LLMEvent.toolInputEnd({ id, name: part.functionCall.name, input, providerMetadata }),
+          LLMEvent.toolInputError({
+            id,
+            name: part.functionCall.name,
+            raw: input,
+            message: `Invalid JSON input for ${ADAPTER} tool call ${part.functionCall.name}`,
+            providerMetadata,
+          }),
+        )
+        hasToolCalls = true
+        continue
+      }
       events.push(
         LLMEvent.toolCall({
           id,
           name: part.functionCall.name,
           input,
-          providerMetadata: part.thoughtSignature
-            ? googleMetadata({ thoughtSignature: part.thoughtSignature })
-            : undefined,
+          providerMetadata,
         }),
       )
       hasToolCalls = true

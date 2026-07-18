@@ -4134,8 +4134,9 @@ describe("SessionRunnerLLM", () => {
         method: "stream",
         reason: new InvalidProviderOutputReason({
           message: "Invalid JSON input for tool call echo",
-          raw: '{"text":"partial',
+          raw: '{"text":"authoritative',
           source: "tool-input",
+          toolCallID: "call-malformed",
           toolName: "echo",
         }),
       })
@@ -4160,7 +4161,7 @@ describe("SessionRunnerLLM", () => {
           state: {
             status: "error",
             input: {},
-            raw: '{"text":"partial',
+            raw: '{"text":"authoritative',
             error: {
               message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
             },
@@ -4182,6 +4183,7 @@ describe("SessionRunnerLLM", () => {
                   error: {
                     message: "Tool call arguments were malformed JSON and were not executed. Retry with valid JSON.",
                   },
+                  raw: '{"text":"authoritative',
                 },
               },
             },
@@ -4204,6 +4206,219 @@ describe("SessionRunnerLLM", () => {
         {
           type: "session.step.failed.1",
           data: { error: { type: "provider.invalid-output", message: "Invalid JSON input for tool call echo" } },
+        },
+      ])
+    }),
+  )
+
+  it.effect("does not recover malformed tool input from an interrupted stream", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Interrupt malformed tool input")
+      const failure = new LLMError({
+        module: "test",
+        method: "stream",
+        reason: new InvalidProviderOutputReason({
+          message: "Invalid JSON input for tool call echo",
+          raw: '{"text":"partial',
+          source: "tool-input",
+          toolCallID: "call-malformed-interrupted",
+          toolName: "echo",
+        }),
+      })
+      responseStream = Stream.fromIterable([
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolInputStart({ id: "call-malformed-interrupted", name: "echo" }),
+        LLMEvent.toolInputDelta({
+          id: "call-malformed-interrupted",
+          name: "echo",
+          text: '{"text":"partial',
+        }),
+      ]).pipe(
+        Stream.concat(
+          Stream.failCause(
+            Cause.fromReasons([Cause.makeFailReason(failure), Cause.makeInterruptReason(1)]),
+          ),
+        ),
+      )
+
+      const exit = yield* session.resume(sessionID).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(requests).toHaveLength(1)
+    }),
+  )
+
+  it.effect("settles a valid sibling tool before recovering malformed input", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Run one valid and one malformed tool")
+      toolExecutionGate = yield* Deferred.make<void>()
+      toolExecutionsStarted = yield* Deferred.make<void>()
+      toolExecutionsReady = 1
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolCall({ id: "call-valid", name: "echo", input: { text: "valid" } }),
+          LLMEvent.toolInputStart({ id: "call-malformed-sibling", name: "echo" }),
+          LLMEvent.toolInputDelta({
+            id: "call-malformed-sibling",
+            name: "echo",
+            text: '{"text":"partial',
+          }),
+          LLMEvent.toolInputEnd({ id: "call-malformed-sibling", name: "echo" }),
+          LLMEvent.toolInputError({
+            id: "call-malformed-sibling",
+            name: "echo",
+            raw: '{"text":"partial',
+            message: "Invalid JSON input for tool call echo",
+          }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        reply.stop(),
+      ]
+
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* Deferred.await(toolExecutionsStarted)
+      yield* Deferred.succeed(toolExecutionGate, undefined)
+      yield* Fiber.join(run)
+      toolExecutionGate = undefined
+      toolExecutionsStarted = undefined
+
+      expect(requests).toHaveLength(2)
+      expect(executions).toEqual(["valid"])
+      expect(requireAssistant(yield* session.context(sessionID)).content).toMatchObject([
+        { id: "call-valid", state: { status: "completed", input: { text: "valid" } } },
+        {
+          id: "call-malformed-sibling",
+          state: { status: "error", raw: '{"text":"partial' },
+        },
+      ])
+    }),
+  )
+
+  it.effect("limits malformed tool input recovery to four retries", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Keep calling malformed tools")
+      responses = Array.from({ length: 5 }, (_, index) => {
+        const id = `call-malformed-${index}`
+        return [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolInputStart({ id, name: "echo" }),
+          LLMEvent.toolInputDelta({ id, name: "echo", text: '{"text":"partial' }),
+          LLMEvent.toolInputEnd({ id, name: "echo" }),
+          LLMEvent.toolInputError({
+            id,
+            name: "echo",
+            raw: '{"text":"partial',
+            message: "Invalid JSON input for tool call echo",
+          }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ]
+      })
+
+      expect(yield* session.resume(sessionID).pipe(Effect.flip)).toMatchObject({
+        _tag: "Session.StepFailedError",
+        error: { type: "provider.invalid-output", message: "Invalid JSON input for tool call echo" },
+      })
+      expect(requests).toHaveLength(5)
+      expect(executions).toEqual([])
+    }),
+  )
+
+  it.effect("replays malformed hosted tool input as provider-executed", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Recover a malformed hosted tool")
+      responses = [
+        [
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolInputStart({
+            id: "call-hosted-malformed",
+            name: "web_search",
+            providerExecuted: true,
+          }),
+          LLMEvent.toolInputDelta({
+            id: "call-hosted-malformed",
+            name: "web_search",
+            text: '{"query":"partial',
+          }),
+          LLMEvent.toolInputEnd({ id: "call-hosted-malformed", name: "web_search" }),
+          LLMEvent.toolInputError({
+            id: "call-hosted-malformed",
+            name: "web_search",
+            raw: '{"query":"partial',
+            message: "Invalid JSON input for Anthropic Messages tool call web_search",
+            providerExecuted: true,
+          }),
+          LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+          LLMEvent.finish({ reason: "tool-calls" }),
+        ],
+        reply.stop(),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(2)
+      expect(requests[1].messages).toMatchObject([
+        { role: "user" },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "tool-call",
+              id: "call-hosted-malformed",
+              providerExecuted: true,
+            },
+            {
+              type: "tool-result",
+              id: "call-hosted-malformed",
+              providerExecuted: true,
+            },
+          ],
+        },
+      ])
+      expect(requireAssistant(yield* session.context(sessionID)).content).toMatchObject([
+        { id: "call-hosted-malformed", executed: true, state: { status: "error" } },
+      ])
+      yield* replaySessionProjection(sessionID)
+      expect(requireAssistant(yield* session.context(sessionID)).content).toMatchObject([
+        { id: "call-hosted-malformed", executed: true, state: { status: "error" } },
+      ])
+    }),
+  )
+
+  it.effect("preserves provider execution identity when the final tool events omit it", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Keep hosted tool identity")
+      response = [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolInputStart({ id: "call-hosted-start-only", name: "echo", providerExecuted: true }),
+        LLMEvent.toolInputDelta({ id: "call-hosted-start-only", name: "echo", text: '{"text":"hosted"}' }),
+        LLMEvent.toolInputEnd({ id: "call-hosted-start-only", name: "echo" }),
+        LLMEvent.toolCall({ id: "call-hosted-start-only", name: "echo", input: { text: "hosted" } }),
+        LLMEvent.toolResult({
+          id: "call-hosted-start-only",
+          name: "echo",
+          result: { type: "json", value: { text: "hosted" } },
+        }),
+        LLMEvent.stepFinish({ index: 0, reason: "tool-calls" }),
+        LLMEvent.finish({ reason: "tool-calls" }),
+      ]
+
+      yield* session.resume(sessionID)
+
+      expect(requests).toHaveLength(1)
+      expect(executions).toEqual([])
+      expect(requireAssistant(yield* session.context(sessionID)).content).toMatchObject([
+        {
+          id: "call-hosted-start-only",
+          executed: true,
+          state: { status: "completed", input: { text: "hosted" } },
         },
       ])
     }),

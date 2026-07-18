@@ -161,6 +161,8 @@ export type SessionMessageProviderState6 = { [x: string]: any }
 
 export type SessionMessageProviderState7 = { [x: string]: any }
 
+export type SessionMessageProviderState8 = { [x: string]: any }
+
 export type EventLogSynced = { type: "log.synced"; aggregateID: string; seq?: number }
 
 export type ModelCapabilities = { tools: boolean; input: Array<string>; output: Array<string> }
@@ -733,16 +735,6 @@ export type SessionTextEnded = {
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: { sessionID: string; assistantMessageID: string; ordinal: number; text: string }
-}
-
-export type SessionToolInputStarted = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.tool.input.started"
-  durable: { aggregateID: string; seq: number; version: 1 }
-  location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; callID: string; name: string }
 }
 
 export type SessionToolInputEnded = {
@@ -1366,6 +1358,23 @@ export type SessionReasoningEnded = {
   }
 }
 
+export type SessionToolInputStarted = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.tool.input.started"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    assistantMessageID: string
+    callID: string
+    name: string
+    executed?: boolean
+    state?: SessionMessageProviderState5
+  }
+}
+
 export type SessionToolCalled = {
   id: string
   created: number
@@ -1379,7 +1388,7 @@ export type SessionToolCalled = {
     callID: string
     input: { [x: string]: any }
     executed: boolean
-    state?: SessionMessageProviderState5
+    state?: SessionMessageProviderState6
   }
 }
 
@@ -1395,9 +1404,10 @@ export type SessionToolFailed = {
     assistantMessageID: string
     callID: string
     error: SessionStructuredError
+    raw?: string
     result?: any
     executed: boolean
-    resultState?: SessionMessageProviderState7
+    resultState?: SessionMessageProviderState8
   }
 }
 
@@ -1877,7 +1887,7 @@ export type SessionToolSuccess = {
     content: Array<LLMToolContent>
     result?: any
     executed: boolean
-    resultState?: SessionMessageProviderState6
+    resultState?: SessionMessageProviderState7
   }
 }
 

@@ -1238,6 +1238,7 @@ describe("OpenAI Responses route", () => {
           type: "tool-input-end",
           id: "call_1",
           name: "lookup",
+          input: '{"query":"weather"}',
           providerMetadata: { openai: { itemId: "item_1" } },
         },
         {
@@ -1256,6 +1257,87 @@ describe("OpenAI Responses route", () => {
           usage,
         },
       ])
+    }),
+  )
+
+  it.effect("emits malformed function input when output_item.done arrives without added", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "item_malformed",
+            call_id: "call_malformed",
+            name: "lookup",
+            arguments: '{"query":"partial',
+          },
+        },
+        { type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1 } } },
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(
+        response.events.filter(
+          (event) =>
+            event.type === "tool-input-start" || event.type === "tool-input-end" || event.type === "tool-input-error",
+        ),
+      ).toMatchObject([
+        { type: "tool-input-start", id: "call_malformed", name: "lookup" },
+        {
+          type: "tool-input-end",
+          id: "call_malformed",
+          name: "lookup",
+          input: '{"query":"partial',
+        },
+        {
+          type: "tool-input-error",
+          id: "call_malformed",
+          name: "lookup",
+          raw: '{"query":"partial',
+        },
+      ])
+    }),
+  )
+
+  it.effect("uses malformed final function input instead of valid streamed deltas", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "item_1", call_id: "call_1", name: "lookup", arguments: "" },
+        },
+        { type: "response.function_call_arguments.delta", item_id: "item_1", delta: '{"query":"valid"}' },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "function_call",
+            id: "item_1",
+            call_id: "call_1",
+            name: "lookup",
+            arguments: '{"query":"partial',
+          },
+        },
+        { type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1 } } },
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.events.find((event) => event.type === "tool-input-end")).toMatchObject({
+        type: "tool-input-end",
+        input: '{"query":"partial',
+      })
+      expect(response.events.find((event) => event.type === "tool-input-error")).toMatchObject({
+        type: "tool-input-error",
+        raw: '{"query":"partial',
+      })
     }),
   )
 

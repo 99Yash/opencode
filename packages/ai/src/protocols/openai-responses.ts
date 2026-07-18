@@ -820,22 +820,33 @@ const onOutputItemDone = Effect.fn("OpenAIResponses.onOutputItemDone")(function*
 
   if (item.type === "function_call") {
     if (!item.id || !item.call_id || !item.name) return [state, NO_EVENTS] satisfies StepResult
-    const tools = state.tools[item.id]
+    const existing = state.tools[item.id]
+    const providerMetadata = openaiMetadata({ itemId: item.id })
+    const tools = existing
       ? state.tools
-      : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name })
+      : ToolStream.start(state.tools, item.id, {
+          id: item.call_id,
+          name: item.name,
+          providerMetadata,
+        })
     const result =
       item.arguments === undefined
         ? yield* ToolStream.finish(ADAPTER, tools, item.id)
         : yield* ToolStream.finishWithInput(ADAPTER, tools, item.id, item.arguments)
     const events: LLMEvent[] = []
-    const resultEvents = result.events ?? []
+    const resultEvents = [
+      ...(existing ? [] : [LLMEvent.toolInputStart({ id: item.call_id, name: item.name, providerMetadata })]),
+      ...(result.events ?? []),
+    ]
     const lifecycle = resultEvents.length ? Lifecycle.stepStart(state.lifecycle, events) : state.lifecycle
     events.push(...resultEvents)
     return [
       {
         ...state,
         lifecycle,
-        hasFunctionCall: resultEvents.some(LLMEvent.is.toolCall) ? true : state.hasFunctionCall,
+        hasFunctionCall:
+          state.hasFunctionCall ||
+          resultEvents.some((event) => LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputError(event)),
         tools: result.tools,
       },
       events,

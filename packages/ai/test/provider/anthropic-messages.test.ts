@@ -617,6 +617,43 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
+  it.effect("preserves provider execution identity for malformed server tool input", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        { type: "message_start", message: { usage: { input_tokens: 5 } } },
+        {
+          type: "content_block_start",
+          index: 0,
+          content_block: { type: "server_tool_use", id: "srvtoolu_malformed", name: "web_search" },
+        },
+        {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: '{"query":"partial' },
+        },
+        { type: "content_block_stop", index: 0 },
+        { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 1 } },
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "web_search", description: "Web search", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.events.find((event) => event.type === "tool-input-start")).toMatchObject({
+        type: "tool-input-start",
+        id: "srvtoolu_malformed",
+        providerExecuted: true,
+      })
+      expect(response.events.find((event) => event.type === "tool-input-error")).toMatchObject({
+        type: "tool-input-error",
+        id: "srvtoolu_malformed",
+        raw: '{"query":"partial',
+        providerExecuted: true,
+      })
+    }),
+  )
+
   it.effect("decodes web_search_tool_result_error as provider-executed error result", () =>
     Effect.gen(function* () {
       const body = sseEvents(
@@ -705,6 +742,55 @@ describe("Anthropic Messages route", () => {
           { role: "user", content: [{ type: "text", text: "Thanks." }] },
         ],
       })
+    }),
+  )
+
+  it.effect("lowers synthetic server tool failures to valid Anthropic error payloads", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicBody>(
+        LLM.request({
+          id: "req_server_tool_input_error",
+          model,
+          messages: [
+            Message.assistant([
+              {
+                type: "tool-call",
+                id: "srvtoolu_malformed",
+                name: "web_search",
+                input: {},
+                providerExecuted: true,
+              },
+              {
+                type: "tool-result",
+                id: "srvtoolu_malformed",
+                name: "web_search",
+                result: {
+                  type: "error",
+                  value: {
+                    error: { type: "provider.invalid-output" },
+                    raw: '{"query":"partial',
+                  },
+                },
+                providerExecuted: true,
+              },
+            ]),
+          ],
+        }),
+      )
+
+      expect(prepared.body.messages).toMatchObject([
+        {
+          role: "assistant",
+          content: [
+            { type: "server_tool_use", id: "srvtoolu_malformed", name: "web_search", input: {} },
+            {
+              type: "web_search_tool_result",
+              tool_use_id: "srvtoolu_malformed",
+              content: { type: "web_search_tool_result_error", error_code: "invalid_tool_input" },
+            },
+          ],
+        },
+      ])
     }),
   )
 

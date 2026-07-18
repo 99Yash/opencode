@@ -490,6 +490,35 @@ describe("Gemini route", () => {
     }),
   )
 
+  it.effect("reports string-encoded function arguments without repairing them", () =>
+    Effect.gen(function* () {
+      const body = sseEvents({
+        candidates: [
+          {
+            content: {
+              role: "model",
+              parts: [{ functionCall: { name: "lookup", args: '{"query":"partial' } }],
+            },
+            finishReason: "STOP",
+          },
+        ],
+      })
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.toolCalls).toEqual([])
+      expect(response.events.find((event) => event.type === "tool-input-error")).toMatchObject({
+        type: "tool-input-error",
+        id: "tool_0",
+        name: "lookup",
+        raw: '{"query":"partial',
+      })
+    }),
+  )
+
   it.effect("assigns unique ids to multiple streamed tool calls", () =>
     Effect.gen(function* () {
       const body = sseEvents({

@@ -1020,6 +1020,8 @@ export type GlobalEvent = {
           assistantMessageID: string
           callID: string
           name: string
+          executed?: boolean
+          state?: SessionMessageProviderState
         }
       }
     | {
@@ -1093,6 +1095,7 @@ export type GlobalEvent = {
           assistantMessageID: string
           callID: string
           error: SessionStructuredError
+          raw?: string
           result?: unknown
           executed: boolean
           resultState?: SessionMessageProviderState
@@ -4117,6 +4120,8 @@ export type SyncEventSessionToolInputStarted = {
       assistantMessageID: string
       callID: string
       name: string
+      executed?: boolean
+      state?: SessionMessageProviderState
     }
   }
 }
@@ -4215,6 +4220,7 @@ export type SyncEventSessionToolFailed = {
       assistantMessageID: string
       callID: string
       error: SessionStructuredError
+      raw?: string
       result?: unknown
       executed: boolean
       resultState?: SessionMessageProviderState
@@ -4639,6 +4645,7 @@ export type SessionMessageToolStateError = {
   input: {
     [key: string]: unknown
   }
+  raw?: string
   content: Array<LlmToolContent>
   structured: {
     [key: string]: unknown
@@ -5275,6 +5282,8 @@ export type SessionToolInputStarted = {
     assistantMessageID: string
     callID: string
     name: string
+    executed?: boolean
+    state?: SessionMessageProviderState
   }
 }
 
@@ -5393,6 +5402,7 @@ export type SessionToolFailed = {
     assistantMessageID: string
     callID: string
     error: SessionStructuredError
+    raw?: string
     result?: unknown
     executed: boolean
     resultState?: SessionMessageProviderState
@@ -7479,6 +7489,8 @@ export type EventSessionToolInputStarted = {
     assistantMessageID: string
     callID: string
     name: string
+    executed?: boolean
+    state?: SessionMessageProviderState
   }
 }
 
@@ -7558,6 +7570,7 @@ export type EventSessionToolFailed = {
     assistantMessageID: string
     callID: string
     error: SessionStructuredError
+    raw?: string
     result?: unknown
     executed: boolean
     resultState?: SessionMessageProviderState
@@ -9607,6 +9620,10 @@ export type SessionReasoningEndedV2 = {
   }
 }
 
+export type SessionMessageProviderState5 = {
+  [key: string]: unknown
+}
+
 export type SessionToolInputStartedV2 = {
   id: string
   created: number
@@ -9625,6 +9642,8 @@ export type SessionToolInputStartedV2 = {
     assistantMessageID: string
     callID: string
     name: string
+    executed?: boolean
+    state?: SessionMessageProviderState5
   }
 }
 
@@ -9649,7 +9668,7 @@ export type SessionToolInputEndedV2 = {
   }
 }
 
-export type SessionMessageProviderState5 = {
+export type SessionMessageProviderState6 = {
   [key: string]: unknown
 }
 
@@ -9674,7 +9693,7 @@ export type SessionToolCalledV2 = {
       [key: string]: unknown
     }
     executed: boolean
-    state?: SessionMessageProviderState5
+    state?: SessionMessageProviderState6
   }
 }
 
@@ -9702,7 +9721,7 @@ export type SessionToolProgressV2 = {
   }
 }
 
-export type SessionMessageProviderState6 = {
+export type SessionMessageProviderState7 = {
   [key: string]: unknown
 }
 
@@ -9729,11 +9748,11 @@ export type SessionToolSuccessV2 = {
     content: Array<LlmToolContent>
     result?: unknown
     executed: boolean
-    resultState?: SessionMessageProviderState6
+    resultState?: SessionMessageProviderState7
   }
 }
 
-export type SessionMessageProviderState7 = {
+export type SessionMessageProviderState8 = {
   [key: string]: unknown
 }
 
@@ -9755,9 +9774,10 @@ export type SessionToolFailedV2 = {
     assistantMessageID: string
     callID: string
     error: SessionStructuredError
+    raw?: string
     result?: unknown
     executed: boolean
-    resultState?: SessionMessageProviderState7
+    resultState?: SessionMessageProviderState8
   }
 }
 

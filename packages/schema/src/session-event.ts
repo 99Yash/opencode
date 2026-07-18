@@ -371,6 +371,8 @@ export namespace Tool {
       schema: {
         ...ToolBase,
         name: Schema.String,
+        executed: Schema.Boolean.pipe(optional),
+        state: SessionMessage.ProviderState.pipe(optional),
       },
     })
     export type Started = typeof Started.Type
@@ -443,6 +445,7 @@ export namespace Tool {
     schema: {
       ...ToolBase,
       error: SessionError.Error,
+      raw: Schema.String.pipe(optional),
       result: Schema.Unknown.pipe(optional),
       executed: Schema.Boolean,
       resultState: SessionMessage.ProviderState.pipe(optional),

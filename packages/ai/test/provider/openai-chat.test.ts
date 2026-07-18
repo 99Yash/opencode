@@ -606,6 +606,33 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
+  it.effect("preserves a valid parallel call when another call is malformed", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        deltaChunk({
+          role: "assistant",
+          tool_calls: [
+            { index: 0, id: "call_valid", function: { name: "lookup", arguments: '{"query":"weather"}' } },
+            { index: 1, id: "call_malformed", function: { name: "lookup", arguments: '{"query":"partial' } },
+          ],
+        }),
+        deltaChunk({}, "tool_calls"),
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(
+        response.events.filter((event) => event.type === "tool-call" || event.type === "tool-input-error"),
+      ).toMatchObject([
+        { type: "tool-call", id: "call_valid", input: { query: "weather" } },
+        { type: "tool-input-error", id: "call_malformed", raw: '{"query":"partial' },
+      ])
+    }),
+  )
+
   it.effect("fails a streamed tool call when the provider ends without a finish reason", () =>
     Effect.gen(function* () {
       const body = sseEvents(
