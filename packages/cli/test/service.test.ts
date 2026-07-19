@@ -20,6 +20,7 @@ import { ServiceConfig } from "../src/services/service-config"
 
 test("managed service ports are stable per installation channel", () => {
   expect(ServiceConfig.defaultPort("latest")).toBe(0xc0de)
+  expect(ServiceConfig.defaultPort("next")).toBe(0xc0de)
   expect(ServiceConfig.defaultPort("local")).toBe(0xc0df)
   expect(ServiceConfig.defaultPort("preview-a")).toBe(ServiceConfig.defaultPort("preview-a"))
   expect(ServiceConfig.defaultPort("preview-a")).not.toBe(ServiceConfig.defaultPort("preview-b"))
@@ -43,15 +44,33 @@ test("local channel stores service config with the local service filename", asyn
   }
 })
 
-test("service filenames isolate installation channels", () => {
+test("service filenames share release channels and identify preview channels", () => {
   expect(ServiceConfig.filename("latest")).toBe("service.json")
+  expect(ServiceConfig.filename("next")).toBe("service.json")
   expect(ServiceConfig.filename("local")).toBe("service-local.json")
-  expect(ServiceConfig.filename("preview-a")).not.toBe(ServiceConfig.filename("preview-b"))
-  expect(ServiceConfig.filename("preview-a")).not.toBe(ServiceConfig.filename("latest"))
+  expect(ServiceConfig.filename("preview-a")).toBe("service-preview-a.json")
+  expect(ServiceConfig.filename("preview/a")).toBe("service-preview-a.json")
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-1234", "preview-a")).toBe(true)
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-1234.2", "preview-a")).toBe(true)
   expect(ServiceConfig.versionBelongsToChannel("0.0.0-preview-a-other-1234", "preview-a")).toBe(false)
   expect(ServiceConfig.versionBelongsToChannel("1.2.3", "preview-a")).toBe(false)
+})
+
+test("service config migrates from the hashed channel filename", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-service-config-migration-"))
+  const legacy = path.join(root, ServiceConfig.legacyFilename("preview-a")!)
+  const target = path.join(root, ServiceConfig.filename("preview-a"))
+  try {
+    await fs.writeFile(legacy, JSON.stringify({ hostname: "127.0.0.2", port: 4098 }))
+    await Effect.runPromise(ServiceConfig.migrateConfig(legacy, target).pipe(Effect.provide(NodeFileSystem.layer)))
+    expect(await Bun.file(target).json()).toEqual({ hostname: "127.0.0.2", port: 4098 })
+
+    await fs.writeFile(target, JSON.stringify({ port: 4099 }))
+    await Effect.runPromise(ServiceConfig.migrateConfig(legacy, target).pipe(Effect.provide(NodeFileSystem.layer)))
+    expect(await Bun.file(target).json()).toEqual({ port: 4099 })
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })
 
 test("preview registration migration never moves stable discovery", async () => {
