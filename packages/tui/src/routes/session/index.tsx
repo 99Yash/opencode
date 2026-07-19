@@ -1607,24 +1607,21 @@ function RevertMessage(props: {
 
 function ShellMessage(props: { message: Extract<SessionMessageInfo, { type: "shell" }> }) {
   const { themeV2 } = useTheme().contextual("elevated")
+  const ctx = use()
   const output = createMemo(() => stripAnsi(props.message.output?.output.trim() ?? ""))
+  const [expanded, setExpanded] = createSignal(false)
+  const maxLines = 10
+  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
+  const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
+  const limited = createMemo(() => (expanded() ? output() : collapsed().output))
 
   return (
-    <box
-      border={["left"]}
-      paddingTop={1}
-      paddingBottom={1}
-      paddingLeft={2}
-      gap={1}
-      backgroundColor={themeV2.background()}
-      customBorderChars={SplitBorder.customBorderChars}
-      borderColor={themeV2.background()}
-    >
+    <BlockTool onClick={collapsed().overflow ? () => setExpanded((value) => !value) : undefined}>
       <text fg={themeV2.text()}>$ {props.message.command}</text>
       <Show when={output()}>
-        <text fg={themeV2.text.subdued()}>{output()}</text>
+        <text fg={themeV2.text.subdued()}>{limited()}</text>
       </Show>
-    </box>
+    </BlockTool>
   )
 }
 
