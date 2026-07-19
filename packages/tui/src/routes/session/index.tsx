@@ -66,7 +66,7 @@ import { useConfig } from "../../config"
 import { useClipboard } from "../../context/clipboard"
 import { nextThinkingMode, reasoningSummary, type ThinkingMode } from "../../context/thinking"
 import { getScrollAcceleration } from "../../util/scroll"
-import { collapseToolOutput } from "../../util/collapse-tool-output"
+import { collapseToolOutput, normalizeShellOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
 import { PluginSlot } from "../../plugin/context"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
@@ -1607,21 +1607,24 @@ function RevertMessage(props: {
 
 function ShellMessage(props: { message: Extract<SessionMessageInfo, { type: "shell" }> }) {
   const { themeV2 } = useTheme().contextual("elevated")
-  const ctx = use()
   const output = createMemo(() => stripAnsi(props.message.output?.output.trim() ?? ""))
-  const [expanded, setExpanded] = createSignal(false)
-  const maxLines = 10
-  const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))
-  const collapsed = createMemo(() => collapseToolOutput(output(), maxLines, maxChars()))
-  const limited = createMemo(() => (expanded() ? output() : collapsed().output))
 
   return (
-    <BlockTool onClick={collapsed().overflow ? () => setExpanded((value) => !value) : undefined}>
+    <box
+      border={["left"]}
+      paddingTop={1}
+      paddingBottom={1}
+      paddingLeft={2}
+      gap={1}
+      backgroundColor={themeV2.background()}
+      customBorderChars={SplitBorder.customBorderChars}
+      borderColor={themeV2.background()}
+    >
       <text fg={themeV2.text()}>$ {props.message.command}</text>
       <Show when={output()}>
-        <text fg={themeV2.text.subdued()}>{limited()}</text>
+        <text fg={themeV2.text.subdued()}>{output()}</text>
       </Show>
-    </BlockTool>
+    </box>
   )
 }
 
@@ -2445,7 +2448,7 @@ function Shell(props: ToolProps) {
         limit: 1024 * 1024,
         location: location ? { directory: location.directory, workspace: location.workspaceID } : undefined,
       })
-      .then((response) => setBackgroundOutput(stripAnsi(response.data.output.trim())))
+      .then((response) => setBackgroundOutput(normalizeShellOutput(response.data.output.trim())))
       .catch(() => undefined)
     loading = false
   }
@@ -2458,7 +2461,7 @@ function Shell(props: ToolProps) {
     if (props.part.state.status === "streaming") return ""
     if (shellID()) return expanded() ? backgroundOutput() : ""
     const content = props.part.state.content[0]
-    return stripAnsi(content?.type === "text" ? content.text.trim() : "")
+    return normalizeShellOutput(content?.type === "text" ? content.text.trim() : "")
   })
   const maxLines = 10
   const maxChars = createMemo(() => maxLines * Math.max(20, ctx.width - 6))

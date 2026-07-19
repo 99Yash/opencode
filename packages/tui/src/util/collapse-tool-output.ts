@@ -1,3 +1,5 @@
+import stripAnsi from "strip-ansi"
+
 export function collapseToolOutput(output: string, maxLines: number, maxChars: number) {
   const lines = output.split("\n")
   if (lines.length <= maxLines && Array.from(output).length <= maxChars) {
@@ -18,4 +20,8 @@ export function collapseToolOutput(output: string, maxLines: number, maxChars: n
   }
 
   return { output: preview, overflow: true }
+}
+
+export function normalizeShellOutput(output: string) {
+  return stripAnsi(output).replace(/\r\n?/g, "\n")
 }
