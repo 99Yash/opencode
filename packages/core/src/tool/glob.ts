@@ -53,6 +53,7 @@ export const Plugin = {
             input: Input,
             output: Output,
             structured: StructuredOutput,
+            codeModeOutput: "output",
             toStructuredOutput: ({ output }) => ({ count: output.length }),
             toModelOutput: ({ output }) => [
               {

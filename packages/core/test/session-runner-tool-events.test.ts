@@ -122,6 +122,45 @@ test("provider-executed success bounds output before durable publication", async
   })
 })
 
+test("normalizes structured output to its durable record shape before bounding", async () => {
+  const guarded: ToolOutputStore.BoundInput[] = []
+  const outputStore: Pick<ToolOutputStore.Interface, "bound"> = {
+    bound: (input) => Effect.sync(() => guarded.push(input)).pipe(Effect.as({ output: input.output, outputPaths: [] })),
+  }
+  const { publisher } = capture("anthropic", outputStore)
+  await Effect.runPromise(publisher.publish(call))
+  await Effect.runPromise(
+    publisher.publish(
+      LLMEvent.toolResult({
+        ...result,
+        output: { structured: "x".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES - 2), content: [] },
+      }),
+    ),
+  )
+
+  expect(guarded[0]?.output.structured).toEqual({
+    value: "x".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES - 2),
+  })
+})
+
+test("a bounding failure leaves the tool eligible for durable failure", async () => {
+  const storage = new ToolOutputStore.StorageError({ operation: "write", cause: new Error("disk full") })
+  const outputStore: Pick<ToolOutputStore.Interface, "bound"> = {
+    bound: () => Effect.fail(storage),
+  }
+  const { published, publisher } = capture("anthropic", outputStore)
+  await Effect.runPromise(publisher.publish(call))
+  const exit = await Effect.runPromiseExit(publisher.publish(result))
+  expect(exit._tag).toBe("Failure")
+
+  await Effect.runPromise(publisher.failUnsettledTools({ type: "unknown", message: storage.message }))
+  expect(published.some((event) => event.type === "session.tool.success.1")).toBe(false)
+  expect(published.find((event) => event.type === "session.tool.failed.1")?.data).toMatchObject({
+    callID: call.id,
+    error: { type: "unknown", message: storage.message },
+  })
+})
+
 test("provider metadata is flattened using the route key", async () => {
   const { published, publisher } = capture()
   await Effect.runPromise(

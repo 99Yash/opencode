@@ -74,6 +74,8 @@ export const Plugin = {
             input: Input,
             output: Output,
             structured: StructuredOutput,
+            codeModeOutput: "output",
+            contentTruncation: true,
             toStructuredOutput: ({ output }) => ({
               name: output.name,
               directory: output.directory,

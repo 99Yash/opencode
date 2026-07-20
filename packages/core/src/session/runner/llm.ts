@@ -172,17 +172,16 @@ const layer = Layer.effect(
                             callID: event.id,
                             output: update,
                           })
-                          if (
-                            typeof bounded.output.structured !== "object" ||
-                            bounded.output.structured === null ||
-                            Array.isArray(bounded.output.structured)
-                          )
-                            yield* Effect.die(new Error("Tool progress structured output must be an object"))
+                          const structured = bounded.output.structured
+                          const entries =
+                            typeof structured === "object" && structured !== null && !Array.isArray(structured)
+                              ? Object.entries(structured)
+                              : yield* Effect.die(new Error("Tool progress structured output must be an object"))
                           yield* events.publish(SessionEvent.Tool.Progress, {
                             sessionID: session.id,
                             assistantMessageID,
                             callID: event.id,
-                            structured: Object.fromEntries(Object.entries(bounded.output.structured)),
+                            structured: Object.fromEntries(entries),
                             content: [...bounded.output.content],
                           })
                         }).pipe(Effect.orDie),
@@ -275,6 +274,11 @@ const layer = Layer.effect(
             }
             yield* serialized(publisher.failAssistant(error))
           }
+          if (streamFailure instanceof ToolOutputStore.StorageError) {
+            const error = toSessionError(streamFailure)
+            yield* serialized(publisher.failUnsettledTools(error))
+            yield* serialized(publisher.failAssistant(error))
+          }
           // Provider error events only arrive from the stream, so the flag is final here.
           const providerFailed = publisher.hasProviderError()
 
@@ -301,8 +305,13 @@ const layer = Layer.effect(
           // settles so the model may recover. A typed infrastructure failure (tool output
           // could not be persisted) also fails the assistant and then fails the drain.
           const settledFailure = settledCauses.find((cause) => !Cause.hasInterrupts(cause) && !isUserDeclined(cause))
-          const infraError =
+          const typedError =
             settledFailure === undefined ? undefined : Option.getOrUndefined(Cause.findErrorOption(settledFailure))
+          const storageDefect = settledFailure?.reasons.find(
+            (reason) => Cause.isDieReason(reason) && reason.defect instanceof ToolOutputStore.StorageError,
+          )
+          const infraError =
+            typedError ?? (storageDefect && Cause.isDieReason(storageDefect) ? storageDefect.defect : undefined)
           if (settledFailure !== undefined) {
             const failure = infraError ?? Cause.squash(settledFailure)
             const error = toSessionError(failure)

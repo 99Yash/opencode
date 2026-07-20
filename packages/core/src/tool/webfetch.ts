@@ -135,6 +135,8 @@ export const Plugin = {
             input: Input,
             output: Output,
             structured: StructuredOutput,
+            codeModeOutput: "output",
+            contentTruncation: true,
             toStructuredOutput: ({ input, output }) => ({
               url: output.url,
               contentType: output.contentType,

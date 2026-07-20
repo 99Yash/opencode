@@ -142,7 +142,7 @@ export const create = (registrations: ReadonlyMap<string, Registration>) => {
 }
 
 function codeModeTool(tool: AnyTool): AnyTool {
-  if ("jsonSchema" in tool) return tool
+  if ("jsonSchema" in tool || tool.codeModeOutput !== "output") return tool
   return { ...tool, structured: undefined }
 }
 

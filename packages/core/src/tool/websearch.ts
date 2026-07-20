@@ -209,6 +209,8 @@ export const Plugin = {
             input: Input,
             output: Output,
             structured: StructuredOutput,
+            codeModeOutput: "output",
+            contentTruncation: true,
             toStructuredOutput: ({ output }) => ({
               provider: output.provider,
               bytes: Buffer.byteLength(output.text, "utf-8"),

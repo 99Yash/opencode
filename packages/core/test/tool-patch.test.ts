@@ -1,7 +1,8 @@
 import fs from "fs/promises"
 import path from "path"
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
+import { parsePatch } from "diff"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FileMutation } from "@opencode-ai/core/file-mutation"
@@ -208,6 +209,40 @@ describe("PatchTool", () => {
                 )
                 expect(yield* Effect.promise(() => fs.readFile(update, "utf8"))).toBe("after\n")
                 expect(yield* exists(remove)).toBe(false)
+              }),
+            ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("retains a bounded patch for large changes", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        const target = path.join(tmp.path, "large.txt")
+        const before = "x".repeat(9_000)
+        const after = "y".repeat(9_000)
+        return Effect.promise(() => fs.writeFile(target, `${before}\n`)).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              Effect.gen(function* () {
+                const settled = yield* settleTool(
+                  registry,
+                  call(`*** Begin Patch\n*** Update File: large.txt\n@@\n-${before}\n+${after}\n*** End Patch`),
+                )
+                const structured = Schema.decodeUnknownSync(PatchTool.Output)(settled.output?.structured)
+                expect(Buffer.byteLength(JSON.stringify(structured))).toBeLessThanOrEqual(
+                  ToolOutputStore.MAX_STRUCTURED_BYTES,
+                )
+                expect(() => parsePatch(structured.files[0]?.patch ?? "")).not.toThrow()
+                expect(structured).toMatchObject({
+                  applied: [{ type: "update", resource: "large.txt" }],
+                  files: [{ file: "large.txt", patch: expect.stringContaining("... truncated ...") }],
+                })
               }),
             ),
           ),

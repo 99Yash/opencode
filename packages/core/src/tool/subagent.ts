@@ -123,6 +123,7 @@ export const Plugin = {
             input: Input,
             output: Output,
             structured: StructuredOutput,
+            contentTruncation: true,
             toStructuredOutput: ({ output }) => ({
               sessionID: output.sessionID,
               status: output.status,

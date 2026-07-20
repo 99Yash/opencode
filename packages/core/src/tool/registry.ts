@@ -118,8 +118,7 @@ const registryLayer = Layer.effect(
 
     const settleTool = Effect.fn("ToolRegistry.settleTool")(function* (input: ExecuteInput, tool: AnyTool) {
       // Hooks fire only for hosted/local tools; provider-executed calls never reach settleTool.
-      const propagateTruncation =
-        !("jsonSchema" in tool) && tool.structured !== undefined && tool.toStructuredOutput !== undefined
+      const propagateTruncation = !("jsonSchema" in tool) && tool.contentTruncation === true
       const beforeEvent: ToolHooks.BeforeEvent = {
         tool: input.call.name,
         sessionID: input.sessionID,
@@ -200,7 +199,6 @@ const registryLayer = Layer.effect(
             sessionID: input.sessionID,
             callID: input.call.id,
             output: afterEvent.output,
-            propagateTruncation,
           })
         : undefined
       const outputPaths = [

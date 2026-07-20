@@ -410,7 +410,6 @@ export const createLLMEventPublisher = (
           if (event.result.type === "error") return
           return yield* Effect.die(new Error(`Duplicate tool result: ${event.id}`))
         }
-        tool.settled = true
         const result = error ? { error } : settledOutput(event.output, event.result)
         const executed = event.providerExecuted === true || tool.providerExecuted
         const resultState = providerState(event.providerMetadata)
@@ -424,12 +423,13 @@ export const createLLMEventPublisher = (
             executed,
             resultState,
           })
+          tool.settled = true
           return
         }
         const bounded = yield* outputs.bound({
           sessionID: input.sessionID,
           callID: event.id,
-          output: result,
+          output: { ...result, structured: record(result.structured) },
         })
         yield* events.publish(SessionEvent.Tool.Success, {
           sessionID: input.sessionID,
@@ -437,10 +437,12 @@ export const createLLMEventPublisher = (
           callID: event.id,
           structured: record(bounded.output.structured),
           content: bounded.output.content,
+          // Provider-executed results remain verbatim for provider-history replay.
           ...(executed ? { result: event.result } : {}),
           executed,
           resultState,
         })
+        tool.settled = true
         return
       }
       case "tool-error": {
