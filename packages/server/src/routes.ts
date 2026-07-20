@@ -12,6 +12,7 @@ import { Project } from "@opencode-ai/core/project"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { Job } from "@opencode-ai/core/job"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { SdkPlugins } from "@opencode-ai/core/plugin/sdk"
@@ -51,25 +52,34 @@ const applicationServices = LayerNode.group([
   SessionRestart.node,
 ])
 
-export function createRoutes(password?: string, serviceURLs: () => ReadonlyArray<string> = () => []) {
+export interface Options {
+  readonly password?: string
+  readonly serviceURLs?: () => ReadonlyArray<string>
+  readonly database?: Database.Options
+  readonly models?: ModelsDev.Options
+}
+
+export function createRoutes(options: Options = {}) {
   return makeRoutes(
-    password
-      ? ServerAuth.Config.configLayer({ username: "opencode", password: Option.some(password) })
+    options.password
+      ? ServerAuth.Config.configLayer({ username: "opencode", password: Option.some(options.password) })
       : ServerAuth.Config.layer,
-    serviceURLs,
+    options,
   )
 }
 
-export function createEmbeddedRoutes() {
-  return makeRoutes(ServerAuth.Config.configLayer({ username: "opencode", password: Option.none() }))
+export function createEmbeddedRoutes(options: Pick<Options, "database" | "models"> = {}) {
+  return makeRoutes(ServerAuth.Config.configLayer({ username: "opencode", password: Option.none() }), options)
 }
 
 function makeRoutes<AuthError, AuthServices>(
   auth: Layer.Layer<ServerAuth.Config, AuthError, AuthServices>,
-  serviceURLs: () => ReadonlyArray<string> = () => [],
+  options: Pick<Options, "database" | "models" | "serviceURLs">,
 ) {
   const pluginRuntimeCell = PluginRuntime.makeCell()
   const replacements: LayerNode.Replacements = [
+    [Database.node, Database.layer(options.database)],
+    [ModelsDev.node, ModelsDev.nodeWith(options.models)],
     [PluginRuntime.node, PluginRuntime.layerWithCell(pluginRuntimeCell)],
     [PluginRuntime.providerNode, PluginRuntime.providerNodeWithCell(pluginRuntimeCell)],
   ]
@@ -88,7 +98,7 @@ function makeRoutes<AuthError, AuthServices>(
       const services = Layer.succeedContext(context)
       const requestServices = Layer.merge(
         Layer.succeedContext(Context.pick(PermissionSaved.Service, Project.Service, WellKnown.Service)(context)),
-        ServerInfo.layer(serviceURLs),
+        ServerInfo.layer(options.serviceURLs ?? (() => [])),
       )
       return HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
         Layer.provide(handlers.pipe(Layer.provide(services))),

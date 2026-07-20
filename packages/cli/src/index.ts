@@ -7,7 +7,6 @@ import { Runtime } from "./framework/runtime"
 import { Observability } from "@opencode-ai/core/observability"
 import { Updater } from "./services/updater"
 import { InstallationChannel, InstallationVersion, InstallationLocal } from "@opencode-ai/core/installation/version"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Global } from "@opencode-ai/core/global"
 import { AppProcess } from "@opencode-ai/core/process"
@@ -31,6 +30,9 @@ const Handlers = Runtime.handlers(Commands, {
     add: () => import("./commands/handlers/mcp/add"),
     auth: () => import("./commands/handlers/mcp/auth"),
     logout: () => import("./commands/handlers/mcp/logout"),
+  },
+  plugin: {
+    list: () => import("./commands/handlers/plugin/list"),
   },
   migrate: () => import("./commands/handlers/migrate"),
   mini: () => import("./commands/handlers/mini"),
@@ -58,7 +60,7 @@ Effect.logInfo("cli starting", {
   Effect.annotateLogs({ role: "cli" }),
   Effect.provide(Config.layer),
   Effect.provide(Updater.layer),
-  Effect.provide(AppNodeBuilder.build(LayerNode.group([Global.node, AppProcess.node, Npm.node]))),
+  Effect.provide(LayerNode.compile(LayerNode.group([Global.node, AppProcess.node, Npm.node]))),
   Effect.provide(Observability.layer),
   Effect.provide(NodeServices.layer),
   Effect.scoped,

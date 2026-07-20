@@ -9,15 +9,15 @@ export type BaseHue = Schema.Schema.Type<typeof BaseHue>
 export const HueAlias = Schema.Literals(["accent", "interactive", "neutral"])
 export type HueAlias = Schema.Schema.Type<typeof HueAlias>
 
-export const ActionVariant = Schema.Literals(["primary", "secondary", "destructive"])
+export const ActionVariant = Schema.Literals(["primary", "destructive"])
 export type ActionVariant = Schema.Schema.Type<typeof ActionVariant>
 
-export const ActionState = Schema.Literals(["focused", "pressed", "disabled"])
+export const ActionState = Schema.Literals(["disabled", "pressed", "focused", "selected", "hovered"])
 export type ActionState = Schema.Schema.Type<typeof ActionState>
 export type ActionStateKey = `$${ActionState}`
 
-export const FormfieldState = Schema.Literals(["focused", "pressed", "disabled", "selected"])
-export type FormfieldState = Schema.Schema.Type<typeof FormfieldState>
+export const FormfieldState = ActionState
+export type FormfieldState = ActionState
 export type FormfieldStateKey = `$${FormfieldState}`
 
 export const FeedbackKind = Schema.Literals(["error", "warning", "success", "info"])
@@ -34,7 +34,10 @@ const ColorValue = Schema.Union([
   Schema.TemplateLiteral(["$", Schema.NonEmptyString]),
 ])
 
-const HueName = Schema.Union([BaseHue, HueAlias])
+export const HueName = Schema.Union([BaseHue, HueAlias])
+export type HueName = Schema.Schema.Type<typeof HueName>
+export const CategoricalDefinition = Schema.Array(HueName).check(Schema.isMinLength(1))
+export type CategoricalDefinition = Schema.Schema.Type<typeof CategoricalDefinition>
 const HueColorValue = Schema.Union([HexColor, Schema.TemplateLiteral(["$hue.", HueName, ".", HueStep])])
 
 const ContextKey = Schema.Literals(["@context:elevated", "@context:overlay"])
@@ -75,24 +78,18 @@ export type HueOverrideDefinition = Schema.Schema.Type<typeof HueOverrideDefinit
 
 const StatefulColorDefinition = Schema.Struct({
   default: Schema.optional(ColorValue),
+  $hovered: Schema.optional(ColorValue),
   $focused: Schema.optional(ColorValue),
   $pressed: Schema.optional(ColorValue),
+  $selected: Schema.optional(ColorValue),
   $disabled: Schema.optional(ColorValue),
 })
 export type StatefulColorDefinition = Schema.Schema.Type<typeof StatefulColorDefinition>
 
-const FormfieldColorDefinition = Schema.Struct({
-  default: Schema.optional(ColorValue),
-  $focused: Schema.optional(ColorValue),
-  $pressed: Schema.optional(ColorValue),
-  $disabled: Schema.optional(ColorValue),
-  $selected: Schema.optional(ColorValue),
-})
-export type FormfieldColorDefinition = Schema.Schema.Type<typeof FormfieldColorDefinition>
+export type FormfieldColorDefinition = StatefulColorDefinition
 
 const ActionColorDefinition = Schema.Struct({
   primary: Schema.optional(StatefulColorDefinition),
-  secondary: Schema.optional(StatefulColorDefinition),
   destructive: Schema.optional(StatefulColorDefinition),
 })
 
@@ -109,7 +106,7 @@ const TextDefinition = Schema.Struct({
   default: Schema.optional(ColorValue),
   subdued: Schema.optional(ColorValue),
   action: Schema.optional(ActionColorDefinition),
-  formfield: Schema.optional(FormfieldColorDefinition),
+  formfield: Schema.optional(StatefulColorDefinition),
   feedback: Schema.optional(
     Schema.Struct({
       error: Schema.optional(TextFeedbackDefinition),
@@ -130,7 +127,7 @@ const BackgroundDefinition = Schema.Struct({
     }),
   ),
   action: Schema.optional(ActionColorDefinition),
-  formfield: Schema.optional(FormfieldColorDefinition),
+  formfield: Schema.optional(StatefulColorDefinition),
   feedback: Schema.optional(
     Schema.Struct({
       error: Schema.optional(BackgroundFeedbackDefinition),
@@ -143,15 +140,35 @@ const BackgroundDefinition = Schema.Struct({
 export type BackgroundDefinition = Schema.Schema.Type<typeof BackgroundDefinition>
 
 export const SyntaxToken = Schema.Literals([
-  "comment", "keyword", "function", "variable", "string", "number", "type", "operator", "punctuation",
+  "comment",
+  "keyword",
+  "function",
+  "variable",
+  "string",
+  "number",
+  "type",
+  "operator",
+  "punctuation",
 ])
 export type SyntaxToken = Schema.Schema.Type<typeof SyntaxToken>
 export const SyntaxDefinition = Schema.Record(SyntaxToken, Schema.optionalKey(HueColorValue))
 export type SyntaxDefinition = Schema.Schema.Type<typeof SyntaxDefinition>
 
 export const MarkdownToken = Schema.Literals([
-  "text", "heading", "link", "linkText", "code", "blockQuote", "emphasis", "strong", "horizontalRule", "listItem",
-  "listEnumeration", "image", "imageText", "codeBlock",
+  "text",
+  "heading",
+  "link",
+  "linkText",
+  "code",
+  "blockQuote",
+  "emphasis",
+  "strong",
+  "horizontalRule",
+  "listItem",
+  "listEnumeration",
+  "image",
+  "imageText",
+  "codeBlock",
 ])
 export type MarkdownToken = Schema.Schema.Type<typeof MarkdownToken>
 export const MarkdownDefinition = Schema.Record(MarkdownToken, Schema.optionalKey(HueColorValue))
@@ -200,6 +217,7 @@ export type ThemeTokensDefinition = Schema.Schema.Type<typeof ThemeTokensDefinit
 
 const ThemeDefinitionFields = Schema.Struct({
   hue: HueDefinition,
+  categorical: Schema.optional(CategoricalDefinition),
   ...ThemeTokensDefinition.fields,
   "@context:elevated": Schema.optional(ThemeTokensDefinition),
   "@context:overlay": Schema.optional(ThemeTokensDefinition),
@@ -209,6 +227,7 @@ export type ThemeDefinition = Schema.Schema.Type<typeof ThemeDefinition>
 
 const FileThemeDefinition = Schema.Struct({
   hue: Schema.optional(HueOverrideDefinition),
+  categorical: Schema.optional(CategoricalDefinition),
   ...ThemeTokensDefinition.fields,
   "@context:elevated": Schema.optional(ThemeTokensDefinition),
   "@context:overlay": Schema.optional(ThemeTokensDefinition),
@@ -218,6 +237,7 @@ export type FileThemeDefinition = Schema.Schema.Type<typeof FileThemeDefinition>
 const MergeModeDefinition = Schema.Struct({
   mergeMode: Schema.Literal(true),
   hue: Schema.optional(HueOverrideDefinition),
+  categorical: Schema.optional(CategoricalDefinition),
   ...ThemeTokensDefinition.fields,
   "@context:elevated": Schema.optional(ThemeTokensDefinition),
   "@context:overlay": Schema.optional(ThemeTokensDefinition),
@@ -231,5 +251,8 @@ const FileMetadata = {
   version: Schema.Literal(2),
   standalone: Schema.optional(Schema.Boolean),
 }
-export const ThemeFile = Schema.Struct({ ...FileMetadata, light: ModeDefinition, dark: ModeDefinition })
+export const ThemeFile = Schema.Union([
+  Schema.Struct({ ...FileMetadata, light: ModeDefinition, dark: Schema.optional(ModeDefinition) }),
+  Schema.Struct({ ...FileMetadata, light: Schema.optional(ModeDefinition), dark: ModeDefinition }),
+])
 export type ThemeFile = Schema.Schema.Type<typeof ThemeFile>

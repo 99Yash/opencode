@@ -148,7 +148,10 @@ function resourceServer(
   )
 }
 
-function resourceMcpLayer(url: string, onFormCreated?: (form: Form.Info) => Effect.Effect<void>) {
+function resourceMcpLayer(
+  server: string | typeof ConfigMCP.Server.Type,
+  onFormCreated?: (form: Form.Info) => Effect.Effect<void>,
+) {
   const directory = AbsolutePath.make(import.meta.dir)
   const unusedIntegration = () => Effect.die("unused integration service")
   return MCP.layer.pipe(
@@ -164,7 +167,12 @@ function resourceMcpLayer(url: string, onFormCreated?: (form: Form.Info) => Effe
                   type: "document",
                   info: new Config.Info({
                     mcp: new ConfigMCP.Info({
-                      servers: { resources: new ConfigMCP.Remote({ type: "remote", url, oauth: false }) },
+                      servers: {
+                        resources:
+                          typeof server === "string"
+                            ? new ConfigMCP.Remote({ type: "remote", url: server, oauth: false })
+                            : server,
+                      },
                     }),
                   }),
                 }),
@@ -224,6 +232,13 @@ const mcp = Layer.mock(MCP.Service, {
           required: ["ok"],
         },
       }),
+      new MCP.Tool({
+        server: MCP.ServerName.make("direct"),
+        name: "lookup",
+        codemode: false,
+        description: "Lookup",
+        inputSchema: { type: "object", properties: {} },
+      }),
     ]),
   callTool: (input) =>
     Effect.sync(() => {
@@ -268,6 +283,7 @@ describe("MCP errors", () => {
 })
 
 test("MCP tool names match V1 sanitization", () => {
+  expect(McpTool.namespace("context 7")).toBe("context_7")
   expect(McpTool.name("context 7", "resolve.library/id")).toBe("context_7_resolve_library_id")
 })
 
@@ -633,6 +649,120 @@ test("loads and reads MCP resources", async () => {
   )
 })
 
+test("adds, disconnects, and reconnects MCP servers at runtime", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          const service = yield* MCP.Service
+
+          expect((yield* service.servers())[0]?.status).toEqual({ status: "disabled" })
+          expect(yield* service.connect("missing").pipe(Effect.flip)).toBeInstanceOf(MCP.NotFoundError)
+          expect(yield* service.disconnect("missing").pipe(Effect.flip)).toBeInstanceOf(MCP.NotFoundError)
+          yield* service.add(
+            "dynamic",
+            new ConfigMCP.Local({
+              type: "local",
+              command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
+            }),
+          )
+          expect((yield* service.servers()).find((server) => server.name === "dynamic")?.status).toEqual({
+            status: "connected",
+          })
+
+          yield* service.add(
+            "dynamic",
+            new ConfigMCP.Local({
+              type: "local",
+              command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
+              disabled: true,
+            }),
+          )
+          expect((yield* service.servers()).find((server) => server.name === "dynamic")?.status).toEqual({
+            status: "disabled",
+          })
+          expect(yield* service.tools()).toEqual([])
+
+          yield* service.connect("dynamic")
+          expect((yield* service.servers()).find((server) => server.name === "dynamic")?.status).toEqual({
+            status: "connected",
+          })
+          yield* service.disconnect("dynamic")
+          expect((yield* service.servers()).find((server) => server.name === "dynamic")?.status).toEqual({
+            status: "disabled",
+          })
+          expect(yield* service.tools()).toEqual([])
+
+          yield* service.connect("dynamic")
+          expect((yield* service.servers()).find((server) => server.name === "dynamic")?.status).toEqual({
+            status: "connected",
+          })
+
+          yield* service.remove("dynamic")
+          expect((yield* service.servers()).some((server) => server.name === "dynamic")).toBe(false)
+          expect(yield* service.tools()).toEqual([])
+          expect(yield* service.remove("dynamic").pipe(Effect.flip)).toBeInstanceOf(MCP.NotFoundError)
+        }).pipe(
+          Effect.provide(
+            resourceMcpLayer(
+              new ConfigMCP.Local({
+                type: "local",
+                command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
+                disabled: true,
+              }),
+            ),
+          ),
+        )
+      }),
+    ),
+  )
+})
+
+test("serializes concurrent MCP lifecycle operations", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          const service = yield* MCP.Service
+
+          // Whatever order the racing operations land in, the resulting state must be consistent.
+          yield* Effect.all(
+            [
+              service.connect("resources"),
+              service.connect("resources"),
+              service.disconnect("resources"),
+              service.connect("resources"),
+            ],
+            { concurrency: "unbounded", discard: true },
+          )
+          const status = (yield* service.servers()).find((server) => server.name === "resources")?.status
+          const tools = yield* service.tools()
+          expect(status?.status === "connected" || status?.status === "disabled").toBe(true)
+          if (status?.status === "disabled") expect(tools).toEqual([])
+          if (status?.status === "connected") expect(tools.length).toBeGreaterThan(0)
+
+          yield* service.disconnect("resources")
+          expect((yield* service.servers())[0]?.status).toEqual({ status: "disabled" })
+          expect(yield* service.tools()).toEqual([])
+          yield* service.connect("resources")
+          expect((yield* service.servers())[0]?.status).toEqual({ status: "connected" })
+          expect((yield* service.tools()).length).toBeGreaterThan(0)
+        }).pipe(
+          Effect.provide(
+            resourceMcpLayer(
+              new ConfigMCP.Local({
+                type: "local",
+                command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
+                disabled: true,
+              }),
+            ),
+          ),
+        )
+      }),
+    ),
+  )
+})
+
 it.effect("advertises MCP output schemas to Code Mode", () =>
   Effect.gen(function* () {
     const registry = yield* ToolRegistry.Service
@@ -640,6 +770,18 @@ it.effect("advertises MCP output schemas to Code Mode", () =>
     const execute = (yield* toolDefinitions(registry)).find((tool) => tool.name === "execute")
 
     expect(execute?.description).toContain("tools.demo.search(input: {}): Promise<{\n  ok: boolean,\n}>")
+  }),
+)
+
+it.effect("advertises MCP tools directly when Code Mode is disabled for the server", () =>
+  Effect.gen(function* () {
+    const registry = yield* ToolRegistry.Service
+    yield* waitForTool(registry, "direct_lookup")
+    const definitions = yield* toolDefinitions(registry)
+    const execute = definitions.find((tool) => tool.name === "execute")
+
+    expect(definitions.some((tool) => tool.name === "direct_lookup")).toBe(true)
+    expect(execute?.description).not.toContain("tools.direct.lookup")
   }),
 )
 

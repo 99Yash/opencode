@@ -1,16 +1,11 @@
 import type { RGBA } from "@opentui/core"
 import type { Accessor } from "solid-js"
-import type {
-  ActionState,
-  ActionVariant,
-  FormfieldState,
-  ResolvedActionState,
-  ResolvedFormfieldState,
-  ResolvedThemeView,
-  HueStep,
-} from "./index"
+import type { ActionVariant, Mode, ResolvedActionState, ResolvedThemeView } from "./index"
+import { ActionState, HueStep } from "./schema"
 
-export function createComponentTheme(current: Accessor<ResolvedThemeView>) {
+type StateFlags = Partial<Record<ActionState, boolean>>
+
+export function createComponentTheme(current: Accessor<ResolvedThemeView>, mode: Accessor<Mode>) {
   const textAction = actions((variant, state) => current().text.action[variant][state])
   const backgroundAction = actions((variant, state) => current().background.action[variant][state])
   const textFormfield = formfield((state) => current().text.formfield[state])
@@ -77,34 +72,39 @@ export function createComponentTheme(current: Accessor<ResolvedThemeView>) {
 
   return {
     hue,
+    categorical: (step: HueStep) => current().categorical.map((scale) => scale[step]),
+    source: (color: RGBA) => current().source(color),
+    increase: (color: RGBA, amount = 1) => current().increase(color, amount),
+    decrease: (color: RGBA, amount = 1) => current().decrease(color, amount),
+    raise: (color: RGBA) => (mode() === "light" ? current().increase(color) : current().decrease(color)),
     text,
     background,
     border: () => current().border.default,
     scrollbar: () => current().scrollbar.default,
     diff: {
-        text: {
-          added: () => current().diff.text.added,
-          removed: () => current().diff.text.removed,
-          context: () => current().diff.text.context,
-          hunkHeader: () => current().diff.text.hunkHeader,
-        },
+      text: {
+        added: () => current().diff.text.added,
+        removed: () => current().diff.text.removed,
+        context: () => current().diff.text.context,
+        hunkHeader: () => current().diff.text.hunkHeader,
+      },
+      background: {
+        added: () => current().diff.background.added,
+        removed: () => current().diff.background.removed,
+        context: () => current().diff.background.context,
+      },
+      highlight: {
+        added: () => current().diff.highlight.added,
+        removed: () => current().diff.highlight.removed,
+      },
+      lineNumber: {
+        text: () => current().diff.lineNumber.text,
         background: {
-          added: () => current().diff.background.added,
-          removed: () => current().diff.background.removed,
-          context: () => current().diff.background.context,
-        },
-        highlight: {
-          added: () => current().diff.highlight.added,
-          removed: () => current().diff.highlight.removed,
-        },
-        lineNumber: {
-          text: () => current().diff.lineNumber.text,
-          background: {
-            added: () => current().diff.lineNumber.background.added,
-            removed: () => current().diff.lineNumber.background.removed,
-          },
+          added: () => current().diff.lineNumber.background.added,
+          removed: () => current().diff.lineNumber.background.removed,
         },
       },
+    },
     syntax: {
       comment: () => current().syntax.comment,
       keyword: () => current().syntax.keyword,
@@ -121,17 +121,21 @@ export function createComponentTheme(current: Accessor<ResolvedThemeView>) {
 }
 
 function actions(get: (variant: ActionVariant, state: ResolvedActionState) => RGBA) {
-  const action = (variant: ActionVariant) => (state: ActionState | "default" = "default") => get(variant, state)
-  const primary = action("primary")
+  const primary = stateful((state) => get("primary", state))
   return Object.assign(primary, {
-    primary,
-    secondary: action("secondary"),
-    destructive: action("destructive"),
+    destructive: stateful((state) => get("destructive", state)),
   })
 }
 
-function formfield(get: (state: ResolvedFormfieldState) => RGBA) {
-  return (state: FormfieldState | "default" = "default") => get(state)
+function formfield(get: (state: ResolvedActionState) => RGBA) {
+  return stateful(get)
+}
+
+function stateful(get: (state: ResolvedActionState) => RGBA) {
+  return (states: ActionState | "default" | StateFlags = "default") => {
+    if (typeof states === "string") return get(states)
+    return get(ActionState.literals.find((state) => states[state]) ?? "default")
+  }
 }
 
 export type ComponentTheme = ReturnType<typeof createComponentTheme>

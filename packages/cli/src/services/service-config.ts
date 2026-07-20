@@ -5,6 +5,7 @@ import { Service } from "@opencode-ai/client/effect/service"
 import { Effect, FileSystem, Option, Schema } from "effect"
 import { randomBytes } from "crypto"
 import path from "path"
+import { selfCommand } from "../util/process"
 
 // The CLI's service configuration file, plus the Service.EnsureOptions binding that
 // points the client package's service operations at this CLI: which
@@ -27,6 +28,12 @@ export function filename(channel = InstallationChannel) {
   if (channel === "latest") return "service.json"
   if (channel === "local") return "service-local.json"
   return `service-${Hash.fast(channel)}.json`
+}
+
+export function defaultPort(channel = InstallationChannel) {
+  if (channel === "latest") return 0xc0de
+  if (channel === "local") return 0xc0df
+  return 10_000 + (Number.parseInt(Hash.fast(channel).slice(0, 8), 16) % 50_000)
 }
 
 export function versionBelongsToChannel(
@@ -78,13 +85,10 @@ const paths = Effect.gen(function* () {
 export const options = Effect.fnUntraced(function* () {
   const { file, legacyFile } = yield* paths
   yield* migrateRegistration(legacyFile, file)
-  const compiled = path.basename(process.execPath).replace(/\.exe$/, "") !== "bun"
-  const entrypoint = compiled ? undefined : process.argv[1]
-  if (!compiled && entrypoint === undefined) return yield* Effect.fail(new Error("Failed to resolve CLI entrypoint"))
   return {
     file,
     version: InstallationVersion,
-    command: [process.execPath, ...(entrypoint ? [entrypoint] : []), "serve", "--service"],
+    command: [...selfCommand(), "serve", "--service"],
   }
 })
 

@@ -28,9 +28,9 @@ import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
+import { MessageDecodeError, NotFoundError } from "./session/error"
 import { makeGlobalNode } from "./effect/app-node"
 import { LocationServiceMap } from "./location-service-map"
-import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionPending } from "./session/pending"
 import { SessionGenerate } from "./session/generate"
@@ -108,10 +108,6 @@ type ForkInput = {
   messageID?: SessionMessage.ID
 }
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Session.NotFoundError", {
-  sessionID: SessionSchema.ID,
-}) {}
-
 export class OperationUnavailableError extends Schema.TaggedErrorClass<OperationUnavailableError>()(
   "Session.OperationUnavailableError",
   {
@@ -119,7 +115,7 @@ export class OperationUnavailableError extends Schema.TaggedErrorClass<Operation
   },
 ) {}
 
-export { MessageDecodeError } from "./session/error"
+export { MessageDecodeError, NotFoundError }
 
 export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictError>()("Session.PromptConflictError", {
   sessionID: SessionSchema.ID,
@@ -210,12 +206,11 @@ export interface Interface {
    */
   readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<SessionPending.Info[], NotFoundError>
   /**
-   * Durable, ordered session log read. Replays public durable
-   * session events after the exclusive `after` cursor, emits a `Synced`
-   * marker at the captured replay watermark, then continues live when `follow`
-   * is set.
-   * The marker's seq may exceed the last emitted event because non-public
-   * durable events share the aggregate's sequence space.
+   * Durable, ordered session log read. Replays durable session events after
+   * the exclusive `after` cursor, emits a `Synced` marker at the captured
+   * replay watermark, then continues live when `follow` is set.
+   * The marker's seq may exceed the last emitted event because other durable
+   * events share the aggregate's sequence space.
    */
   readonly log: (input: {
     sessionID: SessionSchema.ID

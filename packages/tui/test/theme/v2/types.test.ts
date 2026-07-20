@@ -5,8 +5,11 @@ const text = {
   default: "$hue.neutral.900",
   subdued: "$hue.neutral.600",
   action: {
-    primary: { default: "$hue.neutral.100", $pressed: "$hue.neutral.200" },
-    secondary: { default: "$hue.neutral.900" },
+    primary: {
+      default: "$hue.neutral.100",
+      $hovered: "$hue.neutral.200",
+      $pressed: "$hue.neutral.300",
+    },
     destructive: { default: "$hue.red.100", $disabled: "$hue.neutral.500" },
   },
   formfield: { default: "$hue.neutral.600", $selected: "$hue.neutral.100" },
@@ -19,16 +22,25 @@ const background = {
   default: "$hue.neutral.100",
   surface: { offset: "$hue.neutral.200", overlay: "$hue.neutral.300" },
   action: {
-    primary: { default: "$hue.interactive.600", $pressed: "$hue.interactive.800" },
-    secondary: { default: "$hue.neutral.200" },
+    primary: {
+      default: "$hue.interactive.600",
+      $hovered: "$hue.interactive.700",
+      $pressed: "$hue.interactive.800",
+      $selected: "$hue.interactive.700",
+    },
     destructive: { default: "$hue.red.600" },
   },
-  formfield: { default: "$hue.neutral.100", $selected: "$hue.interactive.600" },
+  formfield: {
+    default: "$hue.neutral.100",
+    $hovered: "$hue.neutral.200",
+    $selected: "$hue.interactive.600",
+  },
   feedback: { error: { default: "$hue.red.100" } },
 } satisfies BackgroundDefinition
 
 const definition = {
   hue: {} as ThemeDefinition["hue"],
+  categorical: ["blue", "accent"],
   text,
   background,
   border: { default: "$hue.neutral.300" },
@@ -40,13 +52,24 @@ const definition = {
 } satisfies ThemeDefinition
 
 const file = { version: 2, light: definition, dark: definition } satisfies ThemeFile
+const lightOnly = { version: 2, light: definition } satisfies ThemeFile
+const darkOnly = { version: 2, dark: definition } satisfies ThemeFile
+// @ts-expect-error A theme file must provide at least one mode.
+const empty = { version: 2 } satisfies ThemeFile
 
 test("supports property-first definitions, variants, states, and contexts", () => {
-  expect(text.action.primary.$pressed).toBe("$hue.neutral.200")
+  expect(text.action.primary.$hovered).toBe("$hue.neutral.200")
+  expect(text.action.primary.$pressed).toBe("$hue.neutral.300")
   expect(text.formfield.$selected).toBe("$hue.neutral.100")
   expect(background.action.destructive.default).toBe("$hue.red.600")
+  expect(background.action.primary.$selected).toBe("$hue.interactive.700")
+  expect(background.formfield.$hovered).toBe("$hue.neutral.200")
   expect(background.surface.offset).toBe("$hue.neutral.200")
   expect(definition["@context:elevated"].text?.default).toBe("$hue.neutral.800")
   expect(definition["@context:overlay"].background?.default).toBe("$hue.neutral.300")
+  expect(definition.categorical).toEqual(["blue", "accent"])
   expect(file.light).toBe(definition)
+  expect(lightOnly.light).toBe(definition)
+  expect(darkOnly.dark).toBe(definition)
+  expect(empty.version).toBe(2)
 })

@@ -3,12 +3,7 @@ import { Effect, FileSystem, Option, Schedule, Schema } from "effect"
 import { spawn, type ChildProcess } from "node:child_process"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import type {
-  DiscoverOptions,
-  Endpoint,
-  EnsureOptions,
-  StopOptions,
-} from "../service.js"
+import type { DiscoverOptions, Endpoint, EnsureOptions, StopOptions } from "../service.js"
 
 export * from "../service.js"
 /** Contents of the local service registration file. */
@@ -32,6 +27,17 @@ type Contender = {
 /** Discover a healthy, compatible local service without starting one. */
 export const discover = Effect.fn("service.discover")(function* (options: DiscoverOptions = {}) {
   return (yield* discoverLocal(options))?.endpoint
+})
+
+/** Recognize an authenticated compatible service bound to an expected URL, including while it starts or fails. */
+export const incumbent = Effect.fn("service.incumbent")(function* (
+  options: DiscoverOptions & { readonly url: string },
+) {
+  const info = yield* read(options.file)
+  const found = info === undefined ? undefined : yield* probe({ ...info, url: options.url })
+  if (found === undefined || found.legacy) return undefined
+  if (options.version !== undefined && found.version !== options.version) return undefined
+  return { endpoint: found.endpoint, state: found.state }
 })
 
 const discoverLocal = Effect.fnUntraced(function* (options: DiscoverOptions) {
@@ -82,7 +88,8 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       spawnDelay = 5_000
       const compatible = !service.legacy && (options.version === undefined || service.version === options.version)
       if (compatible && service.state === "ready") return Option.some(service)
-      if (compatible && service.state === "failed") return yield* Effect.fail(new Error("Background service failed to start"))
+      if (compatible && service.state === "failed")
+        return yield* Effect.fail(new Error("Background service failed to start"))
       if (compatible) return Option.none<LocalService>()
       yield* announce("version-mismatch", service.version)
       yield* kill(service, options).pipe(Effect.ignore)
@@ -105,8 +112,15 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       lastSpawn = Date.now()
     }
     return Option.none<LocalService>()
-  }).pipe(Effect.repeat({ until: Option.isSome, schedule: Schedule.spaced("1 second") }))
-  return Option.getOrThrow(found).endpoint
+  }).pipe(
+    Effect.repeat({
+      until: Option.isSome,
+      schedule: Schedule.max([Schedule.spaced("1 second"), Schedule.recurs(120)]),
+    }),
+  )
+  if (Option.isNone(found))
+    return yield* Effect.fail(new Error("Timed out waiting for the background service to start"))
+  return found.value.endpoint
 })
 
 function contenderFailure(contender: Contender) {
@@ -221,7 +235,7 @@ const find = Effect.fnUntraced(function* (options: { readonly file?: string }) {
 
 // 50ms cadence bounded at ~5s, shared by stop escalation and each ensure
 // discovery window.
-const poll = Schedule.spaced("50 millis").pipe(Schedule.both(Schedule.recurs(100)))
+const poll = Schedule.max([Schedule.spaced("50 millis"), Schedule.recurs(100)])
 
 const signal = (pid: number, name: NodeJS.Signals) =>
   Effect.try({ try: () => process.kill(pid, name), catch: (cause) => cause }).pipe(Effect.ignore)
@@ -238,10 +252,7 @@ function same(left: Info, right: Info) {
   return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid
 }
 
-const kill = Effect.fnUntraced(function* (
-  service: LocalService,
-  options: { readonly file?: string },
-) {
+const kill = Effect.fnUntraced(function* (service: LocalService, options: { readonly file?: string }) {
   const requested = yield* requestStop(service)
   if (requested === "rejected") return
   if (requested === "unsupported") {
@@ -280,4 +291,4 @@ const requestStop = Effect.fnUntraced(function* (service: LocalService) {
 })
 
 /** Effect-based local service lifecycle operations. */
-export const Service = { discover, ensure, stop, headers, Info }
+export const Service = { discover, incumbent, ensure, stop, headers, Info }

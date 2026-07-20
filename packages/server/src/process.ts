@@ -1,7 +1,9 @@
 export * as ServerProcess from "./process"
 
 import { NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node"
+import { Database } from "@opencode-ai/core/database/database"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { ServiceStatus } from "@opencode-ai/protocol/groups/health"
 import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
@@ -10,6 +12,7 @@ import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerRe
 import { createServer } from "node:http"
 import { ServerAuth } from "./auth"
 import { authorizedRequest } from "./middleware/authorization"
+import { withoutParentSpan } from "./request-tracing"
 import { createRoutes } from "./routes"
 import { ServerInfo } from "./server-info"
 import { Status } from "./service-status"
@@ -19,8 +22,13 @@ export type Options<E = never, R = never> = {
   readonly port: Option.Option<number>
   readonly password: string
   readonly instanceID: string
+  readonly database?: Database.Options
+  readonly models?: ModelsDev.Options
   readonly service?: {
-    readonly onListen: (address: HttpServer.Address) => Effect.Effect<void, E, R>
+    readonly onListen: (
+      address: HttpServer.Address,
+      shutdown: Effect.Effect<void>,
+    ) => Effect.Effect<Effect.Effect<void>, E, R>
   }
 }
 
@@ -39,27 +47,39 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(options: 
   })
   const bound = yield* listen(options)
   const application = yield* Ref.make(Option.none<App>())
-  yield* bound.http.serve(dispatch(options.password, status, application, shutdown), HttpMiddleware.logger)
-  if (options.service) yield* options.service.onListen(bound.http.address)
+  // Request fibers may continue inbound trace context, but must not inherit the server startup parent.
+  yield* bound.http
+    .serve(dispatch(options.password, status, application, shutdown), HttpMiddleware.logger)
+    .pipe(withoutParentSpan)
+  if (options.service)
+    yield* options.service.onListen(bound.http.address, Deferred.succeed(shutdown, undefined).pipe(Effect.asVoid)).pipe(
+      Effect.flatMap((cleanup) =>
+        Effect.addFinalizer(() => Scope.close(bound.scope, Exit.void).pipe(Effect.andThen(cleanup))),
+      ),
+      Effect.uninterruptible,
+    )
 
   const parentScope = yield* Scope.Scope
   const applicationScope = yield* Scope.fork(parentScope)
   yield* Effect.addFinalizer(() =>
-    status
-      .beginStopping
-      .pipe(
-        Effect.andThen(Ref.set(application, Option.none())),
-        Effect.andThen(Effect.sync(() => bound.server.closeAllConnections())),
-      ),
+    status.beginStopping.pipe(
+      Effect.andThen(Ref.set(application, Option.none())),
+      Effect.andThen(Effect.sync(() => bound.server.closeAllConnections())),
+    ),
   )
 
   const boot = Effect.gen(function* () {
     const context = yield* Layer.buildWithScope(
-      createRoutes(options.password, () => {
-        const address = bound.server.address()
-        if (address === null || typeof address === "string") return []
-        const host = address.family === "IPv6" ? `[${address.address}]` : address.address
-        return ServerInfo.connectionURLs(`http://${host}:${address.port}`, options.hostname)
+      createRoutes({
+        password: options.password,
+        serviceURLs: () => {
+          const address = bound.server.address()
+          if (address === null || typeof address === "string") return []
+          const host = address.family === "IPv6" ? `[${address.address}]` : address.address
+          return ServerInfo.connectionURLs(`http://${host}:${address.port}`, options.hostname)
+        },
+        database: options.database,
+        models: options.models,
       }).pipe(Layer.provide(NodeHttpServer.layerHttpServices)),
       applicationScope,
     )
@@ -108,7 +128,7 @@ function bind(hostname: string, port: number) {
     return yield* Effect.gen(function* () {
       const http = yield* NodeHttpServer.make(() => server, { port, host: hostname })
       yield* Effect.addFinalizer(() => Effect.sync(() => server.closeAllConnections()))
-      return { http, server }
+      return { http, server, scope: serverScope }
     }).pipe(
       Effect.provideService(Scope.Scope, serverScope),
       Effect.onError((cause) => Scope.close(serverScope, Exit.failCause(cause))),
@@ -186,10 +206,13 @@ const control = Effect.fnUntraced(function* (
 
 const healthResponse = Effect.fnUntraced(function* (status: Status.Interface) {
   const state = yield* status.current
-  return HttpServerResponse.jsonUnsafe({ healthy: true, version: InstallationVersion, pid: process.pid }, {
-    status: state.type === "ready" ? 200 : state.type === "failed" ? 500 : 503,
-    headers: state.type === "starting" || state.type === "stopping" ? { "retry-after": "1" } : undefined,
-  })
+  return HttpServerResponse.jsonUnsafe(
+    { healthy: true, version: InstallationVersion, pid: process.pid },
+    {
+      status: state.type === "ready" ? 200 : state.type === "failed" ? 500 : 503,
+      headers: state.type === "starting" || state.type === "stopping" ? { "retry-after": "1" } : undefined,
+    },
+  )
 })
 
 function unavailable(status: Status.State) {
