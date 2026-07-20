@@ -3,8 +3,8 @@ export * as PatchTool from "./patch"
 import type { Context as PluginContext } from "@opencode-ai/plugin/v2/effect/plugin"
 import { ToolFailure } from "@opencode-ai/ai"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
-import { diffLines } from "diff"
-import { Effect, Schema, Struct } from "effect"
+import { createTwoFilesPatch, diffLines } from "diff"
+import { Effect, Schema } from "effect"
 import { FileMutation } from "../file-mutation"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
@@ -26,11 +26,9 @@ export const Applied = Schema.Struct({
   target: Schema.String,
 })
 
-const FileInfo = FileDiff.Info.mapFields(Struct.omit(["patch"]))
-
 export const Output = Schema.Struct({
   applied: Schema.Array(Applied),
-  files: Schema.Array(FileInfo),
+  files: Schema.Array(FileDiff.Info),
 })
 export type Output = typeof Output.Type
 
@@ -213,7 +211,7 @@ export const Plugin = {
   }),
 }
 
-function patchFile(change: Prepared): typeof FileInfo.Type {
+function patchFile(change: Prepared): typeof FileDiff.Info.Type {
   const counts = diffLines(change.before, change.after).reduce(
     (result, item) => ({
       additions: result.additions + (item.added ? (item.count ?? 0) : 0),
@@ -223,6 +221,7 @@ function patchFile(change: Prepared): typeof FileInfo.Type {
   )
   return {
     file: change.target.resource,
+    patch: createTwoFilesPatch(change.target.resource, change.target.resource, change.before, change.after),
     status: change.type === "add" ? "added" : change.type === "delete" ? "deleted" : "modified",
     ...counts,
   }

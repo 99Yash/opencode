@@ -158,10 +158,10 @@ describe("EditTool", () => {
                       status: "modified",
                       additions: 1,
                       deletions: 1,
+                      patch: expect.stringContaining("-before\n+after"),
                     },
                   ],
                 })
-                expect(settled.output?.structured).not.toHaveProperty("files.0.patch")
                 expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after\nrest\n")
                 expect(assertions).toMatchObject([{ sessionID, action: "edit", resources: ["hello.txt"], save: ["*"] }])
                 expect(writes).toEqual([yield* Effect.promise(() => fs.realpath(target))])
@@ -366,7 +366,6 @@ describe("EditTool", () => {
           Effect.andThen((settled) =>
             Effect.gen(function* () {
               expect(settled.output?.structured).toMatchObject({ replacements: 3 })
-              expect(settled.output?.structured).not.toHaveProperty("files.0.patch")
               expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after after after")
               expect(writes).toHaveLength(1)
             }),
