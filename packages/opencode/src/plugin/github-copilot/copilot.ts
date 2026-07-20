@@ -8,6 +8,7 @@ import { MessageV2 } from "@/session/message-v2"
 
 const CLIENT_ID = "Ov23li8tweQw6odWQebz"
 const API_VERSION = "2026-06-01"
+const USER_API_VERSION = "2025-04-01"
 const UTILITY_MODELS = ["gpt-5.4-nano", "gpt-4.1", "gpt-4o", "gpt-4o-mini"]
 // Add a small safety buffer when polling to avoid hitting the server
 // slightly too early due to clock skew / timer drift.
@@ -66,9 +67,28 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
         }
 
         const auth = ctx.auth
+        const fallback = base(auth.enterpriseUrl)
+        const url = await fetch(
+          `${auth.enterpriseUrl ? `https://api.${normalizeDomain(auth.enterpriseUrl)}` : "https://api.github.com"}/copilot_internal/user`,
+          {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${auth.refresh}`,
+              "X-GitHub-Api-Version": USER_API_VERSION,
+            },
+            signal: AbortSignal.timeout(5_000),
+          },
+        )
+          .then(async (response) => {
+            if (!response.ok) return fallback
+            const result = (await response.json()) as { endpoints?: { api?: unknown } }
+            const endpoint = result.endpoints?.api
+            return typeof endpoint === "string" && endpoint ? endpoint.replace(/\/+$/, "") : fallback
+          })
+          .catch(() => fallback)
 
         return CopilotModels.get(
-          base(auth.enterpriseUrl),
+          url,
           {
             ...(provider.options?.headers as Record<string, string> | undefined),
             Authorization: `Bearer ${auth.refresh}`,
@@ -85,9 +105,7 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
           })
           .catch((error) => {
             models = {}
-            return Object.fromEntries(
-              Object.entries(provider.models).map(([id, model]) => [id, fix(model, base(auth.enterpriseUrl))]),
-            )
+            return Object.fromEntries(Object.entries(provider.models).map(([id, model]) => [id, fix(model, url)]))
           })
       },
     },
@@ -187,17 +205,17 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             {
               type: "select",
               key: "deploymentType",
-              message: "Select GitHub deployment type",
+              message: "Select where your GitHub account is hosted",
               options: [
                 {
                   label: "GitHub.com",
                   value: "github.com",
-                  hint: "Public",
+                  hint: "Including Copilot Business or Enterprise",
                 },
                 {
-                  label: "GitHub Enterprise",
+                  label: "GitHub Enterprise host",
                   value: "enterprise",
-                  hint: "Data residency or self-hosted",
+                  hint: "GHE.com or self-hosted",
                 },
               ],
             },

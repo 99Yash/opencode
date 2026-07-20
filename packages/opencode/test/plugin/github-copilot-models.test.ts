@@ -422,3 +422,60 @@ test("remaps fallback oauth model urls to the enterprise host", async () => {
   expect(models.claude.api.url).toBe("https://copilot-api.ghe.example.com")
   expect(models.claude.api.npm).toBe("@ai-sdk/github-copilot")
 })
+
+test("uses the account-specific Copilot API endpoint", async () => {
+  const requests: string[] = []
+  globalThis.fetch = mock((input: RequestInfo | URL) => {
+    const url = input instanceof URL ? input.href : typeof input === "string" ? input : input.url
+    requests.push(url)
+    if (url === "https://api.github.com/copilot_internal/user") {
+      return Promise.resolve(
+        new Response(JSON.stringify({ endpoints: { api: "https://api.business.githubcopilot.com/" } })),
+      )
+    }
+    return Promise.reject(new Error("timeout"))
+  }) as unknown as typeof fetch
+
+  const hooks = await CopilotAuthPlugin({
+    client: {} as never,
+    project: {} as never,
+    directory: "",
+    worktree: "",
+    experimental_workspace: {
+      register() {},
+    },
+    serverUrl: new URL("https://example.com"),
+    $: {} as never,
+  })
+
+  const models = await hooks.provider!.models!(
+    {
+      id: "github-copilot",
+      models: {
+        claude: {
+          id: "claude",
+          providerID: "github-copilot",
+          api: {
+            id: "claude-sonnet-4.5",
+            url: "https://api.githubcopilot.com/v1",
+            npm: "@ai-sdk/anthropic",
+          },
+        },
+      },
+    } as never,
+    {
+      auth: {
+        type: "oauth",
+        refresh: "token",
+        access: "token",
+        expires: Date.now() + 60_000,
+      } as never,
+    },
+  )
+
+  expect(requests).toEqual([
+    "https://api.github.com/copilot_internal/user",
+    "https://api.business.githubcopilot.com/models",
+  ])
+  expect(models.claude.api.url).toBe("https://api.business.githubcopilot.com")
+})
