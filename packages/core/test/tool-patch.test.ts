@@ -1,8 +1,8 @@
 import fs from "fs/promises"
 import path from "path"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Deferred, Effect, Exit, Fiber, Layer, Schema } from "effect"
-import { parsePatch } from "diff"
+import { createTwoFilesPatch, parsePatch } from "diff"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FileMutation } from "@opencode-ai/core/file-mutation"
@@ -15,6 +15,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { PatchTool } from "@opencode-ai/core/tool/patch"
+import { ToolStructured } from "@opencode-ai/core/tool/structured"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { makeLocationNode } from "@opencode-ai/core/effect/app-node"
@@ -146,6 +147,22 @@ const exists = (target: string) =>
 const it = testEffect(Layer.empty)
 
 describe("PatchTool", () => {
+  test("summarizes multi-line truncation without fabricating unchanged context", () => {
+    const before = Array.from({ length: 100 }, (_, index) => `old-${index}`).join("\n")
+    const after = Array.from({ length: 100 }, (_, index) => `new-${index}`).join("\n")
+    const summary = ToolStructured.patch(createTwoFilesPatch("large.txt", "large.txt", before, after), 500)
+    const hunk = parsePatch(summary)[0]?.hunks[0]
+
+    expect(hunk?.lines.some((line) => line.startsWith(" "))).toBe(false)
+    expect(hunk?.lines).toEqual([
+      "-old-0",
+      "+new-0",
+      "-... 99 removed lines omitted ...",
+      "+... 99 added lines omitted ...",
+    ])
+    expect(hunk).toMatchObject({ oldLines: 2, newLines: 2 })
+  })
+
   it.live("registers and sequentially applies add, update, and delete hunks", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
