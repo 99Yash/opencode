@@ -1,6 +1,6 @@
 import { Layer } from "effect"
 import { OtlpLogger } from "effect/unstable/observability"
-import { Flag } from "../flag/flag"
+import { Flag } from "../flag"
 import { InstallationChannel, InstallationVersion } from "../installation/version"
 import { runID } from "./shared"
 

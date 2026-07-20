@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Provider } from "../../src/provider/provider"
 
 import { Effect } from "effect"

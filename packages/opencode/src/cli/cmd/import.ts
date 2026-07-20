@@ -9,7 +9,7 @@ import { InstanceRef } from "@/effect/instance-ref"
 import { ShareNext } from "@/share/share-next"
 import { EOL } from "os"
 import path from "path"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Effect, Schema } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
 

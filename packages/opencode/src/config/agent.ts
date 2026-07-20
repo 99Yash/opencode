@@ -2,7 +2,7 @@ export * as ConfigAgent from "./agent"
 
 import path from "path"
 import { Exit, Schema } from "effect"
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Glob } from "@opencode-ai/util/glob"
 import { ConfigAgentV1 } from "@opencode-ai/core/v1/config/agent"
 import { configEntryNameFromPath } from "./entry-name"
 import * as ConfigMarkdown from "./markdown"

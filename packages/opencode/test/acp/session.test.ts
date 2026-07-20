@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import type { McpServer } from "@agentclientprotocol/sdk"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Effect } from "effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"

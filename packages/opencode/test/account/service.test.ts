@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
 import { Duration, Effect, Layer, Option, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/unstable/http"

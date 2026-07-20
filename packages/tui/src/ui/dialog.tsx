@@ -5,7 +5,7 @@ import { useTheme } from "../context/theme"
 import { MouseButton, Renderable, RGBA } from "@opentui/core"
 import { createStore } from "solid-js/store"
 import { useToast } from "./toast"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@opencode-ai/util/flag"
 import { useClipboard } from "../context/clipboard"
 
 export function Dialog(

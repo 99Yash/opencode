@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Service, make } from "@opencode-ai/core/job"
 import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer } from "effect"

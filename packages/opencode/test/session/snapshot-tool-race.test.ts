@@ -13,7 +13,7 @@
  */
 import { expect } from "bun:test"
 import { Effect, Layer } from "effect"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import fs from "fs/promises"
 import path from "path"
 import { Session } from "@/session/session"
@@ -29,7 +29,7 @@ import { TestLLMServer } from "../lib/llm-server"
 
 import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { CrossSpawnSpawner } from "@opencode-ai/util/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 
 const mcp = Layer.succeed(

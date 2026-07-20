@@ -1,6 +1,6 @@
 import yargs from "yargs"
 import { V2ServeCommand } from "./cli/cmd/v2-serve"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationVersion } from "@opencode-ai/util/installation/version"
 import { hideBin } from "yargs/helpers"
 const cli = yargs(hideBin(process.argv))
   .parserConfiguration({ "populate--": true })

@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Fiber } from "effect"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Job } from "@/job"
 import { SessionSchema } from "@opencode-ai/core/session/schema"
 import { testEffect } from "./lib/effect"

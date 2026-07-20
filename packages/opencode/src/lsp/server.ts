@@ -1,7 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "child_process"
 import path from "path"
 import os from "os"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@opencode-ai/util/global"
 import { text } from "node:stream/consumers"
 import fs from "fs/promises"
 import { Filesystem } from "@/util/filesystem"
@@ -11,7 +11,7 @@ import { Process } from "@/util/process"
 import { which } from "@opencode-ai/core/util/which"
 import { Module } from "@opencode-ai/core/util/module"
 import { spawn } from "./launch"
-import { Npm } from "@opencode-ai/core/npm"
+import { Npm } from "@opencode-ai/util/npm"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 
 const pathExists = async (p: string) =>

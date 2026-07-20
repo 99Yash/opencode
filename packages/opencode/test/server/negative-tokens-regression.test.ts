@@ -6,7 +6,7 @@
 // strict `NonNegativeInt` schema then made every load of the message list
 // fail to encode, killing Desktop boot for every user with such a row.
 import { describe, expect } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Effect, Layer } from "effect"
 import { eq } from "drizzle-orm"
 

@@ -3,8 +3,8 @@ import { type ParseError as JsoncParseError, applyEdits, modify, parse as parseJ
 import { unique } from "remeda"
 import { Option, Schema } from "effect"
 import { TuiConfig } from "@opencode-ai/tui/config/v1"
-import { Flag } from "@opencode-ai/core/flag/flag"
-import { Global } from "@opencode-ai/core/global"
+import { Flag } from "@opencode-ai/util/flag"
+import { Global } from "@opencode-ai/util/global"
 import { Filesystem } from "@/util/filesystem"
 import * as ConfigPaths from "@/config/paths"
 

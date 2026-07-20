@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Effect, Fiber, Layer } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { Job } from "@/job"

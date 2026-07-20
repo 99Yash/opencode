@@ -1,7 +1,7 @@
 export * as SessionModelHeaders from "./model-headers"
 
-import { Flag } from "../flag/flag"
-import { InstallationVersion } from "../installation/version"
+import { Flag } from "@opencode-ai/util/flag"
+import { InstallationVersion } from "@opencode-ai/util/installation/version"
 import { SessionSchema } from "./schema"
 
 export const make = (session: Pick<SessionSchema.Info, "id" | "parentID" | "projectID">) => ({

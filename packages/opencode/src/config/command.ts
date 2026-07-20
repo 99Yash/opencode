@@ -2,7 +2,7 @@ export * as ConfigCommand from "./command"
 
 import path from "path"
 import { Cause, Exit, Schema } from "effect"
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Glob } from "@opencode-ai/util/glob"
 import { ConfigCommandV1 } from "@opencode-ai/core/v1/config/command"
 import { configEntryNameFromPath } from "./entry-name"
 import { InvalidError } from "@opencode-ai/core/v1/config/error"

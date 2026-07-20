@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect } from "bun:test"
 import { Effect, Exit, Layer, Option } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
+import { CrossSpawnSpawner } from "@opencode-ai/util/cross-spawn-spawner"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 
 import { AccessToken, AccountID, OrgID, RefreshToken } from "../../src/account/schema"

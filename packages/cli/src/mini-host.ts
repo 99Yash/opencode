@@ -1,6 +1,6 @@
 import type { MiniFrontendInput } from "@opencode-ai/tui/mini"
-import { Flag } from "@opencode-ai/core/flag/flag"
-import { Global } from "@opencode-ai/core/global"
+import { Flag } from "@opencode-ai/util/flag"
+import { Global } from "@opencode-ai/util/global"
 import fs from "node:fs"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import path from "node:path"

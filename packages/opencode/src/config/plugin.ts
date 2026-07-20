@@ -1,4 +1,4 @@
-import { Glob } from "@opencode-ai/core/util/glob"
+import { Glob } from "@opencode-ai/util/glob"
 import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { pathToFileURL } from "url"
 import { isPathPluginSpec, parsePluginSpecifier, resolvePathPluginTarget } from "@/plugin/shared"

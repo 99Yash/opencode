@@ -2,13 +2,13 @@ export * as InstructionDiscovery from "./instruction-discovery"
 
 import { Array, Context, Effect, Layer, Schema } from "effect"
 import { isAbsolute, join, relative, sep } from "path"
-import { FSUtil } from "./fs-util"
-import { Flag } from "./flag/flag"
-import { Global } from "./global"
+import { FSUtil } from "@opencode-ai/util/fs-util"
+import { Flag } from "@opencode-ai/util/flag"
+import { Global } from "@opencode-ai/util/global"
 import { Location } from "./location"
 import { AbsolutePath } from "./schema"
 import { Instructions } from "./instructions/index"
-import { makeLocationNode } from "./effect/app-node"
+import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 
 class File extends Schema.Class<File>("InstructionDiscovery.File")({
   path: AbsolutePath,

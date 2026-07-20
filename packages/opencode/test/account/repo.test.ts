@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Effect, Layer, Option } from "effect"
 import { sql } from "drizzle-orm"
 

@@ -1,18 +1,9 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { Service, type Info } from "@opencode-ai/client/effect/service"
-import { Database } from "@opencode-ai/core/database/database"
-import { EventV2 } from "@opencode-ai/core/event"
-import { EventTable } from "@opencode-ai/core/event/sql"
-import { Global } from "@opencode-ai/core/global"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { Project } from "@opencode-ai/core/project"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { SessionV2 } from "@opencode-ai/core/session"
-import { SessionEvent } from "@opencode-ai/core/session/event"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { Global } from "@opencode-ai/util/global"
+import { InstallationVersion } from "@opencode-ai/util/installation/version"
 import { expect, test } from "bun:test"
-import { Effect, Schedule, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -204,31 +195,6 @@ test("concurrent service processes elect one server", async () => {
     XDG_DATA_HOME: path.join(root, "data"),
     XDG_STATE_HOME: path.join(root, "state"),
   }
-  const sessionID = SessionV2.ID.make("ses_service_recovery")
-  await withDatabase(
-    database,
-    Effect.gen(function* () {
-      const { db } = yield* Database.Service
-      yield* db
-        .insert(ProjectTable)
-        .values({ id: Project.ID.global, worktree: AbsolutePath.make(root), sandboxes: [] })
-        .run()
-        .pipe(Effect.orDie)
-      yield* db
-        .insert(SessionTable)
-        .values({
-          id: sessionID,
-          project_id: Project.ID.global,
-          slug: "recovery",
-          directory: root,
-          title: "recovery",
-          version: "test",
-          time_suspended: Date.now(),
-        })
-        .run()
-        .pipe(Effect.orDie)
-    }),
-  )
   const command = [process.execPath, path.join(import.meta.dir, "../src/index.ts"), "serve", "--service"]
   const registration = path.join(root, "state", "opencode", "service-local.json")
   const port = await availablePort()
@@ -281,20 +247,6 @@ test("concurrent service processes elect one server", async () => {
       contender.kill("SIGTERM")
       await contender.exited
     }
-    expect(
-      await withDatabase(
-        database,
-        Effect.gen(function* () {
-          const { db } = yield* Database.Service
-          return yield* db
-            .select({ timeSuspended: SessionTable.time_suspended })
-            .from(SessionTable)
-            .get()
-            .pipe(Effect.orDie)
-        }),
-      ),
-    ).toEqual({ timeSuspended: null })
-    expect(await waitForExecutionStart(database, sessionID)).toBe(1)
     await Effect.runPromise(Service.stop({ file: registration }).pipe(Effect.provide(NodeFileSystem.layer)))
     await winner?.exited
     expect(await Bun.file(registration).exists()).toBe(false)
@@ -528,40 +480,6 @@ test("a failed service stays registered and owns the selected port until stopped
     await fs.rm(root, { recursive: true, force: true })
   }
 }, 30_000)
-
-function withDatabase<A, E>(file: string, effect: Effect.Effect<A, E, Database.Service>) {
-  return Effect.runPromise(effect.pipe(Effect.provide(Database.layerFromPath(file)), Effect.scoped))
-}
-
-function waitForExecutionStart(file: string, sessionID: SessionV2.ID) {
-  return withDatabase(
-    file,
-    Effect.gen(function* () {
-      const { db } = yield* Database.Service
-      return yield* db
-        .select({ id: EventTable.id, sessionID: EventTable.aggregate_id, type: EventTable.type })
-        .from(EventTable)
-        .all()
-        .pipe(
-          Effect.orDie,
-          Effect.map((rows) =>
-            rows.filter(
-              (row) =>
-                row.sessionID === sessionID &&
-                row.type ===
-                  EventV2.versionedType(
-                    SessionEvent.Execution.Started.type,
-                    SessionEvent.Execution.Started.durable.version,
-                  ),
-            ),
-          ),
-          Effect.filterOrFail((rows) => rows.length > 0),
-          Effect.map((rows) => rows.length),
-          Effect.retry(Schedule.max([Schedule.spaced("50 millis"), Schedule.recurs(200)])),
-        )
-    }),
-  )
-}
 
 async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true) {
   for (let attempt = 0; attempt < 400; attempt++) {

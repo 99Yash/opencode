@@ -5,8 +5,8 @@ import { spawn, type ChildProcess } from "child_process"
 import { readFile } from "fs/promises"
 import { statSync } from "fs"
 import { setTimeout } from "node:timers/promises"
-import { Flag } from "../flag/flag"
-import { FSUtil } from "../fs-util"
+import { Flag } from "@opencode-ai/util/flag"
+import { FSUtil } from "@opencode-ai/util/fs-util"
 import { which } from "../util/which"
 
 const SIGKILL_TIMEOUT_MS = 200
