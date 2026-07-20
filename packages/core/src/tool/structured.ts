@@ -1,5 +1,6 @@
 export * as ToolStructured from "./structured"
 
+import { formatPatch, parsePatch } from "diff"
 import { ToolOutputStore } from "../tool-output-store"
 
 export function fit<A>(project: (maxStringBytes: number) => A) {
@@ -36,4 +37,27 @@ export function truncate(input: string, maximumBytes: number) {
     end += char.length
   }
   return input.slice(0, end).replace(/\r?\n$/, "") + (maximumBytes >= markerBytes ? marker : "")
+}
+
+export function patch(input: string, maximumBytes: number) {
+  if (Buffer.byteLength(input, "utf-8") <= maximumBytes) return input
+  const parsed = parsePatch(input)[0]
+  const hunk = parsed?.hunks[0]
+  if (!parsed || !hunk) return truncate(input, maximumBytes)
+  const changed = [hunk.lines.find((line) => line.startsWith("-")), hunk.lines.find((line) => line.startsWith("+"))]
+    .filter((line) => line !== undefined)
+    .map((line) => line[0] + truncate(line.slice(1), Math.max(0, Math.floor(maximumBytes / 2) - 1)))
+  const lines = [...changed, " ... diff truncated ..."]
+  return formatPatch({
+    ...parsed,
+    hunks: [
+      {
+        oldStart: hunk.oldStart,
+        oldLines: lines.filter((line) => line.startsWith("-") || line.startsWith(" ")).length,
+        newStart: hunk.newStart,
+        newLines: lines.filter((line) => line.startsWith("+") || line.startsWith(" ")).length,
+        lines,
+      },
+    ],
+  })
 }

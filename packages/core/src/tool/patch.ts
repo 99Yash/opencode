@@ -79,7 +79,7 @@ export const Plugin = {
                   ...output,
                   files: output.files.map((file) => ({
                     ...file,
-                    patch: ToolStructured.truncate(file.patch, maximumBytes),
+                    patch: ToolStructured.patch(file.patch, maximumBytes),
                   })),
                 })),
               toModelOutput: ({ output }) => [{ type: "text", text: toModelOutput(output) }],

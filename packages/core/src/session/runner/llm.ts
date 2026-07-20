@@ -305,9 +305,17 @@ const layer = Layer.effect(
           // settles so the model may recover. A typed infrastructure failure (tool output
           // could not be persisted) also fails the assistant and then fails the drain.
           const settledFailure = settledCauses.find((cause) => !Cause.hasInterrupts(cause) && !isUserDeclined(cause))
-          const typedError =
-            settledFailure === undefined ? undefined : Option.getOrUndefined(Cause.findErrorOption(settledFailure))
-          const storageDefect = settledFailure?.reasons.find(
+          const infrastructureFailure = settledCauses.find(
+            (cause) =>
+              Option.getOrUndefined(Cause.findErrorOption(cause)) instanceof ToolOutputStore.StorageError ||
+              cause.reasons.some(
+                (reason) => Cause.isDieReason(reason) && reason.defect instanceof ToolOutputStore.StorageError,
+              ),
+          )
+          const typedError = infrastructureFailure
+            ? Option.getOrUndefined(Cause.findErrorOption(infrastructureFailure))
+            : undefined
+          const storageDefect = infrastructureFailure?.reasons.find(
             (reason) => Cause.isDieReason(reason) && reason.defect instanceof ToolOutputStore.StorageError,
           )
           const infraError =
@@ -365,8 +373,8 @@ const layer = Layer.effect(
 
           if (stream._tag === "Failure") return yield* Effect.failCause(stream.cause)
           if (userDeclined) return yield* Effect.interrupt
-          if ((toolsInterrupted || infraError !== undefined) && settledFailure)
-            return yield* Effect.failCause(settledFailure)
+          if (infraError !== undefined && infrastructureFailure) return yield* Effect.failCause(infrastructureFailure)
+          if (toolsInterrupted && settledFailure) return yield* Effect.failCause(settledFailure)
           if (toolsInterrupted && settled._tag === "Failure") return yield* Effect.failCause(settled.cause)
           if (stepFailure) return yield* new StepFailedError({ error: stepFailure })
           return {

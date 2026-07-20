@@ -224,8 +224,8 @@ describe("PatchTool", () => {
       (tmp) => {
         reset()
         const target = path.join(tmp.path, "large.txt")
-        const before = "x".repeat(9_000)
-        const after = "y".repeat(9_000)
+        const before = "x".repeat(20_000)
+        const after = "y".repeat(20_000)
         return Effect.promise(() => fs.writeFile(target, `${before}\n`)).pipe(
           Effect.andThen(
             withTool(tmp.path, (registry) =>
@@ -238,7 +238,10 @@ describe("PatchTool", () => {
                 expect(Buffer.byteLength(JSON.stringify(structured))).toBeLessThanOrEqual(
                   ToolOutputStore.MAX_STRUCTURED_BYTES,
                 )
-                expect(() => parsePatch(structured.files[0]?.patch ?? "")).not.toThrow()
+                const hunk = parsePatch(structured.files[0]?.patch ?? "")[0]?.hunks[0]
+                expect(hunk?.lines.some((line) => line.startsWith("-"))).toBe(true)
+                expect(hunk?.lines.some((line) => line.startsWith("+"))).toBe(true)
+                expect(hunk).toMatchObject({ oldLines: 2, newLines: 2 })
                 expect(structured).toMatchObject({
                   applied: [{ type: "update", resource: "large.txt" }],
                   files: [{ file: "large.txt", patch: expect.stringContaining("... truncated ...") }],

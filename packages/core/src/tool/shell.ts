@@ -149,6 +149,7 @@ export const Plugin = {
             output: Output,
             structured: StructuredOutput,
             codeModeOutput: "output",
+            contentTruncation: true,
             toStructuredOutput: ({ output }) => ({
               truncated: output.truncated,
               ...(output.exit === undefined ? {} : { exit: output.exit }),

@@ -168,6 +168,53 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("normalizes structured values to their durable JSON record", () =>
+    withStore(({ store }) =>
+      Effect.gen(function* () {
+        const primitive = yield* store.bound({
+          sessionID,
+          callID: "call-primitive",
+          output: { structured: "value", content: [] },
+        })
+        const nonFinite = yield* store.bound({
+          sessionID,
+          callID: "call-non-finite",
+          output: { structured: { value: Number.NaN }, content: [] },
+        })
+        const omitted = yield* store.bound({
+          sessionID,
+          callID: "call-omitted",
+          output: { structured: undefined, content: [] },
+        })
+
+        expect(primitive.output.structured).toEqual({ value: "value" })
+        expect(nonFinite.output.structured).toEqual({ value: null })
+        expect(omitted.output.structured).toEqual({})
+      }),
+    ),
+  )
+
+  it.live("measures primitive overflow after durable record normalization", () =>
+    withStore(({ store, fs }) =>
+      Effect.gen(function* () {
+        const value = "x".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES)
+        const encoded = JSON.stringify({ value })
+        const result = yield* store.bound({
+          sessionID,
+          callID: "call-primitive-overflow",
+          output: { structured: value, content: [] },
+        })
+
+        expect(result.output.structured).toEqual({
+          _truncated: true,
+          _bytes: Buffer.byteLength(encoded),
+          _outputPath: result.outputPaths[0],
+        })
+        expect(yield* fs.readFileString(result.outputPaths[0])).toBe(encoded)
+      }),
+    ),
+  )
+
   it.live("preserves native media and structured metadata without applying a settlement media limit", () =>
     withStore(({ store }) =>
       Effect.gen(function* () {

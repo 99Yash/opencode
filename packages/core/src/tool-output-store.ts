@@ -17,6 +17,11 @@ export const RETENTION = Duration.days(7)
 
 export const MANAGED_DIRECTORY = "tool-output"
 
+export interface Limits {
+  readonly maxLines: number
+  readonly maxBytes: number
+}
+
 export interface BoundInput {
   readonly sessionID: SessionSchema.ID
   readonly callID: string
@@ -42,7 +47,7 @@ export class StorageError extends Schema.TaggedErrorClass<StorageError>()("ToolO
 export type Error = StorageError
 
 export interface Interface {
-  readonly limits: () => Effect.Effect<{ readonly maxLines: number; readonly maxBytes: number }>
+  readonly limits: () => Effect.Effect<Limits>
   readonly bound: (input: BoundInput) => Effect.Effect<BoundResult, Error>
   readonly cleanup: () => Effect.Effect<void>
 }
@@ -116,6 +121,27 @@ const lineCount = (text: string) => {
   return count
 }
 
+export const contextualOverflow = (output: ToolOutput, limits: Limits) => {
+  const contextual = output.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text)
+    .join("")
+  return Buffer.byteLength(contextual, "utf-8") > limits.maxBytes || lineCount(contextual) > limits.maxLines
+}
+
+export const propagateTruncation = (output: ToolOutput, limits: Limits): ToolOutput =>
+  contextualOverflow(output, limits) &&
+  Predicate.isObject(output.structured) &&
+  "truncated" in output.structured &&
+  typeof output.structured.truncated === "boolean"
+    ? { ...output, structured: { ...output.structured, truncated: true } }
+    : output
+
+const record = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : { value }
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -146,41 +172,49 @@ const layer = Layer.effect(
       const media = input.output.content.filter((item) => item.type === "file")
       const text = input.output.content.filter((item) => item.type === "text")
       const encoded = yield* Effect.try({
-        try: () => JSON.stringify(input.output.structured) ?? String(input.output.structured),
+        try: () => JSON.stringify(record(input.output.structured)),
         catch: (cause) => new StorageError({ operation: "encode", cause }),
       })
+      const decoded: unknown = JSON.parse(encoded)
+      const structured =
+        typeof decoded === "object" && decoded !== null && !Array.isArray(decoded)
+          ? Object.fromEntries(Object.entries(decoded))
+          : yield* Effect.die(new Error("Durable tool structured output must be an object"))
       const encodedBytes = Buffer.byteLength(encoded, "utf-8")
       const contextual = input.output.content.length === 0 ? encoded : text.map((item) => item.text).join("")
       const contextualBytes = input.output.content.length === 0 ? encodedBytes : Buffer.byteLength(contextual, "utf-8")
       const structuredOverflow = encodedBytes > MAX_STRUCTURED_BYTES
-      const contextualOverflow =
-        contextualBytes > outputLimits.maxBytes || lineCount(contextual) > outputLimits.maxLines
-      if (!structuredOverflow && !contextualOverflow)
+      const contentOverflow = contextualBytes > outputLimits.maxBytes || lineCount(contextual) > outputLimits.maxLines
+      if (!structuredOverflow && !contentOverflow)
         return {
-          output: input.output,
+          output: { ...input.output, structured },
           outputPaths: [],
         }
 
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       const structuredPath = structuredOverflow ? yield* write(encoded) : undefined
-      const contextualPath = contextualOverflow
+      const contextualPath = contentOverflow
         ? input.output.content.length === 0 && structuredPath
           ? structuredPath
-          : yield* write(contextual)
+          : yield* write(contextual).pipe(
+              Effect.onError(() =>
+                structuredPath ? fs.remove(structuredPath).pipe(Effect.catch(() => Effect.void)) : Effect.void,
+              ),
+            )
         : undefined
 
       return {
         output: {
           structured: structuredPath
             ? { _truncated: true, _bytes: encodedBytes, _outputPath: structuredPath }
-            : contextualOverflow &&
+            : contentOverflow &&
                 input.propagateTruncation === true &&
-                Predicate.isObject(input.output.structured) &&
-                "truncated" in input.output.structured &&
-                typeof input.output.structured.truncated === "boolean"
-              ? { ...input.output.structured, truncated: true }
-              : input.output.structured,
-          content: contextualOverflow
+                Predicate.isObject(structured) &&
+                "truncated" in structured &&
+                typeof structured.truncated === "boolean"
+              ? { ...structured, truncated: true }
+              : structured,
+          content: contentOverflow
             ? [
                 {
                   type: "text" as const,
