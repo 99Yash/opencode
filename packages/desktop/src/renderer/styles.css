@@ -1,0 +1,18 @@
+html[data-background-image] body {
+  background-image: linear-gradient(rgb(0 0 0 / 18%), rgb(0 0 0 / 18%)), var(--desktop-background-image);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+html[data-background-image] [data-background-surface="shell"] {
+  background-color: transparent !important;
+}
+
+html[data-background-image] [data-background-surface="content"] {
+  background-color: color-mix(in srgb, var(--background-base) 76%, transparent) !important;
+}
+
+html[data-background-image] [data-background-surface="panel"] {
+  background-color: color-mix(in srgb, var(--v2-background-bg-base) 70%, transparent) !important;
+}
