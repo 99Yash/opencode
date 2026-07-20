@@ -4,7 +4,7 @@
 @import "tw-animate-css";
 
 html[data-background-image] body {
-  background-image: linear-gradient(rgb(0 0 0 / 12%), rgb(0 0 0 / 12%)), var(--app-background-image);
+  background-image: linear-gradient(rgb(0 0 0 / 20%), rgb(0 0 0 / 20%)), var(--app-background-image);
   background-color: transparent !important;
   background-position: center;
   background-repeat: no-repeat;
@@ -29,6 +29,12 @@ html[data-background-image] [data-background-surface="panel"] {
 
 html[data-background-image] [data-background-surface="prompt"] {
   background-color: color-mix(in srgb, var(--v2-background-bg-base) 68%, transparent) !important;
+  backdrop-filter: blur(16px);
+}
+
+html[data-background-image] [data-background-surface="project-selector"] {
+  background-color: color-mix(in srgb, var(--v2-background-bg-base) 68%, transparent) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v2-border-border-base) 70%, transparent);
   backdrop-filter: blur(16px);
 }
 

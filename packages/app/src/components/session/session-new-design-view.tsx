@@ -11,7 +11,7 @@ export function NewSessionDesignView(props: { children: JSX.Element }) {
     >
       <div class="absolute inset-x-0 top-[25.375%] flex justify-center px-6">
         <div class={NEW_SESSION_CONTENT_WIDTH}>
-          <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse" />
+          <WordmarkV2 class="h-auto w-full text-v2-background-bg-inverse [&>g>g>g]:!opacity-30" />
           <div class="mt-8">{props.children}</div>
         </div>
       </div>
