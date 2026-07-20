@@ -180,6 +180,7 @@ export default function NewSessionPage() {
                     />
                     <Show when={projectController.selected()}>
                       <div
+                        data-background-surface={showWorkspaceBar() ? "workspace-bar" : undefined}
                         class="flex min-h-7 min-w-0 items-center gap-0 text-v2-text-text-faint"
                         classList={{
                           "flex-col justify-center sm:flex-row": showWorkspaceBar(),
