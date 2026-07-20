@@ -44,10 +44,17 @@ export function patch(input: string, maximumBytes: number) {
   const parsed = parsePatch(input)[0]
   const hunk = parsed?.hunks[0]
   if (!parsed || !hunk) return truncate(input, maximumBytes)
-  const changed = [hunk.lines.find((line) => line.startsWith("-")), hunk.lines.find((line) => line.startsWith("+"))]
+  const changedLines = parsed.hunks.flatMap((item) => item.lines).filter((line) => /^[+-]/.test(line))
+  const removed = changedLines.filter((line) => line.startsWith("-"))
+  const added = changedLines.filter((line) => line.startsWith("+"))
+  const changed = [removed[0], added[0]]
     .filter((line) => line !== undefined)
     .map((line) => line[0] + truncate(line.slice(1), Math.max(0, Math.floor(maximumBytes / 2) - 1)))
-  const lines = [...changed, " ... diff truncated ..."]
+  const lines = [
+    ...changed,
+    ...(removed.length > 1 ? [`-... ${removed.length - 1} removed lines omitted ...`] : []),
+    ...(added.length > 1 ? [`+... ${added.length - 1} added lines omitted ...`] : []),
+  ]
   return formatPatch({
     ...parsed,
     hunks: [

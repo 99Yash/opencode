@@ -198,7 +198,7 @@ describe("EditTool", () => {
                 const hunk = parsePatch(structured.files[0]?.patch ?? "")[0]?.hunks[0]
                 expect(hunk?.lines.some((line) => line.startsWith("-"))).toBe(true)
                 expect(hunk?.lines.some((line) => line.startsWith("+"))).toBe(true)
-                expect(hunk).toMatchObject({ oldLines: 2, newLines: 2 })
+                expect(hunk).toMatchObject({ oldLines: 1, newLines: 1 })
                 expect(structured).toMatchObject({
                   replacements: 1,
                   files: [
