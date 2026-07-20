@@ -118,6 +118,8 @@ const registryLayer = Layer.effect(
 
     const settleTool = Effect.fn("ToolRegistry.settleTool")(function* (input: ExecuteInput, tool: AnyTool) {
       // Hooks fire only for hosted/local tools; provider-executed calls never reach settleTool.
+      const propagateTruncation =
+        !("jsonSchema" in tool) && tool.structured !== undefined && tool.toStructuredOutput !== undefined
       const beforeEvent: ToolHooks.BeforeEvent = {
         tool: input.call.name,
         sessionID: input.sessionID,
@@ -169,6 +171,7 @@ const registryLayer = Layer.effect(
           sessionID: input.sessionID,
           callID: input.call.id,
           output: { structured: pending.output.structured, content: yield* normalizeImages(pending.output.content) },
+          propagateTruncation,
         })
         const result = ToolOutput.toResultValue(bounded.output)
         settlement =
@@ -192,10 +195,21 @@ const registryLayer = Layer.effect(
         outputPaths: settlement.outputPaths,
       }
       yield* toolHooks.runAfter(afterEvent)
+      const finalOutput = afterEvent.output
+        ? yield* resources.bound({
+            sessionID: input.sessionID,
+            callID: input.call.id,
+            output: afterEvent.output,
+            propagateTruncation,
+          })
+        : undefined
+      const outputPaths = [
+        ...new Set([...(afterEvent.outputPaths ?? []), ...(finalOutput?.outputPaths ?? [])]),
+      ]
       return {
         result: afterEvent.result,
-        ...(afterEvent.output !== undefined ? { output: afterEvent.output } : {}),
-        ...(afterEvent.outputPaths !== undefined ? { outputPaths: afterEvent.outputPaths } : {}),
+        ...(finalOutput !== undefined ? { output: finalOutput.output } : {}),
+        ...(outputPaths.length > 0 ? { outputPaths } : {}),
         ...(settlement.error !== undefined ? { error: settlement.error } : {}),
       }
     })

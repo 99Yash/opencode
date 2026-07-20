@@ -21,6 +21,7 @@ export interface BoundInput {
   readonly sessionID: SessionSchema.ID
   readonly callID: string
   readonly output: ToolOutput
+  readonly propagateTruncation?: boolean
 }
 
 export interface BoundResult {
@@ -173,6 +174,7 @@ const layer = Layer.effect(
           structured: structuredPath
             ? { _truncated: true, _bytes: encodedBytes, _outputPath: structuredPath }
             : contextualOverflow &&
+                input.propagateTruncation === true &&
                 Predicate.isObject(input.output.structured) &&
                 "truncated" in input.output.structured &&
                 typeof input.output.structured.truncated === "boolean"

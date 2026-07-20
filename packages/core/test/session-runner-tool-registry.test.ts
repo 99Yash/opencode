@@ -3,11 +3,13 @@ import { Tool } from "@opencode-ai/core/tool/tool"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import type { PermissionV2 } from "@opencode-ai/core/permission"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Global } from "@opencode-ai/core/global"
 import { Image } from "@opencode-ai/core/image"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
+import { ToolHooks } from "@opencode-ai/core/tool/hooks"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { executeTool, settleTool, toolDefinitions } from "./lib/tool"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer, Option, Schema, SchemaGetter, SchemaIssue, Scope } from "effect"
@@ -115,6 +117,47 @@ describe("ToolRegistry", () => {
           const encoded = JSON.stringify({ text })
 
           expect(settled.result).toEqual({ type: "text", value: encoded })
+          expect(settled.outputPaths).toHaveLength(1)
+          expect(settled.output).toEqual({
+            structured: {
+              _truncated: true,
+              _bytes: Buffer.byteLength(encoded),
+              _outputPath: settled.outputPaths?.[0],
+            },
+            content: [{ type: "text", text: encoded }],
+          })
+        }).pipe(Effect.provide(layer))
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  live.live("bounds output replaced by an execute-after hook", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        const layer = AppNodeBuilder.build(LayerNode.group([ToolRegistry.node, ToolHooks.node]), [
+          [Global.node, Global.layerWith({ data: tmp.path })],
+          [Image.node, imageStore],
+          [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
+        ])
+        return Effect.gen(function* () {
+          const service = yield* ToolRegistry.Service
+          const hooks = yield* ToolHooks.Service
+          const text = "y".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES)
+          yield* hooks.hook.after((event) => {
+            event.result = { type: "text", value: "hook result" }
+            event.output = { structured: { text }, content: [] }
+          })
+          yield* service.register({ hooked: make() }, { codemode: false })
+          const settled = yield* settleTool(service, {
+            sessionID,
+            ...identity,
+            call: { type: "tool-call", id: "call-hooked", name: "hooked", input: { text: "original" } },
+          })
+          const encoded = JSON.stringify({ text })
+
+          expect(settled.result).toEqual({ type: "text", value: "hook result" })
           expect(settled.outputPaths).toHaveLength(1)
           expect(settled.output).toEqual({
             structured: {
@@ -345,7 +388,7 @@ describe("ToolRegistry", () => {
         output: { structured: {}, content: [{ type: "text", text: "bounded reference" }] },
         outputPaths: ["/managed/generic"],
       })
-      expect(bounds).toHaveLength(1)
+      expect(bounds).toHaveLength(2)
     }),
   )
 

@@ -80,6 +80,9 @@ describe("ToolOutputStore", () => {
           _bytes: Buffer.byteLength(JSON.stringify(structured)),
           _outputPath: result.outputPaths[0],
         })
+        expect(Buffer.byteLength(JSON.stringify(result.output.structured))).toBeLessThanOrEqual(
+          ToolOutputStore.MAX_STRUCTURED_BYTES,
+        )
         expect(result.outputPaths).toHaveLength(1)
         expect(JSON.parse(yield* fs.readFileString(result.outputPaths[0]))).toEqual(structured)
         expect(result.output.content).toHaveLength(1)
@@ -103,6 +106,46 @@ describe("ToolOutputStore", () => {
         })
         expect(result.output.content).toEqual([{ type: "text", text: JSON.stringify(structured) }])
         expect(JSON.parse(yield* fs.readFileString(result.outputPaths[0]))).toEqual(structured)
+      }),
+    ),
+  )
+
+  it.live("measures the structured boundary in UTF-8 bytes", () =>
+    withStore(({ store }) =>
+      Effect.gen(function* () {
+        const structured = { text: "é".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES / 2) }
+        const encoded = JSON.stringify(structured)
+        expect(structured.text.length).toBeLessThan(ToolOutputStore.MAX_STRUCTURED_BYTES)
+        expect(Buffer.byteLength(encoded)).toBeGreaterThan(ToolOutputStore.MAX_STRUCTURED_BYTES)
+
+        const result = yield* store.bound({
+          sessionID,
+          callID: "call-structured-utf8",
+          output: { structured, content: [] },
+        })
+
+        expect(result.output.structured).toMatchObject({
+          _truncated: true,
+          _bytes: Buffer.byteLength(encoded),
+        })
+      }),
+    ),
+  )
+
+  it.live("retains independent structured and contextual overflow", () =>
+    withStore(({ store, fs }) =>
+      Effect.gen(function* () {
+        const structured = { detail: "s".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES) }
+        const content = "c".repeat(ToolOutputStore.MAX_BYTES + 1)
+        const result = yield* store.bound({
+          sessionID,
+          callID: "call-two-channel-overflow",
+          output: { structured, content: [{ type: "text", text: content }] },
+        })
+
+        expect(result.outputPaths).toHaveLength(2)
+        expect(JSON.parse(yield* fs.readFileString(result.outputPaths[0]))).toEqual(structured)
+        expect(yield* fs.readFileString(result.outputPaths[1])).toBe(content)
       }),
     ),
   )
@@ -173,18 +216,35 @@ describe("ToolOutputStore", () => {
     ),
   )
 
-  it.live("marks receipt metadata truncated when bounding its contextual output", () =>
+  it.live("marks projected receipt metadata truncated when bounding its contextual output", () =>
     withStore(({ store }) =>
       Effect.gen(function* () {
         const result = yield* store.bound({
           sessionID,
           callID: "call-receipt",
+          propagateTruncation: true,
           output: {
             structured: { bytes: ToolOutputStore.MAX_BYTES + 1, truncated: false },
             content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }],
           },
         })
         expect(result.output.structured).toEqual({ bytes: ToolOutputStore.MAX_BYTES + 1, truncated: true })
+      }),
+    ),
+  )
+
+  it.live("preserves ordinary truncated metadata when bounding contextual output", () =>
+    withStore(({ store }) =>
+      Effect.gen(function* () {
+        const result = yield* store.bound({
+          sessionID,
+          callID: "call-ordinary-truncated",
+          output: {
+            structured: { truncated: false },
+            content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }],
+          },
+        })
+        expect(result.output.structured).toEqual({ truncated: false })
       }),
     ),
   )

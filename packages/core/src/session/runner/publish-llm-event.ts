@@ -11,6 +11,7 @@ import { AgentV2 } from "../../agent"
 import { Snapshot } from "../../snapshot"
 import { RelativePath } from "../../schema"
 import { SessionUsage } from "../usage"
+import { ToolOutputStore } from "../../tool-output-store"
 
 type Input = {
   readonly sessionID: SessionSchema.ID
@@ -34,18 +35,22 @@ const message = (value: unknown) => {
 }
 
 type SettledOutput =
-  | { readonly structured: Record<string, unknown>; readonly content: ToolOutput["content"] }
+  | ToolOutput
   | { readonly error: SessionError.Error }
 
 const settledOutput = (value: ToolOutput | undefined, result: ToolResultValue): SettledOutput => {
   if (result.type === "error") return { error: { type: "tool.execution", message: message(result.value) } }
   const settled = value ?? ToolOutput.fromResultValue(result)
   if (!settled) throw new Error(`Unsupported tool result: ${message(result)}`)
-  return { structured: record(settled.structured), content: settled.content }
+  return settled
 }
 
 /** Persist one step without executing tools or starting a continuation step. */
-export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish">, input: Input) => {
+export const createLLMEventPublisher = (
+  events: Pick<EventV2.Interface, "publish">,
+  outputs: Pick<ToolOutputStore.Interface, "bound">,
+  input: Input,
+) => {
   const tools = new Map<
     string,
     {
@@ -421,11 +426,17 @@ export const createLLMEventPublisher = (events: Pick<EventV2.Interface, "publish
           })
           return
         }
+        const bounded = yield* outputs.bound({
+          sessionID: input.sessionID,
+          callID: event.id,
+          output: result,
+        })
         yield* events.publish(SessionEvent.Tool.Success, {
           sessionID: input.sessionID,
           assistantMessageID: tool.assistantMessageID,
           callID: event.id,
-          ...result,
+          structured: record(bounded.output.structured),
+          content: bounded.output.content,
           ...(executed ? { result: event.result } : {}),
           executed,
           resultState,

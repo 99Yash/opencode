@@ -840,6 +840,7 @@ describe("SessionRunnerLLM", () => {
       const session = yield* setup
       const registry = yield* ToolRegistry.Service
       const contexts: Tool.Context[] = []
+      const progress = "x".repeat(ToolOutputStore.MAX_STRUCTURED_BYTES)
       yield* registry.register({
         location_context: Tool.make({
           description: "Read application context",
@@ -848,7 +849,7 @@ describe("SessionRunnerLLM", () => {
           execute: ({ query }, context) =>
             Effect.gen(function* () {
               contexts.push(context)
-              yield* context.progress({ structured: { phase: "reading" } })
+              yield* context.progress({ structured: { phase: progress } })
               return { answer: query.toUpperCase() }
             }),
         }),
@@ -875,7 +876,13 @@ describe("SessionRunnerLLM", () => {
           progress: expect.any(Function),
         },
       ])
-      expect(Array.from(yield* Fiber.join(progressFiber))[0]?.data.structured).toEqual({ phase: "reading" })
+      const update = Array.from(yield* Fiber.join(progressFiber))[0]?.data
+      expect(update?.structured).toMatchObject({
+        _truncated: true,
+        _bytes: Buffer.byteLength(JSON.stringify({ phase: progress })),
+        _outputPath: expect.any(String),
+      })
+      expect(update?.content).toEqual([{ type: "text", text: JSON.stringify({ phase: progress }) }])
       expect(yield* session.context(sessionID)).toMatchObject([
         { type: "user", text: "Use application context" },
         {

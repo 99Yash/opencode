@@ -12,11 +12,15 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { RelativePath } from "@opencode-ai/core/schema"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { createLLMEventPublisher } from "@opencode-ai/core/session/runner/publish-llm-event"
+import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 
 const sessionID = SessionV2.ID.make("ses_tool_event_test")
 const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
+const outputs: Pick<ToolOutputStore.Interface, "bound"> = {
+  bound: (input) => Effect.succeed({ output: input.output, outputPaths: [] }),
+}
 
-const capture = (providerMetadataKey = "anthropic") => {
+const capture = (providerMetadataKey = "anthropic", outputStore = outputs) => {
   const published: Array<{ readonly type: string; readonly data: unknown }> = []
   const events: Pick<EventV2.Interface, "publish"> = {
     publish: (definition, data) =>
@@ -33,7 +37,7 @@ const capture = (providerMetadataKey = "anthropic") => {
   }
   return {
     published,
-    publisher: createLLMEventPublisher(events, {
+    publisher: createLLMEventPublisher(events, outputStore, {
       sessionID,
       agent: AgentV2.ID.make("build"),
       model: {
@@ -90,6 +94,32 @@ test("provider-executed success retains its raw provider result", async () => {
   await Effect.runPromise(publisher.publish(LLMEvent.toolResult({ ...result, providerExecuted: true })))
   const success = published.find((event) => event.type === "session.tool.success.1")
   expect(success?.data).toHaveProperty("result")
+})
+
+test("provider-executed success bounds output before durable publication", async () => {
+  const guarded: ToolOutputStore.BoundInput[] = []
+  const outputStore: Pick<ToolOutputStore.Interface, "bound"> = {
+    bound: (input) =>
+      Effect.sync(() => guarded.push(input)).pipe(
+        Effect.as({
+          output: {
+            structured: { _truncated: true, _bytes: 20_000, _outputPath: "/managed/provider" },
+            content: [{ type: "text" as const, text: "bounded provider output" }],
+          },
+          outputPaths: ["/managed/provider"],
+        }),
+      ),
+  }
+  const { published, publisher } = capture("anthropic", outputStore)
+  await Effect.runPromise(publisher.publish(LLMEvent.toolCall({ ...call, providerExecuted: true })))
+  await Effect.runPromise(publisher.publish(LLMEvent.toolResult({ ...result, providerExecuted: true })))
+
+  expect(guarded).toHaveLength(1)
+  expect(published.find((event) => event.type === "session.tool.success.1")?.data).toMatchObject({
+    structured: { _truncated: true, _bytes: 20_000, _outputPath: "/managed/provider" },
+    content: [{ type: "text", text: "bounded provider output" }],
+    result: result.result,
+  })
 })
 
 test("provider metadata is flattened using the route key", async () => {

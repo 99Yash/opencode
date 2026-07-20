@@ -40,6 +40,7 @@ const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const compaction = yield* SessionCompaction.Service
     const title = yield* SessionTitle.Service
+    const outputs = yield* ToolOutputStore.Service
     // Title generation is a side effect of the first step; it must not delay step continuation.
     // Tracked per process so repeated wakes before the second user message arrives don't
     // re-fire a redundant LLM call; `SessionTitle` itself is idempotent based on durable history.
@@ -116,7 +117,7 @@ const layer = Layer.effect(
       const ownedToolFibers: Array<Fiber.Fiber<void, ToolOutputStore.Error>> = []
       let needsContinuation = false
       const startSnapshot = yield* snapshots.capture()
-      const publisher = createLLMEventPublisher(events, {
+      const publisher = createLLMEventPublisher(events, outputs, {
         sessionID: session.id,
         agent: agent.id,
         // The selected catalog identity, not model.id: route-level ids are provider API
@@ -165,13 +166,26 @@ const layer = Layer.effect(
                     call: event,
                     progress: (update) =>
                       serialized(
-                        events.publish(SessionEvent.Tool.Progress, {
-                          sessionID: session.id,
-                          assistantMessageID,
-                          callID: event.id,
-                          structured: { ...update.structured },
-                          content: [...update.content],
-                        }),
+                        Effect.gen(function* () {
+                          const bounded = yield* outputs.bound({
+                            sessionID: session.id,
+                            callID: event.id,
+                            output: update,
+                          })
+                          if (
+                            typeof bounded.output.structured !== "object" ||
+                            bounded.output.structured === null ||
+                            Array.isArray(bounded.output.structured)
+                          )
+                            yield* Effect.die(new Error("Tool progress structured output must be an object"))
+                          yield* events.publish(SessionEvent.Tool.Progress, {
+                            sessionID: session.id,
+                            assistantMessageID,
+                            callID: event.id,
+                            structured: Object.fromEntries(Object.entries(bounded.output.structured)),
+                            content: [...bounded.output.content],
+                          })
+                        }).pipe(Effect.orDie),
                       ),
                   }),
                 ).pipe(
@@ -500,6 +514,7 @@ export const node = makeLocationNode({
     SessionCompaction.node,
     SessionTitle.node,
     Snapshot.node,
+    ToolOutputStore.node,
     Database.node,
   ],
 })
