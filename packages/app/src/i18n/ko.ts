@@ -581,7 +581,7 @@ export const dict = {
   "settings.general.row.terminalFont.title": "터미널 글꼴",
   "settings.general.row.terminalFont.description": "터미널에서 사용할 글꼴을 설정합니다",
   "settings.general.row.backgroundImage.title": "Background image",
-  "settings.general.row.backgroundImage.description": "Choose an image for the desktop background.",
+  "settings.general.row.backgroundImage.description": "Choose an image for the app background.",
   "settings.general.row.backgroundImage.choose": "Choose image",
   "settings.general.row.backgroundImage.remove": "Remove",
   "settings.general.row.uiFont.title": "UI 글꼴",

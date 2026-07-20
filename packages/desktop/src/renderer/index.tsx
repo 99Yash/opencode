@@ -118,12 +118,12 @@ const createPlatform = (windowState: DesktopWindowState): Platform => {
     document.documentElement.toggleAttribute("data-background-image", !!image)
     if (image) {
       document.documentElement.style.setProperty(
-        "--desktop-background-image",
+        "--app-background-image",
         `url("oc://renderer/background-image?revision=${encodeURIComponent(image.revision)}")`,
       )
       return true
     }
-    document.documentElement.style.removeProperty("--desktop-background-image")
+    document.documentElement.style.removeProperty("--app-background-image")
     return false
   }
   window.api.onBackgroundImageChanged(applyBackgroundImage)

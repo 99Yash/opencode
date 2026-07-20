@@ -710,7 +710,7 @@ export const dict = {
   "settings.general.row.terminalFont.title": "ターミナルのフォント",
   "settings.general.row.terminalFont.description": "ターミナルで使用するフォントをカスタマイズ",
   "settings.general.row.backgroundImage.title": "Background image",
-  "settings.general.row.backgroundImage.description": "Choose an image for the desktop background.",
+  "settings.general.row.backgroundImage.description": "Choose an image for the app background.",
   "settings.general.row.backgroundImage.choose": "Choose image",
   "settings.general.row.backgroundImage.remove": "Remove",
   "settings.general.row.uiFont.title": "UIフォント",

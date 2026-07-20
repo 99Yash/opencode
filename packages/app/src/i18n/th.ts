@@ -772,7 +772,7 @@ export const dict = {
   "settings.general.row.terminalFont.title": "ฟอนต์เทอร์มินัล",
   "settings.general.row.terminalFont.description": "ปรับแต่งฟอนต์ที่ใช้ในเทอร์มินัล",
   "settings.general.row.backgroundImage.title": "Background image",
-  "settings.general.row.backgroundImage.description": "Choose an image for the desktop background.",
+  "settings.general.row.backgroundImage.description": "Choose an image for the app background.",
   "settings.general.row.backgroundImage.choose": "Choose image",
   "settings.general.row.backgroundImage.remove": "Remove",
   "settings.general.row.uiFont.title": "ฟอนต์ UI",

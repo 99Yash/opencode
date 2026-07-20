@@ -863,7 +863,7 @@ export const dict = {
   "settings.general.row.theme.title": "Theme",
   "settings.general.row.theme.description": "Customise how OpenCode is themed.",
   "settings.general.row.backgroundImage.title": "Background image",
-  "settings.general.row.backgroundImage.description": "Choose an image for the desktop background.",
+  "settings.general.row.backgroundImage.description": "Choose an image for the app background.",
   "settings.general.row.backgroundImage.choose": "Choose image",
   "settings.general.row.backgroundImage.remove": "Remove",
   "settings.general.row.font.title": "Code Font",
