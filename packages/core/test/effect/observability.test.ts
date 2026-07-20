@@ -16,6 +16,8 @@ test("measures an immediate event-loop block and stops sampling", async () => {
   const startedAt = performance.now()
   while (performance.now() - startedAt < 60) {}
   const maxMs = monitor.stop()
+  const stoppedAt = performance.now()
+  while (performance.now() - stoppedAt < 60) {}
   await Bun.sleep(40)
 
   expect(maxMs).toBeGreaterThanOrEqual(20)
