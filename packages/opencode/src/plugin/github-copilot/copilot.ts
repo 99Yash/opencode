@@ -205,17 +205,17 @@ export async function CopilotAuthPlugin(input: PluginInput): Promise<Hooks> {
             {
               type: "select",
               key: "deploymentType",
-              message: "Select where your GitHub account is hosted",
+              message: "Select GitHub login domain",
               options: [
                 {
-                  label: "GitHub.com",
+                  label: "github.com",
                   value: "github.com",
-                  hint: "Including Copilot Business or Enterprise",
+                  hint: "Default",
                 },
                 {
-                  label: "GitHub Enterprise host",
+                  label: "Custom domain",
                   value: "enterprise",
-                  hint: "GHE.com or self-hosted",
+                  hint: "GHE.com or GitHub Enterprise Server",
                 },
               ],
             },
