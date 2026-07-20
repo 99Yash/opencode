@@ -9,8 +9,8 @@ export * as EditTool from "./edit"
 import type { Context as PluginContext } from "@opencode-ai/plugin/v2/effect/plugin"
 import { ToolFailure } from "@opencode-ai/ai"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
-import { createTwoFilesPatch, diffLines } from "diff"
-import { Effect, Schema } from "effect"
+import { diffLines } from "diff"
+import { Effect, Schema, Struct } from "effect"
 import { FileMutation } from "../file-mutation"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
@@ -31,8 +31,10 @@ export const Input = Schema.Struct({
   }),
 })
 
+const FileInfo = FileDiff.Info.mapFields(Struct.omit(["patch"]))
+
 export const Output = Schema.Struct({
-  files: Schema.Array(FileDiff.Info),
+  files: Schema.Array(FileInfo),
   replacements: Schema.Number,
 })
 export type Output = typeof Output.Type
@@ -200,7 +202,6 @@ export const Plugin = {
                     files: [
                       {
                         file: result.resource,
-                        patch: createTwoFilesPatch(result.resource, result.resource, source.text, replaced),
                         status: "modified" as const,
                         ...counts,
                       },

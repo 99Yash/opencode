@@ -181,24 +181,24 @@ describe("PatchTool", () => {
                       status: "added",
                       additions: 1,
                       deletions: 0,
-                      patch: expect.stringContaining("+created"),
                     },
                     {
                       file: "update.txt",
                       status: "modified",
                       additions: 1,
                       deletions: 1,
-                      patch: expect.stringContaining("-before\n+after"),
                     },
                     {
                       file: "remove.txt",
                       status: "deleted",
                       additions: 0,
                       deletions: 1,
-                      patch: expect.stringContaining("-remove"),
                     },
                   ],
                 })
+                expect(settled.output?.structured).not.toHaveProperty("files.0.patch")
+                expect(settled.output?.structured).not.toHaveProperty("files.1.patch")
+                expect(settled.output?.structured).not.toHaveProperty("files.2.patch")
                 expect(assertions).toMatchObject([
                   { sessionID, action: "edit", resources: ["nested/new.txt", "update.txt", "remove.txt"], save: ["*"] },
                 ])

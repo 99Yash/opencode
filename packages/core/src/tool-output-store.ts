@@ -1,7 +1,7 @@
 export * as ToolOutputStore from "./tool-output-store"
 
 import path from "path"
-import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effect"
+import { Context, Duration, Effect, Layer, Option, Predicate, Schedule, Schema } from "effect"
 import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
@@ -12,6 +12,7 @@ import type { ToolOutput } from "@opencode-ai/ai"
 
 export const MAX_LINES = 2_000
 export const MAX_BYTES = 50 * 1024
+export const MAX_STRUCTURED_BYTES = 16 * 1024
 export const RETENTION = Duration.days(7)
 
 export const MANAGED_DIRECTORY = "tool-output"
@@ -49,26 +50,31 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 
 const takePrefix = (input: string, maximumBytes: number) => {
   let bytes = 0
-  let content = ""
+  let end = 0
   for (const char of input) {
     const size = Buffer.byteLength(char, "utf-8")
     if (bytes + size > maximumBytes) break
-    content += char
+    end += char.length
     bytes += size
   }
-  return content
+  return input.slice(0, end)
 }
 
 const takeSuffix = (input: string, maximumBytes: number) => {
   let bytes = 0
-  const content: string[] = []
-  for (const char of Array.from(input).toReversed()) {
+  let start = input.length
+  while (start > 0) {
+    const codeUnit = input.charCodeAt(start - 1)
+    const previous = start > 1 ? input.charCodeAt(start - 2) : 0
+    const next =
+      codeUnit >= 0xdc00 && codeUnit <= 0xdfff && previous >= 0xd800 && previous <= 0xdbff ? start - 2 : start - 1
+    const char = input.slice(next, start)
     const size = Buffer.byteLength(char, "utf-8")
     if (bytes + size > maximumBytes) break
-    content.unshift(char)
+    start = next
     bytes += size
   }
-  return content.join("")
+  return input.slice(start)
 }
 
 const preview = (text: string, maxLines: number, maxBytes: number) => {
@@ -128,7 +134,6 @@ const layer = Layer.effect(
 
     const write = Effect.fn("ToolOutputStore.write")(function* (content: string) {
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
-      yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
         .writeFileString(file, content, { flag: "wx" })
         .pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
@@ -139,37 +144,58 @@ const layer = Layer.effect(
       const outputLimits = yield* limits()
       const media = input.output.content.filter((item) => item.type === "file")
       const text = input.output.content.filter((item) => item.type === "text")
-      const contextual =
-        input.output.content.length === 0
-          ? yield* Effect.try({
-              try: () => JSON.stringify(input.output.structured, null, 2) ?? String(input.output.structured),
-              catch: (cause) => new StorageError({ operation: "encode", cause }),
-            })
-          : text.map((item) => item.text).join("")
-      if (
-        lineCount(contextual) <= outputLimits.maxLines &&
-        Buffer.byteLength(contextual, "utf-8") <= outputLimits.maxBytes
-      )
+      const encoded = yield* Effect.try({
+        try: () => JSON.stringify(input.output.structured) ?? String(input.output.structured),
+        catch: (cause) => new StorageError({ operation: "encode", cause }),
+      })
+      const encodedBytes = Buffer.byteLength(encoded, "utf-8")
+      const contextual = input.output.content.length === 0 ? encoded : text.map((item) => item.text).join("")
+      const contextualBytes = input.output.content.length === 0 ? encodedBytes : Buffer.byteLength(contextual, "utf-8")
+      const structuredOverflow = encodedBytes > MAX_STRUCTURED_BYTES
+      const contextualOverflow =
+        contextualBytes > outputLimits.maxBytes || lineCount(contextual) > outputLimits.maxLines
+      if (!structuredOverflow && !contextualOverflow)
         return {
           output: input.output,
           outputPaths: [],
         }
 
-      const outputPath = yield* write(contextual)
-      const marker = `... output truncated; full content saved to ${outputPath} ...`
+      yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
+      const structuredPath = structuredOverflow ? yield* write(encoded) : undefined
+      const contextualPath = contextualOverflow
+        ? input.output.content.length === 0 && structuredPath
+          ? structuredPath
+          : yield* write(contextual)
+        : undefined
 
       return {
         output: {
-          structured: input.output.structured,
-          content: [
-            {
-              type: "text" as const,
-              text: boundedPreview(contextual, marker, outputLimits.maxLines, outputLimits.maxBytes),
-            },
-            ...media,
-          ],
+          structured: structuredPath
+            ? { _truncated: true, _bytes: encodedBytes, _outputPath: structuredPath }
+            : contextualOverflow &&
+                Predicate.isObject(input.output.structured) &&
+                "truncated" in input.output.structured &&
+                typeof input.output.structured.truncated === "boolean"
+              ? { ...input.output.structured, truncated: true }
+              : input.output.structured,
+          content: contextualOverflow
+            ? [
+                {
+                  type: "text" as const,
+                  text: boundedPreview(
+                    contextual,
+                    `... output truncated; full content saved to ${contextualPath} ...`,
+                    outputLimits.maxLines,
+                    outputLimits.maxBytes,
+                  ),
+                },
+                ...media,
+              ]
+            : input.output.content.length === 0 && structuredPath
+              ? [{ type: "text" as const, text: contextual }]
+              : input.output.content,
         },
-        outputPaths: [outputPath],
+        outputPaths: [...new Set([structuredPath, contextualPath].filter((value) => value !== undefined))],
       }
     })
 
