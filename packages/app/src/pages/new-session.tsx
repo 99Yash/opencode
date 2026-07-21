@@ -184,6 +184,7 @@ export default function NewSessionPage() {
                         class="flex min-h-7 min-w-0 items-center gap-0 text-v2-text-text-faint"
                         classList={{
                           "flex-col justify-center sm:flex-row": showWorkspaceBar(),
+                          "w-fit max-w-full self-center": showWorkspaceBar(),
                           "justify-start": !showWorkspaceBar(),
                         }}
                       >
