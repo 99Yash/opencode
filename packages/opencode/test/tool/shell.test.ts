@@ -1117,7 +1117,7 @@ describe("tool.shell abort", () => {
         expect(Date.now() - started).toBeLessThan(3_000)
         expect(result.output).toContain("parent done")
         expect(result.output).toContain(
-          "shell tool exited without reaching EOF within 500 ms; a background descendant may be holding the output pipe open",
+          "shell process exited, but stdout/stderr did not reach EOF within 500 ms; a descendant process may still hold inherited pipe handles open",
         )
         expect(result.metadata.outputIncomplete).toBe(true)
       }),

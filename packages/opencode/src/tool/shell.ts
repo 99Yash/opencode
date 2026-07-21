@@ -578,7 +578,7 @@ export const ShellTool = Tool.define(
       if (aborted) meta.push("User aborted the command")
       if (incomplete)
         meta.push(
-          `shell tool exited without reaching EOF within ${POST_EXIT_OUTPUT_GRACE_MS} ms; a background descendant may be holding the output pipe open`,
+          `shell process exited, but stdout/stderr did not reach EOF within ${POST_EXIT_OUTPUT_GRACE_MS} ms; a descendant process may still hold inherited pipe handles open`,
         )
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
