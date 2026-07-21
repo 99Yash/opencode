@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "version": "1.18.3",
+  "version": "1.18.4",
   "name": "@opencode-ai/core",
   "type": "module",
   "license": "MIT",
@@ -16,7 +16,6 @@
     "opencode": "./bin/opencode"
   },
   "exports": {
-    "./effect/app-node": "./src/effect/app-node.ts",
     "./session/runner": "./src/session/runner/index.ts",
     "./instructions": "./src/instructions/index.ts",
     "./*": "./src/*.ts"
