@@ -1,17 +1,15 @@
 import { createConnection } from "node:net"
 
-const socketFromEnvironment = () => process.env.TERMCTRL_QUERY_SOCKET
+const socketFromEnvironment = () => process.env.TERMCTRL_SEMANTIC_SOCKET
 
-export function provideTerminalControlQueries({
+export function provideTerminalControlSemanticSnapshot({
   application,
-  queries,
+  snapshot,
   socketPath = socketFromEnvironment(),
   onError = () => {},
 }) {
   if (!application?.name) throw new TypeError("application.name is required")
-  if (!queries || Object.values(queries).some((handler) => typeof handler !== "function")) {
-    throw new TypeError("queries must be an object of query handlers")
-  }
+  if (typeof snapshot !== "function") throw new TypeError("snapshot must be a function")
   if (!socketPath) {
     return { enabled: false, ready: Promise.resolve(false), close() {} }
   }
@@ -32,7 +30,7 @@ export function provideTerminalControlQueries({
   socket.setEncoding("utf8")
 
   const handshakeTimer = setTimeout(() => {
-    fail(new Error("Terminal Control query handshake timed out"))
+    fail(new Error("Terminal Control semantic handshake timed out"))
   }, 5_000)
   handshakeTimer.unref?.()
 
@@ -41,7 +39,7 @@ export function provideTerminalControlQueries({
       type: "hello",
       protocolVersion: 1,
       application,
-      queries: Object.keys(queries),
+      capabilities: ["semantic.snapshot"],
     })
   })
 
@@ -73,26 +71,20 @@ export function provideTerminalControlQueries({
       return
     }
     if (
-      message?.type !== "query" ||
+      message?.type !== "semantic.snapshot" ||
       !protocolReady ||
-      !Number.isSafeInteger(message.id) ||
-      typeof message.name !== "string"
+      !Number.isSafeInteger(message.id)
     ) {
-      throw new Error("Terminal Control sent an invalid query message")
+      throw new Error("Terminal Control sent an invalid semantic snapshot request")
     }
 
-    const handler = queries[message.name]
-    if (!handler) {
-      sendError(message.id, "QUERY_NOT_SUPPORTED", `Unsupported query ${message.name}`)
-      return
-    }
     Promise.resolve()
-      .then(() => handler(message.params, { id: message.id, name: message.name }))
+      .then(snapshot)
       .then((value) => send({ type: "result", id: message.id, value }))
       .catch((error) =>
         sendError(
           message.id,
-          typeof error?.code === "string" ? error.code : "QUERY_FAILED",
+          typeof error?.code === "string" ? error.code : "SNAPSHOT_FAILED",
           error instanceof Error ? error.message : String(error),
         ),
       )

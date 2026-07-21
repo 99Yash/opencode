@@ -235,10 +235,10 @@ export const run = Effect.fn("Tui.run")(function* (input: TuiInput) {
           (renderer) => Effect.sync(() => destroyRenderer(renderer)),
         )
       })
-      if (process.env.TERMCTRL_QUERY_SOCKET) {
-        const { startTerminalControlQueries } = yield* Effect.promise(() => import("./terminal-control"))
-        const queries = startTerminalControlQueries(renderer)
-        yield* Effect.addFinalizer(() => Effect.sync(() => queries.close()))
+      if (process.env.TERMCTRL_SEMANTIC_SOCKET) {
+        const { startTerminalControlSemantics } = yield* Effect.promise(() => import("./terminal-control"))
+        const semantics = startTerminalControlSemantics(renderer)
+        yield* Effect.addFinalizer(() => Effect.sync(() => semantics.close()))
       }
       win32DisableProcessedInput()
       const finalizers = new Set<() => Promise<void>>()
