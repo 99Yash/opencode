@@ -51,14 +51,12 @@ function update(version: string): OpenCodeEvent {
   }
 }
 
-async function mount(
-  reconnect?: (signal: AbortSignal) => Promise<{ api: OpenCodeClient }>,
-  log?: LogSink,
-) {
+async function mount(reconnect?: (signal: AbortSignal) => Promise<{ api: OpenCodeClient }>, log?: LogSink) {
   const events = createEventStream()
   const calls = createFetch(undefined, events)
   const seen: OpenCodeEvent[] = []
   const workspaces: Array<string | undefined> = []
+  const handshakes: string[] = []
   let client!: ReturnType<typeof useClient>
   let done!: () => void
   const ready = new Promise<void>((resolve) => {
@@ -76,24 +74,27 @@ async function mount(
           }}
           seen={seen}
           workspaces={workspaces}
+          handshakes={handshakes}
         />
       </ClientProvider>
     </TestTuiContexts>
   ))
 
   await ready
-  return { app, events, emit: events.emit, client, seen, workspaces }
+  return { app, events, emit: (event: OpenCodeEvent) => events.emit(event), client, seen, workspaces, handshakes }
 }
 
 function Probe(props: {
   seen: OpenCodeEvent[]
   workspaces: Array<string | undefined>
+  handshakes: string[]
   onReady: (ctx: { client: ReturnType<typeof useClient> }) => void
 }) {
   const client = useClient()
   const event = useEvent()
 
   onMount(() => {
+    client.event.on("server.connected", () => props.handshakes.push(client.connection.status()))
     event.subscribe((evt, { workspace }) => {
       props.seen.push(evt)
       props.workspaces.push(workspace)
@@ -105,6 +106,35 @@ function Probe(props: {
 }
 
 describe("useEvent", () => {
+  test("dispatches server.connected immediately", async () => {
+    const { app, client, handshakes } = await mount()
+
+    try {
+      await wait(() => client.connection.status() === "connected")
+      expect(handshakes).toEqual(["connecting"])
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
+  test("delivers a burst exactly once and in order", async () => {
+    const { app, client, emit, seen } = await mount()
+
+    try {
+      await wait(() => client.connection.status() === "connected")
+      for (const branch of ["one", "two", "three"]) emit(vcs(branch))
+      await wait(() => seen.length === 3)
+
+      expect(seen.map((item) => (item.type === "vcs.branch.updated" ? item.data.branch : item.type))).toEqual([
+        "one",
+        "two",
+        "three",
+      ])
+    } finally {
+      app.renderer.destroy()
+    }
+  })
+
   test("logs only durable events", async () => {
     const logs: Array<{ level: LogLevel; message: string; tags: Readonly<Record<string, unknown>> }> = []
     const { app, emit, seen } = await mount(undefined, (level, message, tags) => {
@@ -195,6 +225,9 @@ describe("useEvent", () => {
       await wait(() => client.connection.status() === "connected")
       // Reconnection only runs when the stream is down, never while connected.
       expect(attempts).toEqual([])
+      events.emit(event(vcs("before-drop"), { directory: "/tmp/original" }))
+      await wait(() => seen.some((item) => item.type === "vcs.branch.updated" && item.data.branch === "before-drop"))
+      events.emit(event(vcs("at-drop"), { directory: "/tmp/original" }))
       events.disconnect()
       await wait(() => client.connection.status() === "connected" && attempts.length > 0)
       replacementEvents.emit(event(vcs("rediscovered"), { directory: "/tmp/rediscovered" }))
@@ -202,6 +235,11 @@ describe("useEvent", () => {
 
       expect(client.api).toBe(replacement.api)
       expect(attempts).toEqual([1])
+      expect(seen.map((item) => (item.type === "vcs.branch.updated" ? item.data.branch : item.type))).toEqual([
+        "before-drop",
+        "at-drop",
+        "rediscovered",
+      ])
       const history = client.connection.internal.history()
       expect(history.map((event) => [event.data.status, event.data.attempt])).toEqual([
         ["connecting", 0],

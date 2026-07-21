@@ -1,8 +1,9 @@
 import type { OpenCodeClient, OpenCodeEvent } from "@opencode-ai/client"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
-import { onCleanup, onMount } from "solid-js"
+import { batch, onCleanup, onMount } from "solid-js"
 import { createStore } from "solid-js/store"
 import { errorMessage } from "../util/error"
+import { createEventBatcher } from "./event-batcher"
 import { createSimpleContext } from "./helper"
 import { useLog } from "./log"
 
@@ -61,6 +62,7 @@ export const { use: useClient, provider: ClientProvider } = createSimpleContext(
           const cancel = () => request.abort(controller.signal.reason)
           const timeout = setTimeout(() => request.abort(new Error("Timed out connecting to server")), connectTimeout)
           controller.signal.addEventListener("abort", cancel, { once: true })
+          let queued: ReturnType<typeof createEventBatcher<OpenCodeEvent>> | undefined
           const error = await (async () => {
             record(attempt === 0 ? "connecting" : "reconnecting", attempt)
             log.info("event stream connecting", { attempt })
@@ -79,6 +81,11 @@ export const { use: useClient, provider: ClientProvider } = createSimpleContext(
             log.info("event stream connected")
             events.emit(first.value.type, first.value)
             setConnection({ status: "connected", attempt: 0, error: undefined })
+            queued = createEventBatcher((pending) => {
+              batch(() => {
+                for (const event of pending) events.emit(event.type, event)
+              })
+            })
             while (!abort.signal.aborted && !controller.signal.aborted) {
               const event = await iterator.next()
               if (abort.signal.aborted || controller.signal.aborted) return undefined
@@ -89,12 +96,13 @@ export const { use: useClient, provider: ClientProvider } = createSimpleContext(
                   aggregateID: event.value.durable.aggregateID,
                   seq: event.value.durable.seq,
                 })
-              events.emit(event.value.type, event.value)
+              queued.add(event.value)
             }
             return undefined
           })()
             .catch((error) => error)
             .finally(() => {
+              queued?.end(abort.signal.aborted || controller.signal.aborted)
               request.abort()
               clearTimeout(timeout)
               controller.signal.removeEventListener("abort", cancel)

@@ -792,6 +792,63 @@ test("completes exploration when a queued prompt is promoted", async () => {
   }
 })
 
+test("batches burst event projections into fewer reactive executions", async () => {
+  const events = createEventStream()
+  const calls = createFetch(undefined, events)
+  const sessionID = "session-event-burst"
+  let client!: ReturnType<typeof useClient>
+  let received = 0
+  let executions = 0
+
+  function Probe() {
+    const data = useData()
+    client = useClient()
+    client.event.on("session.input.admitted", () => received++)
+    createEffect(() => {
+      data.session.message.list(sessionID).length
+      executions++
+    })
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await wait(() => client.connection.status() === "connected")
+    const baseline = executions
+    for (let index = 0; index < 10; index++) {
+      emitEvent(events, {
+        id: `evt_input_${index}`,
+        created: index,
+        type: "session.input.admitted",
+        durable: durable(sessionID, index),
+        data: {
+          sessionID,
+          inputID: `message-${index}`,
+          input: { type: "user", data: { text: `${index}` }, delivery: "steer" },
+        },
+      })
+    }
+
+    await wait(() => received === 10)
+    await Bun.sleep(20)
+    expect(received).toBe(10)
+    expect(executions - baseline).toBe(2)
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("classifies live tool rows independently of their call ID", async () => {
   const events = createEventStream()
   const sessionID = "session-tool-call-id"
