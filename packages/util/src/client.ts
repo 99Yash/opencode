@@ -1,7 +1,7 @@
-export * as Client from "./client"
+export * as Client from "./client.js"
 
 import { Context, Layer } from "effect"
-import { makeGlobalNode } from "./effect/app-node"
+import { makeGlobalNode } from "./effect/app-node.js"
 
 export const Name = Context.Reference<string>("@opencode/Client/Name", {
   defaultValue: () => "cli",

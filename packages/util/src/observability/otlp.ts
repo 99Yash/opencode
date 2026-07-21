@@ -1,7 +1,7 @@
 import { Layer } from "effect"
 import { OtlpLogger } from "effect/unstable/observability"
-import { InstallationChannel, InstallationVersion } from "../installation/version"
-import { runID } from "./shared"
+import { InstallationChannel, InstallationVersion } from "../installation/version.js"
+import { runID } from "./shared.js"
 
 export interface Options {
   readonly endpoint?: string
@@ -90,4 +90,4 @@ export async function tracingLayer(options: Options | undefined, client: string)
   }))
 }
 
-export * as Otlp from "./otlp"
+export * as Otlp from "./otlp.js"
