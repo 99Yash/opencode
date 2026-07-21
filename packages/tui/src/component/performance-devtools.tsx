@@ -40,7 +40,7 @@ export function PerformanceDevTools() {
       },
       { key: "Event loop max", value: `${Math.max(0, eventLoopLag).toFixed(1)} ms` },
       { key: "RSS", value: megabytes(memory.rss) },
-      { key: "Heap", value: `${megabytes(memory.heapUsed)} / ${megabytes(memory.heapTotal)}` },
+      { key: "Heap used", value: megabytes(memory.heapUsed) },
       { key: "Array buffers", value: megabytes(memory.arrayBuffers) },
     ])
     rendering.setAll([
