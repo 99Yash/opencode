@@ -155,6 +155,23 @@ export const Plugin = {
                         prepared.push({ ...hunk, target, before: original.replace(/^\uFEFF/, ""), after: "" })
                         return
                       }
+                      if (!target.externalDirectory && !hunk.movePath) {
+                        const resolved = resolveTarget(location, yield* fs.resolve(target.canonical))
+                        if (resolved.externalDirectory) {
+                          yield* permission.assert({
+                            action: "external_directory",
+                            resources: [resolved.externalDirectory.resource],
+                            save: [resolved.externalDirectory.resource],
+                            metadata: {
+                              filepath: resolved.canonical,
+                              parentDir: resolved.externalDirectory.directory,
+                            },
+                            sessionID: context.sessionID,
+                            agent: context.agent,
+                            source,
+                          })
+                        }
+                      }
                       const previous = updates.get(target.canonical)
                       const original =
                         previous ??
