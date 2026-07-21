@@ -374,7 +374,7 @@ function map(
   const shade = fade(footerTheme.backgroundMenu, footerTheme.background, 0.12, 0.56, 0.72)
   const surface = fade(footerTheme.backgroundMenu, footerTheme.background, 0.18, 0.76, 0.9)
   const line = fade(footerTheme.backgroundMenu, footerTheme.background, 0.24, 0.9, 0.98)
-  const statusBase = tint(footerBackground, rgba("#000000"), footerMode === "dark" ? 0.12 : 0.06)
+  const statusBase = tint(footerBackground, rgba("#000000"), footerMode === "dark" ? 0.13 : 0.06)
   const statusAccentBase =
     footerMode === "dark" ? tint(footerBackground, rgba("#ffffff"), 0.06) : tint(statusBase, rgba("#000000"), 0.04)
   const collapsedStatus = footerMode === "dark" && luminance(statusBase) <= 0.04
@@ -506,7 +506,71 @@ export const RUN_THEME_FALLBACK: RunTheme = {
   },
 }
 
-export async function resolveRunTheme(renderer: CliRenderer, config?: RunTuiConfig["theme"]): Promise<RunTheme> {
+function monoTheme(mode: "dark" | "light"): RunTheme {
+  const foreground = RGBA.defaultForeground(mode === "light" ? "#000000" : "#ffffff")
+  const background = RGBA.defaultBackground(mode === "light" ? "#ffffff" : "#000000")
+  return {
+    background,
+    footer: {
+      highlight: foreground,
+      selected: background,
+      selectedText: foreground,
+      warning: foreground,
+      error: foreground,
+      muted: foreground,
+      text: foreground,
+      status: background,
+      statusAccent: background,
+      shade: background,
+      surface: background,
+      pane: background,
+      border: foreground,
+      line: background,
+    },
+    entry: {
+      system: tone(foreground),
+      user: tone(foreground),
+      assistant: tone(foreground),
+      reasoning: tone(foreground),
+      tool: tone(foreground),
+      error: tone(foreground),
+    },
+    splash: {
+      left: foreground,
+      right: foreground,
+      leftShadow: background,
+    },
+    block: {
+      text: foreground,
+      muted: foreground,
+      diffRemoved: foreground,
+      diffAddedBg: background,
+      diffRemovedBg: background,
+      diffContextBg: background,
+      diffHighlightAdded: foreground,
+      diffHighlightRemoved: foreground,
+      diffLineNumber: foreground,
+      diffAddedLineNumberBg: background,
+      diffRemovedLineNumberBg: background,
+    },
+  }
+}
+
+export const RUN_THEME_MONO = monoTheme("dark")
+const RUN_THEME_MONO_LIGHT = monoTheme("light")
+
+export async function resolveRunTheme(
+  renderer: CliRenderer,
+  config?: RunTuiConfig["theme"],
+  mono = false,
+): Promise<RunTheme> {
+  if (mono) {
+    const mode =
+      config?.mode === "light" || config?.mode === "dark"
+        ? config.mode
+        : (renderer.themeMode ?? (await renderer.waitForThemeMode(300)))
+    return mode === "light" ? RUN_THEME_MONO_LIGHT : RUN_THEME_MONO
+  }
   try {
     const colors = await renderer.getPalette({
       size: 256,

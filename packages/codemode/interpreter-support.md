@@ -36,7 +36,8 @@ ultimate source of truth.
 - [x] Regular-expression literals.
 - [x] `NaN` and `Infinity` globals.
 - [ ] BigInt literals and in-interpreter BigInt arithmetic; BigInt remains invalid at JSON-like host boundaries.
-- [ ] Symbol primitive values and symbol-keyed properties.
+- [ ] Arbitrary Symbol primitive values and symbol-keyed properties. The confined `Symbol.iterator` and
+      `Symbol.asyncIterator` keys are available only for custom iterator protocols.
 - [ ] Tagged-template calls.
 - [ ] Getter and setter definitions in object literals.
 
@@ -69,8 +70,12 @@ ultimate source of truth.
 - [x] Unlabeled `break` and `continue`.
 - [x] `try`, `catch`, optional catch bindings, and `finally`.
 - [x] `throw` with arbitrary values.
-- [ ] Labeled statements, labeled `break`, and labeled `continue`.
-- [ ] `for await...of` and async iteration.
+- [x] Labeled statements, labeled `break`, and labeled `continue`.
+- [x] `for await...of` over the supported synchronous collections and custom iterator objects using
+      `Symbol.asyncIterator` or the `Symbol.iterator` fallback. Each iterator step is sequential, yielded promises and
+      plain values from synchronous collections and sync iterators are awaited before binding, and abrupt loop
+      completion invokes the iterator's optional `return()`. Custom async iterators control their yielded values, as in
+      JavaScript; only their `next()` results are awaited. Async generators remain outside the supported subset.
 
 ## Functions and callbacks
 
@@ -247,10 +252,15 @@ ultimate source of truth.
 
 - [x] `JSON.parse` and `JSON.stringify` for supported data objects; the blocked data-key gap listed above still applies.
 - [x] Numeric/string indentation for `JSON.stringify`.
+- [x] `JSON.parse` reviver callbacks, including postorder traversal, deletion through `undefined`, and root replacement.
+      Revivers receive `(key, value)` but no `this` holder because CodeMode functions intentionally have no `this`.
+- [x] `JSON.stringify` function and array replacers. Function replacers receive `(key, value)` in preorder, including
+      the root, but no `this` holder. Array replacers preserve requested property order, deduplicate names, coerce
+      number primitives, and ignore non-string/non-number entries. Primitive wrapper entries remain unsupported.
+- [x] JSON callbacks retain the blocked-key boundary: parsed or stringified data containing `__proto__`, `constructor`,
+      or `prototype` is rejected before callback traversal.
 - [x] Captured `console.log`, `console.info`, `console.debug`, `console.warn`, and `console.error`.
 - [x] Captured `console.dir` and `console.table`.
-- [ ] `JSON.parse` reviver callbacks.
-- [ ] `JSON.stringify` function/array replacers.
 
 ## Date
 
@@ -295,8 +305,8 @@ ultimate source of truth.
 - [x] Materialized `keys`, `values`, and `entries` arrays for Map and Set.
 - [x] Spread, `for...of`, `Array.from`, and `Object.fromEntries` integration.
 - [x] Map and Set values serialize to `{}` at host/JSON boundaries.
-- [ ] Set composition and relation methods: `union`, `intersection`, `difference`, `symmetricDifference`, `isSubsetOf`,
-      `isSupersetOf`, and `isDisjointFrom`.
+- [x] Set composition and relation methods: `union`, `intersection`, `difference`, `symmetricDifference`, `isSubsetOf`,
+      `isSupersetOf`, and `isDisjointFrom`, including supported Set-like operands.
 
 ## URL and URI helpers
 

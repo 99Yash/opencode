@@ -1,4 +1,10 @@
-import { type AstNode, InterpreterRuntimeError } from "../interpreter/model.js"
+import {
+  type AstNode,
+  AsyncIteratorSymbol,
+  InterpreterRuntimeError,
+  IteratorSymbol,
+  IteratorSymbols,
+} from "../interpreter/model.js"
 import { containsOpaqueReference } from "../interpreter/references.js"
 import { isBlockedMember } from "../tool-runtime.js"
 import { isCodeModeValue, CodeModeMap, CodeModePromise, CodeModeSet, CodeModeURLSearchParams } from "../values.js"
@@ -30,7 +36,7 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
     return input as Record<string, unknown>
   }
   const guardedSet = (out: Record<string, unknown>, key: string, item: unknown): void => {
-    if (isBlockedMember(key)) throw new InterpreterRuntimeError(`Property '${key}' is not available in CodeMode.`, node)
+    if (isBlockedMember(key)) throw new InterpreterRuntimeError(`Property '${key}' is not available.`, node)
     out[key] = item
   }
   const addEntry = (out: Record<string, unknown>, key: unknown, item: unknown): void => {
@@ -46,10 +52,13 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
     case "entries":
       return Object.entries(requireObject()).map(([key, item]) => [key, item])
     case "hasOwn":
-      return Object.hasOwn(requireObject(), String(args[1]))
+      return Object.hasOwn(
+        requireObject(),
+        args[1] === AsyncIteratorSymbol || args[1] === IteratorSymbol ? args[1] : String(args[1]),
+      )
     case "is":
       if (containsOpaqueReference(args[0]) || containsOpaqueReference(args[1])) {
-        throw new InterpreterRuntimeError("Object.is requires data values in CodeMode.", node, "InvalidDataValue")
+        throw new InterpreterRuntimeError("Object.is requires data values.", node, "InvalidDataValue")
       }
       return Object.is(args[0], args[1])
     case "assign": {
@@ -64,6 +73,9 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
           throw new InterpreterRuntimeError("Object.assign expects data objects.", node)
         }
         for (const [key, item] of Object.entries(source)) guardedSet(out, key, item)
+        for (const symbol of IteratorSymbols) {
+          if (Object.hasOwn(source, symbol)) Reflect.set(out, symbol, Reflect.get(source, symbol))
+        }
       }
       return out
     }
@@ -94,5 +106,5 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
       return out
     }
   }
-  throw new InterpreterRuntimeError(`Object.${name} is not available in CodeMode.`, node)
+  throw new InterpreterRuntimeError(`Object.${name} is not available.`, node)
 }

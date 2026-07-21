@@ -5,7 +5,8 @@ import { Context, Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "../agent"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
-import { makeLocationNode } from "../effect/app-node"
+import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
+import { Client } from "@opencode-ai/util/client"
 import { llmClient } from "../effect/app-node-platform"
 import { SessionEvent } from "./event"
 import { SessionHistory } from "./history"
@@ -17,6 +18,7 @@ import { SessionUsage } from "./usage"
 const MAX_LENGTH = 100
 
 type Dependencies = {
+  readonly client: string
   readonly events: EventV2.Interface
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
@@ -66,7 +68,7 @@ const make = (dependencies: Dependencies) => {
       .stream(
         LLM.request({
           model: resolved.model,
-          http: { headers: SessionModelHeaders.make(session) },
+          http: { headers: SessionModelHeaders.make(session, dependencies.client) },
           system: agent.system,
           messages: [Message.user(firstUser.text)],
           tools: [],
@@ -110,7 +112,8 @@ export const layer = Layer.effect(
     const agents = yield* AgentV2.Service
     const models = yield* SessionRunnerModel.Service
     const database = yield* Database.Service
-    const title = make({ events, llm, agents, models })
+    const client = yield* Client.Name
+    const title = make({ events, llm, agents, models, client })
     return Service.of({
       generateForFirstPrompt: (session) => title.generateForFirstPrompt(database.db, session),
     })
@@ -120,5 +123,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [EventV2.node, llmClient, AgentV2.node, SessionRunnerModel.node, Database.node],
+  deps: [EventV2.node, llmClient, AgentV2.node, SessionRunnerModel.node, Database.node, Client.node],
 })

@@ -8,6 +8,7 @@ import {
   GlobalNamespace,
   IntrinsicReference,
   InterpreterRuntimeError,
+  JsonMethodReference,
   PromiseCapabilityFunction,
   PromiseNamespace,
   UriFunction,
@@ -25,7 +26,6 @@ import {
   isCodeModeValue,
 } from "../values.js"
 import { dateSetterArgumentCount, invokeDateMethod, invokeDateStatic } from "../stdlib/date.js"
-import { invokeJsonMethod } from "../stdlib/json.js"
 import { invokeMathMethod } from "../stdlib/math.js"
 import { invokeNumberMethod, invokeNumberStatic } from "../stdlib/number.js"
 import { invokeObjectMethod } from "../stdlib/object.js"
@@ -54,6 +54,7 @@ export type SupportedCallback =
   | UriFunction
   | PromiseCapabilityFunction
   | GlobalMethodReference
+  | JsonMethodReference
   | IntrinsicReference
   | ErrorConstructorReference
   | GlobalNamespace
@@ -65,6 +66,7 @@ export const isSupportedCallback = (value: unknown): value is SupportedCallback 
   value instanceof UriFunction ||
   value instanceof PromiseCapabilityFunction ||
   value instanceof GlobalMethodReference ||
+  value instanceof JsonMethodReference ||
   value instanceof IntrinsicReference ||
   value instanceof ErrorConstructorReference ||
   // Callable namespaces dispatch like JS: Array/Object/Date/RegExp construct,
@@ -103,7 +105,7 @@ export const invokeIntrinsic = <R>(
     // Native setters read the current time before argument coercion, whose callbacks may mutate the Date.
     const initialTime = target.time
     return Effect.map(
-      Effect.forEach(args.slice(0, argumentCount), (arg) => coerceDateSetterArgument(runner, arg, node), {
+      Effect.forEach(args.slice(0, argumentCount), (arg) => coerceNumericArgument(runner, arg, node), {
         concurrency: 1,
       }),
       (values) => invokeDateMethod(target, ref.name, values, node, initialTime),
@@ -124,10 +126,10 @@ export const invokeIntrinsic = <R>(
   if (ref.receiver instanceof CodeModeURLSearchParams) {
     return invokeURLSearchParamsMethod(runner, ref.receiver, ref.name, args, node)
   }
-  throw new InterpreterRuntimeError(`Method '${ref.name}' is not available in CodeMode.`, node)
+  throw new InterpreterRuntimeError(`Method '${ref.name}' is not available.`, node)
 }
 
-const coerceDateSetterArgument = <R>(
+const coerceNumericArgument = <R>(
   runner: CallbackRunner<R>,
   value: unknown,
   node: AstNode,
@@ -155,8 +157,7 @@ const coerceDateSetterArgument = <R>(
 }
 
 export const invokeGlobalMethod = (ref: GlobalMethodReference, args: Array<unknown>, node: AstNode): unknown => {
-  if (ref.namespace === "console")
-    throw new InterpreterRuntimeError(`console.${ref.name} is not available in CodeMode.`, node)
+  if (ref.namespace === "console") throw new InterpreterRuntimeError(`console.${ref.name} is not available.`, node)
   if (ref.namespace === "Object") return invokeObjectMethod(ref.name, args, node)
   if (ref.namespace === "Math") return invokeMathMethod(ref.name, args, node)
   if (ref.namespace === "Array") return invokeArrayStatic(ref.name, args, node)
@@ -166,9 +167,9 @@ export const invokeGlobalMethod = (ref: GlobalMethodReference, args: Array<unkno
   if (ref.namespace === "Date") return invokeDateStatic(ref.name, args, node)
   if (ref.namespace === "RegExp") return invokeRegExpStatic(ref.name, args, node)
   if (ref.namespace === "Map" || ref.namespace === "Set" || ref.namespace === "URLSearchParams") {
-    throw new InterpreterRuntimeError(`${ref.namespace}.${ref.name} is not available in CodeMode.`, node)
+    throw new InterpreterRuntimeError(`${ref.namespace}.${ref.name} is not available.`, node)
   }
-  return invokeJsonMethod(ref.name, args, node)
+  throw new InterpreterRuntimeError(`${ref.namespace}.${ref.name} is not available.`, node)
 }
 
 const requireDataArgument = (name: string, index: number, arg: unknown, node: AstNode): unknown => {
@@ -346,7 +347,7 @@ const invokeStringMethod = (value: string, name: string, args: Array<unknown>, n
       break
     }
     default:
-      throw new InterpreterRuntimeError(`String method '${name}' is not available in CodeMode.`, node)
+      throw new InterpreterRuntimeError(`String method '${name}' is not available.`, node)
   }
   return boundedData(result, `String.${name} result`)
 }
@@ -362,7 +363,7 @@ const invokeArrayStatic = (name: string, args: Array<unknown>, node: AstNode): u
     case "from":
       return arrayFromItems(args[0], node)
     default:
-      throw new InterpreterRuntimeError(`Array.${name} is not available in CodeMode.`, node)
+      throw new InterpreterRuntimeError(`Array.${name} is not available.`, node)
   }
 }
 
@@ -424,7 +425,7 @@ export const invokeGroupBy = <R>(
     throw new InterpreterRuntimeError(`${namespace}.groupBy expects an iterable collection.`, node).as("TypeError")
   }
   const apply = applyCollectionCallback(runner, args[1], `${namespace}.groupBy`, node)
-  const items = groupByItems(source)
+  const items = supportedIterableItems(source)
   if (items === undefined) {
     throw new InterpreterRuntimeError(`${namespace}.groupBy expects an iterable collection.`, node).as("TypeError")
   }
@@ -447,7 +448,7 @@ export const invokeGroupBy = <R>(
     for (const item of items) {
       const key = yield* coerceGroupByPropertyKey(runner, yield* apply([item, index]), node)
       if (isBlockedMember(key)) {
-        throw new InterpreterRuntimeError(`Property '${key}' is not available in CodeMode.`, node)
+        throw new InterpreterRuntimeError(`Property '${key}' is not available.`, node)
       }
       const group = result[key]
       if (group === undefined) result[key] = [item]
@@ -458,7 +459,7 @@ export const invokeGroupBy = <R>(
   })
 }
 
-const groupByItems = (source: unknown): Iterable<unknown> | undefined => {
+const supportedIterableItems = (source: unknown): Iterable<unknown> | undefined => {
   if (Array.isArray(source) || typeof source === "string") return source
   if (source instanceof CodeModeMap) return source.map.entries()
   if (source instanceof CodeModeSet) return source.set.values()
@@ -617,7 +618,7 @@ const invokeMapMethod = <R>(
       })
     }
     default:
-      throw new InterpreterRuntimeError(`Map method '${name}' is not available in CodeMode.`, node)
+      throw new InterpreterRuntimeError(`Map method '${name}' is not available.`, node)
   }
 }
 
@@ -655,9 +656,138 @@ const invokeSetMethod = <R>(
         return undefined
       })
     }
+    case "union":
+    case "intersection":
+    case "difference":
+    case "symmetricDifference":
+    case "isSubsetOf":
+    case "isSupersetOf":
+    case "isDisjointFrom":
+      return invokeSetOperation(runner, target, name, args[0], node)
     default:
-      throw new InterpreterRuntimeError(`Set method '${name}' is not available in CodeMode.`, node)
+      throw new InterpreterRuntimeError(`Set method '${name}' is not available.`, node)
   }
+}
+
+const invokeSetOperation = <R>(
+  runner: CallbackRunner<R>,
+  target: CodeModeSet,
+  name: string,
+  source: unknown,
+  node: AstNode,
+): Effect.Effect<unknown, unknown, R> =>
+  Effect.gen(function* () {
+    const other = yield* loadSetRecord(runner, source, name, node)
+    if (name === "union") {
+      const result = copySet(target)
+      for (const item of yield* other.keys()) result.set.add(item)
+      return result
+    }
+    if (name === "intersection") {
+      const result = new CodeModeSet()
+      if (target.set.size <= other.size) {
+        for (const item of target.set.values()) {
+          if (yield* other.has(item)) result.set.add(item)
+        }
+        return result
+      }
+      for (const item of yield* other.keys()) {
+        if (target.set.has(item)) result.set.add(item)
+      }
+      return result
+    }
+    if (name === "difference") {
+      const result = copySet(target)
+      if (target.set.size <= other.size) {
+        for (const item of result.set.values()) {
+          if (yield* other.has(item)) result.set.delete(item)
+        }
+        return result
+      }
+      for (const item of yield* other.keys()) result.set.delete(item)
+      return result
+    }
+    if (name === "symmetricDifference") {
+      const result = copySet(target)
+      for (const item of yield* other.keys()) {
+        if (target.set.has(item)) result.set.delete(item)
+        else result.set.add(item)
+      }
+      return result
+    }
+    if (name === "isSubsetOf") {
+      if (target.set.size > other.size) return false
+      for (const item of target.set.values()) {
+        if (!(yield* other.has(item))) return false
+      }
+      return true
+    }
+    if (name === "isSupersetOf") {
+      if (target.set.size < other.size) return false
+      for (const item of yield* other.keys()) {
+        if (!target.set.has(item)) return false
+      }
+      return true
+    }
+    if (target.set.size <= other.size) {
+      for (const item of target.set.values()) {
+        if (yield* other.has(item)) return false
+      }
+      return true
+    }
+    for (const item of yield* other.keys()) {
+      if (target.set.has(item)) return false
+    }
+    return true
+  })
+
+const copySet = (source: CodeModeSet): CodeModeSet => {
+  const result = new CodeModeSet()
+  for (const item of source.set.values()) result.set.add(item)
+  return result
+}
+
+const loadSetRecord = <R>(runner: CallbackRunner<R>, source: unknown, name: string, node: AstNode) => {
+  if (source instanceof CodeModeSet) {
+    return Effect.succeed({
+      size: source.set.size,
+      has: (item: unknown) => Effect.succeed(source.set.has(item)),
+      keys: () => Effect.succeed(source.set.values()),
+    })
+  }
+  if (source instanceof CodeModeMap) {
+    return Effect.succeed({
+      size: source.map.size,
+      has: (item: unknown) => Effect.succeed(source.map.has(item)),
+      keys: () => Effect.succeed(source.map.keys()),
+    })
+  }
+  if (source === null || typeof source !== "object" || isCodeModeValue(source)) {
+    throw new InterpreterRuntimeError(`Set.${name} expects a Set-like object.`, node).as("TypeError")
+  }
+  const object = source as Record<string, unknown>
+  return Effect.gen(function* () {
+    const size = yield* coerceNumericArgument(runner, object.size, node)
+    if (Number.isNaN(size)) {
+      throw new InterpreterRuntimeError(`Set.${name} received a Set-like object with an invalid size.`, node).as(
+        "TypeError",
+      )
+    }
+    if (!isSupportedCallback(object.has) || !isSupportedCallback(object.keys)) {
+      throw new InterpreterRuntimeError(`Set.${name} expects callable 'has' and 'keys' methods.`, node).as("TypeError")
+    }
+    const has = object.has
+    const keys = object.keys
+    return {
+      size: Math.max(Math.trunc(size), 0),
+      has: (item: unknown) => Effect.map(runner.invokeCallable(has, [item], node), Boolean),
+      keys: () =>
+        Effect.flatMap(runner.invokeCallable(keys, [], node), (result) => {
+          if (Array.isArray(result)) return Effect.succeed(result)
+          throw new InterpreterRuntimeError(`Set.${name} expected 'keys' to return an iterator.`, node).as("TypeError")
+        }),
+    }
+  })
 }
 
 const invokeURLSearchParamsMethod = <R>(
@@ -730,7 +860,7 @@ const invokeURLSearchParamsMethod = <R>(
       })
     }
     default:
-      throw new InterpreterRuntimeError(`URLSearchParams method '${name}' is not available in CodeMode.`, node)
+      throw new InterpreterRuntimeError(`URLSearchParams method '${name}' is not available.`, node)
   }
 }
 
@@ -973,7 +1103,7 @@ const invokeArrayMethod = <R>(
         }
         return -1
     }
-    throw new InterpreterRuntimeError(`Array method '${name}' is not available in CodeMode.`, node)
+    throw new InterpreterRuntimeError(`Array method '${name}' is not available.`, node)
   })
 }
 

@@ -2,12 +2,11 @@ export * as Database from "./database"
 
 import { EffectDrizzleSqlite } from "@opencode-ai/effect-drizzle-sqlite"
 import { sqliteLayer } from "#sqlite"
-import { Context, Effect, Layer } from "effect"
-import { Global } from "../global"
+import { Context, Effect, Layer, Schema } from "effect"
+import { Global } from "@opencode-ai/util/global"
 import { isAbsolute, join } from "path"
 import { DatabaseMigration } from "./migration"
-import { InstallationChannel } from "../installation/version"
-import { makeGlobalNode } from "../effect/app-node"
+import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 
 const makeDatabase = EffectDrizzleSqlite.makeWithDefaults()
 type DatabaseShape = Effect.Success<typeof makeDatabase>
@@ -16,9 +15,10 @@ export interface Interface {
   db: DatabaseShape
 }
 
-export interface Options {
-  readonly path?: string
-}
+export const Options = Schema.Struct({
+  path: Schema.optional(Schema.String),
+})
+export type Options = typeof Options.Type
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/storage/Database") {}
 
@@ -39,25 +39,17 @@ const databaseLayer = Layer.effect(
   }).pipe(Effect.orDie),
 )
 
-export function layer(options?: Options) {
+export function layer(options: Options = { path: ":memory:" }) {
   return Layer.suspend(() => {
     const provide = (filename: string) => databaseLayer.pipe(Layer.provide(sqliteLayer({ filename })))
-    if (options?.path === ":memory:" || (options?.path && isAbsolute(options.path))) return provide(options.path)
-    if (options?.path) return provide(join(Global.Path.data, options.path))
-    if (
-      ["latest", "beta", "prod"].includes(InstallationChannel) ||
-      process.env.OPENCODE_DISABLE_CHANNEL_DB === "1" ||
-      process.env.OPENCODE_DISABLE_CHANNEL_DB === "true"
-    )
-      return provide(join(Global.Path.data, "opencode.db"))
-    return provide(
-      join(Global.Path.data, `opencode-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`),
-    )
+    const filename = options.path ?? ":memory:"
+    if (filename === ":memory:" || isAbsolute(filename)) return provide(filename)
+    return provide(join(Global.Path.data, filename))
   })
 }
 
-export const node = makeGlobalNode({
-  service: Service,
-  layer: layer({ path: ":memory:" }),
-  deps: [],
-})
+export function configured(options?: Options) {
+  return makeGlobalNode({ service: Service, layer: layer(options), deps: [] })
+}
+
+export const node = configured({ path: ":memory:" })

@@ -2,10 +2,10 @@ export * as ServerProcess from "./server-process"
 
 import { NodeServices } from "@effect/platform-node"
 import { Service, type DiscoverOptions, type Info } from "@opencode-ai/client/effect/service"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { Global } from "@opencode-ai/core/global"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { AppProcess } from "@opencode-ai/core/process"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { Global } from "@opencode-ai/util/global"
+import { InstallationChannel, InstallationVersion } from "@opencode-ai/util/installation/version"
+import { AppProcess } from "@opencode-ai/util/process"
 import { randomBytes, randomUUID } from "node:crypto"
 import path from "node:path"
 import { Effect, FileSystem, Logger, Option, Redacted, Schedule, Schema } from "effect"
@@ -26,7 +26,14 @@ export type Options = {
 export const run = Effect.fnUntraced(function* (options: Options) {
   return yield* processEffect(options).pipe(
     Effect.provide(Updater.layer),
-    Effect.provide(LayerNode.compile(LayerNode.group([Global.node, AppProcess.node]))),
+    Effect.provide(
+      LayerNode.compile(LayerNode.group([Global.node, AppProcess.node]), [
+        [
+          Global.node,
+          Global.layerWith(process.env.OPENCODE_CONFIG_DIR ? { config: process.env.OPENCODE_CONFIG_DIR } : {}),
+        ],
+      ]),
+    ),
     Effect.provide(NodeServices.layer),
   )
 })
@@ -60,30 +67,63 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
             : randomBytes(32).toString("base64url")
       if (!password) return yield* Effect.fail(new Error("Missing server password"))
       const instanceID = randomUUID()
-      const server = yield* start({
-        hostname,
-        port: Option.fromNullishOr(port),
-        password,
-        instanceID,
-        database: {
-          path: process.env.OPENCODE_DB,
+      const server = yield* start(
+        {
+          client: process.env.OPENCODE_CLIENT ?? "cli",
+          hostname,
+          port,
+          password,
+          simulation: truthy(process.env.OPENCODE_SIMULATE),
+          database: {
+            path:
+              process.env.OPENCODE_DB ??
+              (["latest", "beta", "prod"].includes(InstallationChannel) ||
+              process.env.OPENCODE_DISABLE_CHANNEL_DB === "1" ||
+              process.env.OPENCODE_DISABLE_CHANNEL_DB === "true"
+                ? "opencode.db"
+                : `opencode-${InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")}.db`),
+          },
+          models: {
+            url: process.env.OPENCODE_MODELS_URL,
+            file: process.env.OPENCODE_MODELS_PATH,
+            fetch: !truthy(process.env.OPENCODE_DISABLE_MODELS_FETCH),
+          },
+          observability: {
+            endpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+            headers: process.env.OTEL_EXPORTER_OTLP_HEADERS,
+          },
+          config: {
+            directory: process.env.OPENCODE_CONFIG_DIR,
+            project: !truthy(
+              process.env.OPENCODE_CONFIG_PROJECT_DISABLE ?? process.env.OPENCODE_DISABLE_PROJECT_CONFIG,
+            ),
+            file: process.env.OPENCODE_CONFIG,
+            content: process.env.OPENCODE_CONFIG_CONTENT,
+          },
+          windows: {
+            gitbash: process.env.OPENCODE_GIT_BASH_PATH,
+          },
+          fs: {
+            filewatcher: !truthy(
+              process.env.OPENCODE_FILEWATCHER_DISABLE ?? process.env.OPENCODE_DISABLE_FILEWATCHER,
+            ),
+            fff:
+              process.env.OPENCODE_DISABLE_FFF === undefined
+                ? process.platform !== "win32"
+                : !truthy(process.env.OPENCODE_DISABLE_FFF),
+          },
         },
-        models: {
-          url: process.env.OPENCODE_MODELS_URL,
-          file: process.env.OPENCODE_MODELS_PATH,
-          fetch: !["1", "true"].includes(process.env.OPENCODE_DISABLE_MODELS_FETCH?.toLowerCase() ?? ""),
-        },
-        service:
-          serviceOptions === undefined
-            ? undefined
-            : {
-                onListen: (address, shutdown) =>
-                  Effect.gen(function* () {
-                    if (!config.password) yield* ServiceConfig.password(password)
-                    return yield* register(address, password, instanceID, serviceOptions.file, shutdown)
-                  }),
-              },
-      }).pipe(
+        serviceOptions === undefined
+          ? undefined
+          : {
+              instanceID,
+              onListen: (address, shutdown) =>
+                Effect.gen(function* () {
+                  if (!config.password) yield* ServiceConfig.password(password)
+                  return yield* register(address, password, instanceID, serviceOptions.file, shutdown)
+                }),
+            },
+      ).pipe(
         Effect.provide(Logger.layer([], { mergeWithExisting: false })),
         Effect.catch((error) => {
           if (serviceOptions === undefined || port === undefined || !addressInUse(error)) return Effect.fail(error)
@@ -174,6 +214,10 @@ const recognizeIncumbent = Effect.fnUntraced(function* (options: DiscoverOptions
 
 function serviceURL(hostname: string, port: number) {
   return `http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port}`
+}
+
+function truthy(value?: string) {
+  return value === "1" || value?.toLowerCase() === "true"
 }
 
 function addressInUse(error: unknown): boolean {

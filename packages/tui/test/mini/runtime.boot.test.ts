@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { OpenCode } from "@opencode-ai/client/promise"
 import type { Resolved } from "../../src/config"
-import { resolveModelInfo, resolveRunTuiConfig } from "../../src/mini/runtime.boot"
+import { resolveMiniSettings, resolveModelInfo, resolveRunTuiConfig } from "../../src/mini/runtime.boot"
 import { catalogModel, catalogProvider } from "./fixture/catalog"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 
@@ -91,18 +91,32 @@ describe("run runtime boot", () => {
     expect(result.keybinds.get("leader")).toEqual([])
   })
 
-  test("preserves current theme mode, leader, and thinking config", async () => {
+  test("preserves shared config while resolving independent Mini defaults", async () => {
     const result = await resolveRunTuiConfig(
       createTuiResolvedConfig({
         theme: { mode: "light" },
         leader_timeout: 450,
-        session: { thinking: "hide" },
+        session: { thinking: "show" },
       }),
     )
 
     expect(result.theme).toEqual({ mode: "light" })
     expect(result.leader.timeout).toBe(450)
-    expect(result.session?.thinking).toBe("hide")
+    expect(result.session?.thinking).toBe("show")
+    expect(resolveMiniSettings(result)).toEqual({
+      thinking: "hide",
+      shell_output: "hide",
+      turn_summary: "show",
+      mono: false,
+    })
+    expect(
+      resolveMiniSettings({ mini: { thinking: "show", shell_output: "show", turn_summary: "hide", mono: true } }),
+    ).toEqual({
+      thinking: "show",
+      shell_output: "show",
+      turn_summary: "hide",
+      mono: true,
+    })
   })
 
   test("loads v2 providers and models for model selector data", async () => {
@@ -127,6 +141,9 @@ describe("run runtime boot", () => {
               name: "gpt-5",
               cost: {
                 input: 0,
+              },
+              limit: {
+                context: 128_000,
               },
               status: "active",
               variants: {

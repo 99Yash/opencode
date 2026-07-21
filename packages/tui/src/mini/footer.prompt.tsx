@@ -28,6 +28,7 @@ import {
 import { parseFileLineRange, parseSlashHead, stripFileLineRange } from "../prompt/parse"
 import { Keymap } from "../context/keymap"
 import { realignEditorPromptParts, resolveEditorSlashValue } from "./prompt.editor"
+import { monoTruncateMiddle } from "./mono"
 import { FOOTER_MENU_ROWS, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import type { RunFooterTheme } from "./theme"
 import type { FooterState, RunAgent, RunCommand, RunPrompt, RunPromptPart, RunReference, RunTuiConfig } from "./types"
@@ -51,7 +52,7 @@ type Auto = RunFooterMenuItem & {
 type SlashOption = RunFooterMenuItem & {
   kind: "slash"
   name: string
-  action?: "skill-menu" | "editor"
+  action?: "skill-menu" | "editor" | "settings"
 }
 
 type PromptOption = Auto | SlashOption
@@ -70,6 +71,7 @@ type PromptInput = {
   prompt: Accessor<boolean>
   width: Accessor<number>
   theme: Accessor<RunFooterTheme>
+  mono: Accessor<boolean>
   history?: Accessor<RunPrompt[]>
   onSubmit: (input: RunPrompt) => boolean | Promise<boolean>
   onCycle: () => void
@@ -79,6 +81,7 @@ type PromptInput = {
   onExitRequest?: () => boolean
   onExit: () => void
   onSkillMenu: () => void
+  onSettings: () => void
   onRows: (rows: number) => void
   onStatus: (text: string) => void
 }
@@ -301,7 +304,9 @@ export function createPromptState(input: PromptInput): PromptState {
   const references = createMemo<Auto[]>(() => {
     return input.references().map((item) => ({
       kind: "mention",
-      display: Locale.truncateMiddle("@" + item.name, width()),
+      display: input.mono()
+        ? monoTruncateMiddle("@" + item.name, width(), true)
+        : Locale.truncateMiddle("@" + item.name, width()),
       value: item.name,
       description: item.description ?? (item.source.type === "git" ? item.source.repository : item.source.path),
       part: {
@@ -343,7 +348,9 @@ export function createPromptState(input: PromptInput): PromptState {
 
         return {
           kind: "mention",
-          display: Locale.truncateMiddle("@" + filename, width()),
+          display: input.mono()
+            ? monoTruncateMiddle("@" + filename, width(), true)
+            : Locale.truncateMiddle("@" + filename, width()),
           value: filename,
           directory: item.endsWith("/"),
           part: {
@@ -379,6 +386,13 @@ export function createPromptState(input: PromptInput): PromptState {
         name: "editor",
         display: "/editor",
         description: "compose in your external editor",
+      } satisfies SlashOption,
+      {
+        kind: "slash",
+        action: "settings" as const,
+        name: "settings",
+        display: "/settings",
+        description: "configure Mini transcript output",
       } satisfies SlashOption,
       { kind: "slash", name: "new", display: "/new", description: "start a new session" } satisfies SlashOption,
       { kind: "slash", name: "exit", display: "/exit", description: "close OpenCode" } satisfies SlashOption,
@@ -815,6 +829,12 @@ export function createPromptState(input: PromptInput): PromptState {
         return
       }
 
+      if (next.action === "settings" && !shell()) {
+        cancelAutocomplete()
+        input.onSettings()
+        return
+      }
+
       const cursor = area.cursorOffset
       const head = parseSlashHead(area.plainText)
       const local = !shell() && (next.name === "new" || next.name === "exit")
@@ -922,6 +942,7 @@ export function createPromptState(input: PromptInput): PromptState {
     if (current === "skill") return false
     if (current === "model") return false
     if (current === "variant") return false
+    if (current === "settings") return false
     if (current === "queued-menu") return false
     if (current === "subagent-menu") return false
     return true
@@ -1116,6 +1137,12 @@ export function createPromptState(input: PromptInput): PromptState {
     const command = next.mode === "shell" ? undefined : selectedCommand(next.text, next.command, input.commands())
     if (!command && next.mode !== "shell" && isExitCommand(next.text)) {
       input.onExit()
+      return
+    }
+
+    if (!command && next.mode !== "shell" && next.text.trim().toLowerCase() === "/settings") {
+      resetDraft()
+      input.onSettings()
       return
     }
 

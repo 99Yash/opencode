@@ -58,6 +58,9 @@ export type RunProviderModel = {
   cost?: {
     input: number
   }
+  limit?: {
+    context: number
+  }
   status?: string
   variants?: Record<string, unknown>
 }
@@ -84,6 +87,8 @@ export type RunPrompt = {
 export type FooterQueuedPrompt = {
   messageID: string
   prompt: RunPrompt
+  delivery: "steer" | "queue"
+  admittedSeq: number
 }
 
 export type RunAgent = {
@@ -161,7 +166,6 @@ export type FooterPhase = "idle" | "running"
 export type FooterState = {
   phase: FooterPhase
   status: string
-  queue: number
   model: string
   usage: string
   first: boolean
@@ -180,6 +184,8 @@ export type TurnSummary = {
 
 export type ScrollbackOptions = {
   suppressBackgrounds?: boolean
+  shellOutput?: boolean
+  mono?: boolean
 }
 
 export type ToolCodeSnapshot = {
@@ -289,6 +295,7 @@ export type FooterPromptRoute =
   | { type: "skill" }
   | { type: "model" }
   | { type: "variant" }
+  | { type: "settings" }
 
 export type FooterSubagentTab = {
   sessionID: string
@@ -339,10 +346,6 @@ export type FooterEvent =
       current: string | undefined
     }
   | {
-      type: "queue"
-      queue: number
-    }
-  | {
       type: "queued.prompts"
       prompts: FooterQueuedPrompt[]
     }
@@ -355,14 +358,8 @@ export type FooterEvent =
       model: string
       selection: NonNullable<RunInput["model"]>
     }
-  | {
-      type: "turn.send"
-      queue: number
-    }
-  | {
-      type: "turn.idle"
-      queue: number
-    }
+  | { type: "turn.send" }
+  | { type: "turn.idle" }
   | {
       type: "turn.duration"
       duration: string
@@ -395,7 +392,18 @@ export type FormCancel = {
   location?: LocationRef
 }
 
-export type RunTuiConfig = Pick<Config.Resolved, "keybinds" | "leader" | "theme" | "session">
+export type RunTuiConfig = Pick<Config.Resolved, "keybinds" | "leader" | "theme" | "session" | "mini">
+
+export type MiniSettings = {
+  thinking: "show" | "hide"
+  shell_output: "show" | "hide"
+  turn_summary: "show" | "hide"
+  mono: boolean
+}
+
+export type MiniSettingChange = {
+  [Key in keyof MiniSettings]: { key: Key; value: MiniSettings[Key] }
+}[keyof MiniSettings]
 
 // Lifecycle phase of a scrollback entry. "start" opens the entry, "progress"
 // appends content (coalesced in the footer queue), "final" closes it.
@@ -438,7 +446,6 @@ export type LocalReplayRow = {
 export type FooterApi = {
   readonly isClosed: boolean
   onPrompt(fn: (input: RunPrompt) => void): () => void
-  onQueuedRemove(fn: (messageID: string) => boolean | Promise<boolean>): () => void
   onClose(fn: () => void): () => void
   event(next: FooterEvent): void
   append(commit: StreamCommit): void

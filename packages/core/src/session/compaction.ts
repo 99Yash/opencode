@@ -5,11 +5,12 @@ import { SessionError } from "@opencode-ai/schema/session-error"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Config } from "../config"
 import { EventV2 } from "../event"
-import { makeLocationNode } from "../effect/app-node"
+import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { llmClient } from "../effect/app-node-platform"
 import { SessionEvent } from "./event"
 import type { SessionMessage } from "./message"
 import { SessionModelHeaders } from "./model-headers"
+import { Client } from "@opencode-ai/util/client"
 import { SessionRunnerModel } from "./runner/model"
 import { SessionSchema } from "./schema"
 import { toSessionError } from "./to-session-error"
@@ -60,6 +61,7 @@ type Settings = {
 }
 
 type Dependencies = {
+  readonly client: string
   readonly events: EventV2.Interface
   readonly llm: {
     readonly stream: (request: LLMRequest) => Stream.Stream<LLMEvent, LLMError>
@@ -258,7 +260,7 @@ const make = (dependencies: Dependencies) => {
       .stream(
         LLM.request({
           model: plan.model,
-          http: { headers: SessionModelHeaders.make(plan.session) },
+          http: { headers: SessionModelHeaders.make(plan.session, dependencies.client) },
           messages: [Message.user(plan.prompt)],
           tools: [],
         }),
@@ -397,12 +399,13 @@ export const layer = Layer.effect(
     const llm = yield* LLMClient.Service
     const config = yield* Config.Service
     const models = yield* SessionRunnerModel.Service
-    return make({ events, llm, models, config: settings(yield* config.entries()) })
+    const client = yield* Client.Name
+    return make({ events, llm, models, config: settings(yield* config.entries()), client })
   }),
 )
 
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [EventV2.node, llmClient, Config.node, SessionRunnerModel.node],
+  deps: [EventV2.node, llmClient, Config.node, SessionRunnerModel.node, Client.node],
 })

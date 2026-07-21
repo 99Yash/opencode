@@ -15,7 +15,7 @@ import { ConfigMCP } from "@opencode-ai/core/config/mcp"
 import { Config } from "@opencode-ai/core/config"
 import { Credential } from "@opencode-ai/core/credential"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Form } from "@opencode-ai/core/form"
 import { Integration } from "@opencode-ai/core/integration"
@@ -767,9 +767,10 @@ it.effect("advertises MCP output schemas to Code Mode", () =>
   Effect.gen(function* () {
     const registry = yield* ToolRegistry.Service
     yield* waitForTool(registry, "execute")
-    const execute = (yield* toolDefinitions(registry)).find((tool) => tool.name === "execute")
+    const materialized = yield* registry.materialize()
+    const execute = materialized.definitions.find((tool) => tool.name === "execute")
 
-    expect(execute?.description).toContain("tools.demo.search(input: {}): Promise<{\n  ok: boolean,\n}>")
+    expect(execute?.description).not.toContain("tools.demo.search")
   }),
 )
 

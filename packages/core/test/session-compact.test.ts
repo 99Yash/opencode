@@ -4,7 +4,7 @@ import { OpenAIChat } from "@opencode-ai/ai/protocols"
 import { Config } from "@opencode-ai/core/config"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Job } from "@opencode-ai/core/job"
 import { Location } from "@opencode-ai/core/location"
@@ -49,7 +49,14 @@ const client = Layer.mock(LLMClient.Service)({
   generate: () => Effect.die("unused"),
 })
 const config = Layer.mock(Config.Service)({ entries: () => Effect.succeed([]) })
-const models = SessionRunnerModel.layerWith(() => Effect.succeed(SessionRunnerModel.resolved(model)))
+const models = SessionRunnerModel.layerWith(() =>
+  Effect.succeed(
+    SessionRunnerModel.resolved(model, {
+      capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+      cost: [],
+    }),
+  ),
+)
 const locations = Layer.effect(
   LocationServiceMap.Service,
   LayerMap.make(

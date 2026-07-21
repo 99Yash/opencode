@@ -5,7 +5,7 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { llmClient } from "@opencode-ai/core/effect/app-node-platform"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
@@ -65,7 +65,14 @@ const client = Layer.mock(LLMClient.Service)({
       return response
     }),
 })
-const models = SessionRunnerModel.layerWith(() => Effect.succeed(SessionRunnerModel.resolved(model)))
+const models = SessionRunnerModel.layerWith(() =>
+  Effect.succeed(
+    SessionRunnerModel.resolved(model, {
+      capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+      cost: [],
+    }),
+  ),
+)
 const builtins = Layer.mock(InstructionBuiltIns.Service, {
   load: () =>
     Effect.succeed(

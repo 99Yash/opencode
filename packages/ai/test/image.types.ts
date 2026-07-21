@@ -1,12 +1,13 @@
 import {
   Image,
+  ImageInput,
   ImageModel,
   type ImageModelOptions,
   type ImageOptions,
   type ImageRequestFor,
   type ImageRoute,
 } from "../src"
-import { OpenAI, XAI } from "../src/providers"
+import { Google, OpenAI, XAI, ZAI } from "../src/providers"
 
 type GoogleLikeOptions = {
   readonly aspectRatio?: "1:1" | "16:9"
@@ -22,8 +23,40 @@ void invalidGoogleOptions
 Image.generate({
   model: google,
   prompt: "A lighthouse",
+  images: [
+    ImageInput.bytes(Uint8Array.from([1, 2, 3]), "image/png"),
+    ImageInput.url("data:image/jpeg;base64,AQID"),
+    ImageInput.fileUri("https://generativelanguage.googleapis.com/v1beta/files/example", "image/webp"),
+  ],
   options: { aspectRatio: "16:9", imageSize: "2K", futureOption: true },
 })
+
+const googleProvider = Google.configure({ apiKey: "test" }).image("any-model-id")
+Image.generate({
+  model: googleProvider,
+  prompt: "A lighthouse",
+  options: {
+    aspectRatio: "16:9",
+    imageSize: "2K",
+    seed: 42,
+    thinkingLevel: "HIGH",
+    includeThoughts: true,
+    futureOption: true,
+  },
+})
+Image.generate({
+  model: googleProvider,
+  prompt: "A lighthouse",
+  options: { aspectRatio: "future-ratio", imageSize: "8K", thinkingLevel: "FUTURE" },
+})
+// @ts-expect-error Image generation options are request-scoped, not provider configuration.
+Google.configure({ image: { providerOptions: { imageSize: "2K" } } })
+// @ts-expect-error Known Google string options retain their value kind.
+Image.generate({ model: googleProvider, prompt: "A lighthouse", options: { imageSize: 2 } })
+// @ts-expect-error Known Google numeric options retain their value kind.
+Image.generate({ model: googleProvider, prompt: "A lighthouse", options: { seed: "42" } })
+// @ts-expect-error Known Google boolean options retain their value kind.
+Image.generate({ model: googleProvider, prompt: "A lighthouse", options: { includeThoughts: "yes" } })
 
 const openai = OpenAI.image("gpt-image-2")
 // @ts-expect-error Image generation options are request-scoped, not provider configuration.
@@ -33,7 +66,14 @@ void futureOpenAIOptions
 Image.generate({
   model: openai,
   prompt: "A lighthouse",
-  options: { quality: "hd", outputFormat: "webp", size: "2048x2048", future_option: true },
+  images: [ImageInput.url("https://example.com/source.png"), ImageInput.file("file_123")],
+  options: {
+    mask: ImageInput.bytes(Uint8Array.from([1]), "image/png"),
+    quality: "hd",
+    outputFormat: "webp",
+    size: "2048x2048",
+    future_option: true,
+  },
 })
 Image.generate({ model: openai, prompt: "A lighthouse", options: { quality: "future-quality", size: "256x256" } })
 Image.generate({ model: openai, prompt: "A lighthouse", options: { size: "1792x1024" } })
@@ -54,6 +94,7 @@ XAI.configure({ image: { options: { resolution: "1k" } } })
 Image.generate({
   model: xai,
   prompt: "A lighthouse",
+  images: [ImageInput.url("data:image/png;base64,AQID"), ImageInput.file("file_123")],
   options: {
     n: 2,
     aspectRatio: "future-ratio",
@@ -72,8 +113,31 @@ Image.generate({ model: xai, prompt: "A lighthouse", options: { n: "2" } })
 // @ts-expect-error Known xAI string options retain their value kind.
 Image.generate({ model: xai, prompt: "A lighthouse", options: { resolution: 2 } })
 
+const zai = ZAI.configure({ apiKey: "test" }).image("any-model-id")
+// @ts-expect-error Image generation options are request-scoped, not provider configuration.
+ZAI.configure({ image: { options: { quality: "hd" } } })
+Image.generate({
+  model: zai,
+  prompt: "A lighthouse",
+  options: { quality: "future-quality", userID: "user-123", future_option: true },
+})
+Image.generate({ model: zai, prompt: "A lighthouse", options: { user_id: "raw-user" } })
+// @ts-expect-error Known Z.ai string options retain their value kind.
+Image.generate({ model: zai, prompt: "A lighthouse", options: { quality: 1 } })
+// @ts-expect-error Known Z.ai user IDs retain their value kind.
+Image.generate({ model: zai, prompt: "A lighthouse", options: { userID: 1 } })
+
 declare const generic: ImageModel<ImageOptions>
 Image.generate({ model: generic, prompt: "A lighthouse", options: { arbitrary: true } })
+const explicitImageInput: ImageInput = ImageInput.url("https://example.com/image.png")
+void explicitImageInput
+
+// @ts-expect-error Raw strings are ambiguous and are not image inputs.
+Image.generate({ model: openai, prompt: "A lighthouse", images: ["AQID"] })
+// @ts-expect-error Byte image inputs require an explicit MIME type.
+Image.generate({ model: openai, prompt: "A lighthouse", images: [{ type: "bytes", data: new Uint8Array() }] })
+// @ts-expect-error File URIs require an explicit MIME type for Gemini fileData.
+Image.generate({ model: google, prompt: "A lighthouse", images: [{ type: "file-uri", uri: "files/123" }] })
 
 const request = Image.request({
   model: google,
@@ -93,3 +157,5 @@ Image.generate({ model: openai, prompt: "A lighthouse", aspectRatio: "16:9" })
 Image.generate({ model: openai, prompt: "A lighthouse", seed: 1 })
 // @ts-expect-error Image requests do not expose metadata.
 Image.generate({ model: openai, prompt: "A lighthouse", metadata: { trace: true } })
+// @ts-expect-error Masks are provider options, not a common image request field.
+Image.generate({ model: openai, prompt: "A lighthouse", mask: ImageInput.url("https://example.com/mask.png") })
