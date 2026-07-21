@@ -30,7 +30,7 @@ export function startTerminalControlQueries(renderer: CliRenderer) {
           })
         return { ...snapshot, nodes: [...snapshot.nodes, ...inferred] }
       },
-      logs: () => Logging.file(),
+      "log-files": () => Logging.file(),
     },
   })
 }
