@@ -46,6 +46,7 @@ import { useEvent } from "./context/event"
 import { ClientProvider, useClient } from "./context/client"
 import { StartupLoading } from "./component/startup-loading"
 import { DevToolsSidebar } from "./component/devtools-sidebar"
+import { PerformanceDevTools } from "./component/performance-devtools"
 import { DevTools } from "./devtools"
 import { Reconnecting } from "./component/reconnecting"
 import { DataProvider, useData } from "./context/data"
@@ -1135,7 +1136,10 @@ function App(props: { pair?: DialogPairCredentials; started: number }) {
           </Show>
         </box>
         <Show when={devtools()}>
-          <DevToolsSidebar />
+          <>
+            <PerformanceDevTools />
+            <DevToolsSidebar />
+          </>
         </Show>
       </box>
       <Show when={!startup.skipInitialLoading}>

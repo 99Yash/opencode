@@ -17,3 +17,26 @@ test("registers and updates grouped DevTools data", () => {
     ],
   })
 })
+
+test("updates a DevTools group in one batch", () => {
+  const group = DevTools.register({ id: "batch", title: "Batch data" })
+
+  group.setAll([
+    { key: "CPU", value: "20%" },
+    { key: "Memory", value: "100 MB" },
+  ])
+  group.setAll([
+    { key: "CPU", value: "30%" },
+    { key: "FPS", value: 60 },
+  ])
+
+  expect(DevTools.data().find((item) => item.id === "batch")).toEqual({
+    id: "batch",
+    title: "Batch data",
+    entries: [
+      { key: "CPU", value: "30%" },
+      { key: "Memory", value: "100 MB" },
+      { key: "FPS", value: 60 },
+    ],
+  })
+})
