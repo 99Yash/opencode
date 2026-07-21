@@ -25,7 +25,7 @@ import { BashArity } from "@/permission/arity"
 export { Parameters } from "./shell/prompt"
 
 const MAX_METADATA_LENGTH = 30_000
-const POST_EXIT_OUTPUT_GRACE = "500 millis"
+const POST_EXIT_OUTPUT_GRACE_MS = 500
 const CWD = new Set(["cd", "chdir", "popd", "pushd", "push-location", "set-location"])
 const FILES = new Set([
   ...CWD,
@@ -559,7 +559,7 @@ export const ShellTool = Tool.define(
           const outputComplete = yield* Fiber.await(output).pipe(
             Effect.as(true),
             Effect.timeoutOrElse({
-              duration: POST_EXIT_OUTPUT_GRACE,
+              duration: `${POST_EXIT_OUTPUT_GRACE_MS} millis`,
               orElse: () => Effect.succeed(false),
             }),
           )
@@ -576,7 +576,10 @@ export const ShellTool = Tool.define(
         )
       }
       if (aborted) meta.push("User aborted the command")
-      if (incomplete) meta.push("shell tool exited without reaching EOF within 500 ms")
+      if (incomplete)
+        meta.push(
+          `shell tool exited without reaching EOF within ${POST_EXIT_OUTPUT_GRACE_MS} ms; a background descendant may be holding the output pipe open`,
+        )
       const raw = list.map((item) => item.text).join("")
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true
