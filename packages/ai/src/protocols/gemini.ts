@@ -93,8 +93,10 @@ const GeminiToolConfig = Schema.Struct({
 
 const GeminiThinkingConfig = Schema.Struct({
   thinkingBudget: Schema.optional(Schema.Number),
+  thinkingLevel: Schema.optional(Schema.Literals(["minimal", "low", "medium", "high"])),
   includeThoughts: Schema.optional(Schema.Boolean),
 })
+type GeminiThinkingLevel = NonNullable<Schema.Schema.Type<typeof GeminiThinkingConfig>["thinkingLevel"]>
 
 const GeminiGenerationConfig = Schema.Struct({
   maxOutputTokens: Schema.optional(Schema.Number),
@@ -289,11 +291,16 @@ const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMR
 
 const geminiOptions = (request: LLMRequest) => request.providerOptions?.gemini
 
+const isThinkingLevel = (value: unknown): value is GeminiThinkingLevel =>
+  value === "minimal" || value === "low" || value === "medium" || value === "high"
+
 const thinkingConfig = (request: LLMRequest) => {
   const value = geminiOptions(request)?.thinkingConfig
   if (!ProviderShared.isRecord(value)) return undefined
+  const thinkingLevel = value.thinkingLevel
   const result = {
     thinkingBudget: typeof value.thinkingBudget === "number" ? value.thinkingBudget : undefined,
+    thinkingLevel: isThinkingLevel(thinkingLevel) ? thinkingLevel : undefined,
     includeThoughts: typeof value.includeThoughts === "boolean" ? value.includeThoughts : undefined,
   }
   return Object.values(result).some((item) => item !== undefined) ? result : undefined
