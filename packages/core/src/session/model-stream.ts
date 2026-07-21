@@ -4,8 +4,8 @@ import { LLMClient, type LLMError, type LLMEvent, type LLMRequest } from "@openc
 import type { Agent } from "@opencode-ai/schema/agent"
 import type { Model } from "@opencode-ai/schema/model"
 import type { Session } from "@opencode-ai/schema/session"
+import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Context, Effect, Layer, Stream } from "effect"
-import { makeLocationNode } from "../effect/app-node"
 import { llmClient } from "../effect/app-node-platform"
 import { PluginHooks } from "../plugin/hooks"
 

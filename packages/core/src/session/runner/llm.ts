@@ -104,7 +104,14 @@ const layer = Layer.effect(
       const agent = loaded.agent
       const resolved = loaded.model
       const model = resolved.model
-      const compactionInput = { session, messages: loaded.messages, model, cost: resolved.cost }
+      const compactionInput = {
+        session,
+        messages: loaded.messages,
+        model,
+        agent: agent.id,
+        modelRef: resolved.ref,
+        cost: resolved.cost,
+      }
       if (compaction.required(compactionInput) && !(yield* SessionPending.compaction(db, session.id))) {
         const compacted = yield* compaction.compact(compactionInput)
         if (compacted.status === "completed") return { _tag: "RestartAfterCompaction", step: currentStep } as const
@@ -137,66 +144,66 @@ const layer = Layer.effect(
       const providerStream = llm
         .stream({ sessionID: session.id, agent: agent.id, model: resolved.ref, request: prepared.request })
         .pipe(
-        Stream.runForEach((event) =>
-          Effect.gen(function* () {
-            if (overflowFailure || publisher.hasProviderError()) return
-            if (LLMEvent.is.providerError(event)) {
-              if (isContextOverflowFailure(event) && !publisher.hasRetryEvidence()) {
-                overflowFailure = event
+          Stream.runForEach((event) =>
+            Effect.gen(function* () {
+              if (overflowFailure || publisher.hasProviderError()) return
+              if (LLMEvent.is.providerError(event)) {
+                if (isContextOverflowFailure(event) && !publisher.hasRetryEvidence()) {
+                  overflowFailure = event
+                  return
+                }
+              }
+              yield* publish(event)
+              if (LLMEvent.is.toolInputError(event)) {
+                if (prepared.resolveToolCall(event.name).type === "settle") needsContinuation = true
                 return
               }
-            }
-            yield* publish(event)
-            if (LLMEvent.is.toolInputError(event)) {
-              if (prepared.resolveToolCall(event.name).type === "settle") needsContinuation = true
-              return
-            }
-            if (event.type !== "tool-call" || event.providerExecuted) return
-            const tool = prepared.resolveToolCall(event.name)
-            if (tool.type === "reject") {
-              yield* serialized(publisher.failUnsettledTools(tool.error))
-              return
-            }
-            needsContinuation = true
-            const assistantMessageID = yield* publisher.assistantMessageID(event.id)
-            ownedToolFibers.push(
-              yield* Effect.uninterruptibleMask((restore) =>
-                restore(
-                  tool.settle({
-                    sessionID: session.id,
-                    agent: agent.id,
-                    messageID: assistantMessageID,
-                    call: event,
-                    progress: (update) =>
-                      serialized(
-                        events.publish(SessionEvent.Tool.Progress, {
-                          sessionID: session.id,
-                          assistantMessageID,
-                          callID: event.id,
-                          structured: { ...update.structured },
-                          content: [...update.content],
+              if (event.type !== "tool-call" || event.providerExecuted) return
+              const tool = prepared.resolveToolCall(event.name)
+              if (tool.type === "reject") {
+                yield* serialized(publisher.failUnsettledTools(tool.error))
+                return
+              }
+              needsContinuation = true
+              const assistantMessageID = yield* publisher.assistantMessageID(event.id)
+              ownedToolFibers.push(
+                yield* Effect.uninterruptibleMask((restore) =>
+                  restore(
+                    tool.settle({
+                      sessionID: session.id,
+                      agent: agent.id,
+                      messageID: assistantMessageID,
+                      call: event,
+                      progress: (update) =>
+                        serialized(
+                          events.publish(SessionEvent.Tool.Progress, {
+                            sessionID: session.id,
+                            assistantMessageID,
+                            callID: event.id,
+                            structured: { ...update.structured },
+                            content: [...update.content],
+                          }),
+                        ),
+                    }),
+                  ).pipe(
+                    Effect.flatMap((settlement) =>
+                      publish(
+                        LLMEvent.toolResult({
+                          id: event.id,
+                          name: event.name,
+                          result: settlement.result,
+                          output: settlement.output,
                         }),
+                        settlement.error,
                       ),
-                  }),
-                ).pipe(
-                  Effect.flatMap((settlement) =>
-                    publish(
-                      LLMEvent.toolResult({
-                        id: event.id,
-                        name: event.name,
-                        result: settlement.result,
-                        output: settlement.output,
-                      }),
-                      settlement.error,
                     ),
                   ),
-                ),
-              ).pipe(FiberSet.run(toolFibers)),
-            )
-          }),
-        ),
-        Effect.ensuring(serialized(publisher.flush())),
-      )
+                ).pipe(FiberSet.run(toolFibers)),
+              )
+            }),
+          ),
+          Effect.ensuring(serialized(publisher.flush())),
+        )
 
       const stepUsage = (settlement: NonNullable<ReturnType<typeof publisher.stepSettlement>>) => ({
         cost: SessionUsage.calculateCost(resolved.cost, settlement.tokens),
@@ -243,8 +250,7 @@ const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasRetryEvidence() &&
             isContextOverflowFailure(overflowFailure ?? streamFailure) &&
-            (yield* restore(recoverOverflow({ session, messages: loaded.messages, model, cost: resolved.cost })))
-              .status === "completed"
+            (yield* restore(recoverOverflow(compactionInput))).status === "completed"
           )
             return { _tag: "RestartAfterOverflowCompaction", step: currentStep } as const
 
