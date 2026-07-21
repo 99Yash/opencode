@@ -1,4 +1,4 @@
-import { Effect, Fiber, Stream } from "effect"
+import { Effect, Exit, Fiber, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -557,7 +557,7 @@ export const ShellTool = Tool.define(
           }
 
           const outputComplete = yield* Fiber.await(output).pipe(
-            Effect.as(true),
+            Effect.map(Exit.isSuccess),
             Effect.timeoutOrElse({
               duration: `${POST_EXIT_OUTPUT_GRACE_MS} millis`,
               orElse: () => Effect.succeed(false),

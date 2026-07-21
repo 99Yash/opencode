@@ -305,18 +305,19 @@ describe("cross-spawn spawner", () => {
             `writeFileSync(${JSON.stringify(file)}, String(child.pid))`,
           ].join("\n"),
         ])
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(async () => {
+            const pid = Number(await fs.readFile(file, "utf8").catch(() => ""))
+            if (!pid) return
+            try {
+              process.kill(pid, "SIGKILL")
+            } catch {}
+          }),
+        )
         const code = yield* handle.exitCode.pipe(
           Effect.timeoutOrElse({
             duration: "2 seconds",
             orElse: () => Effect.die("exitCode waited for inherited output pipes"),
-          }),
-        )
-        const pid = Number(yield* Effect.promise(() => fs.readFile(file, "utf8")))
-        yield* Effect.addFinalizer(() =>
-          Effect.sync(() => {
-            try {
-              process.kill(pid, "SIGKILL")
-            } catch {}
           }),
         )
 
