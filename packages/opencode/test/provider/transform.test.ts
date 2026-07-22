@@ -3091,6 +3091,12 @@ describe("ProviderTransform.reasoningVariants", () => {
     expect(ProviderTransform.reasoningVariants(model([]), target("@ai-sdk/openai"))).toEqual({})
   })
 
+  test("preserves fixed reasoning for the paid OpenCode MiniMax M3 route", () => {
+    expect(
+      ProviderTransform.reasoningVariants(model([]), target("@ai-sdk/openai-compatible", "minimax-m3", "opencode")),
+    ).toEqual({})
+  })
+
   test.each([
     ["@openrouter/ai-sdk-provider", { reasoning: { effort: "high" } }],
     ["@ai-sdk/anthropic", { thinking: { type: "adaptive" }, effort: "high" }, "claude-opus-4-6"],
@@ -3272,6 +3278,22 @@ describe("ProviderTransform.reasoningVariants", () => {
       },
     ],
     [
+      "opencode",
+      "@ai-sdk/anthropic",
+      {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    ],
+    [
+      "opencode-go",
+      "@ai-sdk/anthropic",
+      {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    ],
+    [
       "nvidia",
       "@ai-sdk/openai-compatible",
       {
@@ -3290,14 +3312,6 @@ describe("ProviderTransform.reasoningVariants", () => {
     [
       "kilo",
       "@ai-sdk/openai-compatible",
-      {
-        none: { reasoning: { enabled: false } },
-        thinking: { reasoning: { enabled: true } },
-      },
-    ],
-    [
-      "vercel",
-      "@ai-sdk/gateway",
       {
         none: { reasoning: { enabled: false } },
         thinking: { reasoning: { enabled: true } },

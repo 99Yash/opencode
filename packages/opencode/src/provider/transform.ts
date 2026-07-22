@@ -684,10 +684,7 @@ function googleThinkingVariants(model: Provider.Model): Record<string, Record<st
 
 function minimaxM3ThinkingVariants(model: Provider.Model): Provider.Model["variants"] {
   if (!model.api.id.toLowerCase().includes("minimax-m3")) return
-  if (
-    (model.providerID === "kilo" && model.api.npm === "@ai-sdk/openai-compatible") ||
-    (model.providerID === "vercel" && model.api.npm === "@ai-sdk/gateway")
-  ) {
+  if (model.providerID === "kilo" && model.api.npm === "@ai-sdk/openai-compatible") {
     return {
       none: { reasoning: { enabled: false } },
       thinking: { reasoning: { enabled: true } },
