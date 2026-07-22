@@ -1041,6 +1041,7 @@ export const Model = Schema.Struct({
   options: Schema.Record(Schema.String, Schema.Any),
   headers: Schema.Record(Schema.String, Schema.String),
   release_date: Schema.String,
+  variant: optional(ModelV2.VariantID),
   variants: optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Any))),
 }).annotate({ identifier: "Model" })
 export type Model = Types.DeepMutable<Schema.Schema.Type<typeof Model>>
@@ -1216,8 +1217,8 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       npm: model.provider?.npm ?? provider.npm ?? "@ai-sdk/openai-compatible",
     },
     status: model.status ?? "active",
-    headers: {},
-    options: {},
+    headers: { ...(model.provider?.headers ?? {}) },
+    options: { ...(model.provider?.body ?? {}) },
     cost: cost(model.cost),
     limit: {
       context: model.limit.context,
@@ -1246,10 +1247,12 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       interleaved: model.interleaved ?? false,
     },
     release_date: model.release_date ?? "",
+    variant: model.provider?.variant ? ModelV2.VariantID.make(model.provider.variant) : undefined,
     variants: {},
   }
 
-  const variants = ProviderTransform.reasoningVariants(model, base) ?? ProviderTransform.variants(base)
+  const variants =
+    model.variants ?? ProviderTransform.reasoningVariants(model, base) ?? ProviderTransform.variants(base)
 
   return {
     ...base,
@@ -1498,6 +1501,7 @@ const layer = Layer.effect(
               headers: mergeDeep(existingModel?.headers ?? {}, model.headers ?? {}),
               family: model.family ?? existingModel?.family ?? "",
               release_date: model.release_date ?? existingModel?.release_date ?? "",
+              variant: existingModel?.variant,
               variants: {},
             }
             const variants =

@@ -22,7 +22,7 @@ type Api =
     }
   | { readonly type: "native"; readonly url?: string; readonly settings: Record<string, unknown> }
 
-const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
+const model = (api: Api, variants: ModelV2.Info["variants"] = [], variant?: ModelV2.VariantID) =>
   ModelV2.Info.make({
     id: ModelV2.ID.make("test-model"),
     providerID: ProviderV2.ID.make("test-provider"),
@@ -32,6 +32,7 @@ const model = (api: Api, variants: ModelV2.Info["variants"] = []) =>
     request: {
       headers: { "x-test": "header" },
       body: { apiKey: "secret", custom_extension: { enabled: true } },
+      ...(variant ? { variant } : {}),
     },
     variants,
     time: { released: 0 },
@@ -171,6 +172,44 @@ describe("SessionRunnerModel", () => {
         custom_extension: { enabled: true },
         store: false,
         reasoning_effort: "high",
+      })
+    }),
+  )
+
+  it.effect("uses the catalog default Session variant", () =>
+    Effect.gen(function* () {
+      const catalog = model(
+        { type: "aisdk", package: "@ai-sdk/anthropic", url: "https://anthropic.example/v1" },
+        [
+          {
+            id: ModelV2.VariantID.make("none"),
+            headers: {},
+            body: { thinking: { type: "disabled" } },
+          },
+          {
+            id: ModelV2.VariantID.make("thinking"),
+            headers: {},
+            body: { thinking: { type: "adaptive" } },
+          },
+        ],
+        ModelV2.VariantID.make("thinking"),
+      )
+      const session = SessionV2.Info.make({
+        id: SessionV2.ID.make("ses_default_variant"),
+        projectID: ProjectV2.ID.global,
+        title: "test",
+        model: { id: catalog.id, providerID: catalog.providerID },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(0), updated: DateTime.makeUnsafe(0) },
+        location: { directory: AbsolutePath.make("/project") },
+      })
+
+      const resolved = yield* SessionRunnerModel.resolve(session, catalog)
+
+      expect(resolved.route.defaults.http?.body).toEqual({
+        custom_extension: { enabled: true },
+        thinking: { type: "adaptive" },
       })
     }),
   )

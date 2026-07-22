@@ -682,21 +682,6 @@ function googleThinkingVariants(model: Provider.Model): Record<string, Record<st
   )
 }
 
-function minimaxM3ThinkingVariants(model: Provider.Model): Provider.Model["variants"] {
-  if (!model.api.id.toLowerCase().includes("minimax-m3")) return
-  if (!["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"].includes(model.api.npm)) return
-  if (["nvidia", "lilac"].includes(model.providerID)) {
-    return {
-      none: { chat_template_kwargs: { thinking_mode: "disabled" } },
-      thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
-    }
-  }
-  return {
-    none: { thinking: { type: "disabled" } },
-    thinking: { thinking: { type: "adaptive" } },
-  }
-}
-
 export function variants(model: Provider.Model): Record<string, Record<string, any>> {
   if (!model.capabilities.reasoning) return {}
 
@@ -704,8 +689,6 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
   const glm52 = ["glm-5.2", "glm-5-2", "glm-5p2"].some(
     (name) => id.includes(name) || model.api.id.toLowerCase().includes(name),
   )
-  const minimaxM3 = minimaxM3ThinkingVariants(model)
-  if (minimaxM3) return minimaxM3
   const adaptiveThinkingOmitted = anthropicOmitsThinking(model.api.id)
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
   if (glm52 && model.api.npm === "@openrouter/ai-sdk-provider") {
@@ -1196,11 +1179,6 @@ export function options(input: {
 
   const modelId = input.model.api.id.toLowerCase()
 
-  // MiniMax's Anthropic interface defaults thinking off, unlike Chat Completions.
-  if (modelId.includes("minimax-m3") && input.model.api.npm === "@ai-sdk/anthropic") {
-    result["thinking"] = { type: "adaptive" }
-  }
-
   // Moonshot's Anthropic-compatible API uses adaptive effort rather than token budgets.
   // Request summaries so thinking content survives replay on subsequent turns.
   if (
@@ -1313,21 +1291,15 @@ const SLUG_OVERRIDES: Record<string, string> = {
 }
 
 export function providerOptions(model: Provider.Model, options: { [x: string]: any }) {
-  const cleaned =
-    model.api.id.toLowerCase().includes("minimax-m3") &&
-    ["nvidia", "lilac"].includes(model.providerID) &&
-    options.chat_template_kwargs?.thinking_mode !== undefined
-      ? Object.fromEntries(Object.entries(options).filter(([key]) => key !== "thinking"))
-      : options
   const usesOpenAIReasoningGate =
     model.api.npm === "@ai-sdk/openai" ||
     model.api.npm === "@ai-sdk/azure" ||
     model.api.npm === "@ai-sdk/amazon-bedrock/mantle"
   const normalized =
     usesOpenAIReasoningGate &&
-    (model.capabilities.reasoning || cleaned.reasoningEffort !== undefined || cleaned.reasoningSummary !== undefined)
-      ? { ...cleaned, forceReasoning: true }
-      : cleaned
+    (model.capabilities.reasoning || options.reasoningEffort !== undefined || options.reasoningSummary !== undefined)
+      ? { ...options, forceReasoning: true }
+      : options
 
   if (model.api.npm === "@ai-sdk/gateway") {
     // Gateway providerOptions are split across two namespaces:
@@ -1666,8 +1638,6 @@ function nonEmptyVariants(variants: NonNullable<Provider.Model["variants"]>): Pr
 }
 
 function reasoningToggle(model: Provider.Model): NonNullable<Provider.Model["variants"]> {
-  const minimaxM3 = minimaxM3ThinkingVariants(model)
-  if (minimaxM3) return minimaxM3
   if (model.api.npm === "@ai-sdk/alibaba")
     return {
       none: { enableThinking: false },

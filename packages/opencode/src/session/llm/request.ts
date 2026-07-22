@@ -77,10 +77,9 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system.push(header, rest.join("\n"))
   }
 
-  const variant =
-    !input.small && input.model.variants && input.user.model.variant
-      ? input.model.variants[input.user.model.variant]
-      : {}
+  const variantID =
+    input.user.model.variant === "default" ? input.model.variant : (input.user.model.variant ?? input.model.variant)
+  const variant = !input.small && input.model.variants && variantID ? input.model.variants[variantID] : {}
   const base = input.small
     ? ProviderTransform.smallOptions(input.model)
     : ProviderTransform.options({

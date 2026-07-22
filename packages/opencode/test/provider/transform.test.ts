@@ -5,8 +5,7 @@ import { LLMRequestPrep } from "@/session/llm/request"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
-import { generateText, jsonSchema } from "ai"
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
+import { jsonSchema } from "ai"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -279,22 +278,56 @@ describe("ProviderTransform.options - minimax m3 thinking", () => {
       limit: { output: 64_000 },
     }) as any
 
-  test("explicitly enables adaptive thinking with the anthropic SDK", () => {
+  test.each(["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"])("does not synthesize options for %s", (npm) => {
     expect(
       ProviderTransform.options({
-        model: createModel("@ai-sdk/anthropic"),
-        sessionID: "test-session-123",
-      }).thinking,
-    ).toEqual({ type: "adaptive" })
-  })
-
-  test("uses the native default with the openai-compatible SDK", () => {
-    expect(
-      ProviderTransform.options({
-        model: createModel("@ai-sdk/openai-compatible"),
+        model: createModel(npm),
         sessionID: "test-session-123",
       }).thinking,
     ).toBeUndefined()
+  })
+
+  test("applies the model default variant without changing small requests", async () => {
+    const model = {
+      ...createModel("@ai-sdk/anthropic"),
+      variant: "thinking",
+      variants: {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    }
+    const prepare = (small: boolean) =>
+      Effect.runPromise(
+        LLMRequestPrep.prepare({
+          user: {
+            id: "msg_user-test",
+            sessionID: "test-session-123",
+            role: "user",
+            time: { created: Date.now() },
+            agent: "test",
+            model: { providerID: "minimax", modelID: "minimax-m3" },
+          } as any,
+          sessionID: "test-session-123",
+          model,
+          agent: { name: "test", mode: "primary", options: {}, permission: [] } as any,
+          system: [],
+          messages: [{ role: "user", content: "Hello" }],
+          small,
+          tools: {},
+          provider: { id: "minimax", options: {} } as any,
+          auth: undefined,
+          plugin: {
+            trigger: (_name: string, _input: unknown, output: unknown) => Effect.succeed(output),
+            list: () => Effect.succeed([]),
+            init: () => Effect.void,
+          } as any,
+          flags: { outputTokenMax: 32_000, client: "test" } as any,
+          isWorkflow: false,
+        }),
+      )
+
+    expect((await prepare(false)).params.options.thinking).toEqual({ type: "adaptive" })
+    expect((await prepare(true)).params.options.thinking).toEqual({ type: "disabled" })
   })
 })
 
@@ -3078,10 +3111,10 @@ describe("ProviderTransform.temperature - Cohere North", () => {
 
 describe("ProviderTransform.reasoningVariants", () => {
   const model = (reasoning_options: ModelsDev.Model["reasoning_options"]) => ({ reasoning_options }) as ModelsDev.Model
-  const target = (npm: string, id = "test-model", providerID = "test") =>
+  const target = (npm: string, id = "test-model") =>
     ({
       id,
-      providerID,
+      providerID: "test",
       api: { id, npm, url: "" },
       capabilities: { reasoning: true },
       limit: { output: 64_000 },
@@ -3089,12 +3122,6 @@ describe("ProviderTransform.reasoningVariants", () => {
 
   test("respects explicitly empty reasoning options", () => {
     expect(ProviderTransform.reasoningVariants(model([]), target("@ai-sdk/openai"))).toEqual({})
-  })
-
-  test("preserves fixed reasoning for the paid OpenCode MiniMax M3 route", () => {
-    expect(
-      ProviderTransform.reasoningVariants(model([]), target("@ai-sdk/openai-compatible", "minimax-m3", "opencode")),
-    ).toEqual({})
   })
 
   test.each([
@@ -3258,75 +3285,6 @@ describe("ProviderTransform.reasoningVariants", () => {
     ],
   ])("converts toggle options for %s", (npm, expected) => {
     expect(ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm))).toEqual(expected)
-  })
-
-  test.each([
-    [
-      "minimax",
-      "@ai-sdk/anthropic",
-      {
-        none: { thinking: { type: "disabled" } },
-        thinking: { thinking: { type: "adaptive" } },
-      },
-    ],
-    [
-      "crossmodel",
-      "@ai-sdk/openai-compatible",
-      {
-        none: { thinking: { type: "disabled" } },
-        thinking: { thinking: { type: "adaptive" } },
-      },
-    ],
-    [
-      "opencode",
-      "@ai-sdk/anthropic",
-      {
-        none: { thinking: { type: "disabled" } },
-        thinking: { thinking: { type: "adaptive" } },
-      },
-    ],
-    [
-      "opencode-go",
-      "@ai-sdk/anthropic",
-      {
-        none: { thinking: { type: "disabled" } },
-        thinking: { thinking: { type: "adaptive" } },
-      },
-    ],
-    [
-      "nvidia",
-      "@ai-sdk/openai-compatible",
-      {
-        none: { chat_template_kwargs: { thinking_mode: "disabled" } },
-        thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
-      },
-    ],
-    [
-      "lilac",
-      "@ai-sdk/openai-compatible",
-      {
-        none: { chat_template_kwargs: { thinking_mode: "disabled" } },
-        thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
-      },
-    ],
-    [
-      "kilo",
-      "@ai-sdk/openai-compatible",
-      {
-        none: { thinking: { type: "disabled" } },
-        thinking: { thinking: { type: "adaptive" } },
-      },
-    ],
-  ])("maps MiniMax M3 toggle options for %s", (providerID, npm, expected) => {
-    expect(
-      ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm, "minimaxai/minimax-m3", providerID)),
-    ).toEqual(expected)
-  })
-
-  test("preserves unsupported Vercel MiniMax M3 toggle behavior", () => {
-    const vercel = target("@ai-sdk/gateway", "minimax/minimax-m3", "vercel")
-    expect(ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), vercel)).toBeUndefined()
-    expect(ProviderTransform.variants(vercel)).toEqual({})
   })
 
   test("combines Cohere toggle and budget options", () => {
@@ -3511,112 +3469,21 @@ describe("ProviderTransform.variants", () => {
     expect(result).toEqual({})
   })
 
-  test("minimax m3 using anthropic returns thinking toggles", () => {
-    const model = createMockModel({
-      id: "minimax/minimax-m3",
-      providerID: "minimax",
-      api: {
-        id: "MiniMax-M3",
-        url: "https://api.minimax.com/anthropic/v1",
-        npm: "@ai-sdk/anthropic",
-      },
-    })
-    const result = ProviderTransform.variants(model)
-    expect(result).toEqual({
-      none: { thinking: { type: "disabled" } },
-      thinking: { thinking: { type: "adaptive" } },
-    })
-  })
-
-  test("minimax m3 using openai-compatible returns thinking toggles", () => {
-    const model = createMockModel({
-      id: "minimax/minimax-m3",
-      providerID: "minimax",
-      api: {
-        id: "minimax-m3",
-        url: "https://api.minimax.com/v1",
-        npm: "@ai-sdk/openai-compatible",
-      },
-    })
-    expect(ProviderTransform.variants(model)).toEqual({
-      none: { thinking: { type: "disabled" } },
-      thinking: { thinking: { type: "adaptive" } },
-    })
-  })
-
-  test.each([
-    ["nvidia", "https://integrate.api.nvidia.com/v1"],
-    ["lilac", "https://api.getlilac.com/v1"],
-  ])("%s minimax m3 sends chat template thinking toggles", async (providerID, baseURL) => {
-    const model = createMockModel({
-      id: `${providerID}/minimaxai/minimax-m3`,
-      providerID,
-      api: {
-        id: "minimaxai/minimax-m3",
-        url: baseURL,
-        npm: "@ai-sdk/openai-compatible",
-      },
-    })
-    const variants = ProviderTransform.variants(model)
-    expect(variants).toEqual({
-      none: { chat_template_kwargs: { thinking_mode: "disabled" } },
-      thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
-    })
-    const bodies: Record<string, unknown>[] = []
-    const captureFetch: typeof fetch = Object.assign(
-      async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        bodies.push(JSON.parse(String(init?.body)))
-        return new Response(
-          JSON.stringify({
-            id: "test",
-            object: "chat.completion",
-            created: 0,
-            model: model.api.id,
-            choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-          }),
-          { headers: { "content-type": "application/json" } },
-        )
-      },
-      { preconnect: fetch.preconnect.bind(fetch) },
-    )
-    const provider = createOpenAICompatible({
-      name: providerID,
-      baseURL,
-      apiKey: "test",
-      fetch: captureFetch,
-    })
-    const call = async (options: Record<string, unknown>) => {
-      await generateText({
-        model: provider(model.api.id),
-        prompt: "test",
-        providerOptions: ProviderTransform.providerOptions(model, options),
+  test.each(["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"])(
+    "does not synthesize minimax m3 variants for %s",
+    (npm) => {
+      const model = createMockModel({
+        id: "minimax/minimax-m3",
+        providerID: "minimax",
+        api: {
+          id: "minimax-m3",
+          url: "https://api.minimax.com/v1",
+          npm,
+        },
       })
-      return bodies.at(-1)
-    }
-
-    const defaults = await call({})
-    expect(defaults?.chat_template_kwargs).toBeUndefined()
-    expect(defaults?.thinking).toBeUndefined()
-
-    const legacy = await call({ thinking: { type: "adaptive" } })
-    expect(legacy?.chat_template_kwargs).toBeUndefined()
-    expect(legacy?.thinking).toEqual({ type: "adaptive" })
-
-    const none = await call({
-      thinking: { type: "adaptive" },
-      ...variants.none,
-    })
-    expect(none?.chat_template_kwargs).toEqual({ thinking_mode: "disabled" })
-    expect(none?.thinking).toBeUndefined()
-
-    const thinking = await call({
-      thinking: { type: "disabled" },
-      ...variants.thinking,
-    })
-    expect(thinking?.chat_template_kwargs).toEqual({ thinking_mode: "enabled" })
-    expect(thinking?.thinking).toBeUndefined()
-  })
+      expect(ProviderTransform.variants(model)).toEqual({})
+    },
+  )
 
   test("glm returns empty object", () => {
     const model = createMockModel({

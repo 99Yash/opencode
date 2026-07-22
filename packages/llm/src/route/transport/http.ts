@@ -55,7 +55,6 @@ const PROTOCOL_BODY_OVERLAY_DENYLIST = new Set([
   "systemInstruction",
   "system_instruction",
   "temperature",
-  "thinking",
   "toolChoice",
   "toolConfig",
   "tool_choice",

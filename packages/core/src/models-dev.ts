@@ -69,6 +69,7 @@ export const Model = Schema.Struct({
   temperature: Schema.Boolean,
   tool_call: Schema.Boolean,
   reasoning_options: Schema.optional(Schema.Array(ReasoningOption)),
+  variants: Schema.optional(Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.MutableJson))),
   interleaved: Schema.optional(
     Schema.Union([
       Schema.Literal(true),
@@ -109,7 +110,13 @@ export const Model = Schema.Struct({
   ),
   status: Schema.optional(CatalogModelStatus),
   provider: Schema.optional(
-    Schema.Struct({ npm: Schema.optional(Schema.String), api: Schema.optional(Schema.String) }),
+    Schema.Struct({
+      npm: Schema.optional(Schema.String),
+      api: Schema.optional(Schema.String),
+      variant: Schema.optional(Schema.String),
+      body: Schema.optional(Schema.Record(Schema.String, Schema.MutableJson)),
+      headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    }),
   ),
 })
 export type Model = Schema.Schema.Type<typeof Model>

@@ -3,6 +3,7 @@ import type { ModelV2Info } from "@opencode-ai/sdk/v2/types"
 import { Effect, Stream } from "effect"
 import { EventV2 } from "../event"
 import { ModelsDev } from "../models-dev"
+import { ModelV2 } from "../model"
 import { ProviderV2 } from "../provider"
 
 function released(date: string) {
@@ -102,7 +103,11 @@ function applyModel(
     input: [...(model.modalities?.input ?? [])],
     output: [...(model.modalities?.output ?? [])],
   }
-  draft.variants = []
+  draft.variants = Object.entries(model.variants ?? {}).map(([id, body]) => ({
+    id: ModelV2.VariantID.make(id),
+    headers: {},
+    body: { ...body },
+  }))
   draft.time.released = released(model.release_date)
   draft.cost = input.cost ?? cost(model.cost)
   draft.status = model.status ?? "active"
@@ -112,6 +117,9 @@ function applyModel(
     input: model.limit.input,
     output: model.limit.output,
   }
+  if (model.provider?.variant !== undefined) draft.request.variant = ModelV2.VariantID.make(model.provider.variant)
+  Object.assign(draft.request.headers, model.provider?.headers ?? {})
+  Object.assign(draft.request.body, model.provider?.body ?? {})
   Object.assign(draft.request.headers, input.request?.headers ?? {})
   Object.assign(draft.request.body, input.request?.body ?? {})
 }

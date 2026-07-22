@@ -156,6 +156,32 @@ describe("request option precedence", () => {
     }),
   )
 
+  it.effect("allows provider thinking body overlays", () =>
+    LLMClient.generate(
+      LLM.request({
+        model: OpenAIChat.route
+          .with({
+            endpoint: { baseURL: "https://api.provider.test/v1/" },
+            auth: Auth.bearer("test"),
+            http: { body: { thinking: { type: "adaptive" } } },
+          })
+          .model({ id: "minimax-m3" }),
+        prompt: "Say hello.",
+      }),
+    ).pipe(
+      Effect.provide(
+        dynamicResponse((input) => {
+          expect(decodeJson(input.text)).toMatchObject({ thinking: { type: "adaptive" } })
+          return Effect.succeed(
+            input.respond(sseEvents(deltaChunk({}, "stop")), {
+              headers: { "content-type": "text/event-stream" },
+            }),
+          )
+        }),
+      ),
+    ),
+  )
+
   it.effect("uses model output limits after route limits and before call maxTokens", () =>
     Effect.gen(function* () {
       const route = AnthropicMessages.route.with({

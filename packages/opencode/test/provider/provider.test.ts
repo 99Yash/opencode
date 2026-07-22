@@ -1522,6 +1522,23 @@ test("models.dev reasoning options replace generated variants and unsupported to
         provider: { npm: "@ai-sdk/anthropic" },
         limit: { context: 1_048_576, output: 131_072 },
       },
+      providerVariants: {
+        id: "minimax-m3",
+        name: "Provider Variants",
+        reasoning: true,
+        reasoning_options: [{ type: "toggle" }],
+        variants: {
+          none: { thinking: { type: "disabled" } },
+          thinking: { thinking: { type: "adaptive" } },
+        },
+        provider: {
+          npm: "@ai-sdk/anthropic",
+          variant: "thinking",
+          body: { thinking: { type: "adaptive" } },
+          headers: { "x-model": "minimax-m3" },
+        },
+        limit: { context: 1_000_000, output: 128_000 },
+      },
     },
   } as unknown as ModelsDev.Provider
 
@@ -1539,6 +1556,13 @@ test("models.dev reasoning options replace generated variants and unsupported to
     high: { thinkingConfig: { includeThoughts: true, thinkingLevel: "high" } },
   })
   expect(models.anthropicCompatible.variants).toEqual({ max: { effort: "max" } })
+  expect(models.providerVariants.options).toEqual({ thinking: { type: "adaptive" } })
+  expect(models.providerVariants.headers).toEqual({ "x-model": "minimax-m3" })
+  expect(models.providerVariants.variant).toBe(ModelV2.VariantID.make("thinking"))
+  expect(models.providerVariants.variants).toEqual({
+    none: { thinking: { type: "disabled" } },
+    thinking: { thinking: { type: "adaptive" } },
+  })
   expect(models["gemini-3-pro-fast"].variants).toEqual(models.override.variants)
 })
 

@@ -48,8 +48,13 @@ describe("ModelsDevPlugin", () => {
                   release_date: "2026-01-01",
                   attachment: false,
                   reasoning: true,
+                  reasoning_options: [{ type: "toggle" }],
                   temperature: true,
                   tool_call: true,
+                  variants: {
+                    none: { thinking: { type: "disabled" } },
+                    thinking: { thinking: { type: "adaptive" } },
+                  },
                   cost: {
                     input: 2.5,
                     output: 15,
@@ -64,6 +69,11 @@ describe("ModelsDevPlugin", () => {
                     context_over_200k: { input: 5, output: 22.5, cache_read: 0.5 },
                   },
                   limit: { context: 1_050_000, input: 922_000, output: 128_000 },
+                  provider: {
+                    variant: "thinking",
+                    body: { thinking: { type: "adaptive" } },
+                    headers: { "x-model": "gpt-5.4" },
+                  },
                   experimental: {
                     modes: {
                       fast: {
@@ -93,18 +103,29 @@ describe("ModelsDevPlugin", () => {
       const base = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4"))
       const fast = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4-fast"))
 
-      expect(base?.variants).toEqual([])
-      expect(base?.request.body).toEqual({})
+      expect(base?.variants).toEqual([
+        { id: ModelV2.VariantID.make("none"), headers: {}, body: { thinking: { type: "disabled" } } },
+        { id: ModelV2.VariantID.make("thinking"), headers: {}, body: { thinking: { type: "adaptive" } } },
+      ])
+      expect(base?.request).toEqual({
+        variant: ModelV2.VariantID.make("thinking"),
+        headers: { "x-model": "gpt-5.4" },
+        body: { thinking: { type: "adaptive" } },
+      })
       expect(fast).toMatchObject({
         id: "gpt-5.4-fast",
         providerID: "acme",
         name: "GPT-5.4 Fast",
         api: { id: "gpt-5.4" },
         request: {
-          headers: { "x-mode": "fast" },
-          body: { service_tier: "priority" },
+          variant: ModelV2.VariantID.make("thinking"),
+          headers: { "x-model": "gpt-5.4", "x-mode": "fast" },
+          body: { thinking: { type: "adaptive" }, service_tier: "priority" },
         },
-        variants: [],
+        variants: [
+          { id: ModelV2.VariantID.make("none"), headers: {}, body: { thinking: { type: "disabled" } } },
+          { id: ModelV2.VariantID.make("thinking"), headers: {}, body: { thinking: { type: "adaptive" } } },
+        ],
       })
       expect(fast?.cost).toEqual([
         { input: 5, output: 30, cache: { read: 0.5, write: 0 } },
