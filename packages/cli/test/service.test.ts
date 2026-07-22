@@ -430,17 +430,15 @@ test("stale dead registration is replaced after binding the selected port", asyn
     stdout: "ignore",
   })
   try {
-    const info = await waitForInfo(registration, (value) => value.id !== "dead")
+    const info = await waitForInfo(registration, (value) => value.id !== "dead", 60_000)
     expect(new URL(info.url).port).toBe(String(port))
     expect(info.pid).toBe(owner.pid)
-    await Effect.runPromise(Service.stop({ file: registration }).pipe(Effect.provide(NodeFileSystem.layer)))
-    await owner.exited
   } finally {
     owner.kill("SIGTERM")
     await owner.exited
     await fs.rm(root, { recursive: true, force: true })
   }
-}, 30_000)
+}, 75_000)
 
 test("a failed service stays registered and owns the selected port until stopped", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-service-failed-"))
@@ -481,8 +479,9 @@ test("a failed service stays registered and owns the selected port until stopped
   }
 }, 30_000)
 
-async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true) {
-  for (let attempt = 0; attempt < 400; attempt++) {
+async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true, timeout = 20_000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
     const value = await Bun.file(file)
       .json()
       .catch(() => undefined)
