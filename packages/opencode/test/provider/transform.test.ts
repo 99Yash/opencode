@@ -3309,10 +3309,24 @@ describe("ProviderTransform.reasoningVariants", () => {
         thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
       },
     ],
+    [
+      "kilo",
+      "@ai-sdk/openai-compatible",
+      {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    ],
   ])("maps MiniMax M3 toggle options for %s", (providerID, npm, expected) => {
     expect(
       ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm, "minimaxai/minimax-m3", providerID)),
     ).toEqual(expected)
+  })
+
+  test("preserves unsupported Vercel MiniMax M3 toggle behavior", () => {
+    const vercel = target("@ai-sdk/gateway", "minimax/minimax-m3", "vercel")
+    expect(ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), vercel)).toBeUndefined()
+    expect(ProviderTransform.variants(vercel)).toEqual({})
   })
 
   test("combines Cohere toggle and budget options", () => {
@@ -3548,14 +3562,10 @@ describe("ProviderTransform.variants", () => {
       none: { chat_template_kwargs: { thinking_mode: "disabled" } },
       thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
     })
-    expect(ProviderTransform.providerOptions(model, { thinking: { type: "adaptive" } })).toEqual({
-      [providerID]: { thinking: { type: "adaptive" } },
-    })
-
-    let body: Record<string, unknown> | undefined
+    const bodies: Record<string, unknown>[] = []
     const captureFetch: typeof fetch = Object.assign(
       async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        body = JSON.parse(String(init?.body))
+        bodies.push(JSON.parse(String(init?.body)))
         return new Response(
           JSON.stringify({
             id: "test",
@@ -3576,17 +3586,36 @@ describe("ProviderTransform.variants", () => {
       apiKey: "test",
       fetch: captureFetch,
     })
-    await generateText({
-      model: provider(model.api.id),
-      prompt: "test",
-      providerOptions: ProviderTransform.providerOptions(model, {
-        thinking: { type: "adaptive" },
-        ...variants.none,
-      }),
-    })
+    const call = async (options: Record<string, unknown>) => {
+      await generateText({
+        model: provider(model.api.id),
+        prompt: "test",
+        providerOptions: ProviderTransform.providerOptions(model, options),
+      })
+      return bodies.at(-1)
+    }
 
-    expect(body?.chat_template_kwargs).toEqual({ thinking_mode: "disabled" })
-    expect(body?.thinking).toBeUndefined()
+    const defaults = await call({})
+    expect(defaults?.chat_template_kwargs).toBeUndefined()
+    expect(defaults?.thinking).toBeUndefined()
+
+    const legacy = await call({ thinking: { type: "adaptive" } })
+    expect(legacy?.chat_template_kwargs).toBeUndefined()
+    expect(legacy?.thinking).toEqual({ type: "adaptive" })
+
+    const none = await call({
+      thinking: { type: "adaptive" },
+      ...variants.none,
+    })
+    expect(none?.chat_template_kwargs).toEqual({ thinking_mode: "disabled" })
+    expect(none?.thinking).toBeUndefined()
+
+    const thinking = await call({
+      thinking: { type: "disabled" },
+      ...variants.thinking,
+    })
+    expect(thinking?.chat_template_kwargs).toEqual({ thinking_mode: "enabled" })
+    expect(thinking?.thinking).toBeUndefined()
   })
 
   test("glm returns empty object", () => {
