@@ -252,8 +252,6 @@ GitHubCopilot.configure({ baseURL: "https://copilot.test", apiKey: "copilot-key"
 // @ts-expect-error GitHub Copilot model selectors only accept model ids.
 GitHubCopilot.configure({ baseURL: "https://copilot.test", apiKey: "copilot-key" }).model("gpt-4.1", {})
 
-Alibaba.configure({ image: { providerOptions: { qwen: { promptExtend: true } } } }).image("qwen-image-2.0")
-// @ts-expect-error Alibaba Qwen options are closed and reject unimplemented parameters.
-Alibaba.configure({ image: { providerOptions: { qwen: { style: "photorealistic" } } } })
-// @ts-expect-error Alibaba Wan options are closed and reject unimplemented parameters.
-Alibaba.configure({ image: { providerOptions: { wan: { parameters: { watermark: true } } } } })
+Alibaba.configure({ apiKey: "dashscope-key" }).image("any-model-id")
+// @ts-expect-error Alibaba image options are request-scoped, not provider configuration.
+Alibaba.configure({ image: { options: { promptExtend: true } } })

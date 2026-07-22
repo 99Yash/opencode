@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Option, Schema } from "effect"
-import { Image } from "../../src"
+import { Image, ImageInput } from "../../src"
 import { Alibaba } from "../../src/providers"
+import { dimensions } from "../lib/image"
 import { recordedTests } from "../recorded-test"
 
 const alibaba = Alibaba.configure({
@@ -58,6 +59,15 @@ const recorded = recordedTests({
   options: { redact: { body: redactSignedUrls } },
 })
 
+const inspectLive = async (value: string | Uint8Array | undefined) => {
+  if (process.env.RECORD !== "true" || typeof value !== "string") return
+  const response = await fetch(value)
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  expect(response.headers.get("content-type")).toMatch(/^image\//)
+  expect(dimensions(bytes).width).toBeGreaterThan(0)
+  expect(dimensions(bytes).height).toBeGreaterThan(0)
+}
+
 test("recorder redacts signed URL credentials in nested JSON strings repeatably", () => {
   const body = JSON.stringify({
     output: {
@@ -87,8 +97,7 @@ describe("Alibaba Images recorded", () => {
       const response = yield* Image.generate({
         model: alibaba.image("qwen-image-2.0"),
         prompt: "A simple flat black circle centered on a plain white background.",
-        size: { width: 512, height: 512 },
-        providerOptions: { alibaba: { qwen: { promptExtend: false, watermark: false } } },
+        options: { size: "512*512", promptExtend: false, watermark: false },
       })
 
       expect(response.images).toHaveLength(1)
@@ -102,12 +111,54 @@ describe("Alibaba Images recorded", () => {
       const response = yield* Image.generate({
         model: alibaba.image("wan2.7-image"),
         prompt: "A simple flat black square centered on a plain white background.",
-        providerOptions: { alibaba: { wan: { resolution: "1K", thinkingMode: false, watermark: false } } },
+        options: { resolution: "1K", thinkingMode: false, watermark: false },
       })
 
       expect(response.images).toHaveLength(1)
       expect(response.image?.mediaType).toBe("image/png")
       expect(response.image?.data).toStartWith("https://")
+    }),
+  )
+
+  recorded.effect("edits with Qwen Image 2.0", () =>
+    Effect.gen(function* () {
+      const response = yield* Image.generate({
+        model: alibaba.image("qwen-image-2.0"),
+        prompt: "Turn the black source shape into a bright orange sun icon on a pale blue background.",
+        images: [
+          ImageInput.bytes(
+            yield* Effect.promise(() => Bun.file("test/fixtures/images/edit-source.jpg").bytes()),
+            "image/jpeg",
+          ),
+        ],
+        options: { promptExtend: false, watermark: false },
+      })
+
+      expect(response.images).toHaveLength(1)
+      expect(response.image?.mediaType).toBe("image/png")
+      expect(response.image?.data).toStartWith("https://")
+      yield* Effect.promise(() => inspectLive(response.image?.data))
+    }),
+  )
+
+  recorded.effect("edits with Wan 2.7", () =>
+    Effect.gen(function* () {
+      const response = yield* Image.generate({
+        model: alibaba.image("wan2.7-image"),
+        prompt: "Turn the black source shape into a bright orange sun icon on a pale blue background.",
+        images: [
+          ImageInput.bytes(
+            yield* Effect.promise(() => Bun.file("test/fixtures/images/edit-source-256.jpg").bytes()),
+            "image/jpeg",
+          ),
+        ],
+        options: { resolution: "1K", thinkingMode: false, watermark: false },
+      })
+
+      expect(response.images).toHaveLength(1)
+      expect(response.image?.mediaType).toBe("image/png")
+      expect(response.image?.data).toStartWith("https://")
+      yield* Effect.promise(() => inspectLive(response.image?.data))
     }),
   )
 })

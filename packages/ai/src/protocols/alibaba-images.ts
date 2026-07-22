@@ -1,13 +1,6 @@
 import { Effect, Schema } from "effect"
 import { Headers, HttpClientRequest } from "effect/unstable/http"
-import {
-  GeneratedImage,
-  ImageModel,
-  ImageResponse,
-  type ImageModelDefaults,
-  type ImageRequest,
-  type ImageRoute,
-} from "../image"
+import { GeneratedImage, ImageModel, ImageResponse, type ImageRequestFor, type ImageRoute } from "../image"
 import { Auth, type Definition as AuthDefinition } from "../route/auth"
 import {
   InvalidProviderOutputReason,
@@ -16,87 +9,44 @@ import {
   Usage,
   mergeHttpOptions,
   mergeJsonRecords,
+  type HttpOptions,
 } from "../schema"
 import { ProviderShared } from "./shared"
+import { ImageInputs } from "./utils/image-input"
 
 const ADAPTER = "alibaba-images"
 export const DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/api/v1"
 export const PATH = "/services/aigc/multimodal-generation/generation"
 
-export type Family = "qwen" | "wan"
+export type AlibabaImageString<Known extends string> = Known | (string & {})
 
-export interface QwenImageOptions {
-  readonly negativePrompt?: string
-  readonly promptExtend?: boolean
-  readonly watermark?: boolean
-}
-
-export interface WanColor {
+export interface AlibabaColor {
   readonly hex: string
   readonly ratio: string
 }
 
-export interface WanImageOptions {
-  readonly resolution?: "1K" | "2K" | "4K"
+export type AlibabaImageOptions = {
+  readonly n?: number
+  readonly size?: string
+  readonly resolution?: AlibabaImageString<"1K" | "2K" | "4K">
+  readonly negativePrompt?: string
+  readonly promptExtend?: boolean
   readonly thinkingMode?: boolean
-  readonly colorPalette?: ReadonlyArray<WanColor>
+  readonly colorPalette?: ReadonlyArray<AlibabaColor>
   readonly watermark?: boolean
-}
+  readonly seed?: number
+} & Record<string, unknown>
 
-export interface AlibabaImageOptions {
-  readonly qwen?: QwenImageOptions
-  readonly wan?: WanImageOptions
-}
-
-declare module "../image" {
-  interface ImageProviderOptions {
-    readonly alibaba?: AlibabaImageOptions
+export type AlibabaImageBody = Record<string, unknown> & {
+  readonly model: string
+  readonly input: {
+    readonly messages: ReadonlyArray<{
+      readonly role: "user"
+      readonly content: ReadonlyArray<{ readonly image: string } | { readonly text: string }>
+    }>
   }
+  readonly parameters: Record<string, unknown>
 }
-
-const MessageInput = Schema.Struct({
-  messages: Schema.Tuple([
-    Schema.Struct({
-      role: Schema.tag("user"),
-      content: Schema.Tuple([Schema.Struct({ text: Schema.String })]),
-    }),
-  ]),
-})
-
-const QwenBody = Schema.Struct({
-  model: Schema.String,
-  input: MessageInput,
-  parameters: Schema.Struct({
-    size: Schema.optional(Schema.String),
-    n: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-    negative_prompt: Schema.optional(Schema.String),
-    prompt_extend: Schema.optional(Schema.Boolean),
-    watermark: Schema.optional(Schema.Boolean),
-    seed: Schema.optional(Schema.Int),
-  }),
-})
-export type QwenBody = Schema.Schema.Type<typeof QwenBody>
-
-const WanBody = Schema.Struct({
-  model: Schema.String,
-  input: MessageInput,
-  parameters: Schema.Struct({
-    size: Schema.optional(Schema.String),
-    n: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-    thinking_mode: Schema.optional(Schema.Boolean),
-    color_palette: Schema.optional(
-      Schema.Array(
-        Schema.Struct({
-          hex: Schema.String,
-          ratio: Schema.String,
-        }),
-      ),
-    ),
-    watermark: Schema.optional(Schema.Boolean),
-    seed: Schema.optional(Schema.Int),
-  }),
-})
-export type WanBody = Schema.Schema.Type<typeof WanBody>
 
 const AlibabaResponse = Schema.Struct({
   output: Schema.optional(
@@ -136,60 +86,22 @@ const AlibabaResponse = Schema.Struct({
 
 export interface ModelInput {
   readonly id: string
-  readonly family: Family
   readonly auth: AuthDefinition
   readonly baseURL?: string
   readonly headers?: Record<string, string>
-  readonly defaults?: ImageModelDefaults
+  readonly http?: HttpOptions
 }
 
-const options = (request: ImageRequest): AlibabaImageOptions => ({
-  ...request.model.defaults?.providerOptions?.alibaba,
-  ...request.providerOptions?.alibaba,
-  qwen: {
-    ...(request.model.defaults?.providerOptions?.alibaba?.qwen as QwenImageOptions | undefined),
-    ...(request.providerOptions?.alibaba?.qwen as QwenImageOptions | undefined),
-  },
-  wan: {
-    ...(request.model.defaults?.providerOptions?.alibaba?.wan as WanImageOptions | undefined),
-    ...(request.providerOptions?.alibaba?.wan as WanImageOptions | undefined),
-  },
-})
-
-const messageInput = (request: ImageRequest) => ({
-  messages: [{ role: "user" as const, content: [{ text: request.prompt }] }] as const,
-})
-
-const qwenBody = (request: ImageRequest): QwenBody => {
-  const qwen = options(request).qwen
+const nativeOptions = (options: AlibabaImageOptions | undefined) => {
+  if (!options) return undefined
+  const { resolution, negativePrompt, promptExtend, thinkingMode, colorPalette, ...native } = options
   return {
-    model: request.model.id,
-    input: messageInput(request),
-    parameters: {
-      size: request.size === undefined ? undefined : `${request.size.width}*${request.size.height}`,
-      n: request.count,
-      negative_prompt: qwen?.negativePrompt,
-      prompt_extend: qwen?.promptExtend,
-      watermark: qwen?.watermark,
-      seed: request.seed,
-    },
-  }
-}
-
-const wanBody = (request: ImageRequest): WanBody => {
-  const wan = options(request).wan
-  return {
-    model: request.model.id,
-    input: messageInput(request),
-    parameters: {
-      size:
-        wan?.resolution ?? (request.size === undefined ? undefined : `${request.size.width}*${request.size.height}`),
-      n: request.count,
-      thinking_mode: wan?.thinkingMode,
-      color_palette: wan?.colorPalette === undefined ? undefined : [...wan.colorPalette],
-      watermark: wan?.watermark,
-      seed: request.seed,
-    },
+    size: resolution,
+    negative_prompt: negativePrompt,
+    prompt_extend: promptExtend,
+    thinking_mode: thinkingMode,
+    color_palette: colorPalette,
+    ...native,
   }
 }
 
@@ -221,21 +133,6 @@ const applyQuery = (url: string, query: Record<string, string> | undefined) => {
   return next.toString()
 }
 
-const PROTOCOL_BODY_FIELDS = new Set(["model", "input", "parameters"])
-
-const bodyWithOverlay = Effect.fn("AlibabaImages.bodyWithOverlay")(function* (
-  imageBody: QwenBody | WanBody,
-  overlay: Record<string, unknown> | undefined,
-) {
-  if (!overlay) return imageBody
-  const reserved = Object.keys(overlay).filter((key) => PROTOCOL_BODY_FIELDS.has(key))
-  if (reserved.length > 0)
-    return yield* ProviderShared.invalidRequest(
-      `http.body cannot overlay protocol-owned field(s): ${reserved.join(", ")}`,
-    )
-  return mergeJsonRecords(imageBody, overlay) ?? imageBody
-})
-
 const expiration = (url: string) => {
   if (!URL.canParse(url)) return undefined
   const value = new URL(url).searchParams.get("Expires")
@@ -245,32 +142,31 @@ const expiration = (url: string) => {
 }
 
 export const model = (input: ModelInput) => {
-  const route: ImageRoute = {
-    id: `${ADAPTER}-${input.family}`,
-    generate: Effect.fn("AlibabaImages.generate")(function* (request: ImageRequest, execute) {
-      if (request.aspectRatio !== undefined)
-        return yield* ProviderShared.invalidRequest("Alibaba Images does not support the common aspectRatio option")
-      if (
-        input.family === "qwen" &&
-        (request.model.defaults?.providerOptions?.alibaba?.wan !== undefined ||
-          request.providerOptions?.alibaba?.wan !== undefined)
-      )
-        return yield* ProviderShared.invalidRequest("Qwen Image does not accept providerOptions.alibaba.wan")
-      if (
-        input.family === "wan" &&
-        (request.model.defaults?.providerOptions?.alibaba?.qwen !== undefined ||
-          request.providerOptions?.alibaba?.qwen !== undefined)
-      )
-        return yield* ProviderShared.invalidRequest("Wan Image does not accept providerOptions.alibaba.qwen")
-      if (input.family === "wan" && request.size !== undefined && options(request).wan?.resolution !== undefined)
-        return yield* ProviderShared.invalidRequest("Wan Image accepts either size or resolution, not both")
-
-      const requestBody = yield* ProviderShared.validateWith(
-        Schema.decodeUnknownEffect(input.family === "qwen" ? QwenBody : WanBody),
-      )(input.family === "qwen" ? qwenBody(request) : wanBody(request))
-      const http = mergeHttpOptions(request.model.defaults?.http, request.http)
-      const overlaidBody = yield* bodyWithOverlay(requestBody, http?.body)
-      const text = ProviderShared.encodeJson(overlaidBody)
+  const route: ImageRoute<AlibabaImageOptions> = {
+    id: ADAPTER,
+    generate: Effect.fn("AlibabaImages.generate")(function* (request: ImageRequestFor<AlibabaImageOptions>, execute) {
+      const content = yield* Effect.forEach(request.images ?? [], (image) => {
+        if (image.type === "bytes") return Effect.succeed({ image: ImageInputs.dataUrl(image) })
+        if (image.type === "url") return Effect.succeed({ image: image.url })
+        return ImageInputs.invalid(ADAPTER, "Alibaba Images accepts image URLs, data URLs, and bytes")
+      })
+      const requestBody: AlibabaImageBody = {
+        model: request.model.id,
+        input: { messages: [{ role: "user", content: [...content, { text: request.prompt }] }] },
+        parameters: nativeOptions(request.options) ?? {},
+      }
+      const http = mergeHttpOptions(request.model.http, request.http)
+      const overlay = mergeJsonRecords(requestBody, http?.body) ?? requestBody
+      const body: AlibabaImageBody = {
+        ...overlay,
+        model: requestBody.model,
+        input: requestBody.input,
+        parameters:
+          overlay.parameters !== null && typeof overlay.parameters === "object" && !Array.isArray(overlay.parameters)
+            ? (overlay.parameters as Record<string, unknown>)
+            : requestBody.parameters,
+      }
+      const text = ProviderShared.encodeJson(body)
       const url = applyQuery(`${(input.baseURL ?? DEFAULT_BASE_URL).replace(/\/$/, "")}${PATH}`, http?.query)
       const headers = yield* Auth.toEffect(input.auth)({
         request,
@@ -293,26 +189,20 @@ export const model = (input: ModelInput) => {
       )
       if (decoded.code !== undefined || decoded.output === undefined)
         return yield* providerError(decoded.code, decoded.message, decoded.request_id)
-      const urls = decoded.output.choices.flatMap((choice) => choice.message.content.map((content) => content.image))
+      const urls = decoded.output.choices.flatMap((choice) => choice.message.content.map((item) => item.image))
       if (urls.length === 0)
         return yield* invalidOutput("Alibaba Images returned no images", { requestId: decoded.request_id })
 
       return new ImageResponse({
-        images: urls.map((url) => {
-          const expiresAt = expiration(url)
-          return new GeneratedImage({
-            mediaType: "image/png",
-            data: url,
-            expiresAt,
-            providerMetadata: {
-              alibaba: {
-                modelId: request.model.id,
-                family: input.family,
-                expiresAt,
-              },
-            },
-          })
-        }),
+        images: urls.map(
+          (url) =>
+            new GeneratedImage({
+              mediaType: "image/png",
+              data: url,
+              expiresAt: expiration(url),
+              providerMetadata: { alibaba: { modelId: request.model.id } },
+            }),
+        ),
         usage:
           decoded.usage === undefined
             ? undefined
@@ -322,17 +212,16 @@ export const model = (input: ModelInput) => {
                 totalTokens: decoded.usage.total_tokens,
                 providerMetadata: { alibaba: decoded.usage },
               }),
-        providerMetadata: {
-          alibaba: {
-            requestId: decoded.request_id,
-            modelId: request.model.id,
-            family: input.family,
-          },
-        },
+        providerMetadata: { alibaba: { requestId: decoded.request_id, modelId: request.model.id } },
       })
     }),
   }
-  return ImageModel.make({ id: input.id, provider: "alibaba", route, defaults: input.defaults })
+  return ImageModel.make<AlibabaImageOptions>({
+    id: input.id,
+    provider: "alibaba",
+    route,
+    http: input.http,
+  })
 }
 
 export const AlibabaImages = {
