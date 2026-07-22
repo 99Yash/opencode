@@ -5,7 +5,8 @@ import { LLMRequestPrep } from "@/session/llm/request"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
-import { jsonSchema } from "ai"
+import { generateText, jsonSchema } from "ai"
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 
 describe("ProviderTransform.options - setCacheKey", () => {
   const sessionID = "test-session-123"
@@ -3523,7 +3524,7 @@ describe("ProviderTransform.variants", () => {
     })
   })
 
-  test("nvidia minimax m3 uses chat template thinking toggles", () => {
+  test("nvidia minimax m3 sends chat template thinking toggles", async () => {
     const model = createMockModel({
       id: "nvidia/minimaxai/minimax-m3",
       providerID: "nvidia",
@@ -3533,10 +3534,44 @@ describe("ProviderTransform.variants", () => {
         npm: "@ai-sdk/openai-compatible",
       },
     })
-    expect(ProviderTransform.variants(model)).toEqual({
+    const variants = ProviderTransform.variants(model)
+    expect(variants).toEqual({
       none: { chat_template_kwargs: { thinking_mode: "disabled" } },
       thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
     })
+
+    let body: Record<string, unknown> | undefined
+    const captureFetch: typeof fetch = Object.assign(
+      async (_url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        body = JSON.parse(String(init?.body))
+        return new Response(
+          JSON.stringify({
+            id: "test",
+            object: "chat.completion",
+            created: 0,
+            model: model.api.id,
+            choices: [{ index: 0, message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+          { headers: { "content-type": "application/json" } },
+        )
+      },
+      { preconnect: fetch.preconnect.bind(fetch) },
+    )
+    const provider = createOpenAICompatible({
+      name: "nvidia",
+      baseURL: "https://integrate.api.nvidia.com/v1",
+      apiKey: "test",
+      fetch: captureFetch,
+    })
+    await generateText({
+      model: provider(model.api.id),
+      prompt: "test",
+      providerOptions: ProviderTransform.providerOptions(model, variants.thinking),
+    })
+
+    expect(body?.chat_template_kwargs).toEqual({ thinking_mode: "enabled" })
+    expect(body?.thinking).toBeUndefined()
   })
 
   test("glm returns empty object", () => {
