@@ -3309,14 +3309,6 @@ describe("ProviderTransform.reasoningVariants", () => {
         thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
       },
     ],
-    [
-      "kilo",
-      "@ai-sdk/openai-compatible",
-      {
-        none: { reasoning: { enabled: false } },
-        thinking: { reasoning: { enabled: true } },
-      },
-    ],
   ])("maps MiniMax M3 toggle options for %s", (providerID, npm, expected) => {
     expect(
       ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm, "minimaxai/minimax-m3", providerID)),
@@ -3538,13 +3530,16 @@ describe("ProviderTransform.variants", () => {
     })
   })
 
-  test("nvidia minimax m3 sends chat template thinking toggles", async () => {
+  test.each([
+    ["nvidia", "https://integrate.api.nvidia.com/v1"],
+    ["lilac", "https://api.getlilac.com/v1"],
+  ])("%s minimax m3 sends chat template thinking toggles", async (providerID, baseURL) => {
     const model = createMockModel({
-      id: "nvidia/minimaxai/minimax-m3",
-      providerID: "nvidia",
+      id: `${providerID}/minimaxai/minimax-m3`,
+      providerID,
       api: {
         id: "minimaxai/minimax-m3",
-        url: "https://integrate.api.nvidia.com/v1",
+        url: baseURL,
         npm: "@ai-sdk/openai-compatible",
       },
     })
@@ -3552,6 +3547,9 @@ describe("ProviderTransform.variants", () => {
     expect(variants).toEqual({
       none: { chat_template_kwargs: { thinking_mode: "disabled" } },
       thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
+    })
+    expect(ProviderTransform.providerOptions(model, { thinking: { type: "adaptive" } })).toEqual({
+      [providerID]: { thinking: { type: "adaptive" } },
     })
 
     let body: Record<string, unknown> | undefined
@@ -3573,18 +3571,21 @@ describe("ProviderTransform.variants", () => {
       { preconnect: fetch.preconnect.bind(fetch) },
     )
     const provider = createOpenAICompatible({
-      name: "nvidia",
-      baseURL: "https://integrate.api.nvidia.com/v1",
+      name: providerID,
+      baseURL,
       apiKey: "test",
       fetch: captureFetch,
     })
     await generateText({
       model: provider(model.api.id),
       prompt: "test",
-      providerOptions: ProviderTransform.providerOptions(model, variants.thinking),
+      providerOptions: ProviderTransform.providerOptions(model, {
+        thinking: { type: "adaptive" },
+        ...variants.none,
+      }),
     })
 
-    expect(body?.chat_template_kwargs).toEqual({ thinking_mode: "enabled" })
+    expect(body?.chat_template_kwargs).toEqual({ thinking_mode: "disabled" })
     expect(body?.thinking).toBeUndefined()
   })
 

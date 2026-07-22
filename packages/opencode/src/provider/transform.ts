@@ -684,12 +684,6 @@ function googleThinkingVariants(model: Provider.Model): Record<string, Record<st
 
 function minimaxM3ThinkingVariants(model: Provider.Model): Provider.Model["variants"] {
   if (!model.api.id.toLowerCase().includes("minimax-m3")) return
-  if (model.providerID === "kilo" && model.api.npm === "@ai-sdk/openai-compatible") {
-    return {
-      none: { reasoning: { enabled: false } },
-      thinking: { reasoning: { enabled: true } },
-    }
-  }
   if (!["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"].includes(model.api.npm)) return
   if (["nvidia", "lilac"].includes(model.providerID)) {
     return {
@@ -1319,15 +1313,21 @@ const SLUG_OVERRIDES: Record<string, string> = {
 }
 
 export function providerOptions(model: Provider.Model, options: { [x: string]: any }) {
+  const cleaned =
+    model.api.id.toLowerCase().includes("minimax-m3") &&
+    ["nvidia", "lilac"].includes(model.providerID) &&
+    options.chat_template_kwargs?.thinking_mode !== undefined
+      ? Object.fromEntries(Object.entries(options).filter(([key]) => key !== "thinking"))
+      : options
   const usesOpenAIReasoningGate =
     model.api.npm === "@ai-sdk/openai" ||
     model.api.npm === "@ai-sdk/azure" ||
     model.api.npm === "@ai-sdk/amazon-bedrock/mantle"
   const normalized =
     usesOpenAIReasoningGate &&
-    (model.capabilities.reasoning || options.reasoningEffort !== undefined || options.reasoningSummary !== undefined)
-      ? { ...options, forceReasoning: true }
-      : options
+    (model.capabilities.reasoning || cleaned.reasoningEffort !== undefined || cleaned.reasoningSummary !== undefined)
+      ? { ...cleaned, forceReasoning: true }
+      : cleaned
 
   if (model.api.npm === "@ai-sdk/gateway") {
     // Gateway providerOptions are split across two namespaces:
