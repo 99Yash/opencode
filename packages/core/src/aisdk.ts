@@ -129,20 +129,6 @@ function prepareOptions(model: ModelV2.Info, pkg: string) {
     if (abortSignals.length === 1) opts.signal = abortSignals[0]
     if (abortSignals.length > 1) opts.signal = AbortSignal.any(abortSignals)
 
-    if (
-      (pkg === "@ai-sdk/openai" || pkg === "@ai-sdk/azure" || pkg === "@ai-sdk/amazon-bedrock/mantle") &&
-      opts.body &&
-      opts.method === "POST"
-    ) {
-      const body = JSON.parse(opts.body as string)
-      if (body.store !== true && Array.isArray(body.input)) {
-        for (const item of body.input) {
-          if ("id" in item) delete item.id
-        }
-        opts.body = JSON.stringify(body)
-      }
-    }
-
     if (typeof opts.body === "string" && model.body !== undefined) {
       const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(opts.body))
       if (Schema.is(Schema.Record(Schema.String, Schema.Json))(decoded)) {
@@ -337,7 +323,7 @@ function modelFromLanguage(info: ModelV2.Info, language: LanguageModelV3) {
     },
     body: {
       schema: Schema.Unknown,
-      from: (request) => Effect.succeed(callOptions(request)),
+      from: (request) => Effect.succeed(callOptions(request, info)),
     },
     with: () => route,
     model: (input) => Model.make({ ...input, provider: "provider" in input ? input.provider : info.providerID, route }),
@@ -411,8 +397,11 @@ function mapBodyToProviderOptions(model: ModelV2.Info, packageName: string) {
   }
 }
 
-function callOptions(request: LLMRequest): LanguageModelV3CallOptions {
-  return {
+function callOptions(request: LLMRequest, model: ModelV2.Info): LanguageModelV3CallOptions {
+  const packageName = ProviderV2.isAISDK(model.package) ? ProviderV2.packageName(model.package) : undefined
+  const optionKey = providerOptionKey(packageName, model.providerID)
+  const store = request.providerOptions?.[optionKey]?.store
+  const options: LanguageModelV3CallOptions = {
     prompt: prompt(request),
     maxOutputTokens: request.generation?.maxTokens ?? request.model.route.defaults.limits?.output,
     temperature: request.generation?.temperature,
@@ -428,6 +417,30 @@ function callOptions(request: LLMRequest): LanguageModelV3CallOptions {
     headers: request.http?.headers,
     providerOptions: providerOptions(request.providerOptions),
   }
+  if (
+    store !== true &&
+    packageName !== undefined &&
+    ["@ai-sdk/openai", "@ai-sdk/azure", "@ai-sdk/amazon-bedrock/mantle", "@ai-sdk/github-copilot"].includes(
+      packageName,
+    )
+  ) {
+    options.prompt = options.prompt.map((message) => {
+      if (!Array.isArray(message.content)) return message
+      return {
+        ...message,
+        content: message.content.map((part) => {
+          if (!("providerOptions" in part)) return part
+          const providerOptions = part.providerOptions
+          const metadata = providerOptions?.[optionKey]
+          if (metadata === undefined || !("itemId" in metadata)) return part
+          const next = { ...metadata }
+          delete next.itemId
+          return { ...part, providerOptions: { ...providerOptions, [optionKey]: next } }
+        }),
+      } as LanguageModelV3Message
+    })
+  }
+  return options
 }
 
 function prompt(request: LLMRequest): LanguageModelV3Prompt {
