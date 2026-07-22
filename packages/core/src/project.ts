@@ -42,6 +42,7 @@ export interface Resolved {
   readonly id: ID
   readonly directory: AbsolutePath
   readonly vcs?: Vcs
+  readonly repository?: Git.Repository
 }
 
 // Keep this filesystem-only; permission checks use it and should not execute VCS commands.
@@ -217,6 +218,7 @@ const layer = Layer.effect(
           id: id ?? ID.global,
           directory: repo.worktree,
           vcs: { type: "git" as const, store: repo.commonDirectory },
+          repository: repo,
         }
       }
 

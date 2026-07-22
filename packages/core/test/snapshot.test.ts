@@ -14,7 +14,7 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 
 describe("Snapshot", () => {
-  testEffect(Layer.empty).live("keeps lazy repository discovery after the first caller is interrupted", () =>
+  testEffect(Layer.empty).live("reuses the Location repository after the first caller is interrupted", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) =>
@@ -65,16 +65,16 @@ describe("Snapshot", () => {
 
             const interrupted = yield* snapshot.capture().pipe(Effect.forkChild)
             yield* Deferred.await(started)
-            expect(discoveries).toBe(1)
+            expect(discoveries).toBe(0)
             expect(creations).toBe(1)
             yield* Fiber.interrupt(interrupted)
 
             const capture = yield* snapshot.capture().pipe(Effect.forkChild)
-            expect(discoveries).toBe(1)
+            expect(discoveries).toBe(0)
             expect(creations).toBe(1)
             yield* Deferred.succeed(release, undefined)
             expect(yield* Fiber.join(capture)).toBeDefined()
-            expect(discoveries).toBe(1)
+            expect(discoveries).toBe(0)
             expect(creations).toBe(1)
           }).pipe(Effect.provide(layer))
         }),
