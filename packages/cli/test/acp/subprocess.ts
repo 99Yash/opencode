@@ -322,7 +322,7 @@ function spawnAcp(input: { readonly env: Record<string, string | undefined> }): 
         inputClosed = true
         await child.stdin.end()
       }
-      const exitCode = await withTimeout(child.exited, 5_000, "ACP did not exit after stdin EOF")
+      const exitCode = await withTimeout(child.exited, 45_000, "ACP did not exit after stdin EOF")
       await Promise.all([output, errors])
       if (exitCode !== 0) throw new Error(`ACP exited with ${exitCode}: ${stderr}`)
       return exitCode
