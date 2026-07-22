@@ -682,6 +682,30 @@ function googleThinkingVariants(model: Provider.Model): Record<string, Record<st
   )
 }
 
+function minimaxM3ThinkingVariants(model: Provider.Model): Provider.Model["variants"] {
+  if (!model.api.id.toLowerCase().includes("minimax-m3")) return
+  if (
+    (model.providerID === "kilo" && model.api.npm === "@ai-sdk/openai-compatible") ||
+    (model.providerID === "vercel" && model.api.npm === "@ai-sdk/gateway")
+  ) {
+    return {
+      none: { reasoning: { enabled: false } },
+      thinking: { reasoning: { enabled: true } },
+    }
+  }
+  if (!["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"].includes(model.api.npm)) return
+  if (["nvidia", "lilac"].includes(model.providerID)) {
+    return {
+      none: { chat_template_kwargs: { thinking_mode: "disabled" } },
+      thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
+    }
+  }
+  return {
+    none: { thinking: { type: "disabled" } },
+    thinking: { thinking: { type: "adaptive" } },
+  }
+}
+
 export function variants(model: Provider.Model): Record<string, Record<string, any>> {
   if (!model.capabilities.reasoning) return {}
 
@@ -689,15 +713,8 @@ export function variants(model: Provider.Model): Record<string, Record<string, a
   const glm52 = ["glm-5.2", "glm-5-2", "glm-5p2"].some(
     (name) => id.includes(name) || model.api.id.toLowerCase().includes(name),
   )
-  if (
-    model.api.id.toLowerCase().includes("minimax-m3") &&
-    ["@ai-sdk/anthropic", "@ai-sdk/openai-compatible"].includes(model.api.npm)
-  ) {
-    return {
-      none: { thinking: { type: "disabled" } },
-      thinking: { thinking: { type: "adaptive" } },
-    }
-  }
+  const minimaxM3 = minimaxM3ThinkingVariants(model)
+  if (minimaxM3) return minimaxM3
   const adaptiveThinkingOmitted = anthropicOmitsThinking(model.api.id)
   const adaptiveEfforts = anthropicAdaptiveEfforts(model.api.id)
   if (glm52 && model.api.npm === "@openrouter/ai-sdk-provider") {
@@ -1652,6 +1669,8 @@ function nonEmptyVariants(variants: NonNullable<Provider.Model["variants"]>): Pr
 }
 
 function reasoningToggle(model: Provider.Model): NonNullable<Provider.Model["variants"]> {
+  const minimaxM3 = minimaxM3ThinkingVariants(model)
+  if (minimaxM3) return minimaxM3
   if (model.api.npm === "@ai-sdk/alibaba")
     return {
       none: { enableThinking: false },

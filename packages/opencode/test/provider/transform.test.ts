@@ -3077,10 +3077,10 @@ describe("ProviderTransform.temperature - Cohere North", () => {
 
 describe("ProviderTransform.reasoningVariants", () => {
   const model = (reasoning_options: ModelsDev.Model["reasoning_options"]) => ({ reasoning_options }) as ModelsDev.Model
-  const target = (npm: string, id = "test-model") =>
+  const target = (npm: string, id = "test-model", providerID = "test") =>
     ({
       id,
-      providerID: "test",
+      providerID,
       api: { id, npm, url: "" },
       capabilities: { reasoning: true },
       limit: { output: 64_000 },
@@ -3251,6 +3251,61 @@ describe("ProviderTransform.reasoningVariants", () => {
     ],
   ])("converts toggle options for %s", (npm, expected) => {
     expect(ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm))).toEqual(expected)
+  })
+
+  test.each([
+    [
+      "minimax",
+      "@ai-sdk/anthropic",
+      {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    ],
+    [
+      "crossmodel",
+      "@ai-sdk/openai-compatible",
+      {
+        none: { thinking: { type: "disabled" } },
+        thinking: { thinking: { type: "adaptive" } },
+      },
+    ],
+    [
+      "nvidia",
+      "@ai-sdk/openai-compatible",
+      {
+        none: { chat_template_kwargs: { thinking_mode: "disabled" } },
+        thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
+      },
+    ],
+    [
+      "lilac",
+      "@ai-sdk/openai-compatible",
+      {
+        none: { chat_template_kwargs: { thinking_mode: "disabled" } },
+        thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
+      },
+    ],
+    [
+      "kilo",
+      "@ai-sdk/openai-compatible",
+      {
+        none: { reasoning: { enabled: false } },
+        thinking: { reasoning: { enabled: true } },
+      },
+    ],
+    [
+      "vercel",
+      "@ai-sdk/gateway",
+      {
+        none: { reasoning: { enabled: false } },
+        thinking: { reasoning: { enabled: true } },
+      },
+    ],
+  ])("maps MiniMax M3 toggle options for %s", (providerID, npm, expected) => {
+    expect(
+      ProviderTransform.reasoningVariants(model([{ type: "toggle" }]), target(npm, "minimaxai/minimax-m3", providerID)),
+    ).toEqual(expected)
   })
 
   test("combines Cohere toggle and budget options", () => {
@@ -3465,6 +3520,22 @@ describe("ProviderTransform.variants", () => {
     expect(ProviderTransform.variants(model)).toEqual({
       none: { thinking: { type: "disabled" } },
       thinking: { thinking: { type: "adaptive" } },
+    })
+  })
+
+  test("nvidia minimax m3 uses chat template thinking toggles", () => {
+    const model = createMockModel({
+      id: "nvidia/minimaxai/minimax-m3",
+      providerID: "nvidia",
+      api: {
+        id: "minimaxai/minimax-m3",
+        url: "https://integrate.api.nvidia.com/v1",
+        npm: "@ai-sdk/openai-compatible",
+      },
+    })
+    expect(ProviderTransform.variants(model)).toEqual({
+      none: { chat_template_kwargs: { thinking_mode: "disabled" } },
+      thinking: { chat_template_kwargs: { thinking_mode: "enabled" } },
     })
   })
 
