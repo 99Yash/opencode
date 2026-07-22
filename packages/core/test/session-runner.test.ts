@@ -22,7 +22,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@opencode-ai/core/effect/app-node-platform"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { EventV2 } from "@opencode-ai/core/event"
-import { InstallationVersion } from "@opencode-ai/util/installation/version"
+import { App } from "@opencode-ai/core/app"
 import { PermissionV2 } from "@opencode-ai/core/permission"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { Project } from "@opencode-ai/core/project"
@@ -888,6 +888,52 @@ describe("SessionRunnerLLM", () => {
             },
           ],
         },
+      ])
+    }),
+  )
+
+  it.effect("persists the latest partial snapshot when a tool fails", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const registry = yield* ToolRegistry.Service
+      yield* registry.register({
+        failing_progress: Tool.make({
+          description: "Report progress and fail",
+          input: Schema.Struct({}),
+          output: Schema.Struct({}),
+          execute: (_, context) =>
+            Effect.gen(function* () {
+              yield* context.progress({
+                structured: { phase: "running" },
+                content: [{ type: "text", text: "before failure" }],
+              })
+              return yield* new ToolFailure({ message: "failed after progress" })
+            }),
+        }),
+      }, { codemode: false })
+      yield* admit(session, "Run failing progress")
+      responses = [reply.tool("call-failing-progress", "failing_progress", {}), reply.stop()]
+
+      yield* session.resume(sessionID)
+
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user", text: "Run failing progress" },
+        {
+          type: "assistant",
+          content: [
+            {
+              type: "tool",
+              id: "call-failing-progress",
+              state: {
+                status: "error",
+                structured: { phase: "running" },
+                content: [{ type: "text", text: "before failure" }],
+                error: { message: "failed after progress" },
+              },
+            },
+          ],
+        },
+        { type: "assistant", finish: "stop" },
       ])
     }),
   )
@@ -3180,10 +3226,10 @@ describe("SessionRunnerLLM", () => {
       expect(requests[0]?.http?.headers).toEqual({
         "x-session-affinity": sessionID,
         "X-Session-Id": sessionID,
-        "User-Agent": `opencode/${InstallationVersion}`,
+        "User-Agent": App.useragent(App.make()),
         "x-opencode-project": Project.ID.global,
         "x-opencode-session": sessionID,
-        "x-opencode-client": "cli",
+        "x-opencode-client": "opencode",
       })
     }),
   )

@@ -4,7 +4,7 @@ import { LLM, LLMClient, Message, SystemPart } from "@opencode-ai/ai"
 import { Effect, Layer } from "effect"
 import { Database } from "../database/database"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { Client } from "@opencode-ai/util/client"
+import { App } from "../app"
 import { llmClient } from "../effect/app-node-platform"
 import { PluginHooks } from "../plugin/hooks"
 import { SessionContext } from "./context"
@@ -12,6 +12,7 @@ import { SessionGenerate } from "./generate"
 import { SessionHistory } from "./history"
 import { SessionModelHeaders } from "./model-headers"
 import { SessionRunnerModel } from "./runner/model"
+import { ToolRegistry } from "../tool/registry"
 import PROMPT_DEFAULT from "./runner/prompt/base.txt"
 import { toLLMMessages } from "./runner/to-llm-message"
 
@@ -23,7 +24,8 @@ export const layer = Layer.effect(
     const hooks = yield* PluginHooks.Service
     const llm = yield* LLMClient.Service
     const models = yield* SessionRunnerModel.Service
-    const client = yield* Client.Name
+    const registry = yield* ToolRegistry.Service
+    const app = yield* App.Metadata
 
     return SessionGenerate.Service.of({
       generate: Effect.fn("SessionGenerate.generate")(function* (input) {
@@ -34,6 +36,9 @@ export const layer = Layer.effect(
         const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(selection.session.id)
           ? selection.session.id.slice(4)
           : selection.session.id
+        const executableTools = yield* registry.materialize(selection.agent.info.permissions)
+        const toolDefinitions = executableTools.definitions
+        const toolsByName = new Map(toolDefinitions.map((tool) => [tool.name, tool]))
         const contextEvent = yield* hooks.trigger("session", "context", {
           sessionID: selection.session.id,
           agent: selection.agent.id,
@@ -46,19 +51,34 @@ export const layer = Layer.effect(
             ...(history.instructionUpdate ? [Message.system(history.instructionUpdate)] : []),
             Message.user(input.prompt),
           ],
-          tools: {},
+          tools: Object.fromEntries(
+            toolDefinitions.map((tool) => [tool.name, { description: tool.description, input: { ...tool.inputSchema } }]),
+          ),
         })
-        return (yield* llm.generate(
+        const hookedTools = Object.entries(contextEvent.tools).flatMap(([name, tool]) => {
+          const registered = toolsByName.get(name)
+          return registered
+            ? [Object.assign({}, registered, { description: tool.description, inputSchema: tool.input })]
+            : []
+        })
+        yield* Effect.logInfo("sending session generation request", {
+          sessionID: selection.session.id,
+          providerID: model.ref.providerID,
+          modelID: model.ref.id,
+        })
+        const response = yield* llm.generate(
           LLM.request({
             model: model.model,
-            http: { headers: SessionModelHeaders.make(selection.session, client) },
+            http: { headers: SessionModelHeaders.make(selection.session, app) },
             providerOptions: { openai: { promptCacheKey } },
             system: contextEvent.system,
             messages: contextEvent.messages,
-            tools: [],
+            tools: hookedTools,
             toolChoice: "none",
           }),
-        )).text
+        )
+        yield* Effect.logInfo("session generation usage diagnostic", { usage: response.usage })
+        return response.text
       }),
     })
   }),
@@ -67,5 +87,13 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: SessionGenerate.Service,
   layer,
-  deps: [SessionContext.node, Database.node, PluginHooks.node, SessionRunnerModel.node, Client.node, llmClient],
+  deps: [
+    SessionContext.node,
+    Database.node,
+    PluginHooks.node,
+    SessionRunnerModel.node,
+    ToolRegistry.node,
+    App.node,
+    llmClient,
+  ],
 })

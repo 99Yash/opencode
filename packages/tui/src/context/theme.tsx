@@ -22,7 +22,7 @@ import { createComponentTheme, type ComponentTheme } from "../theme/v2/component
 import { resolveThemeFile } from "../theme/v2/resolve"
 import { migrateV1 } from "../theme/v2/v1-migrate"
 import { themeModes } from "../theme/v2/select"
-import { createEffect, createMemo, onCleanup, onMount, type Accessor } from "solid-js"
+import { createEffect, createMemo, onCleanup, onMount, type Accessor, type ParentProps } from "solid-js"
 import { createStore, produce } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { useConfig } from "../config"
@@ -99,7 +99,7 @@ const [store, setStore] = createStore<State>({
 
 subscribeThemes((themes) => setStore("themes", themes))
 
-export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
+const themeContext = createSimpleContext({
   name: "Theme",
   init: (props: { mode: "dark" | "light"; source?: ThemeSource }) => {
     const renderer = useRenderer()
@@ -162,7 +162,6 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
     let systemThemeMode: "dark" | "light" | undefined
     let hasResolvedSystemTheme = false
     function resolveSystemTheme(mode: "dark" | "light" = store.mode) {
-      const started = performance.now()
       return renderer
         .getPalette({ size: 16 })
         .then((colors: TerminalColors) => {
@@ -186,7 +185,6 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
           setSystemTheme(undefined)
           if (store.active === "system") setStore("active", "opencode")
         })
-        .finally(() => themePerformance.set("Resolve system palette", duration(performance.now() - started)))
     }
 
     let systemRefreshRunning = false
@@ -272,14 +270,10 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       themeRefreshTimeouts.length = 0
     })
 
+    const initStarted = performance.now()
     const source = createMemo(() => store.themes[store.active] ?? store.themes.opencode)
     const sourceName = createMemo(() => (store.themes[store.active] ? store.active : "opencode"))
-    const file = createMemo(() => {
-      const started = performance.now()
-      const result = migrateV1(source())
-      themePerformance.set("Convert V1 to V2", duration(performance.now() - started))
-      return result
-    })
+    const file = createMemo(() => migrateV1(source()))
     const modes = createMemo(() => themeModes(file()))
     const mode = () => {
       const supported = modes()
@@ -287,12 +281,9 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
       return supported[0] ?? store.mode
     }
     const values = createMemo(() => resolveTheme(source(), mode()))
-    const valuesV2 = createMemo(() => {
-      const resolveStarted = performance.now()
-      const result = resolveThemeFile(file(), mode(), sourceName())
-      themePerformance.set("Resolve final theme", duration(performance.now() - resolveStarted))
-      return result
-    })
+    const valuesV2 = createMemo(() => resolveThemeFile(file(), mode(), sourceName()))
+    valuesV2()
+    themePerformance.set("Init", `${(performance.now() - initStarted).toFixed(2)} ms`)
     const themeV2 = createComponentTheme(valuesV2, mode)
     const contextsV2 = {
       elevated: createComponentTheme(() => {
@@ -363,10 +354,17 @@ export const { use: useTheme, provider: ThemeProvider } = createSimpleContext({
   },
 })
 
-function duration(milliseconds: number) {
-  return `${milliseconds.toFixed(2)} ms`
-}
+export const useTheme = themeContext.use
+export const ThemeProvider = themeContext.provider
 
+export function ThemeContextProvider(props: ParentProps<{ context: ContextName }>) {
+  const theme = useTheme()
+  return (
+    <themeContext.context.Provider value={theme.contextual(props.context)}>
+      {props.children}
+    </themeContext.context.Provider>
+  )
+}
 export function createSyntaxStyleMemo(factory: () => SyntaxStyle) {
   const renderer = useRenderer()
   const retained = new Set<SyntaxStyle>()

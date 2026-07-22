@@ -14,6 +14,7 @@ import { registerOpencodeSpinner } from "../component/register-spinner"
 import { createColors, createFrames } from "../ui/spinner"
 import {
   RUN_SUBAGENT_PANEL_ROWS,
+  RunAgentSelectBody,
   RunCommandMenuBody,
   RunModelSelectBody,
   RunQueuedPromptSelectBody,
@@ -50,7 +51,6 @@ import type {
   RunPrompt,
   RunProvider,
   RunReference,
-  RunTuiConfig,
 } from "./types"
 import type { RunTheme } from "./theme"
 
@@ -77,6 +77,8 @@ type RunFooterViewProps = {
   references: () => RunReference[]
   commands: () => RunCommand[] | undefined
   providers: () => RunProvider[] | undefined
+  currentAgent: () => string
+  currentAgentID: () => string | undefined
   currentModel: () => RunInput["model"]
   variants: () => string[]
   currentVariant: () => string | undefined
@@ -86,7 +88,6 @@ type RunFooterViewProps = {
   queuedPrompts?: () => FooterQueuedPrompt[]
   theme: () => RunTheme
   mono: boolean
-  tuiConfig: RunTuiConfig
   miniSettings: () => MiniSettings
   history?: () => RunPrompt[]
   onSubmit: (input: RunPrompt) => boolean
@@ -101,6 +102,7 @@ type RunFooterViewProps = {
   onExitRequest?: () => boolean
   onRequestExit?: (fn: (() => boolean) | undefined) => void
   onExit: () => void
+  onAgentSelect: (agent: string) => void
   onModelSelect: (model: NonNullable<RunInput["model"]>) => void
   onVariantSelect: (variant: string | undefined) => void
   onRows: (rows: number) => void
@@ -136,6 +138,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const inspecting = createMemo(() => active().type === "prompt" && route().type === "subagent")
   const commanding = createMemo(() => active().type === "prompt" && route().type === "command")
   const skilling = createMemo(() => active().type === "prompt" && route().type === "skill")
+  const agenting = createMemo(() => active().type === "prompt" && route().type === "agent")
   const modeling = createMemo(() => active().type === "prompt" && route().type === "model")
   const varianting = createMemo(() => active().type === "prompt" && route().type === "variant")
   const setting = createMemo(() => active().type === "prompt" && route().type === "settings")
@@ -147,6 +150,7 @@ export function RunFooterView(props: RunFooterViewProps) {
       selectingSubagent() ||
       commanding() ||
       skilling() ||
+      agenting() ||
       modeling() ||
       varianting() ||
       setting(),
@@ -189,6 +193,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const armed = createMemo(() => props.state().interrupt > 0)
   const exiting = createMemo(() => props.state().exit > 0)
   const usage = createMemo(() => props.state().usage)
+  const footerDetails = createMemo(() => props.miniSettings().footer === "show")
   const interruptLabel = createMemo(() => {
     if (!interrupt()) {
       return
@@ -216,6 +221,16 @@ export function RunFooterView(props: RunFooterViewProps) {
       frames: createFrames(options),
       color: createColors(options),
     }
+  })
+  const footerStatus = createMemo(() => {
+    const current = model() ?? props.state().model.trim()
+    const variant = props.currentVariant()
+    const details = [busy() ? "running" : "idle", `agent ${props.currentAgent()}`]
+    if (current) details.push(variant ? `${current} ${variant}` : current)
+    if (usage()) details.push(props.mono ? usage().replaceAll(" · ", " - ") : usage())
+    if (queuedPrompts().length > 0) details.push(`${queuedPrompts().length} pending`)
+    if (activeTabs().length > 0) details.push(`${activeTabs().length} subagent${activeTabs().length === 1 ? "" : "s"}`)
+    return details.join(props.mono ? " - " : " · ")
   })
   const permission = createMemo<Extract<FooterView, { type: "permission" }> | undefined>(() => {
     const view = active()
@@ -256,6 +271,11 @@ export function RunFooterView(props: RunFooterViewProps) {
 
   const openModel = () => {
     setRoute({ type: "model" })
+    props.onSubagentSelect?.(undefined)
+  }
+
+  const openAgent = () => {
+    setRoute({ type: "agent" })
     props.onSubagentSelect?.(undefined)
   }
 
@@ -329,7 +349,6 @@ export function RunFooterView(props: RunFooterViewProps) {
     agents: props.agents,
     references: props.references,
     commands: props.commands,
-    tuiConfig: props.tuiConfig,
     state: props.state,
     view: promptView,
     prompt,
@@ -352,6 +371,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const shell = createMemo(() => prompt() && composer.shell())
   const menu = createMemo(() => prompt() && composer.visible())
   const stateStatus = createMemo(() => props.state().status.trim())
+  const notice = createMemo(() => props.state().notice.trim())
   const modeLabel = createMemo(() => {
     if (exiting()) {
       return "EXIT"
@@ -375,9 +395,13 @@ export function RunFooterView(props: RunFooterViewProps) {
       return `Press ${clearShortcut() || "ctrl+c"} again to exit`
     }
 
-    if (busy()) {
-      return armed() ? "again to interrupt" : "interrupt"
-    }
+    if (busy() && armed()) return "again to interrupt"
+
+    if (notice()) return notice()
+
+    if (!footerDetails()) return shell() ? "Shell mode" : ""
+
+    if (busy()) return "interrupt"
 
     if (stateStatus().length > 0) {
       return stateStatus()
@@ -386,16 +410,17 @@ export function RunFooterView(props: RunFooterViewProps) {
     return shell() ? "Shell mode" : ""
   })
   const activityMeta = createMemo(() => {
-    if (!responsive().statusline.showActivityMeta || usage().length === 0) {
+    if (!footerDetails() || !responsive().statusline.showActivityMeta || usage().length === 0) {
       return ""
     }
 
     return props.mono ? usage().replaceAll(" · ", " - ") : usage()
   })
   const modelStatus = createMemo(() => {
-    const current = model()
-    if (!prompt() || !responsive().statusline.showModel || !current) return
+    const current = model() ?? props.state().model.trim()
+    if (!footerDetails() || !prompt() || shell() || !responsive().statusline.showModel || !current) return
     return {
+      agent: props.currentAgent(),
       model: current,
       variant: responsive().statusline.showModelVariant ? props.currentVariant() : undefined,
     }
@@ -409,7 +434,7 @@ export function RunFooterView(props: RunFooterViewProps) {
       return theme().highlight
     }
 
-    if (busy() || stateStatus().length > 0) {
+    if (busy() || notice().length > 0 || stateStatus().length > 0) {
       return theme().text
     }
 
@@ -419,7 +444,7 @@ export function RunFooterView(props: RunFooterViewProps) {
   const hasActivityMeta = createMemo(() => activityMeta().length > 0)
   const hasModelStatus = createMemo(() => Boolean(modelStatus()))
   const contextHints = createMemo(() => {
-    if (!prompt() || shell() || !responsive().statusline.showContextHints) {
+    if (!footerDetails() || !prompt() || shell() || !responsive().statusline.showContextHints) {
       return []
     }
 
@@ -580,6 +605,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     if (
       current.type !== "command" &&
       current.type !== "skill" &&
+      current.type !== "agent" &&
       current.type !== "model" &&
       current.type !== "variant" &&
       current.type !== "settings" &&
@@ -685,6 +711,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                             variants={props.variants}
                             variantCycle={variantCycle()}
                             onClose={closePanel}
+                            onAgent={openAgent}
                             onModel={openModel}
                             onEditor={() => {
                               closePanel()
@@ -697,6 +724,10 @@ export function RunFooterView(props: RunFooterViewProps) {
                             onSettings={openSettings}
                             onVariantCycle={() => {
                               props.onCycle()
+                              closePanel()
+                            }}
+                            onStatus={() => {
+                              props.onStatus(footerStatus())
                               closePanel()
                             }}
                             onCommand={(name) => {
@@ -726,6 +757,19 @@ export function RunFooterView(props: RunFooterViewProps) {
                                   source: "skill",
                                 },
                               })
+                              closePanel()
+                            }}
+                            mono={props.mono}
+                          />
+                        </Match>
+                        <Match when={agenting()}>
+                          <RunAgentSelectBody
+                            theme={theme}
+                            agents={props.agents}
+                            current={props.currentAgentID}
+                            onClose={closePanel}
+                            onSelect={(agent) => {
+                              props.onAgentSelect(agent)
                               closePanel()
                             }}
                             mono={props.mono}
@@ -857,14 +901,14 @@ export function RunFooterView(props: RunFooterViewProps) {
                   paddingRight={1}
                   backgroundColor="transparent"
                 >
-                  <Show when={busy() && !exiting()}>
+                  <Show when={footerDetails() && busy() && !exiting()}>
                     <box flexShrink={0}>
                       <spinner color={spin().color} frames={spin().frames} interval={40} />
                     </box>
                   </Show>
 
                   <text fg={statusColor()} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
-                    <Show when={busy() && !exiting()} fallback={statusText()}>
+                    <Show when={busy() && !exiting() && (footerDetails() || armed())} fallback={statusText()}>
                       <Show when={interruptLabel()}>
                         {(label) => <span style={{ fg: armed() ? statusColor() : theme().muted }}>{label()} </span>}
                       </Show>
@@ -890,6 +934,10 @@ export function RunFooterView(props: RunFooterViewProps) {
                       flexShrink={1}
                     >
                       <text fg={theme().text} wrapMode="none" truncate>
+                        <Show when={responsive().statusline.showAgent}>
+                          {info().agent}
+                          <span style={{ fg: theme().muted }}>{props.mono ? " - " : " · "}</span>
+                        </Show>
                         {info().model}
                         <Show when={info().variant}>
                           {(variant) => <span style={{ fg: theme().warning, bold: true }}> {variant()}</span>}

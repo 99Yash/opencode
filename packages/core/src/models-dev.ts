@@ -3,12 +3,11 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { ModelsDev } from "@opencode-ai/schema/models-dev"
 import { Money } from "@opencode-ai/schema/money"
-import { Client } from "@opencode-ai/util/client"
+import { App } from "./app"
 import { Global } from "@opencode-ai/util/global"
 import { Flock } from "@opencode-ai/util/flock"
 import { Hash } from "@opencode-ai/util/hash"
 import { FSUtil } from "@opencode-ai/util/fs-util"
-import { InstallationChannel, InstallationVersion } from "@opencode-ai/util/installation/version"
 import { EventV2 } from "./event"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
@@ -44,7 +43,7 @@ type SourceModel = {
   readonly reasoning_options?: readonly ReasoningOption[]
   readonly temperature?: boolean
   readonly tool_call: boolean
-  readonly interleaved?: true | { readonly field: "reasoning" | "reasoning_content" | "reasoning_details" }
+  readonly interleaved?: boolean | string | { readonly field: string }
   readonly cost?: Cost
   readonly limit: { readonly context: number; readonly input?: number; readonly output: number }
   readonly modalities?: { readonly input: readonly Modality[]; readonly output: readonly Modality[] }
@@ -496,6 +495,7 @@ function modelInfo(
     modelID: ModelV2.ID.make(model.id),
     providerID,
     name: input.name ?? model.name,
+    compatibility: ModelV2.compatibility(model.interleaved),
     family: model.family ? ModelV2.Family.make(model.family) : undefined,
     package: model.provider?.npm ? ProviderV2.aisdk(model.provider.npm) : undefined,
     settings: model.provider?.api ? { baseURL: model.provider.api } : undefined,
@@ -543,7 +543,7 @@ export const layer = (options?: Options) =>
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const events = yield* EventV2.Service
-      const client = yield* Client.Name
+      const app = yield* App.Metadata
     const http = HttpClient.filterStatusOk(
       (yield* HttpClient.HttpClient).pipe(
         HttpClient.retryTransient({
@@ -556,7 +556,7 @@ export const layer = (options?: Options) =>
 
     const source = options?.url || "https://models.dev"
     const fetch = options?.fetch ?? true
-      const userAgent = `opencode/${InstallationChannel}/${InstallationVersion}/${client}`
+      const userAgent = App.useragent(app)
     const filepath = path.join(
       Global.Path.cache,
       source === "https://models.dev" ? "models.json" : `models-${Hash.fast(source)}.json`,
@@ -660,7 +660,7 @@ export function configured(options?: Options) {
   return makeGlobalNode({
     service: Service,
     layer: layer(options),
-    deps: [FSUtil.node, EventV2.node, Client.node, httpClient],
+    deps: [FSUtil.node, EventV2.node, App.node, httpClient],
   })
 }
 
