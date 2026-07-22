@@ -1036,7 +1036,38 @@ describe("OpenAI Chat route", () => {
     }),
   )
 
-  it.effect("fails a streamed tool call when the provider ends without a finish reason", () =>
+  it.effect("finishes text with an unknown reason when the provider cleanly ends without one", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(fixedResponse(sseEvents(deltaChunk({ role: "assistant", content: "Hello" })))),
+      )
+
+      expect(response.text).toBe("Hello")
+      expect(response.finishReason).toBe("unknown")
+    }),
+  )
+
+  it.effect("rejects missing tool identity when the provider cleanly ends", () =>
+    Effect.gen(function* () {
+      for (const tool of [
+        { index: 0, id: "call_1", function: { arguments: "{}" } },
+        { index: 0, function: { name: "lookup", arguments: "{}" } },
+      ]) {
+        const error = yield* LLMClient.generate(
+          LLM.updateRequest(request, {
+            tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+          }),
+        ).pipe(
+          Effect.provide(fixedResponse(sseEvents(deltaChunk({ tool_calls: [tool] })))),
+          Effect.flip,
+        )
+
+        expect(error.message).toContain("OpenAI Chat tool call delta is missing id or name")
+      }
+    }),
+  )
+
+  it.effect("finalizes a streamed tool call when the provider ends without a finish reason", () =>
     Effect.gen(function* () {
       const body = sseEvents(
         deltaChunk({
@@ -1049,23 +1080,56 @@ describe("OpenAI Chat route", () => {
         tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
       })
       const events: LLMEvent[] = []
-      const streamError = yield* LLMClient.stream(input).pipe(
+      yield* LLMClient.stream(input).pipe(
         Stream.runForEach((event) => Effect.sync(() => events.push(event))),
-        Effect.flip,
         Effect.provide(fixedResponse(body)),
       )
-      const error = yield* LLMClient.generate(input).pipe(Effect.provide(fixedResponse(body)), Effect.flip)
+      const response = yield* LLMClient.generate(input).pipe(Effect.provide(fixedResponse(body)))
 
       expect(events).toEqual([
         { type: "step-start", index: 0 },
         { type: "tool-input-start", id: "call_1", name: "lookup", providerMetadata: undefined },
         { type: "tool-input-delta", id: "call_1", name: "lookup", text: '{"query"' },
         { type: "tool-input-delta", id: "call_1", name: "lookup", text: ':"weather"}' },
+        { type: "tool-input-end", id: "call_1", name: "lookup", providerMetadata: undefined },
+        {
+          type: "tool-call",
+          id: "call_1",
+          name: "lookup",
+          input: { query: "weather" },
+          providerExecuted: undefined,
+          providerMetadata: undefined,
+        },
+        { type: "step-finish", index: 0, reason: "unknown", usage: undefined, providerMetadata: undefined },
+        { type: "finish", reason: "unknown", usage: undefined },
       ])
-      expect(events.filter(LLMEvent.is.toolCall)).toEqual([])
-      expect(streamError.reason).toMatchObject({ _tag: "InvalidProviderOutput" })
-      expect(streamError.message).toContain("Provider stream ended without a terminal finish event")
-      expect(error.message).toContain("Provider stream ended without a terminal finish event")
+      expect(response.toolCalls).toMatchObject([{ id: "call_1", name: "lookup", input: { query: "weather" } }])
+      expect(response.finishReason).toBe("unknown")
+    }),
+  )
+
+  it.effect("keeps malformed tool input non-executable when the provider cleanly ends", () =>
+    Effect.gen(function* () {
+      const body = sseEvents(
+        deltaChunk({
+          role: "assistant",
+          tool_calls: [{ index: 0, id: "call_1", function: { name: "lookup", arguments: '{"query":' } }],
+        }),
+      )
+      const response = yield* LLMClient.generate(
+        LLM.updateRequest(request, {
+          tools: [{ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } }],
+        }),
+      ).pipe(Effect.provide(fixedResponse(body)))
+
+      expect(response.events.find(LLMEvent.is.toolInputError)).toEqual({
+        type: "tool-input-error",
+        id: "call_1",
+        name: "lookup",
+        raw: '{"query":',
+      })
+      expect(response.toolCalls).toEqual([])
+      expect(response.finishReason).toBe("unknown")
     }),
   )
 

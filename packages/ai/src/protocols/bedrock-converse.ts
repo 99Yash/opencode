@@ -614,7 +614,7 @@ const step = (state: ParserState, event: BedrockEvent) =>
 
 const framing = BedrockEventStream.framing(ADAPTER)
 
-const onHalt = (state: ParserState): ReadonlyArray<LLMEvent> =>
+const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> =>
   state.pendingFinish
     ? (() => {
         const events: LLMEvent[] = []
@@ -650,7 +650,7 @@ export const protocol = Protocol.make({
       reasoningSignatures: {},
     }),
     step,
-    onHalt,
+    onHalt: (state) => Effect.succeed(finishEvents(state)),
   },
 })
 

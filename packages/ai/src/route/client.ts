@@ -252,6 +252,33 @@ const requireTerminalEvent = (route: string) => (events: Stream.Stream<LLMEvent,
     )
   })
 
+const parseEvents = <Body, Frame, Event, State>(
+  protocol: Protocol<Body, Frame, Event, State>,
+  request: LLMRequest,
+  events: Stream.Stream<Event, LLMError>,
+) =>
+  Stream.suspend(() => {
+    let state = protocol.stream.initial(request)
+    const parsed = events.pipe(
+      Stream.mapEffect((event) =>
+        protocol.stream.step(state, event).pipe(
+          Effect.map(([next, output]) => {
+            state = next
+            return output
+          }),
+        ),
+      ),
+      Stream.flatMap(Stream.fromIterable),
+    )
+    const onHalt = protocol.stream.onHalt
+    if (!onHalt) return parsed
+    return parsed.pipe(
+      Stream.concat(
+        Stream.fromEffect(Effect.suspend(() => onHalt(state))).pipe(Stream.flatMap(Stream.fromIterable)),
+      ),
+    )
+  })
+
 function makeFromTransport<Body, Prepared, Frame, Event, State>(
   input: MakeTransportInput<Body, Prepared, Frame, Event, State>,
 ): Route<Body, Prepared> {
@@ -314,12 +341,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
             Stream.mapEffect(decodeEvent(route)),
             protocol.stream.terminal ? Stream.takeUntil(protocol.stream.terminal) : (stream) => stream,
           )
-        return events.pipe(
-          Stream.mapAccumEffect(
-            () => protocol.stream.initial(request),
-            protocol.stream.step,
-            protocol.stream.onHalt ? { onHalt: protocol.stream.onHalt } : undefined,
-          ),
+        return parseEvents(protocol, request, events).pipe(
           Stream.catchCause((cause) => Stream.fail(streamError(route, `Failed to read ${route} stream`, cause))),
           requireTerminalEvent(route),
         )

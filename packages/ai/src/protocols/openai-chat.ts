@@ -599,10 +599,14 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
     ] as const
   })
 
-const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
+const finishEvents = Effect.fn("OpenAIChat.finishEvents")(function* (state: ParserState) {
+  if (Object.keys(state.pendingTools).length > 0)
+    return yield* ProviderShared.eventError(ADAPTER, "OpenAI Chat tool call delta is missing id or name")
+  const finished = Object.keys(state.tools).length > 0 ? yield* ToolStream.finishAll(ADAPTER, state.tools) : undefined
+  const toolCallEvents = finished?.events ?? state.toolCallEvents
   const events: LLMEvent[] = []
-  const hasToolCalls = state.toolCallEvents.length > 0
-  const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : state.finishReason
+  const hasToolCalls = toolCallEvents.some(LLMEvent.is.toolCall)
+  const reason = state.finishReason === "stop" && hasToolCalls ? "tool-calls" : (state.finishReason ?? "unknown")
   const metadata = reasoningMetadata(
     state.reasoningField,
     state.reasoningDetailsObserved ? state.reasoningDetails : undefined,
@@ -612,11 +616,11 @@ const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> => {
       ? Lifecycle.reasoningStart(state.lifecycle, events, "reasoning-0", reasoningMetadata(state.reasoningField))
       : state.lifecycle
   const ended = Lifecycle.reasoningEnd(started, events, "reasoning-0", metadata)
-  const lifecycle = state.toolCallEvents.length ? Lifecycle.stepStart(ended, events) : ended
-  events.push(...state.toolCallEvents)
-  if (reason) Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
+  const lifecycle = toolCallEvents.length ? Lifecycle.stepStart(ended, events) : ended
+  events.push(...toolCallEvents)
+  Lifecycle.finish(lifecycle, events, { reason, usage: state.usage })
   return events
-}
+})
 
 // =============================================================================
 // Protocol And OpenAI Route

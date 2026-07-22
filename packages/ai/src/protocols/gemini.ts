@@ -376,7 +376,7 @@ const mapFinishReason = (finishReason: string | undefined, hasToolCalls: boolean
   return "unknown"
 }
 
-const finish = (state: ParserState): ReadonlyArray<LLMEvent> =>
+const finishEvents = (state: ParserState): ReadonlyArray<LLMEvent> =>
   state.finishReason || state.usage
     ? (() => {
         const events: LLMEvent[] = []
@@ -493,7 +493,7 @@ export const protocol = Protocol.make({
     event: Protocol.jsonEvent(GeminiEvent),
     initial: () => ({ hasToolCalls: false, nextToolCallId: 0, lifecycle: Lifecycle.initial() }),
     step,
-    onHalt: finish,
+    onHalt: (state) => Effect.succeed(finishEvents(state)),
   },
 })
 
