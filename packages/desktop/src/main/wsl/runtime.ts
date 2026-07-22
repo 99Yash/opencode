@@ -3,6 +3,7 @@ import { existsSync } from "node:fs"
 import { join } from "node:path"
 import * as pty from "@lydell/node-pty"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
+import { parseShellEnv } from "../shell-env"
 import { wslTerminalArgs } from "./policy"
 
 export type WslCommandLine = {
@@ -32,6 +33,7 @@ export type RunWslOptions = {
 
 const DEFAULT_WSL_TIMEOUT_MS = 20_000
 const DEFAULT_WSL_INSTALL_TIMEOUT_MS = 15 * 60_000
+const WSL_SHELL_ENV_TIMEOUT_MS = 5_000
 
 export function wslArgs(args: string[], distro?: string | null, user?: string | null) {
   return [...(distro ? ["-d", distro] : []), ...(user ? ["--user", user] : []), "--", ...args]
@@ -200,6 +202,31 @@ export function runWslInDistro(args: string[], distro?: string | null, opts?: Ru
 
 export function runWslSh(script: string, distro?: string | null, opts?: RunWslOptions) {
   return runWslInDistro(["sh", "-lc", script], distro, opts)
+}
+
+export function wslShellEnvProbeArgs(mode: "-il" | "-l") {
+  return ["bash", mode, "-c", "env -0"]
+}
+
+export function wslShellEnvExports(env: Record<string, string>) {
+  return Object.entries(env)
+    .filter(([key]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+    .map(([key, value]) => `export ${key}=${shellEscape(value)}`)
+}
+
+export async function loadWslShellEnv(distro: string) {
+  // Probe separately so the long-running server stays non-interactive and does not emit shell prompts or job-control warnings.
+  const probe = async (mode: "-il" | "-l") => {
+    const result = await runWslInDistro(wslShellEnvProbeArgs(mode), distro, {
+      timeoutMs: WSL_SHELL_ENV_TIMEOUT_MS,
+    }).catch(() => undefined)
+    if (!result || result.code !== 0) return undefined
+    const env = parseShellEnv(Buffer.from(result.stdout))
+    if (Object.keys(env).length === 0) return undefined
+    return env
+  }
+
+  return (await probe("-il")) ?? (await probe("-l")) ?? {}
 }
 
 export async function probeWslRuntime(opts?: RunWslOptions): Promise<WslRuntimeCheck> {
