@@ -832,6 +832,66 @@ describe("session.llm.stream", () => {
     },
   )
 
+  it.instance(
+    "preserves DeepSeek V4 effort and caching with the Alibaba SDK",
+    () =>
+      Effect.gen(function* () {
+        const request = waitRequest(
+          "/chat/completions",
+          new Response(createChatStream("Hello"), {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+        )
+        const source = yield* Provider.use.getModel(ProviderV2.ID.make("alibaba"), ModelV2.ID.make("qwen-plus"))
+        const resolved = {
+          ...source,
+          id: ModelV2.ID.make("deepseek-v4-pro"),
+          api: { ...source.api, id: "deepseek-v4-pro", npm: "@ai-sdk/alibaba" },
+          variants: { high: { reasoningEffort: "high" } },
+        }
+        const sessionID = SessionID.make("session-test-alibaba-deepseek-effort")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("msg_user-alibaba-deepseek-effort"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: resolved.providerID, modelID: resolved.id, variant: "high" },
+        } satisfies SessionV1.User
+
+        yield* drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["You are a helpful assistant."],
+          messages: [{ role: "user", content: "Hello" }],
+          tools: {},
+        })
+
+        const capture = yield* Effect.promise(() => request)
+        expect(capture.body.reasoning_effort).toBe("high")
+        expect(JSON.stringify(capture.body.messages)).toContain('"cache_control":{"type":"ephemeral"}')
+      }),
+    {
+      config: () => ({
+        enabled_providers: ["alibaba"],
+        provider: {
+          alibaba: {
+            options: { apiKey: "test-key", baseURL: `${state.server!.url.origin}/v1` },
+          },
+        },
+      }),
+    },
+  )
+
   const cerebrasFixture = { providerID: "cerebras", modelID: "gpt-oss-120b" }
   it.instance(
     "replays Cerebras assistant reasoning using the provider-supported field",

@@ -3289,6 +3289,18 @@ describe("ProviderTransform.reasoningVariants", () => {
     ).toEqual({ max: { effort: "max" } })
   })
 
+  test.each(["deepseek-v4-pro", "deepseek-v4-flash"])("preserves Alibaba %s reasoning effort", (id) => {
+    expect(
+      ProviderTransform.reasoningVariants(
+        model([{ type: "effort", values: ["high", "max"] }]),
+        target("@ai-sdk/alibaba", id),
+      ),
+    ).toEqual({
+      high: { reasoningEffort: "high" },
+      max: { reasoningEffort: "max" },
+    })
+  })
+
   test("maps Kimi effort metadata to adaptive thinking", () => {
     expect(
       ProviderTransform.reasoningVariants(
