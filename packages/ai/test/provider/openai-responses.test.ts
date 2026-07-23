@@ -899,6 +899,66 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("preserves output message phases in follow-up requests", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.added",
+                item: { type: "message", id: "msg_commentary", phase: "commentary" },
+              },
+              { type: "response.output_text.delta", item_id: "msg_commentary", delta: "Checking." },
+              { type: "response.output_text.done", item_id: "msg_commentary" },
+              {
+                type: "response.output_item.added",
+                item: { type: "message", id: "msg_final", phase: "final_answer" },
+              },
+              { type: "response.output_text.delta", item_id: "msg_final", delta: "Done." },
+              { type: "response.output_text.done", item_id: "msg_final" },
+              { type: "response.completed", response: { id: "resp_1" } },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.message.content).toEqual([
+        {
+          type: "text",
+          text: "Checking.",
+          providerMetadata: { openai: { itemId: "msg_commentary", phase: "commentary" } },
+        },
+        {
+          type: "text",
+          text: "Done.",
+          providerMetadata: { openai: { itemId: "msg_final", phase: "final_answer" } },
+        },
+      ])
+
+      const followUp = yield* LLMClient.prepare<OpenAIResponses.OpenAIResponsesBody>(
+        LLM.request({
+          model,
+          messages: [Message.user("Start"), response.message, Message.user("Continue")],
+        }),
+      )
+      expect(followUp.body.input).toEqual([
+        { role: "user", content: [{ type: "input_text", text: "Start" }] },
+        {
+          role: "assistant",
+          phase: "commentary",
+          content: [{ type: "output_text", text: "Checking." }],
+        },
+        {
+          role: "assistant",
+          phase: "final_answer",
+          content: [{ type: "output_text", text: "Done." }],
+        },
+        { role: "user", content: [{ type: "input_text", text: "Continue" }] },
+      ])
+    }),
+  )
+
   it.effect("parses reasoning summary stream fixtures", () =>
     Effect.gen(function* () {
       const body = sseEvents(
