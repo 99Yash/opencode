@@ -2652,23 +2652,29 @@ function Write(props: ToolProps) {
   const code = createMemo(() => {
     return stringValue(props.input.content) ?? ""
   })
+  const complete = createMemo(() => props.part.state.status === "completed")
 
   return (
     <Switch>
-      <Match when={props.metadata.diagnostics !== undefined}>
+      <Match when={complete()}>
         <BlockTool
-          path={{ label: "# Wrote", value: pathFormatter.format(stringValue(props.input.path)) }}
+          path={{
+            label: props.metadata.existed === false ? "# Created" : "# Wrote",
+            value: pathFormatter.format(stringValue(props.input.path)),
+          }}
           part={props.part}
         >
-          <line_number fg={themeV2.text.subdued} minWidth={3} paddingRight={1}>
-            <code
-              conceal={false}
-              fg={themeV2.text.default}
-              filetype={filetype(stringValue(props.input.path))}
-              syntaxStyle={syntax()}
-              content={code()}
-            />
-          </line_number>
+          <Show when={code()}>
+            <line_number fg={themeV2.text.subdued} minWidth={3} paddingRight={1}>
+              <code
+                conceal={false}
+                fg={themeV2.text.default}
+                filetype={filetype(stringValue(props.input.path))}
+                syntaxStyle={syntax()}
+                content={code()}
+              />
+            </line_number>
+          </Show>
           <Diagnostics diagnostics={props.metadata.diagnostics} filePath={stringValue(props.input.path) ?? ""} />
         </BlockTool>
       </Match>
