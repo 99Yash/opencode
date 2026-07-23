@@ -1,6 +1,7 @@
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { installSseTransport } from "../utils/sse-transport"
+import { currentSession } from "../utils/mock-server"
 
 const serverA = "http://127.0.0.1:4096"
 const serverB = "http://127.0.0.1:4097"
@@ -180,10 +181,35 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
       return json(route, true)
     }
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
-    if (url.pathname === "/global/event" || url.pathname === "/event") return sse(route)
+    if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event") return sse(route)
     if (url.pathname === "/global/health") return json(route, { healthy: true })
-    if (url.pathname === "/session/status") return json(route, {})
-    if (url.pathname === "/session") return json(route, sessions)
+    if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
+      return json(route, { data: [] })
+    if (url.pathname === "/api/model/default") return json(route, { data: null })
+    if (["/api/command", "/api/reference", "/api/permission/request", "/api/question/request"].includes(url.pathname))
+      return json(route, { location: { directory }, data: [] })
+    if (url.pathname === "/api/mcp") return json(route, { location: { directory }, data: [] })
+    if (url.pathname === "/api/mcp/resource")
+      return json(route, { location: { directory }, data: { resources: [], templates: [] } })
+    if (url.pathname === "/api/project") {
+      return json(route, [
+        {
+          id: remote ? sessionB.projectID : "project-server-a",
+          worktree: directory,
+          vcs: "git",
+          time: { created: 1, updated: 1 },
+          sandboxes: [],
+        },
+      ])
+    }
+    if (url.pathname === "/api/project/current")
+      return json(route, { id: remote ? sessionB.projectID : "project-server-a", directory })
+    if (url.pathname === "/api/session") return json(route, { data: sessions.map(currentSession), cursor: {} })
+    if (url.pathname === "/api/session/active") return json(route, { data: {} })
+    const currentSessionInfo = sessions.find((session) => url.pathname === `/api/session/${session.id}`)
+    if (currentSessionInfo) return json(route, { data: currentSession(currentSessionInfo) })
+    if (sessions.some((session) => url.pathname === `/api/session/${session.id}/message`))
+      return json(route, { data: [], cursor: {} })
     const current = sessions.find((session) => url.pathname === `/session/${session.id}`)
     if (current) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
@@ -193,7 +219,7 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
       permissionRequests.push(url.toString())
       return json(route, [])
     }
-    if (["/skill", "/command", "/lsp", "/formatter", "/question", "/vcs/diff", "/pty/shells"].includes(url.pathname))
+    if (["/skill", "/command", "/lsp", "/formatter", "/question", "/vcs/diff"].includes(url.pathname))
       return json(route, [])
     if (["/global/config", "/config", "/provider/auth", "/mcp"].includes(url.pathname)) return json(route, {})
     if (url.pathname === "/provider") return json(route, provider(remote ? "server-b" : "server-a"))
@@ -216,7 +242,12 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
         directory,
         home: directory,
       })
+    if (url.pathname === "/api/path")
+      return json(route, { state: directory, config: directory, worktree: directory, directory, home: directory })
     if (url.pathname === "/vcs") return json(route, { branch: "main", default_branch: "main" })
+    if (url.pathname === "/api/vcs")
+      return json(route, { location: { directory }, data: { branch: "main", defaultBranch: "main" } })
+    if (url.pathname === "/api/pty/shells") return json(route, { location: { directory }, data: [] })
     return json(route, {})
   })
 }
