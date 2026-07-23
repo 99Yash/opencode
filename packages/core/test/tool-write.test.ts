@@ -120,7 +120,7 @@ describe("WriteTool", () => {
           Effect.gen(function* () {
             expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["write"])
             const settled = yield* settleTool(registry, call({ path: "src/new.txt", content: "created" }))
-            expect(settled).toEqual({
+            expect(settled).toMatchObject({
               result: { type: "text", value: "Created file successfully: src/new.txt" },
               output: {
                 structured: {
@@ -128,6 +128,14 @@ describe("WriteTool", () => {
                   target: path.join(yield* Effect.promise(() => fs.realpath(tmp.path)), "src", "new.txt"),
                   resource: "src/new.txt",
                   existed: false,
+                  files: [
+                    {
+                      file: "src/new.txt",
+                      status: "added",
+                      additions: 1,
+                      deletions: 0,
+                    },
+                  ],
                 },
                 content: [{ type: "text", text: "Created file successfully: src/new.txt" }],
               },
@@ -156,7 +164,21 @@ describe("WriteTool", () => {
           Effect.andThen((settled) =>
             Effect.gen(function* () {
               expect(settled.result).toEqual({ type: "text", value: "Wrote file successfully: existing.txt" })
-              expect(settled.output?.structured).toMatchObject({ resource: "existing.txt", existed: true })
+              expect(settled.output?.structured).toMatchObject({
+                resource: "existing.txt",
+                existed: true,
+                files: [
+                  {
+                    file: "existing.txt",
+                    status: "modified",
+                    additions: 1,
+                    deletions: 1,
+                  },
+                ],
+              })
+              const structured = settled.output?.structured as WriteTool.Output
+              expect(structured.files[0]?.patch).toContain("-before")
+              expect(structured.files[0]?.patch).toContain("+after")
               expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
                 "after",
               )

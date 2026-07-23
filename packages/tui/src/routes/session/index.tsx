@@ -2654,6 +2654,10 @@ function Write(props: ToolProps) {
   const code = createMemo(() => {
     return stringValue(props.input.content) ?? ""
   })
+  const file = createMemo(() => parseApplyPatchFiles(props.metadata.files)[0])
+  const patch = createMemo(
+    () => file()?.patch ?? createTwoFilesPatch("", stringValue(props.input.path) ?? "", "", code()),
+  )
   const complete = createMemo(() => props.part.state.status === "completed")
   const view = createMemo(() => {
     if (ctx.config.diffs?.view === "unified") return "unified"
@@ -2671,10 +2675,10 @@ function Write(props: ToolProps) {
           }}
           part={props.part}
         >
-          <Show when={code()}>
+          <Show when={code() || file()?.additions || file()?.deletions}>
             <box paddingLeft={1}>
               <diff
-                diff={createTwoFilesPatch("", stringValue(props.input.path) ?? "", "", code())}
+                diff={patch()}
                 view={view()}
                 filetype={filetype(stringValue(props.input.path))}
                 syntaxStyle={syntax()}
