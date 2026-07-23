@@ -66,14 +66,15 @@ const client = Layer.mock(LLMClient.Service)({
       return response
     }),
 })
-const models = SessionRunnerModel.layerWith(() =>
-  Effect.succeed(
-    SessionRunnerModel.resolved(model, {
-      capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
-      cost: [],
-    }),
-  ),
-)
+const models = Layer.mock(SessionRunnerModel.Service)({
+  resolve: () =>
+    Effect.succeed(
+      SessionRunnerModel.resolved(model, {
+        capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+        cost: [],
+      }),
+    ),
+})
 const builtins = Layer.mock(InstructionBuiltIns.Service, {
   load: () =>
     Effect.succeed(
@@ -300,7 +301,7 @@ it.effect("generates from fresh settled Session context without durable mutation
       ),
     ).toEqual(["Settled partial answer"])
     expect(requests[0]?.tools).toMatchObject([{ name: "lookup", description: "Hooked lookup" }])
-    expect(requests[0]?.toolChoice).toMatchObject({ type: "none" })
+    expect(requests[0]?.toolChoice).toBeUndefined()
     expect(yield* durableState(db, sessionID)).toEqual(before)
   }),
 )

@@ -8,7 +8,7 @@ export type ModelRef = { id: string; providerID: string; variant?: string }
 
 export type ProviderSettings = { [x: string]: JsonValue }
 
-export type AgentColor = string | "primary" | "secondary" | "accent" | "success" | "warning" | "error" | "info"
+export type AgentColor = string
 
 export type PermissionV2Effect = "allow" | "deny" | "ask"
 
