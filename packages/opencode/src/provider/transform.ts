@@ -1744,10 +1744,8 @@ function reasoningEffort(model: Provider.Model, effort: string) {
     case "@ai-sdk/cohere":
     case "@ai-sdk/perplexity":
     case "@ai-sdk/vercel":
-    case "gitlab-ai-provider":
-      return
     case "@ai-sdk/alibaba":
-      if (["deepseek-v4-pro", "deepseek-v4-flash"].includes(model.api.id)) return { reasoningEffort: effort }
+    case "gitlab-ai-provider":
       return
   }
 }

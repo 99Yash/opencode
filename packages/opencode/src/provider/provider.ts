@@ -1686,13 +1686,7 @@ const layer = Layer.effect(
           delete options.fetch
         }
 
-        // Alibaba's SDK does not expose DeepSeek V4's native reasoning_effort field.
-        const npm =
-          model.api.npm === "@ai-sdk/alibaba" && ["deepseek-v4-pro", "deepseek-v4-flash"].includes(model.api.id)
-            ? "@ai-sdk/openai-compatible"
-            : model.api.npm
-
-        if (npm.includes("@ai-sdk/openai-compatible") && options["includeUsage"] !== false) {
+        if (model.api.npm.includes("@ai-sdk/openai-compatible") && options["includeUsage"] !== false) {
           options["includeUsage"] = true
         }
 
@@ -1728,7 +1722,7 @@ const layer = Layer.effect(
         const key = Hash.fast(
           JSON.stringify({
             providerID: model.providerID,
-            npm,
+            npm: model.api.npm,
             options,
           }),
         )
@@ -1768,7 +1762,7 @@ const layer = Layer.effect(
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)
         }
 
-        const bundledLoader = BUNDLED_PROVIDERS[npm]
+        const bundledLoader = BUNDLED_PROVIDERS[model.api.npm]
         if (bundledLoader) {
           const factory = await bundledLoader()
           const loaded = factory({
@@ -1780,11 +1774,11 @@ const layer = Layer.effect(
         }
 
         const installedPath = await (async () => {
-          if (npm.startsWith("file://")) {
-            return npm
+          if (model.api.npm.startsWith("file://")) {
+            return model.api.npm
           }
-          const item = await Npm.add(npm)
-          if (!item.entrypoint) throw new Error(`Package ${npm} has no import entrypoint`)
+          const item = await Npm.add(model.api.npm)
+          if (!item.entrypoint) throw new Error(`Package ${model.api.npm} has no import entrypoint`)
           return item.entrypoint
         })()
 
