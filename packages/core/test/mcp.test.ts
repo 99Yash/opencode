@@ -1,5 +1,6 @@
 import path from "node:path"
 import { describe, expect, test } from "bun:test"
+import { Event } from "@opencode-ai/schema/config"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
 import { Server } from "@modelcontextprotocol/sdk/server/index.js"
@@ -28,7 +29,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { McpTool } from "@opencode-ai/core/tool/mcp"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
-import { Deferred, Effect, Exit, Fiber, Layer, Schema, Stream } from "effect"
+import { DateTime, Deferred, Effect, Exit, Fiber, Layer, PubSub, Schedule, Schema, Stream } from "effect"
 import { Image } from "@opencode-ai/core/image"
 import { testEffect } from "./lib/effect"
 import { imagePassthrough } from "./lib/image"
@@ -153,6 +154,10 @@ function resourceMcpLayer(
   server: string | typeof ConfigMCP.Server.Type,
   onFormCreated?: (form: Form.Info) => Effect.Effect<void>,
   options?: MCP.Options,
+  overrides?: {
+    entries?: Config.Interface["entries"]
+    subscribe?: EventV2.Interface["subscribe"]
+  },
 ) {
   const directory = AbsolutePath.make(import.meta.dir)
   const unusedIntegration = () => Effect.die("unused integration service")
@@ -163,27 +168,29 @@ function resourceMcpLayer(
         Layer.succeed(
           Config.Service,
           Config.Service.of({
-            entries: () =>
-              Effect.succeed([
-                new Config.Document({
-                  type: "document",
-                  info: new Config.Info({
-                    mcp: new ConfigMCP.Info({
-                      servers: {
-                        resources:
-                          typeof server === "string"
-                            ? new ConfigMCP.Remote({ type: "remote", url: server, oauth: false })
-                            : server,
-                      },
+            entries:
+              overrides?.entries ??
+              (() =>
+                Effect.succeed([
+                  new Config.Document({
+                    type: "document",
+                    info: new Config.Info({
+                      mcp: new ConfigMCP.Info({
+                        servers: {
+                          resources:
+                            typeof server === "string"
+                              ? new ConfigMCP.Remote({ type: "remote", url: server, oauth: false })
+                              : server,
+                        },
+                      }),
                     }),
                   }),
-                }),
-              ]),
+                ])),
           }),
         ),
         Layer.succeed(Location.Service, Location.Service.of(location({ directory }))),
         Layer.mock(EventV2.Service, {
-          subscribe: () => Stream.never,
+          subscribe: overrides?.subscribe ?? (() => Stream.never),
           publish: (definition, data) => {
             const event = {
               id: EventV2.ID.create(),
@@ -717,6 +724,76 @@ test("adds, disconnects, and reconnects MCP servers at runtime", async () => {
                 command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")],
                 disabled: true,
               }),
+            ),
+          ),
+        )
+      }),
+    ),
+  )
+})
+
+test("reconciles MCP servers when config updates", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* PubSub.unbounded<EventV2.Payload>()
+        const command = [process.execPath, path.join(import.meta.dir, "fixture/mcp-output-schema.ts")]
+        let servers: Record<string, typeof ConfigMCP.Server.Type> = {
+          configured: new ConfigMCP.Local({ type: "local", command }),
+        }
+        const entries = () =>
+          Effect.sync(() => [
+            new Config.Document({
+              type: "document",
+              info: new Config.Info({ mcp: new ConfigMCP.Info({ servers }) }),
+            }),
+          ])
+        const subscribe = (() => Stream.fromPubSub(updates)) as EventV2.Interface["subscribe"]
+        const update = () =>
+          PubSub.publish(updates, {
+            id: EventV2.ID.create(),
+            created: DateTime.makeUnsafe(0),
+            type: Event.Updated.type,
+            data: {},
+          } satisfies EventV2.Payload<typeof Event.Updated>)
+
+        yield* Effect.gen(function* () {
+          const service = yield* MCP.Service
+          yield* service.tools()
+          expect((yield* service.servers())[0]?.status).toEqual({ status: "connected" })
+
+          servers = {
+            configured: new ConfigMCP.Local({ type: "local", command, disabled: true }),
+          }
+          yield* update()
+          const disabled = yield* service.servers().pipe(
+            Effect.filterOrFail(
+              (items) => items[0]?.status.status === "disabled",
+              () => new Error("MCP config update was not applied"),
+            ),
+            Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }),
+          )
+          expect(disabled.map((item) => String(item.name))).toEqual(["configured"])
+
+          servers = {
+            added: new ConfigMCP.Local({ type: "local", command, disabled: true }),
+          }
+          yield* update()
+          const replaced = yield* service.servers().pipe(
+            Effect.filterOrFail(
+              (items) => items.length === 1 && String(items[0]?.name) === "added",
+              () => new Error("MCP config replacement was not applied"),
+            ),
+            Effect.retry({ times: 100, schedule: Schedule.spaced("10 millis") }),
+          )
+          expect(replaced[0]?.status).toEqual({ status: "disabled" })
+        }).pipe(
+          Effect.provide(
+            resourceMcpLayer(
+              new ConfigMCP.Local({ type: "local", command, disabled: true }),
+              undefined,
+              undefined,
+              { entries, subscribe },
             ),
           ),
         )
