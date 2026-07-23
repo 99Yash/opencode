@@ -182,7 +182,7 @@ export const layer = (options?: Options) => Layer.effect(
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
     yield* Effect.addFinalizer((exit) => Scope.close(root, exit))
 
-    const load = Effect.fnUntraced(function* () {
+    const loadConfig = Effect.fnUntraced(function* () {
       const documents = (yield* config.entries()).filter(
         (entry): entry is Config.Document => entry.type === "document",
       )
@@ -199,8 +199,8 @@ export const layer = (options?: Options) => Layer.effect(
       }
       return { timeout, servers }
     })
-    const initial = yield* load()
-    const configured = { names: new Set(initial.servers.keys()), timeout: initial.timeout }
+    const initial = yield* loadConfig()
+    const configState = { names: new Set(initial.servers.keys()), timeout: initial.timeout }
     // Later config files win for duplicate server names; per-server timeout overrides globals.
     const runtime = new Map<ServerName, ServerEntry>()
     // Serializes lifecycle operations per server. Anything taking this lock from a connection
@@ -616,6 +616,22 @@ export const layer = (options?: Options) => Layer.effect(
       yield* events.publish(McpEvent.StatusChanged, { server: name }).pipe(Effect.ignore)
     })
 
+    const reloadConfig = Effect.fnUntraced(function* () {
+      const next = yield* loadConfig()
+      configState.timeout = next.timeout
+      const names = new Set([...configState.names, ...next.servers.keys()])
+      for (const name of names) {
+        const updated = next.servers.get(name)
+        if (!updated) {
+          yield* removeServer(name).pipe(locks.withLock(name))
+          continue
+        }
+        if (isDeepStrictEqual(runtime.get(name)?.config, updated)) continue
+        yield* replaceServer(name, updated).pipe(locks.withLock(name))
+      }
+      configState.names = new Set(next.servers.keys())
+    })
+
     // Disabled servers settle their startup immediately so queries never block on them.
     for (const [name, entry] of runtime) {
       if (entry.config.disabled) {
@@ -653,21 +669,7 @@ export const layer = (options?: Options) => Layer.effect(
     fork(
       events.subscribe(Event.Updated).pipe(
         Stream.runForEach(() =>
-          Effect.gen(function* () {
-            const next = yield* load()
-            configured.timeout = next.timeout
-            const names = new Set([...configured.names, ...next.servers.keys()])
-            for (const name of names) {
-              const updated = next.servers.get(name)
-              if (updated) {
-                if (isDeepStrictEqual(runtime.get(name)?.config, updated)) continue
-                yield* replaceServer(name, updated).pipe(locks.withLock(name))
-                continue
-              }
-              yield* removeServer(name).pipe(locks.withLock(name))
-            }
-            configured.names = new Set(next.servers.keys())
-          }).pipe(Effect.catchCause((cause) => Effect.logError("failed to reload MCP config", { cause }))),
+          reloadConfig().pipe(Effect.catchCause((cause) => Effect.logError("failed to reload MCP config", { cause }))),
         ),
         Effect.ignore,
       ),
@@ -694,7 +696,7 @@ export const layer = (options?: Options) => Layer.effect(
       }),
       add: Effect.fn("MCP.add")(function* (server, config) {
         const name = ServerName.make(server)
-        yield* replaceServer(name, { ...config, timeout: { ...configured.timeout, ...config.timeout } }).pipe(
+        yield* replaceServer(name, { ...config, timeout: { ...configState.timeout, ...config.timeout } }).pipe(
           locks.withLock(name),
         )
       }),
