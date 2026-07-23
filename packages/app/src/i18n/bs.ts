@@ -168,9 +168,9 @@ export const dict = {
   "provider.custom.field.providerID.placeholder": "mojprovajder",
   "provider.custom.field.providerID.description": "Mala slova, brojevi, crtice ili donje crte",
   "provider.custom.field.name.label": "Prikazano ime",
-  "provider.custom.field.name.placeholder": "Moj AI Provajder",
+  "provider.custom.field.name.placeholder": "Meta AI",
   "provider.custom.field.baseURL.label": "Bazni URL",
-  "provider.custom.field.baseURL.placeholder": "https://api.mojprovajder.com/v1",
+  "provider.custom.field.baseURL.placeholder": "https://api.llama.com/compat/v1",
   "provider.custom.field.apiKey.label": "API ključ",
   "provider.custom.field.apiKey.placeholder": "API ključ",
   "provider.custom.field.apiKey.description":

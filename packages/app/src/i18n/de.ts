@@ -159,9 +159,9 @@ export const dict = {
   "provider.custom.field.providerID.placeholder": "myprovider",
   "provider.custom.field.providerID.description": "Kleinbuchstaben, Zahlen, Bindestriche oder Unterstriche",
   "provider.custom.field.name.label": "Anzeigename",
-  "provider.custom.field.name.placeholder": "Mein KI-Anbieter",
+  "provider.custom.field.name.placeholder": "Meta AI",
   "provider.custom.field.baseURL.label": "Basis-URL",
-  "provider.custom.field.baseURL.placeholder": "https://api.myprovider.com/v1",
+  "provider.custom.field.baseURL.placeholder": "https://api.llama.com/compat/v1",
   "provider.custom.field.apiKey.label": "API-Schlüssel",
   "provider.custom.field.apiKey.placeholder": "API-Schlüssel",
   "provider.custom.field.apiKey.description":

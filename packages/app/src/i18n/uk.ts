@@ -168,9 +168,9 @@ export const dict = {
   "provider.custom.field.providerID.placeholder": "myprovider",
   "provider.custom.field.providerID.description": "Малі літери, цифри, дефіси або підкреслення",
   "provider.custom.field.name.label": "Відображувана назва",
-  "provider.custom.field.name.placeholder": "Мій AI Провайдер",
+  "provider.custom.field.name.placeholder": "Meta AI",
   "provider.custom.field.baseURL.label": "Базовий URL",
-  "provider.custom.field.baseURL.placeholder": "https://api.myprovider.com/v1",
+  "provider.custom.field.baseURL.placeholder": "https://api.llama.com/compat/v1",
   "provider.custom.field.apiKey.label": "Ключ API",
   "provider.custom.field.apiKey.placeholder": "Ключ API",
   "provider.custom.field.apiKey.description":

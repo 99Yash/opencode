@@ -172,9 +172,9 @@ export const dict = {
   "provider.custom.field.providerID.placeholder": "saglayicim",
   "provider.custom.field.providerID.description": "Küçük harfler, rakamlar, tire veya alt çizgi",
   "provider.custom.field.name.label": "Görünen ad",
-  "provider.custom.field.name.placeholder": "Yapay Zekâ Sağlayıcım",
+  "provider.custom.field.name.placeholder": "Meta AI",
   "provider.custom.field.baseURL.label": "Temel URL",
-  "provider.custom.field.baseURL.placeholder": "https://api.saglayicim.com/v1",
+  "provider.custom.field.baseURL.placeholder": "https://api.llama.com/compat/v1",
   "provider.custom.field.apiKey.label": "API anahtarı",
   "provider.custom.field.apiKey.placeholder": "API anahtarı",
   "provider.custom.field.apiKey.description":

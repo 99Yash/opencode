@@ -155,9 +155,9 @@ export const dict = {
   "provider.custom.field.providerID.placeholder": "mojdostawca",
   "provider.custom.field.providerID.description": "Małe litery, cyfry, łączniki lub podkreślenia",
   "provider.custom.field.name.label": "Nazwa wyświetlana",
-  "provider.custom.field.name.placeholder": "Mój Dostawca AI",
+  "provider.custom.field.name.placeholder": "Meta AI",
   "provider.custom.field.baseURL.label": "Bazowy URL",
-  "provider.custom.field.baseURL.placeholder": "https://api.mojdostawca.com/v1",
+  "provider.custom.field.baseURL.placeholder": "https://api.llama.com/compat/v1",
   "provider.custom.field.apiKey.label": "Klucz API",
   "provider.custom.field.apiKey.placeholder": "Klucz API",
   "provider.custom.field.apiKey.description":
