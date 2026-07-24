@@ -55,6 +55,12 @@ const OpenResponsesOutputText = Schema.Struct({
   text: Schema.String,
 })
 
+const ExtendedOutputText = Schema.Struct({
+  type: Schema.tag("output_text"),
+  text: Schema.String,
+  annotations: Schema.Array(Schema.Unknown),
+})
+
 const OpenResponsesReasoningSummaryText = Schema.Struct({
   type: Schema.tag("summary_text"),
   text: Schema.String,
@@ -86,10 +92,19 @@ const OpenResponsesFunctionCallOutput = Schema.Union([
   Schema.Array(OpenResponsesFunctionCallOutputContent),
 ])
 
-const OpenResponsesInputItem = Schema.Union([
+export const InputItem = Schema.Union([
   Schema.Struct({ role: Schema.tag("system"), content: Schema.String }),
   Schema.Struct({ role: Schema.tag("user"), content: Schema.Array(OpenResponsesInputContent) }),
   Schema.Struct({ role: Schema.tag("assistant"), content: Schema.Array(OpenResponsesOutputText) }),
+  Schema.Struct({ role: Schema.tag("assistant"), content: Schema.String, phase: Schema.optionalKey(Schema.Unknown) }),
+  Schema.Struct({
+    type: Schema.tag("message"),
+    id: Schema.String,
+    status: Schema.Literals(["in_progress", "completed", "incomplete"]),
+    role: Schema.tag("assistant"),
+    content: Schema.Array(ExtendedOutputText),
+    phase: Schema.optionalKey(Schema.Unknown),
+  }),
   OpenResponsesReasoningItem,
   OpenResponsesItemReference,
   Schema.Struct({
@@ -104,7 +119,7 @@ const OpenResponsesInputItem = Schema.Union([
     output: OpenResponsesFunctionCallOutput,
   }),
 ])
-type OpenResponsesInputItem = Schema.Schema.Type<typeof OpenResponsesInputItem>
+type OpenResponsesInputItem = Schema.Schema.Type<typeof InputItem>
 
 // Mutable counterpart of the schema reasoning item so `lowerMessages` can fold
 // multiple streamed summary parts into the same item before flushing.
@@ -135,7 +150,7 @@ export const ToolChoice = Schema.Union([
 // transports in sync without a destructure-and-strip dance.
 export const coreFields = {
   model: Schema.String,
-  input: Schema.Array(OpenResponsesInputItem),
+  input: Schema.Array(InputItem),
   instructions: Schema.optional(Schema.String),
   tools: optionalArray(Tool),
   tool_choice: Schema.optional(ToolChoice),
@@ -238,6 +253,25 @@ export interface Extension {
     readonly media: ProviderShared.ValidatedMedia
     readonly request: LLMRequest
   }) => MediaInput | undefined
+  readonly messageMetadata?: (
+    item: StreamItem,
+    id: string,
+    previous: ProviderMetadata | undefined,
+    providerMetadataKey: string,
+  ) => ProviderMetadata | undefined
+  readonly messageContentMetadata?: (
+    providerMetadata: ProviderMetadata | undefined,
+    item: StreamItem,
+    index: number,
+  ) => ProviderMetadata | undefined
+}
+
+export type ExtendedExtension = Extension & {
+  readonly lowerAssistantText?: (
+    parts: ReadonlyArray<TextPart>,
+    request: LLMRequest,
+    message: LLMRequest["messages"][number],
+  ) => ReadonlyArray<OpenResponsesInputItem>
 }
 
 const BASE: Extension = { id: ADAPTER, name: NAME }
@@ -249,8 +283,18 @@ export interface ParserState {
   readonly tools: ToolStream.State<string>
   readonly hasFunctionCall: boolean
   readonly lifecycle: Lifecycle.State
+  readonly messageItems: Readonly<Record<string, MessageStreamItem>>
+  readonly messageContentIDs: ReadonlySet<string>
+  readonly messageContentMetadata?: Extension["messageContentMetadata"]
+  readonly messageMetadata?: Extension["messageMetadata"]
+  readonly nextMessageContentID: number
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
   readonly store: boolean | undefined
+}
+
+interface MessageStreamItem {
+  readonly providerMetadata?: ProviderMetadata
+  readonly content: Readonly<Record<number, { readonly id: string; readonly text: string }>>
 }
 
 type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
@@ -377,7 +421,10 @@ const lowerToolResultOutput = Effect.fn("OpenResponses.lowerToolResultOutput")(f
   return yield* Effect.forEach(content, (item) => lowerToolResultContentItem(item, request, extension))
 })
 
-const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (request: LLMRequest, extension: Extension) {
+const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (
+  request: LLMRequest,
+  extension: ExtendedExtension,
+) {
   const system: OpenResponsesInputItem[] =
     request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
   const input: OpenResponsesInputItem[] = [...system]
@@ -412,7 +459,14 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
       const hostedToolReferences = new Set<string>()
       const flushText = () => {
         if (content.length === 0) return
-        input.push({ role: "assistant", content: content.map((part) => ({ type: "output_text", text: part.text })) })
+        input.push(
+          ...(extension.lowerAssistantText?.(content, request, message) ?? [
+            {
+              role: "assistant" as const,
+              content: content.map((part) => ({ type: "output_text" as const, text: part.text })),
+            },
+          ]),
+        )
         content.splice(0, content.length)
       }
       for (const part of message.content) {
@@ -515,7 +569,7 @@ const lowerOptions = (request: LLMRequest) => {
 
 export const fromRequest = Effect.fn("OpenResponses.fromRequest")(function* (
   request: LLMRequest,
-  extension: Extension = BASE,
+  extension: ExtendedExtension = BASE,
 ) {
   const generation = request.generation
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
@@ -595,8 +649,83 @@ const NO_EVENTS: StepResult["1"] = []
 const TERMINAL_TYPES = new Set(["response.completed", "response.incomplete", "response.failed"])
 export const terminal = (event: Event) => TERMINAL_TYPES.has(event.type)
 
+const ensureMessageContent = (state: ParserState, event: Event) => {
+  const itemID = event.item_id ?? "text-0"
+  const index = typeof event.content_index === "number" ? event.content_index : 0
+  const item = state.messageItems[itemID] ?? { content: {} }
+  const existing = item.content[index]
+  if (existing) return { state, itemID, index, item, content: existing }
+  const findID = (next: number): readonly [string, number] => {
+    const id = `responses-text-${next}`
+    return state.messageContentIDs.has(id) ? findID(next + 1) : [id, next + 1]
+  }
+  const [id, nextMessageContentID] =
+    index === 0 && !state.messageContentIDs.has(itemID)
+      ? ([itemID, state.nextMessageContentID] as const)
+      : findID(state.nextMessageContentID)
+  const content = { id, text: "" }
+  const nextItem = { ...item, content: { ...item.content, [index]: content } }
+  return {
+    state: {
+      ...state,
+      messageItems: { ...state.messageItems, [itemID]: nextItem },
+      messageContentIDs: new Set([...state.messageContentIDs, id]),
+      nextMessageContentID,
+    },
+    itemID,
+    index,
+    item: nextItem,
+    content,
+  }
+}
+
+const updateMessageContent = (
+  state: ParserState,
+  itemID: string,
+  index: number,
+  content: { readonly id: string; readonly text: string },
+): ParserState => ({
+  ...state,
+  messageItems: {
+    ...state.messageItems,
+    [itemID]: {
+      ...state.messageItems[itemID],
+      content: { ...state.messageItems[itemID]?.content, [index]: content },
+    },
+  },
+})
+
+const closeOtherMessageContent = (state: ParserState, events: LLMEvent[], item: MessageStreamItem, index: number) =>
+  Object.entries(item.content).reduce(
+    (lifecycle, entry) =>
+      Number(entry[0]) === index ? lifecycle : Lifecycle.textEnd(lifecycle, events, entry[1].id, item.providerMetadata),
+    state.lifecycle,
+  )
+
+const appendOutputText = (state: ParserState, event: Event, text: string): StepResult => {
+  const ensured = ensureMessageContent(state, event)
+  const events: LLMEvent[] = []
+  const lifecycle = Lifecycle.textStart(
+    closeOtherMessageContent(ensured.state, events, ensured.item, ensured.index),
+    events,
+    ensured.content.id,
+    ensured.item.providerMetadata,
+  )
+  return [
+    {
+      ...updateMessageContent(ensured.state, ensured.itemID, ensured.index, {
+        ...ensured.content,
+        text: ensured.content.text + text,
+      }),
+      lifecycle: Lifecycle.textDelta(lifecycle, events, ensured.content.id, text),
+    },
+    events,
+  ]
+}
+
 const onOutputTextDelta = (state: ParserState, event: Event): StepResult => {
   if (!event.delta) return [state, NO_EVENTS]
+  if (state.messageMetadata) return appendOutputText(state, event, event.delta)
   const events: LLMEvent[] = []
   return [
     { ...state, lifecycle: Lifecycle.textDelta(state.lifecycle, events, event.item_id ?? "text-0", event.delta) },
@@ -605,6 +734,30 @@ const onOutputTextDelta = (state: ParserState, event: Event): StepResult => {
 }
 
 const onOutputTextDone = (state: ParserState, event: Event): StepResult => {
+  if (state.messageMetadata) {
+    const text = typeof event.text === "string" ? event.text : undefined
+    const ensured = ensureMessageContent(state, event)
+    if (text === undefined) return [ensured.state, NO_EVENTS]
+    if (text === ensured.content.text) {
+      if (ensured.state.lifecycle.text.has(ensured.content.id)) return [ensured.state, NO_EVENTS]
+      const events: LLMEvent[] = []
+      return [
+        {
+          ...ensured.state,
+          lifecycle: Lifecycle.textStart(
+            closeOtherMessageContent(ensured.state, events, ensured.item, ensured.index),
+            events,
+            ensured.content.id,
+            ensured.item.providerMetadata,
+          ),
+        },
+        events,
+      ]
+    }
+    if (text.startsWith(ensured.content.text))
+      return appendOutputText(ensured.state, event, text.slice(ensured.content.text.length))
+    return [ensured.state, NO_EVENTS]
+  }
   const events: LLMEvent[] = []
   return [{ ...state, lifecycle: Lifecycle.textEnd(state.lifecycle, events, event.item_id ?? "text-0") }, events]
 }
@@ -643,6 +796,28 @@ const reasoningMetadata = (state: ParserState, item: StreamItem & { id: string }
 // best-effort, not guaranteed.
 const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
   const item = event.item
+  if (item?.type === "message" && item.id && state.messageMetadata) {
+    const existing = state.messageItems[item.id]
+    return [
+      {
+        ...state,
+        messageItems: {
+          ...state.messageItems,
+          [item.id]: {
+            ...existing,
+            providerMetadata: state.messageMetadata(
+              item,
+              item.id,
+              existing?.providerMetadata,
+              state.providerMetadataKey,
+            ),
+            content: existing?.content ?? {},
+          },
+        },
+      },
+      NO_EVENTS,
+    ]
+  }
   if (item && isReasoningItem(item)) {
     const events: LLMEvent[] = []
     return [
@@ -799,6 +974,24 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   const item = event.item
   if (!item) return [state, NO_EVENTS] satisfies StepResult
 
+  if (item.type === "message" && item.id && state.messageMetadata) {
+    const events: LLMEvent[] = []
+    const messageItem = state.messageItems[item.id]
+    const { [item.id]: _finished, ...messageItems } = state.messageItems
+    const metadata = state.messageMetadata(item, item.id, messageItem?.providerMetadata, state.providerMetadataKey)
+    const lifecycle = Object.entries(messageItem?.content ?? {}).reduce(
+      (lifecycle, entry) =>
+        Lifecycle.textEnd(
+          lifecycle,
+          events,
+          entry[1].id,
+          state.messageContentMetadata?.(metadata, item, Number(entry[0])) ?? metadata,
+        ),
+      state.lifecycle,
+    )
+    return [{ ...state, lifecycle, messageItems }, events] satisfies StepResult
+  }
+
   if (item.type === "message" && item.id) return onOutputTextDone(state, { ...event, item_id: item.id })
 
   if (item.type === "function_call") {
@@ -933,6 +1126,11 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   hasFunctionCall: false,
   tools: ToolStream.empty<string>(),
   lifecycle: Lifecycle.initial(),
+  messageItems: {},
+  messageContentIDs: new Set<string>(),
+  messageContentMetadata: extension.messageContentMetadata,
+  messageMetadata: extension.messageMetadata,
+  nextMessageContentID: 0,
   reasoningItems: {},
   store: OpenResponsesOptions.resolve(request).store,
 })

@@ -4,11 +4,19 @@ import { Auth } from "../route/auth"
 import { Endpoint } from "../route/endpoint"
 import { Protocol } from "../route/protocol"
 import { HttpTransport, WebSocketTransport } from "../route/transport"
-import { LLMEvent, LLMRequest, type JsonSchema, type ToolDefinition } from "../schema"
+import {
+  LLMEvent,
+  LLMRequest,
+  type JsonSchema,
+  type ProviderMetadata,
+  type TextPart,
+  type ToolDefinition,
+} from "../schema"
 import { OpenResponses } from "./open-responses"
 import { optionalArray, ProviderShared } from "./shared"
 import { Lifecycle } from "./utils/lifecycle"
 import { OpenAIImage } from "./utils/openai-image"
+import { OpenResponsesOptions } from "./utils/open-responses-options"
 import { ToolSchemaProjection } from "./utils/tool-schema"
 
 const ADAPTER = "openai-responses"
@@ -35,8 +43,36 @@ const OpenAIResponsesToolChoice = Schema.Union([
   Schema.Struct({ type: Schema.tag("image_generation") }),
 ])
 
+const OpenAIResponsesOutputText = Schema.Struct({
+  type: Schema.tag("output_text"),
+  text: Schema.String,
+  annotations: Schema.Array(Schema.Unknown),
+})
+
+const OpenAIResponsesMessagePhase = Schema.Literals(["commentary", "final_answer"])
+type OpenAIResponsesMessagePhase = Schema.Schema.Type<typeof OpenAIResponsesMessagePhase>
+
+const OpenAIResponsesInputItem = Schema.Union([
+  Schema.Struct({
+    role: Schema.tag("assistant"),
+    content: Schema.String,
+    phase: Schema.optionalKey(Schema.NullOr(OpenAIResponsesMessagePhase)),
+  }),
+  Schema.Struct({
+    type: Schema.tag("message"),
+    id: Schema.String,
+    status: Schema.Literals(["in_progress", "completed", "incomplete"]),
+    role: Schema.tag("assistant"),
+    content: Schema.Array(OpenAIResponsesOutputText),
+    phase: Schema.optionalKey(Schema.NullOr(OpenAIResponsesMessagePhase)),
+  }),
+  OpenResponses.InputItem,
+])
+type OpenAIResponsesInputItem = Schema.Schema.Type<typeof OpenAIResponsesInputItem>
+
 const OpenAIResponsesCoreFields = {
   ...OpenResponses.coreFields,
+  input: Schema.Array(OpenAIResponsesInputItem),
   tools: optionalArray(OpenAIResponsesTools),
   tool_choice: Schema.optional(OpenAIResponsesToolChoice),
 }
@@ -57,9 +93,161 @@ const OpenAIResponsesWebSocketMessage = Schema.StructWithRest(
 type OpenAIResponsesWebSocketMessage = Schema.Schema.Type<typeof OpenAIResponsesWebSocketMessage>
 const encodeWebSocketMessage = Schema.encodeSync(Schema.fromJsonString(OpenAIResponsesWebSocketMessage))
 
+const messagePhase = (part: TextPart, providerMetadataKey: string): OpenAIResponsesMessagePhase | null | undefined => {
+  const metadata = ProviderShared.isRecord(part.providerMetadata)
+    ? part.providerMetadata[providerMetadataKey]
+    : undefined
+  if (!ProviderShared.isRecord(metadata)) return undefined
+  return metadata.phase === "commentary" || metadata.phase === "final_answer" || metadata.phase === null
+    ? metadata.phase
+    : undefined
+}
+
+const messageItemID = (part: TextPart, providerMetadataKey: string) => {
+  const metadata = ProviderShared.isRecord(part.providerMetadata)
+    ? part.providerMetadata[providerMetadataKey]
+    : undefined
+  return ProviderShared.isRecord(metadata) && typeof metadata.itemId === "string" && metadata.itemId.length > 0
+    ? metadata.itemId
+    : undefined
+}
+
+const messageStatus = (part: TextPart, providerMetadataKey: string) => {
+  const metadata = ProviderShared.isRecord(part.providerMetadata)
+    ? part.providerMetadata[providerMetadataKey]
+    : undefined
+  if (!ProviderShared.isRecord(metadata)) return undefined
+  return metadata.status === "in_progress" || metadata.status === "completed" || metadata.status === "incomplete"
+    ? metadata.status
+    : undefined
+}
+
+const messageAnnotations = (part: TextPart, providerMetadataKey: string) => {
+  const metadata = ProviderShared.isRecord(part.providerMetadata)
+    ? part.providerMetadata[providerMetadataKey]
+    : undefined
+  return ProviderShared.isRecord(metadata) && Array.isArray(metadata.annotations) ? metadata.annotations : []
+}
+
+const lowerAssistantText = (
+  parts: ReadonlyArray<TextPart>,
+  request: LLMRequest,
+  message: LLMRequest["messages"][number],
+) => {
+  const providerMetadataKey = request.model.route.providerMetadataKey ?? "openai"
+  const dropItemIdentity =
+    OpenResponsesOptions.resolve(request).store === false &&
+    message.content.some((part) => {
+      if (part.type !== "reasoning") return false
+      const metadata = part.providerMetadata?.[providerMetadataKey]
+      return (
+        ProviderShared.isRecord(metadata) &&
+        typeof metadata.itemId === "string" &&
+        typeof metadata.reasoningEncryptedContent !== "string"
+      )
+    })
+  const input: OpenAIResponsesInputItem[] = []
+  const content: TextPart[] = []
+  let phase: OpenAIResponsesMessagePhase | null | undefined
+  let itemID: string | undefined
+  let status: "in_progress" | "completed" | "incomplete" | undefined
+  const flush = () => {
+    if (content.length === 0) return
+    if (phase === undefined && content.every((part) => part.text.length === 0)) {
+      content.splice(0, content.length)
+      itemID = undefined
+      status = undefined
+      return
+    }
+    if (phase === undefined && itemID === undefined) {
+      input.push({
+        role: "assistant",
+        content: content.map((part) => ({ type: "output_text", text: part.text })),
+      })
+      content.splice(0, content.length)
+      status = undefined
+      return
+    }
+    input.push(
+      itemID
+        ? {
+            type: "message",
+            id: itemID,
+            status: status ?? "completed",
+            role: "assistant",
+            content: content.map((part) => ({
+              type: "output_text",
+              text: part.text,
+              annotations: messageAnnotations(part, providerMetadataKey),
+            })),
+            ...(phase !== undefined ? { phase } : {}),
+          }
+        : {
+            role: "assistant",
+            content: ProviderShared.joinText(content),
+            ...(phase !== undefined ? { phase } : {}),
+          },
+    )
+    content.splice(0, content.length)
+    phase = undefined
+    itemID = undefined
+    status = undefined
+  }
+  for (const part of parts) {
+    const nextPhase = messagePhase(part, providerMetadataKey)
+    const nextItemID = dropItemIdentity ? undefined : messageItemID(part, providerMetadataKey)
+    if (content.length > 0 && (phase !== nextPhase || itemID !== nextItemID)) flush()
+    phase = nextPhase
+    itemID = nextItemID
+    status = messageStatus(part, providerMetadataKey) ?? status
+    content.push(part)
+  }
+  flush()
+  return input
+}
+
+const messageMetadata = (
+  item: OpenResponses.StreamItem,
+  id: string,
+  previous: ProviderMetadata | undefined,
+  providerMetadataKey: string,
+) => {
+  const prior = previous?.[providerMetadataKey]
+  const metadata = ProviderShared.isRecord(prior) ? prior : {}
+  const phase = item.phase !== undefined ? item.phase : metadata.phase
+  const status = item.status !== undefined ? item.status : metadata.status
+  if (previous === undefined && phase === undefined && status === undefined) return undefined
+  return {
+    [providerMetadataKey]: {
+      ...metadata,
+      itemId: id,
+      ...(phase === "commentary" || phase === "final_answer" || phase === null ? { phase } : {}),
+      ...(status === "in_progress" || status === "completed" || status === "incomplete" ? { status } : {}),
+    },
+  }
+}
+
+const messageContentMetadata = (
+  providerMetadata: ProviderMetadata | undefined,
+  item: OpenResponses.StreamItem,
+  index: number,
+) => {
+  const content = Array.isArray(item.content) ? item.content[index] : undefined
+  if (!ProviderShared.isRecord(content) || content.type !== "output_text" || !Array.isArray(content.annotations))
+    return providerMetadata
+  if (!providerMetadata) return undefined
+  const key = Object.keys(providerMetadata)[0]
+  if (!key) return providerMetadata
+  const metadata = providerMetadata[key]
+  return { [key]: { ...(ProviderShared.isRecord(metadata) ? metadata : {}), annotations: content.annotations } }
+}
+
 const extension = {
   id: ADAPTER,
   name: NAME,
+  lowerAssistantText,
+  messageMetadata,
+  messageContentMetadata,
   lowerMedia: ({ part, media, request }) => {
     if (request.model.provider !== "xai" || media.mime !== "application/pdf") return undefined
     return {
@@ -69,7 +257,7 @@ const extension = {
       mime_type: media.mime,
     }
   },
-} satisfies OpenResponses.Extension
+} satisfies OpenResponses.ExtendedExtension
 
 const nativeImageToolInput = (tool: ToolDefinition) => {
   const native = tool.native?.openai

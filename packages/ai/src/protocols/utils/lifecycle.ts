@@ -17,7 +17,7 @@ export const stepStart = (state: State, events: LLMEvent[]): State => {
 export const textStart = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
   if (state.text.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.textStart({ id, providerMetadata }))
+  events.push(LLMEvent.textStart({ id, ...(providerMetadata ? { providerMetadata } : {}) }))
   return { ...stepped, text: new Set([...stepped.text, id]) }
 }
 
@@ -68,7 +68,7 @@ export const reasoningEnd = (
 export const textEnd = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
   if (!state.text.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.textEnd({ id, providerMetadata }))
+  events.push(LLMEvent.textEnd({ id, ...(providerMetadata ? { providerMetadata } : {}) }))
   const text = new Set(stepped.text)
   text.delete(id)
   return { ...stepped, text }
