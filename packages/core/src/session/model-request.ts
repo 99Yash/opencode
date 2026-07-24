@@ -2,7 +2,7 @@ export * as SessionModelRequest from "./model-request"
 
 import { LLM, Message, SystemPart, type LLMRequest, type ToolContent } from "@opencode-ai/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, LogLevel } from "effect"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { App } from "../app"
 import { ModelV2 } from "../model"
@@ -10,6 +10,7 @@ import { PluginHooks } from "../plugin/hooks"
 import { ToolRegistry } from "../tool/registry"
 import { SessionContext } from "./context"
 import { SessionModelHeaders } from "./model-headers"
+import { PromptCacheDiagnostics } from "./prompt-cache-diagnostics"
 import { MAX_STEPS_PROMPT } from "./runner/max-steps"
 import PROMPT_DEFAULT from "./runner/prompt/base.txt"
 import { toLLMMessages } from "./runner/to-llm-message"
@@ -87,6 +88,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const hooks = yield* PluginHooks.Service
     const app = yield* App.Metadata
+    const promptCacheSnapshots = new Map<string, PromptCacheDiagnostics.Snapshot>()
 
     const prepare = Effect.fn("SessionModelRequest.prepare")(function* (input: PrepareInput) {
       const session = input.context.session
@@ -134,6 +136,23 @@ export const layer = Layer.effect(
         tools: hookedTools,
         toolChoice: stepLimitReached ? "none" : undefined,
       })
+      if (yield* LogLevel.isEnabled("Debug")) {
+        const current = PromptCacheDiagnostics.snapshot(request)
+        const comparison = PromptCacheDiagnostics.compare(promptCacheSnapshots.get(session.id), current)
+        promptCacheSnapshots.delete(session.id)
+        promptCacheSnapshots.set(session.id, current)
+        const oldest = promptCacheSnapshots.keys().next().value
+        if (promptCacheSnapshots.size > 100 && oldest !== undefined) promptCacheSnapshots.delete(oldest)
+        yield* Effect.logDebug("prompt cache prefix").pipe(
+          Effect.annotateLogs({
+            sessionID: session.id,
+            toolCount: current.tools.length,
+            systemParts: current.system.length,
+            messageCount: current.messages.length,
+            ...comparison,
+          }),
+        )
+      }
       const executeTool: ToolRegistry.ToolSet["execute"] = (executeInput) => {
         if (stepLimitReached)
           return Effect.succeed({
