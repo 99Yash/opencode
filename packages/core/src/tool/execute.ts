@@ -129,7 +129,14 @@ export const create = (registrations: ReadonlyMap<string, Registration>) => {
 }
 
 export const catalog = (registrations: ReadonlyMap<string, Registration>) => {
-  return runtime(registrations, () => Effect.fail(toolError("Execute context is unavailable"))).catalog()
+  const pinned = new Set(
+    Array.from(registrations.values()).flatMap((registration) =>
+      registration.pinned === true ? [registrationPath(registration)] : [],
+    ),
+  )
+  return runtime(registrations, () => Effect.fail(toolError("Execute context is unavailable")))
+    .catalog()
+    .map((entry) => (pinned.has(entry.path) ? { ...entry, pinned: true as const } : entry))
 }
 
 function runtime(
@@ -140,8 +147,7 @@ function runtime(
   const tools: Record<string, Tool.Tool<never>> = {}
   for (const [name, registration] of registrations) {
     const child = toLLMDefinition(name, registration.tool)
-    const path =
-      registration.namespace === undefined ? registration.name : `${registration.namespace}.${registration.name}`
+    const path = registrationPath(registration)
     tools[path] = Tool.make({
       description: child.description,
       input: child.inputSchema,
@@ -150,6 +156,10 @@ function runtime(
     })
   }
   return CodeMode.make<typeof tools>({ tools, ...hooks })
+}
+
+function registrationPath(registration: Registration) {
+  return registration.namespace === undefined ? registration.name : `${registration.namespace}.${registration.name}`
 }
 
 // Tool inputs arrive as parsed JSON, so the JSON value cast is a boundary fact.

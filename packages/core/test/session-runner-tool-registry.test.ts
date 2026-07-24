@@ -121,6 +121,17 @@ describe("ToolRegistry", () => {
     }),
   )
 
+  it.effect("rejects pinned tools outside Code Mode", () =>
+    Effect.gen(function* () {
+      const service = yield* ToolRegistry.Service
+      const error = yield* service.register({ echo: make() }, { codemode: false, pinned: true }).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(Tool.RegistrationError)
+      expect(error.message).toBe("Pinned tools must use Code Mode")
+      expect((yield* service.snapshot()).definitions).toEqual([])
+    }),
+  )
+
   it.effect("canonicalizes effective definitions and keeps Code Mode last", () =>
     Effect.gen(function* () {
       const service = yield* ToolRegistry.Service

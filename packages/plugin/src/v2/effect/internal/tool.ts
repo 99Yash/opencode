@@ -129,6 +129,8 @@ export interface RegisterOptions {
   readonly namespace?: string
   /** Defaults to true. False exposes the tool directly to the provider. */
   readonly codemode?: boolean
+  /** Keeps the complete signature visible when the Code Mode catalog is compact. */
+  readonly pinned?: boolean
   /** Permission action used for whole-tool visibility filtering. */
   readonly permission?: string
 }
@@ -138,6 +140,7 @@ export interface Registration {
   readonly name: string
   readonly namespace?: string
   readonly permission: string
+  readonly pinned?: boolean
 }
 
 export const validateName = (name: string) =>
@@ -159,6 +162,7 @@ export const registrationEntries = (
       namespace: options?.namespace,
       tool,
       permission: options?.permission ?? key,
+      ...(options?.pinned === true ? { pinned: true } : {}),
     }
   })
 

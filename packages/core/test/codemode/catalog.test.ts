@@ -57,6 +57,23 @@ describe("CodeModeCatalog.summarize", () => {
     expect(description).toHaveLength(120)
     expect(description).toEndWith("...")
   })
+
+  test("keeps pinned signatures when no unpinned listing fits", () => {
+    const pinned = { ...entry("files.read", "Read a file"), pinned: true as const }
+    const catalog = CodeModeCatalog.summarize([entry("files.write", "Write a file"), pinned], 0)
+
+    expect(catalog).toEqual({
+      total: 2,
+      shown: 1,
+      namespaces: [
+        {
+          name: "files",
+          count: 2,
+          entries: [{ path: pinned.path, line: `  - ${pinned.signature} // Read a file` }],
+        },
+      ],
+    })
+  })
 })
 
 describe("CodeModeInstructions.render", () => {

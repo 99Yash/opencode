@@ -125,3 +125,16 @@ test("raw JSON schemas are render-only and omitted output means model-only", asy
   })
   expect(await Effect.runPromise(Tool.decodeInput(tool.input, { value: 1 }))).toEqual({ value: 1 })
 })
+
+test("registration metadata omits disabled pinning", () => {
+  const tool = Tool.make({
+    description: "Echo text",
+    input: Schema.Struct({ text: Schema.String }),
+    output: Schema.String,
+    execute: ({ text }) => Effect.succeed({ output: text }),
+  })
+  const registration = Tool.registrationEntries({ echo: tool })
+
+  expect(Tool.registrationEntries({ echo: tool }, { pinned: false })).toEqual(registration)
+  expect(Tool.registrationEntries({ echo: tool }, { pinned: true })).toEqual([{ ...registration[0], pinned: true }])
+})

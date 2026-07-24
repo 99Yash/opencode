@@ -6,6 +6,7 @@ export const Entry = Schema.Struct({
   path: Schema.String,
   description: Schema.String,
   signature: Schema.String,
+  pinned: Schema.optionalKey(Schema.Literal(true)),
 })
 export type Entry = typeof Entry.Type
 
@@ -31,8 +32,8 @@ const DESCRIPTION_LIMIT = 120
 const CHARACTERS_PER_TOKEN = 4
 const INLINE_BUDGET = 2_000
 
-// Keep every namespace searchable, then select full listings one per namespace per round,
-// considering shorter listings first until the inline budget is exhausted.
+// Keep every namespace searchable and every pinned listing visible, then select additional
+// listings one per namespace per round until the remaining inline budget is exhausted.
 export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET): Summary {
   const namespaces = [...Map.groupBy(entries, (entry) => entry.path.split(".", 1)[0] ?? entry.path)]
     .sort(([left], [right]) => {
@@ -45,44 +46,46 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
         .map((entry) => {
           const firstLine = entry.description.split("\n", 1)[0]?.trim() ?? ""
           const description =
-            firstLine.length > DESCRIPTION_LIMIT
-              ? firstLine.slice(0, DESCRIPTION_LIMIT - 3) + "..."
-              : firstLine
+            firstLine.length > DESCRIPTION_LIMIT ? firstLine.slice(0, DESCRIPTION_LIMIT - 3) + "..." : firstLine
           const suffix = description.length === 0 ? "" : ` // ${description}`
-          return { path: entry.path, line: `  - ${entry.signature}${suffix}` }
+          return { path: entry.path, line: `  - ${entry.signature}${suffix}`, pinned: entry.pinned === true }
         })
         .toSorted((left, right) => {
           if (left.path < right.path) return -1
           if (left.path > right.path) return 1
           return 0
         })
+      const pinned = listings.filter((listing) => listing.pinned)
       return {
         name,
         listings,
-        selectionOrder: rankListings(listings),
-        selectedListings: new Set<typeof Listing.Type>(),
+        selectionOrder: rankListings(listings.filter((listing) => !listing.pinned)),
+        selectedListings: new Set<typeof Listing.Type>(pinned),
+        pinnedCost: pinned.reduce((total, listing) => total + listingCost(listing), 0),
       }
     })
 
   const active = new Set(namespaces)
-  let remaining = budget
+  let remaining = Math.max(0, budget - namespaces.reduce((total, namespace) => total + namespace.pinnedCost, 0))
   while (active.size > 0) {
     for (const namespace of active) {
-      const candidate = namespace.selectionOrder[namespace.selectedListings.size]
+      const candidate = namespace.selectionOrder.shift()
       if (!candidate || candidate.cost > remaining) {
         active.delete(namespace)
         continue
       }
       namespace.selectedListings.add(candidate.listing)
       remaining -= candidate.cost
-      if (namespace.selectedListings.size === namespace.selectionOrder.length) active.delete(namespace)
+      if (namespace.selectionOrder.length === 0) active.delete(namespace)
     }
   }
 
   const namespaceSummaries = namespaces.map((namespace) => ({
     name: namespace.name,
     count: namespace.listings.length,
-    entries: namespace.listings.filter((listing) => namespace.selectedListings.has(listing)),
+    entries: namespace.listings
+      .filter((listing) => namespace.selectedListings.has(listing))
+      .map((listing) => ({ path: listing.path, line: listing.line })),
   }))
   return {
     total: entries.length,
@@ -91,9 +94,13 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
   }
 }
 
+function listingCost(listing: typeof Listing.Type) {
+  return Math.round(listing.line.length / CHARACTERS_PER_TOKEN)
+}
+
 function rankListings(listings: ReadonlyArray<typeof Listing.Type>) {
   return listings
-    .map((listing) => ({ listing, cost: Math.round(listing.line.length / CHARACTERS_PER_TOKEN) }))
+    .map((listing) => ({ listing, cost: listingCost(listing) }))
     .toSorted((left, right) => {
       if (left.cost !== right.cost) return left.cost - right.cost
       if (left.listing.path < right.listing.path) return -1

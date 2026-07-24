@@ -245,6 +245,13 @@ const registryLayer = Layer.effect(
                 }),
               )
             const codemode = options?.codemode ?? true
+            if (!codemode && options?.pinned === true)
+              return yield* Effect.fail(
+                new Tool.RegistrationError({
+                  name: entries[0]?.key ?? "",
+                  message: "Pinned tools must use Code Mode",
+                }),
+              )
             const reserved = codemode ? undefined : entries.find((entry) => entry.key === "execute")
             if (reserved)
               return yield* Effect.fail(

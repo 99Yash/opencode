@@ -326,12 +326,15 @@ Unsupported characters in tool names are normalized to underscores. Namespace
 segments must begin with a letter, contain at most 64 letters, digits,
 underscores, or hyphens, and are joined with dots. Pass the optional third
 argument to `tools.add` to configure the registration with
-`{ namespace, codemode }`:
+`{ namespace, codemode, pinned }`:
 
 - `namespace` prefixes and groups the exposed tool name.
 - `codemode` defaults to `true` and makes the tool available through the
   `execute` CodeMode tool. Set `codemode: false` to expose it directly to the
   provider.
+- `pinned: true` keeps the tool's complete signature visible when the Code Mode
+  catalog is compact. Pinned tools must use Code Mode and cannot set
+  `codemode: false`.
 
 The executor receives a second context argument containing `sessionID`,
 `agent`, `messageID`, `callID`, and `progress`. A tool with `output`
