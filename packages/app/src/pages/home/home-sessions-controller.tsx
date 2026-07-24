@@ -560,18 +560,19 @@ function createHomeSessionHeaderController(groups: () => HomeSessionGroup[]) {
 export type HomeSessionsController = ReturnType<typeof createHomeSessionsController>
 
 export function HomeSessionStatusController(props: {
-  controller: HomeSessionsController
+  server: Accessor<ServerConnection.Key>
   record: HomeSessionRecord
+  isOpenTab: (record: HomeSessionRecord) => boolean
   render: (state: { unread: Accessor<boolean>; loading: Accessor<boolean>; open: Accessor<boolean> }) => JSX.Element
 }) {
   const avatar = useSessionTabAvatarState(
-    props.controller.server,
+    props.server,
     () => props.record.session.directory,
     () => props.record.session.id,
   )
   return props.render({
     unread: avatar.unread,
     loading: avatar.loading,
-    open: () => props.controller.hasOpenTab(props.record),
+    open: () => props.isOpenTab(props.record),
   })
 }

@@ -1,4 +1,5 @@
-import { type ComponentProps, createMemo, For, Show } from "solid-js"
+import type { Session } from "@opencode-ai/sdk/v2/client"
+import { type Accessor, createMemo, For, Show } from "solid-js"
 import { Spinner } from "@opencode-ai/ui/spinner"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import { ButtonV2 } from "@opencode-ai/ui/v2/button-v2"
@@ -6,14 +7,16 @@ import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
 import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { TooltipV2 } from "@opencode-ai/ui/v2/tooltip-v2"
 import { useLanguage } from "@/context/language"
+import { ServerConnection } from "@/context/server"
 import { SessionTabAvatarView } from "@/pages/layout/session-tab-avatar"
 import { sessionTitle } from "@/utils/session-title"
 import { shouldOpenSessionInBackground } from "../home-session-open"
 import {
   HomeSessionStatusController,
   homeSessionSearchKey,
+  type HomeSessionGroup,
   type HomeSessionRecord,
-  type HomeSessionsController,
+  type OpenSessionOptions,
 } from "./home-sessions-controller"
 
 const SHOW_HOME_SESSION_ARCHIVE = false
@@ -43,19 +46,52 @@ function isBackgroundOpen(event: MouseEvent) {
   })
 }
 
-export function HomeSessionsView(props: { controller: HomeSessionsController }) {
+export type HomeSessionsViewProps = {
+  language: ReturnType<typeof useLanguage>
+  groups: Accessor<HomeSessionGroup[]>
+  loading: Accessor<boolean>
+  showProjectName: Accessor<boolean>
+  server: Accessor<ServerConnection.Key>
+  canCreateSession: Accessor<boolean>
+  searchValue: Accessor<string>
+  searchPlaceholder: Accessor<string>
+  searchOpen: Accessor<boolean>
+  searchLoading: Accessor<boolean>
+  searchResults: Accessor<HomeSessionRecord[]>
+  searchActive: Accessor<string>
+  searchNoResultsLabel: Accessor<string>
+  titleOpacity: (id: HomeSessionGroup["id"]) => number
+  isOpenTab: (record: HomeSessionRecord) => boolean
+  onCreateSession: () => void
+  onOpenSession: (session: Session, options?: OpenSessionOptions) => void
+  onArchiveSession: (session: Session) => Promise<void>
+  onSetHoverTarget: (element: HTMLElement) => void
+  onSetThumbTrack: (element: HTMLDivElement) => void
+  onSetContent: (element: HTMLDivElement) => void
+  onSetHeader: (id: HomeSessionGroup["id"], element: HTMLDivElement) => void
+  onWheel: (event: WheelEvent) => void
+  onSetSearchRoot: (element: HTMLDivElement) => void
+  onSetSearchInput: (element: HTMLInputElement) => void
+  onSetSearchList: (element: HTMLDivElement) => void
+  onSearchFocus: () => void
+  onSearchInput: (value: string) => void
+  onSearchClose: () => void
+  onSearchMove: (delta: number) => void
+  onSearchSelectActive: () => void
+  onSearchHighlight: (record: HomeSessionRecord) => void
+  onSearchSelect: (record: HomeSessionRecord, options?: OpenSessionOptions) => void
+}
+
+export function HomeSessionsView(props: HomeSessionsViewProps) {
   return (
     <section
-      ref={props.controller.scroll.setHoverTarget}
+      ref={props.onSetHoverTarget}
       class="min-h-0 min-w-0 flex-1 flex flex-col"
-      aria-label={props.controller.language.t("sidebar.project.recentSessions")}
+      aria-label={props.language.t("sidebar.project.recentSessions")}
     >
-      <div
-        class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12"
-        onWheel={props.controller.scroll.containWheel}
-      >
-        <HomeSessionSearch controller={props.controller} />
-        <Show when={props.controller.groups().length > 0 && props.controller.canCreateSession()}>
+      <div class="sticky top-0 z-30 shrink-0 bg-v2-background-bg-base pb-3 pt-6 lg:pt-12" onWheel={props.onWheel}>
+        <HomeSessionSearch {...props} />
+        <Show when={props.groups().length > 0 && props.canCreateSession()}>
           <div class="pointer-events-none absolute right-0 top-[84px] z-20 flex lg:top-[108px]">
             <ButtonV2
               data-action="home-new-session"
@@ -63,54 +99,52 @@ export function HomeSessionsView(props: { controller: HomeSessionsController }) 
               size="normal"
               icon="edit"
               class="pointer-events-auto h-7 px-2 [font-weight:530]"
-              onClick={props.controller.createSession}
+              onClick={props.onCreateSession}
             >
-              {props.controller.language.t("command.session.new")}
+              {props.language.t("command.session.new")}
             </ButtonV2>
           </div>
         </Show>
       </div>
       <div class="pointer-events-none sticky top-[84px] z-40 h-0 -mr-3 lg:top-[108px]">
         <div
-          ref={props.controller.scroll.setThumbTrack}
+          ref={props.onSetThumbTrack}
           data-component="home-session-scroll-track"
           class="relative ml-auto h-[calc(100cqh-84px)] w-3 lg:h-[calc(100cqh-108px)]"
         />
       </div>
       <div class="-mr-3 min-h-[calc(100cqh-72px)] lg:min-h-[calc(100cqh-96px)]">
         <Show
-          when={!props.controller.loading()}
+          when={!props.loading()}
           fallback={
             <div class="pt-3">
-              <HomeSessionSkeleton label={props.controller.language.t("common.loading")} />
+              <HomeSessionSkeleton label={props.language.t("common.loading")} />
             </div>
           }
         >
           <Show
-            when={props.controller.groups().length > 0}
+            when={props.groups().length > 0}
             fallback={
               <HomeSessionsEmpty
-                onNewSession={props.controller.canCreateSession() ? props.controller.createSession : undefined}
-                language={props.controller.language}
+                onNewSession={props.canCreateSession() ? props.onCreateSession : undefined}
+                language={props.language}
               />
             }
           >
-            <div ref={props.controller.header.setContent} class="flex flex-col pt-3 pr-3 pb-16">
-              <For each={props.controller.groups()}>
+            <div ref={props.onSetContent} class="flex flex-col pt-3 pr-3 pb-16">
+              <For each={props.groups()}>
                 {(group, index) => (
                   <>
                     <HomeSessionGroupHeader
                       title={group.title}
-                      titleOpacity={props.controller.header.titleOpacity(group.id)}
-                      ref={(element) => props.controller.header.setHeader(group.id, element)}
+                      titleOpacity={props.titleOpacity(group.id)}
+                      onSetRef={(element) => props.onSetHeader(group.id, element)}
                       elevated={index() === 0}
                     />
                     <div
-                      class={`flex min-w-0 flex-col gap-px pt-4 ${index() === props.controller.groups().length - 1 ? "" : "mb-6"}`}
+                      class={`flex min-w-0 flex-col gap-px pt-4 ${index() === props.groups().length - 1 ? "" : "mb-6"}`}
                     >
-                      <For each={group.sessions}>
-                        {(record) => <HomeSessionRow controller={props.controller} record={record} />}
-                      </For>
+                      <For each={group.sessions}>{(record) => <HomeSessionRow {...props} record={record} />}</For>
                     </div>
                   </>
                 )}
@@ -124,14 +158,16 @@ export function HomeSessionsView(props: { controller: HomeSessionsController }) 
 }
 
 function HomeSessionLeadingController(props: {
-  controller: HomeSessionsController
+  server: HomeSessionsViewProps["server"]
+  isOpenTab: HomeSessionsViewProps["isOpenTab"]
   record: HomeSessionRecord
   revealProjectOnHover: boolean
 }) {
   return (
     <HomeSessionStatusController
-      controller={props.controller}
+      server={props.server}
       record={props.record}
+      isOpenTab={props.isOpenTab}
       render={(state) => (
         <HomeSessionLeading
           record={props.record}
@@ -172,11 +208,11 @@ function HomeSessionLeading(props: {
   )
 }
 
-function HomeSessionSearch(props: { controller: HomeSessionsController }) {
+function HomeSessionSearch(props: HomeSessionsViewProps) {
   return (
     <div class="w-full">
-      <div ref={props.controller.search.setRoot} data-component="home-session-search" class="relative z-30 w-full">
-        <Show when={props.controller.search.open()}>
+      <div ref={props.onSetSearchRoot} data-component="home-session-search" class="relative z-30 w-full">
+        <Show when={props.searchOpen()}>
           <div
             data-component="home-session-search-panel"
             class="absolute flex flex-col overflow-hidden rounded-[12px] bg-v2-background-bg-base shadow-[var(--v2-elevation-floating)]"
@@ -185,7 +221,7 @@ function HomeSessionSearch(props: { controller: HomeSessionsController }) {
             <div class="flex flex-col pt-9">
               <div id={HOME_SESSION_SEARCH_RESULTS_ID} role="listbox" class="flex flex-col gap-4 pt-4">
                 <Show
-                  when={!props.controller.search.loading()}
+                  when={!props.searchLoading()}
                   fallback={
                     <div class="flex items-center justify-center px-4 py-3 text-v2-text-text-muted [font-weight:440]">
                       <Spinner class="size-4" />
@@ -193,25 +229,25 @@ function HomeSessionSearch(props: { controller: HomeSessionsController }) {
                   }
                 >
                   <Show
-                    when={props.controller.search.results().length > 0}
+                    when={props.searchResults().length > 0}
                     fallback={
                       <p class="my-1.5 px-4 pb-2 text-[13px] leading-4 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]">
-                        {props.controller.search.noResultsLabel()}
+                        {props.searchNoResultsLabel()}
                       </p>
                     }
                   >
                     <div class="flex flex-col">
                       <p class="my-1.5 pl-[18px] pr-6 text-[13px] leading-4 tracking-[-0.04px] text-v2-text-text-muted [font-weight:440]">
-                        {props.controller.language.t("home.sessions.search.sessions")}
+                        {props.language.t("home.sessions.search.sessions")}
                       </p>
-                      <ScrollView class="max-h-80" viewportRef={props.controller.search.setList}>
+                      <ScrollView class="max-h-80" viewportRef={props.onSetSearchList}>
                         <div class="flex flex-col gap-px pb-2">
-                          <For each={props.controller.search.results()}>
+                          <For each={props.searchResults()}>
                             {(record) => (
                               <HomeSessionSearchResultRow
-                                controller={props.controller}
+                                {...props}
                                 record={record}
-                                selected={props.controller.search.active() === homeSessionSearchKey(record)}
+                                selected={props.searchActive() === homeSessionSearchKey(record)}
                               />
                             )}
                           </For>
@@ -227,57 +263,57 @@ function HomeSessionSearch(props: { controller: HomeSessionsController }) {
         <label class="relative z-20 flex h-9 w-full items-center gap-2 rounded-[6px] bg-v2-background-bg-layer-02/60 py-1 pl-3 pr-2 text-v2-icon-icon-muted transition-[background-color,box-shadow] duration-[120ms] ease-in-out hover:bg-v2-background-bg-layer-02 focus-within:bg-v2-background-bg-layer-02">
           <IconV2 name="magnifying-glass" />
           <input
-            ref={props.controller.search.setInput}
+            ref={props.onSetSearchInput}
             class="relative z-20 min-w-0 flex-1 border-0 bg-transparent text-v2-text-text-base outline-0 [font-weight:440] placeholder:text-v2-text-text-faint"
-            value={props.controller.search.value()}
-            placeholder={props.controller.search.placeholder()}
-            aria-label={props.controller.search.placeholder()}
-            aria-expanded={props.controller.search.open()}
+            value={props.searchValue()}
+            placeholder={props.searchPlaceholder()}
+            aria-label={props.searchPlaceholder()}
+            aria-expanded={props.searchOpen()}
             aria-controls={HOME_SESSION_SEARCH_RESULTS_ID}
             aria-autocomplete="list"
             aria-activedescendant={
-              props.controller.search.active() && props.controller.search.open()
-                ? `home-session-search-option-${props.controller.search.active()}`
+              props.searchActive() && props.searchOpen()
+                ? `home-session-search-option-${props.searchActive()}`
                 : undefined
             }
-            onFocus={props.controller.search.focus}
-            onInput={(event) => props.controller.search.input(event.currentTarget.value)}
+            onFocus={props.onSearchFocus}
+            onInput={(event) => props.onSearchInput(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault()
-                props.controller.search.close()
+                props.onSearchClose()
                 event.currentTarget.blur()
                 return
               }
-              if (!props.controller.search.open() || props.controller.search.results().length === 0) return
+              if (!props.searchOpen() || props.searchResults().length === 0) return
               if (event.altKey || event.metaKey) return
               if (event.key === "ArrowDown") {
                 event.preventDefault()
-                props.controller.search.move(1)
+                props.onSearchMove(1)
                 return
               }
               if (event.key === "ArrowUp") {
                 event.preventDefault()
-                props.controller.search.move(-1)
+                props.onSearchMove(-1)
                 return
               }
               if (event.key === "Enter" && !event.isComposing) {
                 event.preventDefault()
-                props.controller.search.selectActive()
+                props.onSearchSelectActive()
               }
             }}
           />
-          <Show when={props.controller.search.value()}>
+          <Show when={props.searchValue()}>
             <IconButtonV2
               type="button"
               variant="ghost-muted"
               size="small"
               class="relative z-20 shrink-0"
               icon={<IconV2 name="close" size="large" class="text-v2-icon-icon-muted" />}
-              aria-label={props.controller.search.placeholder()}
+              aria-label={props.searchPlaceholder()}
               onClick={() => {
-                props.controller.search.close()
-                props.controller.search.focus()
+                props.onSearchClose()
+                props.onSearchFocus()
               }}
             />
           </Show>
@@ -287,13 +323,14 @@ function HomeSessionSearch(props: { controller: HomeSessionsController }) {
   )
 }
 
-function HomeSessionSearchResultRow(props: {
-  controller: HomeSessionsController
-  record: HomeSessionRecord
-  selected: boolean
-}) {
+function HomeSessionSearchResultRow(
+  props: HomeSessionsViewProps & {
+    record: HomeSessionRecord
+    selected: boolean
+  },
+) {
   const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
-  const showProjectName = () => props.controller.showProjectName() && props.record.projectName
+  const showProjectName = () => props.showProjectName() && props.record.projectName
   const key = () => homeSessionSearchKey(props.record)
 
   return (
@@ -309,19 +346,20 @@ function HomeSessionSearchResultRow(props: {
         "bg-v2-overlay-simple-overlay-hover": props.selected,
         group: !!showProjectName(),
       }}
-      onMouseEnter={() => props.controller.search.highlight(props.record)}
+      onMouseEnter={() => props.onSearchHighlight(props.record)}
       onMouseDown={(event) => {
         if (event.button === 1) event.preventDefault()
       }}
-      onClick={(event) => props.controller.search.select(props.record, { background: isBackgroundOpen(event) })}
+      onClick={(event) => props.onSearchSelect(props.record, { background: isBackgroundOpen(event) })}
       onAuxClick={(event) => {
         if (!isBackgroundOpen(event)) return
         event.preventDefault()
-        props.controller.search.select(props.record, { background: true })
+        props.onSearchSelect(props.record, { background: true })
       }}
     >
       <HomeSessionLeadingController
-        controller={props.controller}
+        server={props.server}
+        isOpenTab={props.isOpenTab}
         record={props.record}
         revealProjectOnHover={!!showProjectName()}
       />
@@ -342,12 +380,12 @@ function HomeSessionSearchResultRow(props: {
 function HomeSessionGroupHeader(props: {
   title: string
   titleOpacity: number
-  ref: ComponentProps<"div">["ref"]
+  onSetRef: (element: HTMLDivElement) => void
   elevated?: boolean
 }) {
   return (
     <div
-      ref={props.ref}
+      ref={props.onSetRef}
       class={`pointer-events-none sticky top-[84px] lg:top-[108px] flex h-7 min-w-0 items-center justify-between pl-3 bg-v2-background-bg-base ${props.elevated ? "home-session-group-header z-[5]" : "z-10"}`}
     >
       <div class={HOME_SECTION_LABEL} style={{ opacity: props.titleOpacity }}>
@@ -357,9 +395,9 @@ function HomeSessionGroupHeader(props: {
   )
 }
 
-function HomeSessionRow(props: { controller: HomeSessionsController; record: HomeSessionRecord }) {
+function HomeSessionRow(props: HomeSessionsViewProps & { record: HomeSessionRecord }) {
   const title = createMemo(() => sessionTitle(props.record.session.title) || props.record.session.id)
-  const showProjectName = () => props.controller.showProjectName() && props.record.projectName
+  const showProjectName = () => props.showProjectName() && props.record.projectName
 
   return (
     <div
@@ -373,15 +411,16 @@ function HomeSessionRow(props: { controller: HomeSessionsController; record: Hom
         onMouseDown={(event) => {
           if (event.button === 1) event.preventDefault()
         }}
-        onClick={(event) => props.controller.openSession(props.record.session, { background: isBackgroundOpen(event) })}
+        onClick={(event) => props.onOpenSession(props.record.session, { background: isBackgroundOpen(event) })}
         onAuxClick={(event) => {
           if (!isBackgroundOpen(event)) return
           event.preventDefault()
-          props.controller.openSession(props.record.session, { background: true })
+          props.onOpenSession(props.record.session, { background: true })
         }}
       >
         <HomeSessionLeadingController
-          controller={props.controller}
+          server={props.server}
+          isOpenTab={props.isOpenTab}
           record={props.record}
           revealProjectOnHover={!!showProjectName()}
         />
@@ -398,21 +437,17 @@ function HomeSessionRow(props: { controller: HomeSessionsController; record: Hom
       </button>
       <Show when={SHOW_HOME_SESSION_ARCHIVE}>
         <div class="hover-reveal absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-1 group-hover/session:opacity-100 focus-within:opacity-100">
-          <TooltipV2
-            class="flex shrink-0 items-center"
-            placement="bottom"
-            value={props.controller.language.t("common.archive")}
-          >
+          <TooltipV2 class="flex shrink-0 items-center" placement="bottom" value={props.language.t("common.archive")}>
             <IconButtonV2
               data-action="home-session-archive"
               variant="ghost-muted"
               size="large"
               icon={<IconV2 name="archive" />}
-              aria-label={props.controller.language.t("common.archive")}
+              aria-label={props.language.t("common.archive")}
               onClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
-                void props.controller.archiveSession(props.record.session)
+                void props.onArchiveSession(props.record.session)
               }}
             />
           </TooltipV2>
