@@ -31,9 +31,9 @@ export type RequestInput = Omit<
   readonly http?: HttpOptions.Input
 }
 
-export const generate = LLMClient.generate
+export const generateTurn = LLMClient.generate
 
-export const stream = LLMClient.stream
+export const streamTurn = LLMClient.stream
 
 export const request = (input: RequestInput) => {
   const {
