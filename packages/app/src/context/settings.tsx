@@ -230,6 +230,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
       migrationApplied: false,
       previous: undefined as string | undefined,
     })
+    const [newLayoutRequired, setNewLayoutRequired] = createSignal(false)
     const showFileTree = withFallback(() => store.general?.showFileTree, defaultSettings.general.showFileTree)
     const showSearch = withFallback(() => store.general?.showSearch, defaultSettings.general.showSearch)
     const showStatus = withFallback(() => store.general?.showStatus, defaultSettings.general.showStatus)
@@ -250,7 +251,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
     const layoutTransition = createMemo(() =>
       layoutTransitionState(!!sunset, layoutTransitionEligible(), oldInterfaceRetired(), newInterfaceNoticeDismissed()),
     )
-    const newLayoutDesigns = createMemo(() => {
+    const preferredNewLayout = createMemo(() => {
       if (layoutUpgrade()) return true
       if (!ready() && !oldInterfaceRetired()) return legacyNewLayoutDesignsDefault
       if (!layoutTransitionClassified()) {
@@ -266,6 +267,7 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         layoutTransitionEligible() ? legacyNewLayoutDesignsDefault : newLayoutDesignsDefault,
       )
     })
+    const newLayoutDesigns = createMemo(() => newLayoutRequired() || preferredNewLayout())
     const visible = (preference: () => boolean) => createMemo(() => !newLayoutDesigns() || preference())
 
     if (sunset && !oldInterfaceRetired()) {
@@ -404,9 +406,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
           setStore("general", "mobileTitlebarPosition", value)
         },
         newLayoutDesigns,
+        newLayoutRequired,
+        setNewLayoutRequired,
         setNewLayoutDesigns(value: boolean) {
+          if (newLayoutRequired() && !value) return
           const next = oldInterfaceRetired() ? true : value
-          if (newLayoutDesigns() === next) return
+          if (preferredNewLayout() === next) return
           setStore("general", "newLayoutDesigns", next)
           if (typeof window !== "undefined") setTimeout(() => window.location.reload())
         },

@@ -47,7 +47,7 @@ import { ServerSyncProvider, useServerSync } from "@/context/server-sync"
 import { GlobalProvider, useGlobal } from "@/context/global"
 import { HighlightsProvider } from "@/context/highlights"
 import { LanguageProvider, type Locale, useLanguage } from "@/context/language"
-import { LayoutProvider } from "@/context/layout"
+import { currentRoute, LayoutProvider } from "@/context/layout"
 import { ModelsProvider } from "@/context/models"
 import { NotificationProvider } from "@/context/notification"
 import { PermissionProvider } from "@/context/permission"
@@ -235,6 +235,44 @@ function ResolvedDraftRoute(props: { draft: DraftTab }) {
 function UiI18nBridge(props: ParentProps) {
   const language = useLanguage()
   return <I18nProvider value={{ locale: language.intl, t: language.t }}>{props.children}</I18nProvider>
+}
+
+function LayoutCompatibility(props: ParentProps) {
+  const global = useGlobal()
+  const location = useLocation()
+  const server = useServer()
+  const settings = useSettings()
+  const tabs = useTabs()
+  const connection = createMemo(() => {
+    const route = currentRoute(location.pathname, location.search)
+    if (route.type === "draft" && !tabs.ready()) return
+    const key =
+      route.type === "draft"
+        ? tabs.store.find((tab): tab is DraftTab => tab.type === "draft" && tab.draftID === route.draftID)?.server
+        : route.type === "home"
+          ? undefined
+          : route.server
+    if (!key) return server.current
+    return global.servers.list().find((item) => ServerConnection.key(item) === key)
+  })
+  const protocol = createMemo(() => {
+    const value = connection()
+    if (!value) return
+    return global.ensureServerCtx(value).sdk.protocolKind()
+  })
+
+  createEffect(() => {
+    const value = protocol()
+    if (!value) return
+    settings.general.setNewLayoutRequired(value === "v2")
+  })
+  const ready = createMemo(() => {
+    const value = protocol()
+    if (!value) return false
+    return settings.general.newLayoutRequired() === (value === "v2")
+  })
+
+  return <Show when={ready()}>{props.children}</Show>
 }
 
 declare global {
@@ -558,15 +596,17 @@ export function AppInterface(props: {
                 component={props.router ?? Router}
                 root={(routerProps) => (
                   <TabsProvider>
-                    <PermissionProvider>
-                      <NotificationProvider>
-                        <ServerShell>
-                          <Show when={useSettings().general.newLayoutDesigns()} fallback={routerProps.children}>
-                            <NewAppLayout serverScoped={props.serverScoped}>{routerProps.children}</NewAppLayout>
-                          </Show>
-                        </ServerShell>
-                      </NotificationProvider>
-                    </PermissionProvider>
+                    <LayoutCompatibility>
+                      <PermissionProvider>
+                        <NotificationProvider>
+                          <ServerShell>
+                            <Show when={useSettings().general.newLayoutDesigns()} fallback={routerProps.children}>
+                              <NewAppLayout serverScoped={props.serverScoped}>{routerProps.children}</NewAppLayout>
+                            </Show>
+                          </ServerShell>
+                        </NotificationProvider>
+                      </PermissionProvider>
+                    </LayoutCompatibility>
                   </TabsProvider>
                 )}
               >

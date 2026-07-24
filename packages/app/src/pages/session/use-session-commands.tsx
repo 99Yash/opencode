@@ -19,6 +19,7 @@ import { extractPromptFromParts } from "@/utils/prompt"
 import { UserMessage } from "@opencode-ai/sdk/v2"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionOwnership } from "./session-ownership"
+import { useServerProtocol } from "@/context/server-sdk"
 
 export type SessionCommandContext = {
   navigateMessageByOffset: (offset: number) => void
@@ -45,6 +46,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   const prompt = usePrompt()
   const sdk = useSDK()
   const settings = useSettings()
+  const protocol = useServerProtocol()
   const sync = useSync()
   const terminal = useTerminal()
   const layout = useLayout()
@@ -184,6 +186,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const share = async () => {
+    if (protocol() !== "v1") return
     const sessionID = params.id
     if (!sessionID) return
 
@@ -210,6 +213,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const unshare = async () => {
+    if (protocol() !== "v1") return
     const sessionID = params.id
     if (!sessionID) return
 
@@ -390,6 +394,7 @@ export const useSessionCommands = (actions: SessionCommandContext) => {
   }
 
   const shareCmds = () => {
+    if (protocol() !== "v1") return []
     if (sync().data.config.share === "disabled") return []
     return [
       sessionCommand({
