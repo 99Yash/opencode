@@ -194,6 +194,7 @@ const onHostedToolDone = Effect.fn("OpenAIResponses.onHostedToolDone")(function*
   state: OpenResponses.ParserState,
   item: HostedToolItem,
 ) {
+  if (state.completedItems.has(item.id)) return [state, []] satisfies OpenResponses.StepResult
   const tool = HOSTED_TOOLS[item.type]
   const providerMetadata = OpenResponses.providerMetadata(state, { itemId: item.id })
   const events: LLMEvent[] = []
@@ -214,10 +215,28 @@ const onHostedToolDone = Effect.fn("OpenAIResponses.onHostedToolDone")(function*
       providerMetadata,
     }),
   )
-  return [{ ...state, lifecycle }, events] satisfies OpenResponses.StepResult
+  return [
+    { ...state, lifecycle, completedItems: new Set([...state.completedItems, item.id]) },
+    events,
+  ] satisfies OpenResponses.StepResult
 })
 
+const onOutputItemDone = (state: OpenResponses.ParserState, event: OpenResponses.Event) =>
+  event.item && isHostedToolItem(event.item)
+    ? onHostedToolDone(state, event.item)
+    : OpenResponses.onOutputItemDone(state, event)
+
 const step = (state: OpenResponses.ParserState, event: OpenResponses.Event) => {
+  const outputItemID = event.item_id ?? event.item?.id
+  if (outputItemID && event.output_index !== undefined && state.outputIndexes[outputItemID] === undefined)
+    return step(
+      {
+        ...state,
+        outputIndexes: { ...state.outputIndexes, [outputItemID]: event.output_index },
+        outputSequence: [...state.outputSequence, outputItemID],
+      },
+      { ...event, output_index: undefined },
+    )
   if (event.type === "response.reasoning_text.delta" || event.type === "response.reasoning_summary.delta")
     return event.item_id
       ? Effect.succeed(OpenResponses.onReasoningDelta(state, event, event.item_id))
@@ -226,8 +245,9 @@ const step = (state: OpenResponses.ParserState, event: OpenResponses.Event) => {
     return event.item_id
       ? OpenResponses.onReasoningDone(state, event)
       : ProviderShared.eventError(ADAPTER, `${event.type} is missing item_id`)
-  if (event.type === "response.output_item.done" && event.item && isHostedToolItem(event.item))
-    return onHostedToolDone(state, event.item)
+  if (event.type === "response.output_item.done") return onOutputItemDone(state, event)
+  if (event.type === "response.completed" || event.type === "response.incomplete")
+    return OpenResponses.onResponseFinish(state, event, onOutputItemDone)
   return OpenResponses.step(state, event)
 }
 

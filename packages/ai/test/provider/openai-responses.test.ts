@@ -913,6 +913,58 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("reconciles output text independently by content index", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "message", id: "msg_1" } },
+              {
+                type: "response.output_text.delta",
+                item_id: "msg_1",
+                content_index: 0,
+                delta: "First",
+              },
+              {
+                type: "response.output_text.done",
+                item_id: "msg_1",
+                content_index: 0,
+                text: "First.",
+              },
+              {
+                type: "response.output_text.delta",
+                item_id: "msg_1",
+                content_index: 1,
+                delta: "Second",
+              },
+              {
+                type: "response.output_text.done",
+                item_id: "msg_1",
+                content_index: 1,
+                text: "Second.",
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  id: "msg_1",
+                  content: [
+                    { type: "output_text", text: "First." },
+                    { type: "output_text", text: "Second." },
+                  ],
+                },
+              },
+              { type: "response.completed", response: {} },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("First.Second.")
+    }),
+  )
+
   it.effect("recovers output from the authoritative terminal response", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(
@@ -941,6 +993,52 @@ describe("OpenAI Responses route", () => {
       expect(response.events.filter(LLMEvent.is.textDelta)).toEqual([
         { type: "text-delta", id: "msg_1", text: "Terminal only." },
       ])
+    }),
+  )
+
+  it.effect("rejects terminal output that cannot be restored to authoritative order", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.added",
+                output_index: 1,
+                item: { type: "message", id: "msg_later" },
+              },
+              {
+                type: "response.output_text.delta",
+                item_id: "msg_later",
+                output_index: 1,
+                content_index: 0,
+                delta: "Later",
+              },
+              {
+                type: "response.completed",
+                response: {
+                  output: [
+                    {
+                      type: "message",
+                      id: "msg_earlier",
+                      content: [{ type: "output_text", text: "Earlier" }],
+                    },
+                    {
+                      type: "message",
+                      id: "msg_later",
+                      content: [{ type: "output_text", text: "Later" }],
+                    },
+                  ],
+                },
+              },
+            ),
+          ),
+        ),
+        Effect.flip,
+      )
+
+      expect(error.reason._tag).toBe("InvalidProviderOutput")
+      expect(error.message).toContain("terminal output conflicts with the streamed output order")
     }),
   )
 
@@ -1182,6 +1280,92 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(response.reasoning).toBe("thinking...")
+    }),
+  )
+
+  it.effect("recovers terminal-only reasoning summaries sequentially", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents({
+              type: "response.completed",
+              response: {
+                output: [
+                  {
+                    type: "reasoning",
+                    id: "rs_1",
+                    encrypted_content: "encrypted-state",
+                    summary: [
+                      { type: "summary_text", text: "First" },
+                      { type: "summary_text", text: "Second" },
+                    ],
+                  },
+                ],
+              },
+            }),
+          ),
+        ),
+      )
+
+      expect(response.message.content.filter((part) => part.type === "reasoning")).toEqual([
+        {
+          type: "reasoning",
+          text: "First",
+          providerMetadata: { openai: { itemId: "rs_1" } },
+        },
+        {
+          type: "reasoning",
+          text: "Second",
+          providerMetadata: {
+            openai: { itemId: "rs_1", reasoningEncryptedContent: "encrypted-state" },
+          },
+        },
+      ])
+      expect(
+        response.events
+          .filter((event) => event.type.startsWith("reasoning-"))
+          .map((event) => `${event.type}:${event.id}`),
+      ).toEqual([
+        "reasoning-start:rs_1:0",
+        "reasoning-delta:rs_1:0",
+        "reasoning-end:rs_1:0",
+        "reasoning-start:rs_1:1",
+        "reasoning-delta:rs_1:1",
+        "reasoning-end:rs_1:1",
+      ])
+    }),
+  )
+
+  it.effect("updates completed reasoning metadata without adding a phantom block", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: "stale", summary: [] },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "final", summary: [] }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.message.content.filter((part) => part.type === "reasoning")).toEqual([
+        {
+          type: "reasoning",
+          text: "",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "final" } },
+        },
+      ])
     }),
   )
 
@@ -1792,7 +1976,10 @@ describe("OpenAI Responses route", () => {
       const body = sseEvents(
         { type: "response.output_item.added", item },
         { type: "response.output_item.done", item },
-        { type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1 } } },
+        {
+          type: "response.completed",
+          response: { output: [item], usage: { input_tokens: 5, output_tokens: 1 } },
+        },
       )
       const response = yield* LLMClient.generate(request).pipe(Effect.provide(fixedResponse(body)))
 
@@ -1835,6 +2022,40 @@ describe("OpenAI Responses route", () => {
               { type: "response.output_item.done", item },
               { type: "response.completed", response: { usage: { input_tokens: 5, output_tokens: 1 } } },
             ),
+          ),
+        ),
+      )
+
+      expect(response.events.find(LLMEvent.is.toolResult)).toMatchObject({
+        id: "ig_1",
+        name: "image_generation",
+        providerExecuted: true,
+        result: {
+          type: "content",
+          value: [{ type: "file", uri: "data:image/png;base64,AQID", mime: "image/png" }],
+        },
+      })
+    }),
+  )
+
+  it.effect("recovers hosted tools from the terminal response", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents({
+              type: "response.completed",
+              response: {
+                output: [
+                  {
+                    type: "image_generation_call",
+                    id: "ig_1",
+                    status: "completed",
+                    result: "AQID",
+                  },
+                ],
+              },
+            }),
           ),
         ),
       )

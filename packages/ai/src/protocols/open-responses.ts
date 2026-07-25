@@ -280,6 +280,8 @@ export interface ParserState {
   readonly hasFunctionCall: boolean
   readonly completedItems: ReadonlySet<string>
   readonly functionArguments: Readonly<Record<string, string>>
+  readonly outputIndexes: Readonly<Record<string, number>>
+  readonly outputSequence: ReadonlyArray<string>
   readonly lifecycle: Lifecycle.State
   readonly messageItems: ReadonlySet<string>
   readonly messagePhase: (value: unknown) => MessagePhase | null | undefined
@@ -660,6 +662,12 @@ export const terminal = (event: Event) => TERMINAL_TYPES.has(event.type)
 
 const onOutputTextDelta = (state: ParserState, event: Event, id: string): StepResult => {
   if (!event.delta) return [state, NO_EVENTS]
+  const key =
+    event.content_index === undefined
+      ? id
+      : event.content_index === 0 && state.outputText[`${id}:0`] === undefined && state.outputText[id] !== undefined
+        ? id
+        : `${id}:${event.content_index}`
   const events: LLMEvent[] = []
   const phase = state.messagePhases[id]
   const metadata = phase === undefined ? undefined : providerMetadata(state, { phase })
@@ -668,7 +676,7 @@ const onOutputTextDelta = (state: ParserState, event: Event, id: string): StepRe
     {
       ...state,
       lifecycle: Lifecycle.textDelta(lifecycle, events, id, event.delta),
-      outputText: { ...state.outputText, [id]: `${state.outputText[id] ?? ""}${event.delta}` },
+      outputText: { ...state.outputText, [key]: `${state.outputText[key] ?? ""}${event.delta}` },
     },
     events,
   ]
@@ -694,8 +702,14 @@ const onOutputTextDone = Effect.fn("OpenResponses.onOutputTextDone")(function* (
   event: Event,
   id: string,
 ) {
+  const key =
+    event.content_index === undefined
+      ? id
+      : event.content_index === 0 && state.outputText[`${id}:0`] === undefined && state.outputText[id] !== undefined
+        ? id
+        : `${id}:${event.content_index}`
   const suffix =
-    event.text === undefined ? "" : yield* authoritativeSuffix(state, "output text", id, state.outputText[id] ?? "", event.text)
+    event.text === undefined ? "" : yield* authoritativeSuffix(state, "output text", key, state.outputText[key] ?? "", event.text)
   const [reconciled, deltaEvents] = onOutputTextDelta(state, { ...event, delta: suffix }, id)
   if (reconciled.messageItems.has(id)) return [reconciled, deltaEvents] satisfies StepResult
   const events: LLMEvent[] = []
@@ -927,29 +941,50 @@ const onFunctionCallArgumentsDelta = Effect.fn("OpenResponses.onFunctionCallArgu
   return [{ ...state, lifecycle, tools: result.tools }, events] satisfies StepResult
 })
 
-const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (state: ParserState, event: Event) {
+export const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
+  state: ParserState,
+  event: Event,
+) {
   const item = event.item
   if (!item) return [state, NO_EVENTS] satisfies StepResult
 
   if (item.type === "message" && item.id) {
+    const itemID = item.id
     const itemPhase = state.messagePhase(item.phase)
     const phase = itemPhase === undefined ? state.messagePhases[item.id] : itemPhase
     const messageItems = new Set([...state.messageItems, item.id])
     const messagePhases = phase === undefined ? state.messagePhases : { ...state.messagePhases, [item.id]: phase }
-    const text = item.content
-      ?.filter((part) => part.type === "output_text" && part.text !== undefined)
-      .map((part) => part.text)
-      .join("")
-    const [reconciled, reconciledEvents] =
-      text === undefined
-        ? [{ ...state, messageItems, messagePhases }, NO_EVENTS]
-        : yield* onOutputTextDone({ ...state, messageItems, messagePhases }, { ...event, text }, item.id)
+    const reconciledEvents: LLMEvent[] = []
+    const reconciled = yield* (item.content ?? [])
+      .map((part, contentIndex) => ({ part, contentIndex }))
+      .filter((entry) => entry.part.type === "output_text" && entry.part.text !== undefined)
+      .reduce<Effect.Effect<ParserState, LLMError>>(
+        (effect, entry) =>
+          effect.pipe(
+            Effect.flatMap(
+              Effect.fnUntraced(function* (current) {
+                const [next, nextEvents] = yield* onOutputTextDone(
+                  current,
+                  { ...event, content_index: entry.contentIndex, text: entry.part.text ?? "" },
+                  itemID,
+                )
+                reconciledEvents.push(...nextEvents)
+                return next
+              }),
+            ),
+          ),
+        Effect.succeed({ ...state, messageItems, messagePhases }),
+      )
     const events: LLMEvent[] = []
     messageItems.delete(item.id)
     const { [item.id]: _phase, ...remainingPhases } = reconciled.messagePhases
     const metadata = phase === undefined ? undefined : providerMetadata(state, { phase })
     const lifecycle = Lifecycle.textEnd(reconciled.lifecycle, events, item.id, metadata)
-    if (!events.length && state.outputText[item.id] !== undefined && metadata)
+    if (
+      !events.length &&
+      Object.keys(state.outputText).some((id) => id === item.id || id.startsWith(`${item.id}:`)) &&
+      metadata
+    )
       events.push(LLMEvent.textEnd({ id: item.id, providerMetadata: metadata }))
     return [
       {
@@ -957,6 +992,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
         lifecycle,
         messageItems,
         messagePhases: remainingPhases,
+        completedItems: new Set([...reconciled.completedItems, item.id]),
       },
       [...reconciledEvents, ...events],
     ] satisfies StepResult
@@ -1007,6 +1043,47 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const events: LLMEvent[] = []
     const metadata = reasoningMetadata(state, item)
     const summaries = item.summary?.filter((part) => part.type === "summary_text" && part.text !== undefined) ?? []
+    if (state.completedItems.has(item.id)) {
+      const reconciled = yield* summaries
+        .map((part, index) => ({ part, index }))
+        .reduce<Effect.Effect<ParserState, LLMError>>(
+          (effect, entry) =>
+            effect.pipe(
+              Effect.flatMap(
+                Effect.fnUntraced(function* (current) {
+                  const [next, nextEvents] = yield* onReasoningDone(current, {
+                    ...event,
+                    item_id: item.id,
+                    summary_index: entry.index,
+                    text: entry.part.text,
+                  })
+                  events.push(...nextEvents)
+                  const endEvents: LLMEvent[] = []
+                  const lifecycle = Lifecycle.reasoningEnd(
+                    next.lifecycle,
+                    endEvents,
+                    `${item.id}:${entry.index}`,
+                    metadata,
+                  )
+                  events.push(
+                    ...(endEvents.length
+                      ? endEvents
+                      : [LLMEvent.reasoningEnd({ id: `${item.id}:${entry.index}`, providerMetadata: metadata })]),
+                  )
+                  return { ...next, lifecycle }
+                }),
+              ),
+            ),
+          Effect.succeed(state),
+        )
+      if (!summaries.length) {
+        const id = Object.keys(state.reasoningText)
+          .filter((id) => id === item.id || id.startsWith(`${item.id}:`))
+          .at(-1) ?? `${item.id}:0`
+        events.push(LLMEvent.reasoningEnd({ id, providerMetadata: metadata }))
+      }
+      return [reconciled, events] satisfies StepResult
+    }
     if (summaries.length === 1 && !state.reasoningItems[item.id] && state.reasoningText[item.id] !== undefined) {
       const [reconciled, reconciledEvents] = yield* onReasoningDone(state, {
         ...event,
@@ -1015,7 +1092,11 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
       })
       events.push(...reconciledEvents)
       return [
-        { ...reconciled, lifecycle: Lifecycle.reasoningEnd(reconciled.lifecycle, events, item.id, metadata) },
+        {
+          ...reconciled,
+          lifecycle: Lifecycle.reasoningEnd(reconciled.lifecycle, events, item.id, metadata),
+          completedItems: new Set([...reconciled.completedItems, item.id]),
+        },
         events,
       ] satisfies StepResult
     }
@@ -1049,7 +1130,13 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
                   text: entry.part.text,
                 })
                 events.push(...nextEvents)
-                return next
+                const [done, doneEvents] = onReasoningSummaryPartDone(next, {
+                  ...event,
+                  item_id: item.id,
+                  summary_index: entry.index,
+                })
+                events.push(...doneEvents)
+                return done
               }),
             ),
           ),
@@ -1064,20 +1151,38 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
           reconciled.lifecycle,
         )
       const { [item.id]: _removed, ...reasoningItems } = reconciled.reasoningItems
-      return [{ ...reconciled, lifecycle, reasoningItems }, events] satisfies StepResult
+      return [
+        {
+          ...reconciled,
+          lifecycle,
+          reasoningItems,
+          completedItems: new Set([...reconciled.completedItems, item.id]),
+        },
+        events,
+      ] satisfies StepResult
     }
     if (summaries.length) {
       events.push(LLMEvent.reasoningEnd({ id: `${item.id}:${summaries.length - 1}`, providerMetadata: metadata }))
-      return [reconciled, events] satisfies StepResult
+      return [
+        { ...reconciled, completedItems: new Set([...reconciled.completedItems, item.id]) },
+        events,
+      ] satisfies StepResult
     }
     if (!reconciled.lifecycle.reasoning.has(item.id)) {
       const lifecycle = Lifecycle.stepStart(reconciled.lifecycle, events)
       events.push(LLMEvent.reasoningStart({ id: item.id, providerMetadata: metadata }))
       events.push(LLMEvent.reasoningEnd({ id: item.id, providerMetadata: metadata }))
-      return [{ ...reconciled, lifecycle }, events] satisfies StepResult
+      return [
+        { ...reconciled, lifecycle, completedItems: new Set([...reconciled.completedItems, item.id]) },
+        events,
+      ] satisfies StepResult
     }
     return [
-      { ...reconciled, lifecycle: Lifecycle.reasoningEnd(reconciled.lifecycle, events, item.id, metadata) },
+      {
+        ...reconciled,
+        lifecycle: Lifecycle.reasoningEnd(reconciled.lifecycle, events, item.id, metadata),
+        completedItems: new Set([...reconciled.completedItems, item.id]),
+      },
       events,
     ] satisfies StepResult
   }
@@ -1085,14 +1190,37 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   return [state, NO_EVENTS] satisfies StepResult
 })
 
-const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (state: ParserState, event: Event) {
+export const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
+  state: ParserState,
+  event: Event,
+  onItemDone: (state: ParserState, event: Event) => Effect.Effect<StepResult, LLMError> = onOutputItemDone,
+) {
   const events: LLMEvent[] = []
-  const reconciled = yield* (event.response?.output ?? []).reduce<Effect.Effect<ParserState, LLMError>>(
+  const output = event.response?.output ?? []
+  const terminalIndexes = Object.fromEntries(
+    output.flatMap((item, index) => (item.id === undefined ? [] : [[item.id, index] as const])),
+  )
+  const emitted = state.outputSequence.filter((id) => terminalIndexes[id] !== undefined)
+  const expected = output.flatMap((item) =>
+    item.id !== undefined && state.outputIndexes[item.id] !== undefined ? [item.id] : [],
+  )
+  const missingBeforeEmitted = output.some(
+    (item, index) =>
+      item.id !== undefined &&
+      state.outputIndexes[item.id] === undefined &&
+      Object.values(state.outputIndexes).some((seen) => seen > index),
+  )
+  if (missingBeforeEmitted || emitted.some((id, index) => id !== expected[index]))
+    return yield* ProviderShared.eventError(
+      state.id,
+      `${state.name} terminal output conflicts with the streamed output order`,
+    )
+  const reconciled = yield* output.reduce<Effect.Effect<ParserState, LLMError>>(
     (effect, item) =>
       effect.pipe(
         Effect.flatMap(
           Effect.fnUntraced(function* (current) {
-            const [next, nextEvents] = yield* onOutputItemDone(current, { ...event, item })
+            const [next, nextEvents] = yield* onItemDone(current, { ...event, item })
             events.push(...nextEvents)
             return next
           }),
@@ -1140,7 +1268,21 @@ const providerError = (state: ParserState, event: Event, fallback: string) => {
   })
 }
 
-export const step = (state: ParserState, event: Event) => {
+export const step = (state: ParserState, event: Event): Effect.Effect<StepResult, LLMError> => {
+  const outputItemID = event.item_id ?? event.item?.id
+  if (
+    outputItemID &&
+    event.output_index !== undefined &&
+    state.outputIndexes[outputItemID] === undefined
+  )
+    return step(
+      {
+        ...state,
+        outputIndexes: { ...state.outputIndexes, [outputItemID]: event.output_index },
+        outputSequence: [...state.outputSequence, outputItemID],
+      },
+      { ...event, output_index: undefined },
+    )
   if (event.type === "response.output_text.delta" || event.type === "response.output_text.done") {
     if (!event.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
     return event.type === "response.output_text.delta"
@@ -1211,6 +1353,8 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   hasFunctionCall: false,
   completedItems: new Set<string>(),
   functionArguments: {},
+  outputIndexes: {},
+  outputSequence: [],
   tools: ToolStream.empty<string>(),
   lifecycle: Lifecycle.initial(),
   messageItems: new Set<string>(),
