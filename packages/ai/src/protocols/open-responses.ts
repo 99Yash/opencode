@@ -278,6 +278,8 @@ export interface ParserState {
   readonly providerMetadataKey: string
   readonly tools: ToolStream.State<string>
   readonly hasFunctionCall: boolean
+  readonly completedItems: ReadonlySet<string>
+  readonly functionArguments: Readonly<Record<string, string>>
   readonly lifecycle: Lifecycle.State
   readonly messageItems: ReadonlySet<string>
   readonly messagePhase: (value: unknown) => MessagePhase | null | undefined
@@ -945,15 +947,14 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const events: LLMEvent[] = []
     messageItems.delete(item.id)
     const { [item.id]: _phase, ...remainingPhases } = reconciled.messagePhases
+    const metadata = phase === undefined ? undefined : providerMetadata(state, { phase })
+    const lifecycle = Lifecycle.textEnd(reconciled.lifecycle, events, item.id, metadata)
+    if (!events.length && state.outputText[item.id] !== undefined && metadata)
+      events.push(LLMEvent.textEnd({ id: item.id, providerMetadata: metadata }))
     return [
       {
         ...reconciled,
-        lifecycle: Lifecycle.textEnd(
-          reconciled.lifecycle,
-          events,
-          item.id,
-          phase === undefined ? undefined : providerMetadata(state, { phase }),
-        ),
+        lifecycle,
         messageItems,
         messagePhases: remainingPhases,
       },
@@ -963,9 +964,19 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
 
   if (item.type === "function_call") {
     if (!item.id || !item.call_id || !item.name) return [state, NO_EVENTS] satisfies StepResult
+    if (state.completedItems.has(item.id)) {
+      if (item.arguments === undefined || item.arguments === state.functionArguments[item.id])
+        return [state, NO_EVENTS] satisfies StepResult
+      return yield* ProviderShared.eventError(
+        state.id,
+        `function call arguments ${item.id} completed with content that conflicts with its previous snapshot`,
+        item.arguments,
+      )
+    }
     const tools = state.tools[item.id]
       ? state.tools
       : ToolStream.start(state.tools, item.id, { id: item.call_id, name: item.name })
+    const authoritativeArguments = item.arguments ?? tools[item.id]?.input
     const result =
       item.arguments === undefined
         ? yield* ToolStream.finish(state.id, tools, item.id)
@@ -981,6 +992,11 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
         hasFunctionCall:
           resultEvents.some((event) => LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputError(event)) ||
           state.hasFunctionCall,
+        completedItems: new Set([...state.completedItems, item.id]),
+        functionArguments: {
+          ...state.functionArguments,
+          ...(authoritativeArguments === undefined ? {} : { [item.id]: authoritativeArguments }),
+        },
         tools: result.tools,
       },
       events,
@@ -1050,7 +1066,10 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
       const { [item.id]: _removed, ...reasoningItems } = reconciled.reasoningItems
       return [{ ...reconciled, lifecycle, reasoningItems }, events] satisfies StepResult
     }
-    if (summaries.length) return [reconciled, events] satisfies StepResult
+    if (summaries.length) {
+      events.push(LLMEvent.reasoningEnd({ id: `${item.id}:${summaries.length - 1}`, providerMetadata: metadata }))
+      return [reconciled, events] satisfies StepResult
+    }
     if (!reconciled.lifecycle.reasoning.has(item.id)) {
       const lifecycle = Lifecycle.stepStart(reconciled.lifecycle, events)
       events.push(LLMEvent.reasoningStart({ id: item.id, providerMetadata: metadata }))
@@ -1190,6 +1209,8 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   name: extension.name,
   providerMetadataKey: request.model.route.providerMetadataKey ?? "openresponses",
   hasFunctionCall: false,
+  completedItems: new Set<string>(),
+  functionArguments: {},
   tools: ToolStream.empty<string>(),
   lifecycle: Lifecycle.initial(),
   messageItems: new Set<string>(),

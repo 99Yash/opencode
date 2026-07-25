@@ -1691,7 +1691,20 @@ describe("OpenAI Responses route", () => {
                 type: "response.output_item.done",
                 item: { type: "function_call", id: "item_1", call_id: "call_1", name: "lookup" },
               },
-              { type: "response.completed", response: {} },
+              {
+                type: "response.completed",
+                response: {
+                  output: [
+                    {
+                      type: "function_call",
+                      id: "item_1",
+                      call_id: "call_1",
+                      name: "lookup",
+                      arguments: '{"query":"authoritative"}',
+                    },
+                  ],
+                },
+              },
             ),
           ),
         ),
@@ -1701,6 +1714,7 @@ describe("OpenAI Responses route", () => {
         id: "call_1",
         input: { query: "authoritative" },
       })
+      expect(response.events.filter(LLMEvent.is.toolCall)).toHaveLength(1)
     }),
   )
 
