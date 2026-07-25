@@ -224,7 +224,7 @@ const step = (state: OpenResponses.ParserState, event: OpenResponses.Event) => {
       : ProviderShared.eventError(ADAPTER, `${event.type} is missing item_id`)
   if (event.type === "response.reasoning_text.done" || event.type === "response.reasoning_summary.done")
     return event.item_id
-      ? Effect.succeed(OpenResponses.onReasoningDone(state, event))
+      ? OpenResponses.onReasoningDone(state, event)
       : ProviderShared.eventError(ADAPTER, `${event.type} is missing item_id`)
   if (event.type === "response.output_item.done" && event.item && isHostedToolItem(event.item))
     return onHostedToolDone(state, event.item)

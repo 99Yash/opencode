@@ -882,6 +882,87 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("reconciles authoritative output text done values", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "message", id: "msg_1" } },
+              { type: "response.output_text.delta", item_id: "msg_1", delta: "Hello" },
+              { type: "response.output_text.done", item_id: "msg_1", text: "Hello!" },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "message",
+                  id: "msg_1",
+                  content: [{ type: "output_text", text: "Hello!" }],
+                },
+              },
+              { type: "response.completed", response: { id: "resp_1" } },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("Hello!")
+      expect(response.events.filter(LLMEvent.is.textDelta)).toEqual([
+        { type: "text-delta", id: "msg_1", text: "Hello" },
+        { type: "text-delta", id: "msg_1", text: "!" },
+      ])
+    }),
+  )
+
+  it.effect("recovers output from the authoritative terminal response", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [
+                    {
+                      type: "message",
+                      id: "msg_1",
+                      content: [{ type: "output_text", text: "Terminal only." }],
+                    },
+                  ],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("Terminal only.")
+      expect(response.events.filter(LLMEvent.is.textDelta)).toEqual([
+        { type: "text-delta", id: "msg_1", text: "Terminal only." },
+      ])
+    }),
+  )
+
+  it.effect("rejects authoritative text that conflicts with streamed deltas", () =>
+    Effect.gen(function* () {
+      const error = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_text.delta", item_id: "msg_1", delta: "Hello" },
+              { type: "response.output_text.done", item_id: "msg_1", text: "Goodbye" },
+            ),
+          ),
+        ),
+        Effect.flip,
+      )
+
+      expect(error.reason._tag).toBe("InvalidProviderOutput")
+      expect(error.message).toContain("completed with content that conflicts with its streamed deltas")
+    }),
+  )
+
   it.effect("preserves and replays assistant message phases", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(
@@ -1083,6 +1164,24 @@ describe("OpenAI Responses route", () => {
         { type: "reasoning", text: "thinking" },
         { type: "text", text: "Hello" },
       ])
+    }),
+  )
+
+  it.effect("reconciles authoritative reasoning done values", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              { type: "response.reasoning_summary_text.done", item_id: "rs_1", text: "thinking..." },
+              { type: "response.completed", response: { id: "resp_1" } },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.reasoning).toBe("thinking...")
     }),
   )
 
@@ -1565,6 +1664,43 @@ describe("OpenAI Responses route", () => {
           usage,
         },
       ])
+    }),
+  )
+
+  it.effect("uses authoritative function argument done values", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(
+        LLMRequest.update(request, {
+          tools: [ToolDefinition.make({ name: "lookup", description: "Lookup data", inputSchema: { type: "object" } })],
+        }),
+      ).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.added",
+                item: { type: "function_call", id: "item_1", call_id: "call_1", name: "lookup", arguments: "" },
+              },
+              { type: "response.function_call_arguments.delta", item_id: "item_1", delta: '{"query":"stale"}' },
+              {
+                type: "response.function_call_arguments.done",
+                item_id: "item_1",
+                arguments: '{"query":"authoritative"}',
+              },
+              {
+                type: "response.output_item.done",
+                item: { type: "function_call", id: "item_1", call_id: "call_1", name: "lookup" },
+              },
+              { type: "response.completed", response: {} },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.events.find(LLMEvent.is.toolCall)).toMatchObject({
+        id: "call_1",
+        input: { query: "authoritative" },
+      })
     }),
   )
 
