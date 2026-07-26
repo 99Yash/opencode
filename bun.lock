@@ -986,6 +986,19 @@
         "@typescript/native-preview": "catalog:",
       },
     },
+    "packages/voice": {
+      "name": "@opencode-ai/voice",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/client": "workspace:*",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
+        "@typescript/native-preview": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/web": {
       "name": "@opencode-ai/web",
       "version": "1.18.4",
@@ -2076,6 +2089,8 @@
     "@opencode-ai/updates": ["@opencode-ai/updates@workspace:packages/updates"],
 
     "@opencode-ai/util": ["@opencode-ai/util@workspace:packages/util"],
+
+    "@opencode-ai/voice": ["@opencode-ai/voice@workspace:packages/voice"],
 
     "@opencode-ai/web": ["@opencode-ai/web@workspace:packages/web"],
 
