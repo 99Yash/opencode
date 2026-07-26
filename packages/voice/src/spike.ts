@@ -20,6 +20,7 @@ const args = parseArgs({
     directory: { type: "string", default: process.cwd() },
     model: { type: "string", default: "gpt-realtime-2.1" },
     voice: { type: "string", default: "marin" },
+    password: { type: "string" },
     // Text mode: send one typed message instead of opening the microphone,
     // print the reply, and exit. Useful for smoke-testing the tool loop.
     text: { type: "string" },
@@ -38,12 +39,17 @@ if (!apiKey) {
   process.exit(1)
 }
 
-const password = process.env["OPENCODE_SERVER_PASSWORD"]
+const password = args.password ?? process.env["OPENCODE_SERVER_PASSWORD"]
 const client = OpenCode.make({
   baseUrl: args.server,
   headers: password ? { Authorization: "Basic " + btoa("opencode:" + password) } : undefined,
 })
-const health = await client.health.get()
+const health = await client.health.get().catch((error) => {
+  console.error(`Could not reach the opencode server at ${args.server}: ${error}`)
+  console.error("If the server printed a password on startup, pass it with --password <value>")
+  console.error("or export OPENCODE_SERVER_PASSWORD.")
+  process.exit(1)
+})
 console.log(`opencode server ${args.server} (version ${health.version})`)
 console.log(`project directory: ${args.directory}`)
 
