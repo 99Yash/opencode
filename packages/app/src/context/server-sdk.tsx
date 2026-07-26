@@ -18,7 +18,10 @@ const isAbortError = (error: unknown) =>
   error !== null && typeof error === "object" && "name" in error && error.name === "AbortError"
 
 const isStreamClosed = (error: unknown, signal?: AbortSignal) => isAbortError(error) || signal?.aborted === true
-export type ServerEvent = Event & { current?: OpenCodeEvent }
+type CurrentServerEvent<T extends OpenCodeEvent = OpenCodeEvent> = T extends OpenCodeEvent
+  ? { id: string; type: T["type"]; properties: T["data"]; current: T }
+  : never
+export type ServerEvent = (Event & { current?: OpenCodeEvent }) | CurrentServerEvent
 type QueuedServerEvent = { directory: string; payload: ServerEvent }
 type CurrentDelta = Extract<
   OpenCodeEvent,
