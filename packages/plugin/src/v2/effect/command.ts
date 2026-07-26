@@ -1,4 +1,4 @@
-import type { CommandInfo } from "@opencode-ai/sdk/v2/types"
+import type { CommandInfo } from "@opencode-ai/client/effect"
 import type { CommandApi } from "@opencode-ai/client/effect/api"
 import type { Effect } from "effect"
 import type { Transform } from "./registration.js"

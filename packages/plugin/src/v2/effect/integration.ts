@@ -1,15 +1,6 @@
-import type {
-  ConnectionInfo,
-  CredentialOAuth,
-  CredentialValue,
-  IntegrationCommandMethod,
-  IntegrationEnvMethod,
-  IntegrationInputs,
-  IntegrationKeyMethod,
-  IntegrationMethod,
-  IntegrationOAuthMethod,
-  IntegrationRef,
-} from "@opencode-ai/sdk/v2/types"
+import type { Connection } from "@opencode-ai/schema/connection"
+import type { Credential } from "@opencode-ai/schema/credential"
+import type { Integration } from "@opencode-ai/schema/integration"
 import type { IntegrationApi } from "@opencode-ai/client/effect/api"
 import type { Effect, Scope } from "effect"
 import type { Transform } from "./registration.js"
@@ -21,44 +12,44 @@ export type IntegrationOAuthAuthorization = {
 } & (
   | {
       readonly mode: "auto"
-      readonly callback: Effect.Effect<CredentialOAuth, unknown>
+      readonly callback: Effect.Effect<Credential.OAuth, unknown>
     }
   | {
       readonly mode: "code"
-      readonly callback: (code: string) => Effect.Effect<CredentialOAuth, unknown>
+      readonly callback: (code: string) => Effect.Effect<Credential.OAuth, unknown>
     }
 )
 export type IntegrationOAuthMethodRegistration = {
   readonly integrationID: string
-  readonly method: IntegrationOAuthMethod
-  readonly authorize: (inputs: IntegrationInputs) => Effect.Effect<IntegrationOAuthAuthorization, unknown, Scope.Scope>
-  readonly refresh?: (credential: CredentialOAuth) => Effect.Effect<CredentialOAuth, unknown>
-  readonly label?: (credential: CredentialOAuth) => string | undefined
+  readonly method: Integration.OAuthMethod
+  readonly authorize: (inputs: Integration.Inputs) => Effect.Effect<IntegrationOAuthAuthorization, unknown, Scope.Scope>
+  readonly refresh?: (credential: Credential.OAuth) => Effect.Effect<Credential.OAuth, unknown>
+  readonly label?: (credential: Credential.OAuth) => string | undefined
 }
 export type IntegrationMethodRegistration =
   | IntegrationOAuthMethodRegistration
   | {
       readonly integrationID: string
-      readonly method: IntegrationCommandMethod
+      readonly method: Integration.CommandMethod
     }
   | {
       readonly integrationID: string
-      readonly method: IntegrationKeyMethod
+      readonly method: Integration.KeyMethod
     }
   | {
       readonly integrationID: string
-      readonly method: IntegrationEnvMethod
+      readonly method: Integration.EnvMethod
     }
 
 export interface IntegrationDraft {
-  list(): readonly IntegrationRef[]
-  get(id: string): IntegrationRef | undefined
-  update(id: string, update: (integration: IntegrationRef) => void): void
+  list(): readonly Integration.Ref[]
+  get(id: string): Integration.Ref | undefined
+  update(id: string, update: (integration: Integration.Ref) => void): void
   remove(id: string): void
   readonly method: {
-    list(integrationID: string): readonly IntegrationMethod[]
+    list(integrationID: string): readonly Integration.Method[]
     update(input: IntegrationMethodRegistration): void
-    remove(integrationID: string, method: IntegrationMethod): void
+    remove(integrationID: string, method: Integration.Method): void
   }
 }
 
@@ -66,7 +57,7 @@ export interface IntegrationDomain extends Omit<IntegrationApi<unknown>, "wellkn
   readonly transform: Transform<IntegrationDraft>
   readonly reload: () => Effect.Effect<void>
   readonly connection: {
-    readonly active: (integrationID: string) => Effect.Effect<ConnectionInfo | undefined>
-    readonly resolve: (connection: ConnectionInfo) => Effect.Effect<CredentialValue | undefined, unknown>
+    readonly active: (integrationID: string) => Effect.Effect<Connection.Info | undefined>
+    readonly resolve: (connection: Connection.Info) => Effect.Effect<Credential.Value | undefined, unknown>
   }
 }

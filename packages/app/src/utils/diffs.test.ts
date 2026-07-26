@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { FileDiffInfo } from "@opencode-ai/sdk/v2"
+import type { FileDiffInfo } from "@opencode-ai/client"
 import type { Message } from "@opencode-ai/sdk/v2/client"
 import { diffs, message } from "./diffs"
 

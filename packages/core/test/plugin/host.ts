@@ -10,12 +10,12 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { WebSearch } from "@opencode-ai/core/websearch"
 import type {
-  CredentialOAuth,
-  IntegrationCommandMethod,
-  IntegrationEnvMethod,
-  IntegrationKeyMethod,
-  IntegrationOAuthMethod,
-} from "@opencode-ai/sdk/v2/types"
+  CommandMethod,
+  EnvMethod,
+  KeyMethod,
+  OAuthMethod,
+} from "@opencode-ai/schema/integration"
+import type { OAuth } from "@opencode-ai/schema/credential"
 import { Effect, Stream } from "effect"
 
 type Overrides = Partial<Omit<Plugin.Context, "options" | "session">> & {
@@ -370,7 +370,7 @@ export function webSearchHost(websearch: WebSearch.Interface): Plugin.Context["w
   }
 }
 
-function oauthCredential(value: CredentialOAuth) {
+function oauthCredential(value: OAuth) {
   return Credential.OAuth.make({ ...value, methodID: Integration.MethodID.make(value.methodID) })
 }
 
@@ -390,7 +390,7 @@ function method(value: Integration.Method) {
 }
 
 function internalMethod(
-  value: IntegrationOAuthMethod | IntegrationCommandMethod | IntegrationKeyMethod | IntegrationEnvMethod,
+  value: OAuthMethod | CommandMethod | KeyMethod | EnvMethod,
 ): Integration.Method {
   if (value.type === "env") return value
   if (value.type === "key") return value

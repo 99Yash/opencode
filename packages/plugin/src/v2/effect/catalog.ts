@@ -1,4 +1,4 @@
-import type { ModelInfo, ProviderV2Info } from "@opencode-ai/sdk/v2/types"
+import type { ModelInfo, ProviderV2Info } from "@opencode-ai/client/effect"
 import type { CatalogApi } from "@opencode-ai/client/effect/api"
 import type { Model } from "@opencode-ai/schema/model"
 import type { Effect } from "effect"

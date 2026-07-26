@@ -1,12 +1,12 @@
-import type { ReferenceGitSource, ReferenceLocalSource } from "@opencode-ai/sdk/v2/types"
+import type { Reference } from "@opencode-ai/schema/reference"
 import type { ReferenceApi } from "@opencode-ai/client/effect/api"
 import type { Effect } from "effect"
 import type { Transform } from "./registration.js"
 
 export interface ReferenceDraft {
-  add(name: string, source: ReferenceLocalSource | ReferenceGitSource): void
+  add(name: string, source: Reference.LocalSource | Reference.GitSource): void
   remove(name: string): void
-  list(): readonly (readonly [string, ReferenceLocalSource | ReferenceGitSource])[]
+  list(): readonly (readonly [string, Reference.LocalSource | Reference.GitSource])[]
 }
 
 export interface ReferenceDomain extends ReferenceApi<unknown> {

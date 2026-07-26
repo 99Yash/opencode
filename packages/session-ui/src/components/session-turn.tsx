@@ -1,10 +1,10 @@
 import {
   AssistantMessage,
-  type FileDiffInfo,
   Message as MessageType,
   Part as PartType,
   type UserMessage,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiffInfo } from "@opencode-ai/client"
 import type { SessionStatus } from "@opencode-ai/sdk/v2"
 import { useData } from "../context"
 import { useFileComponent } from "@opencode-ai/ui/context/file"

@@ -5,8 +5,8 @@ import type {
   PermissionRequest,
   QuestionRequest,
   SessionStatus,
-  FileDiffInfo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiffInfo } from "@opencode-ai/client"
 import { dropSessionCaches, pickSessionCacheEvictions } from "./session-cache"
 
 const msg = (id: string, sessionID: string) =>

@@ -8,8 +8,8 @@ import type {
   QuestionRequest,
   Session,
   SessionStatus,
-  FileDiffInfo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiffInfo } from "@opencode-ai/client"
 import { batch } from "solid-js"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { diffs as cleanDiffs, message as cleanMessage } from "@/utils/diffs"

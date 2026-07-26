@@ -13,9 +13,9 @@ import type {
   ReferenceInfo,
   Session,
   SessionStatus,
-  FileDiffInfo,
   VcsInfo,
 } from "@opencode-ai/sdk/v2/client"
+import type { FileDiffInfo } from "@opencode-ai/client"
 import { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 import type { Accessor } from "solid-js"
 import type { SetStoreFunction, Store } from "solid-js/store"

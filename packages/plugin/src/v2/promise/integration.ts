@@ -1,13 +1,7 @@
 import type { IntegrationApi } from "@opencode-ai/client/promise/api"
 import type { IntegrationDraft, IntegrationMethodRegistration } from "../effect/integration.js"
-import type {
-  CredentialOAuth,
-  CredentialValue,
-  IntegrationEnvMethod,
-  IntegrationInputs,
-  IntegrationKeyMethod,
-  IntegrationOAuthMethod,
-} from "@opencode-ai/sdk/v2/types"
+import type { Connection } from "@opencode-ai/schema/connection"
+import type { Credential } from "@opencode-ai/schema/credential"
 import type { Transform } from "./registration.js"
 
 export type { IntegrationDraft, IntegrationMethodRegistration }
@@ -19,11 +13,11 @@ export type IntegrationOAuthAuthorization = {
 } & (
   | {
       readonly mode: "auto"
-      readonly callback: Promise<CredentialOAuth>
+      readonly callback: Promise<Credential.OAuth>
     }
   | {
       readonly mode: "code"
-      readonly callback: (code: string) => Promise<CredentialOAuth>
+      readonly callback: (code: string) => Promise<Credential.OAuth>
     }
 )
 
@@ -31,9 +25,7 @@ export interface IntegrationDomain extends Omit<IntegrationApi, "wellknown"> {
   readonly transform: Transform<IntegrationDraft>
   readonly reload: () => Promise<void>
   readonly connection: {
-    readonly active: (integrationID: string) => Promise<import("@opencode-ai/sdk/v2/types").ConnectionInfo | undefined>
-    readonly resolve: (
-      connection: import("@opencode-ai/sdk/v2/types").ConnectionInfo,
-    ) => Promise<CredentialValue | undefined>
+    readonly active: (integrationID: string) => Promise<Connection.Info | undefined>
+    readonly resolve: (connection: Connection.Info) => Promise<Credential.Value | undefined>
   }
 }

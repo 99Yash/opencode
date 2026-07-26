@@ -13,6 +13,7 @@
     "shell-prod": "sst shell --target Teams --stage production"
   },
   "dependencies": {
+    "@opencode-ai/client": "workspace:*",
     "@opencode-ai/core": "workspace:*",
     "@opencode-ai/session-ui": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
