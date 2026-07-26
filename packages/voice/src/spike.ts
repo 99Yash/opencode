@@ -21,6 +21,10 @@ const args = parseArgs({
     model: { type: "string", default: "gpt-realtime-2.1" },
     voice: { type: "string", default: "marin" },
     password: { type: "string" },
+    // Keep the mic hot while the assistant speaks (voice barge-in). Only
+    // usable with headphones: on speakers the mic hears the assistant and
+    // interrupts it with its own echo. Default is half-duplex gating.
+    duplex: { type: "boolean", default: false },
     // Text mode: send one typed message instead of opening the microphone,
     // print the reply, and exit. Useful for smoke-testing the tool loop.
     text: { type: "string" },
@@ -254,11 +258,20 @@ let player: ReturnType<typeof Bun.spawn> | undefined
 // PCM16 mono 24kHz is the realtime API default; sox handles both directions.
 const soxFormat = ["-q", "-t", "raw", "-r", "24000", "-e", "signed-integer", "-b", "16", "-c", "1"]
 
+// Estimated wall-clock time when buffered speaker audio finishes playing.
+// PCM16 mono at 24kHz is 48 bytes per millisecond.
+let playbackEndsAt = 0
+const assistantSpeaking = () => Date.now() < playbackEndsAt
+
 async function startMicrophone() {
   recorder = Bun.spawn(["rec", ...soxFormat, "-"], { stdout: "pipe", stderr: "ignore" })
   console.log("[voice] microphone live — start talking (ctrl+c to quit)")
+  if (!args.duplex) console.log("[voice] mic mutes while the assistant speaks; press any key to interrupt it")
   for await (const chunk of recorder.stdout as ReadableStream<Uint8Array>) {
     if (ws.readyState !== WebSocket.OPEN) break
+    // Half-duplex: drop mic audio while the assistant is audible (plus a
+    // short tail) so speaker echo can't barge-in against itself.
+    if (!args.duplex && Date.now() < playbackEndsAt + 300) continue
     send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
   }
 }
@@ -266,13 +279,16 @@ async function startMicrophone() {
 function playAudio(base64: string) {
   player ??= Bun.spawn(["play", ...soxFormat, "-"], { stdin: "pipe", stderr: "ignore" })
   const stdin = player.stdin as import("bun").FileSink
-  stdin.write(Buffer.from(base64, "base64"))
+  const bytes = Buffer.from(base64, "base64")
+  stdin.write(bytes)
   stdin.flush()
+  playbackEndsAt = Math.max(playbackEndsAt, Date.now()) + bytes.length / 48
 }
 
 function flushPlayback() {
   player?.kill()
   player = undefined
+  playbackEndsAt = 0
 }
 
 const createResponse = () =>
@@ -293,6 +309,20 @@ async function handleFunctionCall(item: RealtimeItem) {
   })
   createResponse()
   inflightTools -= 1
+}
+
+// In half-duplex mode voice barge-in is impossible (the mic is muted while
+// the assistant speaks), so any keypress interrupts the assistant instead.
+if (!args.text && process.stdin.isTTY) {
+  process.stdin.setRawMode(true)
+  process.stdin.resume()
+  process.stdin.on("data", (data: Buffer) => {
+    if (data.includes(3)) return shutdown() // ctrl+c
+    if (!assistantSpeaking()) return
+    send({ type: "response.cancel" })
+    flushPlayback()
+    console.log("\n[voice] interrupted")
+  })
 }
 
 ws.addEventListener("open", () => {
