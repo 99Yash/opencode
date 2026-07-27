@@ -1,4 +1,4 @@
-import { For, Match, Show, Switch, createEffect, createMemo, onCleanup, type JSX } from "solid-js"
+import { For, Match, Show, Switch, createMemo, onCleanup, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createMediaQuery } from "@solid-primitives/media"
 import { DragDropProvider as DndKitProvider, PointerSensor } from "@dnd-kit/solid"
@@ -38,23 +38,17 @@ const fileBrowserTabPanelID = "session-side-panel-file-browser-tabpanel"
 import { SessionContextTab, SortableTab, SortableTabV2, FileVisual } from "@/components/session"
 import { OpenInAppV2 } from "@/components/session/open-in-app-v2"
 import { useCommand } from "@/context/command"
-import { useFile, type SelectedLineRange } from "@/context/file"
+import { useFile } from "@/context/file"
 import { useLanguage } from "@/context/language"
 import { useLayout } from "@/context/layout"
 import { useSDK } from "@/context/sdk"
 import { useSettings } from "@/context/settings"
 import { createFileTabListSync } from "@/pages/session/file-tab-scroll"
 import { FileTabContent } from "@/pages/session/file-tabs"
-import {
-  SESSION_OPEN_FILE_TAB,
-  createOpenSessionFileTab,
-  createSessionTabs,
-  getTabReorderIndex,
-  shouldShowFileTree,
-  type Sizing,
-} from "@/pages/session/helpers"
+import { SESSION_OPEN_FILE_TAB, getTabReorderIndex, shouldShowFileTree, type Sizing } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { useSessionLayout } from "@/pages/session/session-layout"
+import { createSessionSidePanelController } from "@/pages/session/session-side-panel-controller"
 import { SessionFileBrowserTab, type SessionFileBrowserState } from "@/pages/session/v2/session-file-browser-tab"
 
 type ReviewDiff = FileDiffInfo | SnapshotFileDiff | VcsFileDiff
@@ -153,91 +147,49 @@ export function SessionSidePanel(props: {
     return file.tree.children("").length === 0
   })
 
-  const normalizeTab = (tab: string) => {
-    if (!tab.startsWith("file://")) return tab
-    return file.tab(tab)
-  }
-
-  const openReviewPanel = () => {
-    if (!view().reviewPanel.opened()) view().reviewPanel.open()
-  }
-
-  const openTab = createOpenSessionFileTab({
-    normalizeTab,
-    openTab: tabs().open,
+  const controller = createSessionSidePanelController({
+    currentTab: () => tabs().active(),
+    allTabs: () => tabs().all(),
+    openTab: (tab) => tabs().open(tab),
+    preview: (tab) => tabs().previewTab(tab),
+    setActive: (tab) => tabs().setActive(tab),
+    normalizeFileTab: file.tab,
     pathFromTab: file.pathFromTab,
     loadFile: file.load,
-    openReviewPanel,
-    setActive: tabs().setActive,
+    reviewEnabled: reviewTab,
+    canReview: props.canReview,
+    fileBrowserEnabled: () => !!props.fileBrowserState,
+    reviewPanelOpened: () => view().reviewPanel.opened(),
+    openReviewPanel: () => view().reviewPanel.open(),
+    treeMode: () => layout.fileTree.tab(),
+    setTreeMode: (mode) => layout.fileTree.setTab(mode),
+    fileReady: file.ready,
+    sessionKey,
+    selectedLines: file.selectedLines,
+    persistHandoff: (key, files) => setSessionHandoff(key, { files }),
+    showDialog: (render) => void dialog.show(render),
   })
-
-  const tabState = createSessionTabs({
-    tabs,
-    pathFromTab: file.pathFromTab,
-    normalizeTab,
-    review: reviewTab,
-    hasReview: props.canReview,
-    fileBrowser: () => !!props.fileBrowserState,
-  })
-  const contextOpen = tabState.contextOpen
-  const openFileOpen = tabState.openFileOpen
-  const panelTabs = tabState.panelTabs
-  const openedTabs = tabState.openedTabs
-  const activeTab = tabState.activeTab
-  const activeFileTab = tabState.activeFileTab
-
-  const fileTreeTab = () => layout.fileTree.tab()
-
-  const setFileTreeTabValue = (value: string) => {
-    if (value !== "changes" && value !== "all") return
-    layout.fileTree.setTab(value)
-  }
-
-  const showAllFiles = () => {
-    if (fileTreeTab() !== "changes") return
-    layout.fileTree.setTab("all")
-  }
+  const contextOpen = controller.tabs.contextOpen
+  const panelTabs = controller.tabs.panelTabs
+  const openedTabs = controller.tabs.openedTabs
+  const activeTab = controller.tabs.activeTab
+  const activeFileTab = controller.tabs.activeFileTab
+  const openTab = controller.tabs.open
+  const previewTab = controller.tabs.preview
+  const activateTab = controller.tabs.activate
+  const browserTab = controller.browser.tab
+  const fileBrowserMounted = controller.browser.mounted
+  const fileBrowserVisible = controller.browser.visible
+  const fileTreeTab = controller.tree.mode
+  const setFileTreeTabValue = controller.tree.setMode
 
   let fileFilter: HTMLInputElement | undefined
   let tabList: HTMLDivElement | undefined
   const temporaryTab = tabs().preview
-  const previewTab = (value: string) => {
-    const next = normalizeTab(value)
-    tabs().previewTab(next)
-    const path = file.pathFromTab(next)
-    if (path) void file.load(path)
-    openReviewPanel()
-    queueMicrotask(() => tabs().setActive(next))
-  }
   const openFileBrowser = () => {
-    previewTab(SESSION_OPEN_FILE_TAB)
+    controller.browser.open()
     queueMicrotask(() => fileFilter?.focus())
   }
-  const activateTab = (value: string) => {
-    const next = normalizeTab(value)
-    const path = file.pathFromTab(next)
-    if (path) void file.load(path)
-    openReviewPanel()
-    tabs().setActive(next)
-  }
-  const browserTab = createMemo(() => {
-    if (!props.fileBrowserState) return undefined
-    const active = activeTab()
-    if (active === SESSION_OPEN_FILE_TAB) return SESSION_OPEN_FILE_TAB
-    if (active && file.pathFromTab(active)) return active
-    return activeFileTab()
-  })
-  // Keep the file-browser shell mounted while any file tab exists. Kobalte briefly
-  // selects Review while the tab For replaces a preview trigger, which would
-  // otherwise dispose the sidebar and reset scroll.
-  const fileBrowserMounted = createMemo(() => {
-    if (!props.fileBrowserState) return false
-    return openedTabs().length > 0 || openFileOpen() || !!browserTab()
-  })
-  const fileBrowserVisible = createMemo(() => {
-    const active = activeTab()
-    return active !== "review" && active !== "context" && active !== "empty"
-  })
   const openFileKeybind = createMemo(() => command.keybindParts("file.open"))
   const closeTabKeybind = createMemo(() => command.keybindParts("tab.close"))
   const [store, setStore] = createStore({
@@ -263,27 +215,6 @@ export function SessionSidePanel(props: {
   const handleDragEnd = () => {
     setStore("activeDraggable", undefined)
   }
-
-  createEffect(() => {
-    if (!file.ready()) return
-
-    setSessionHandoff(sessionKey(), {
-      files: tabs()
-        .all()
-        .reduce<Record<string, SelectedLineRange | null>>((acc, tab) => {
-          const path = file.pathFromTab(tab)
-          if (!path) return acc
-
-          const selected = file.selectedLines(path)
-          acc[path] =
-            selected && typeof selected === "object" && "start" in selected && "end" in selected
-              ? (selected as SelectedLineRange)
-              : null
-
-          return acc
-        }, {}),
-    })
-  })
 
   return (
     <Show when={isDesktop() && !(settings.general.newLayoutDesigns() && !params.id)}>
@@ -451,9 +382,7 @@ export function SessionSidePanel(props: {
                                     iconSize="large"
                                     class="!rounded-md"
                                     onClick={() => {
-                                      void import("@/components/dialog-select-file").then((x) => {
-                                        dialog.show(() => <x.DialogSelectFile mode="files" onOpenFile={showAllFiles} />)
-                                      })
+                                      void controller.dialog.openFile()
                                     }}
                                     aria-label={language.t("command.file.open")}
                                   />
