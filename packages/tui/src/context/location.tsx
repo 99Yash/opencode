@@ -4,6 +4,7 @@ import { useClient } from "./client"
 import { useData } from "./data"
 
 const context = createContext<{
+  readonly ref: LocationRef | undefined
   readonly current: LocationGetOutput | undefined
   set: (location?: LocationRef) => void
 }>()
@@ -34,6 +35,9 @@ export function LocationProvider(props: ParentProps) {
   return (
     <context.Provider
       value={{
+        get ref() {
+          return ref()
+        },
         get current() {
           return current()
         },
