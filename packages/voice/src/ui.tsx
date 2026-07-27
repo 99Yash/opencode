@@ -12,6 +12,7 @@ export type VoiceStatus = {
   session?: string
   audio?: string
   voice?: string
+  model?: string
 }
 
 export type VoiceUI = {
@@ -180,6 +181,7 @@ export async function createVoiceTUI(options: {
       [
         state().status.audio ?? "connecting…",
         state().status.voice,
+        state().status.model,
         state().status.session ?? "no session",
         state().status.server,
         "v: voice · any key interrupts · ctrl+c quits",

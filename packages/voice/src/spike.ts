@@ -20,6 +20,9 @@ const args = parseArgs({
     directory: { type: "string", default: process.cwd() },
     model: { type: "string", default: "gpt-realtime-2.1" },
     voice: { type: "string", default: "marin" },
+    provider: { type: "string", default: "console-openai" },
+    "coding-model": { type: "string", default: "gpt-5.6-sol" },
+    variant: { type: "string", default: "medium" },
     password: { type: "string" },
     // Keep the mic hot while the assistant speaks (voice barge-in). Only
     // usable with headphones: on speakers the mic hears the assistant and
@@ -80,9 +83,16 @@ function latestAssistant(messages: ReadonlyArray<SessionMessageInfo>) {
 
 async function requireSession() {
   if (activeSessionID) return activeSessionID
-  const created = await client.session.create({ location: { directory: args.directory! } })
+  const created = await client.session.create({
+    location: { directory: args.directory! },
+    model: {
+      providerID: args.provider,
+      id: args["coding-model"],
+      variant: args.variant,
+    },
+  })
   activeSessionID = created.id
-  ui.meta(`[session] created ${activeSessionID}`)
+  ui.meta(`[session] created ${activeSessionID} · ${args["coding-model"]}:${args.variant}`)
   ui.setStatus({ session: activeSessionID })
   return created.id
 }
@@ -103,7 +113,7 @@ const ui = tuiActive
       onCycleVoice: () => cycleVoice(),
     })
   : createConsoleUI()
-ui.setStatus({ server: args.server })
+ui.setStatus({ server: args.server, model: `${args["coding-model"]}:${args.variant}` })
 ui.meta(`opencode ${args.server} (version ${health.version})`)
 ui.meta(`project ${args.directory}`)
 
