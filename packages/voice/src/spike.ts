@@ -11,6 +11,8 @@
 // Requires sox (`brew install sox`) for mic capture (`rec`) and playback (`play`).
 
 import { parseArgs } from "node:util"
+import { realpathSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { OpenCode } from "@opencode-ai/client/promise"
 import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client/promise"
 
@@ -20,7 +22,7 @@ const args = parseArgs({
     directory: { type: "string", default: process.cwd() },
     model: { type: "string", default: "gpt-realtime-2.1" },
     voice: { type: "string", default: "marin" },
-    provider: { type: "string", default: "console-openai" },
+    provider: { type: "string", default: "openai" },
     "coding-model": { type: "string", default: "gpt-5.6-sol" },
     variant: { type: "string", default: "medium" },
     password: { type: "string" },
@@ -37,6 +39,7 @@ const args = parseArgs({
     text: { type: "string" },
     // Log every realtime event type as it arrives.
     debug: { type: "boolean", default: false },
+    "reduce-motion": { type: "boolean", default: false },
   },
 }).values
 
@@ -68,7 +71,11 @@ const health = await client.health.get().catch((error) => {
 // ---------------------------------------------------------------------------
 
 let activeSessionID: string | undefined
+let activeDirectory = args.directory!
+let activeProjectID: string | undefined
 let lastPromptAt = 0
+const selectableProjectIDs = new Set<string>()
+const selectableSessionIDs = new Set<string>()
 
 function assistantText(message: SessionMessageAssistant) {
   return message.content
@@ -84,7 +91,7 @@ function latestAssistant(messages: ReadonlyArray<SessionMessageInfo>) {
 async function requireSession() {
   if (activeSessionID) return activeSessionID
   const created = await client.session.create({
-    location: { directory: args.directory! },
+    location: { directory: activeDirectory },
     model: {
       providerID: args.provider,
       id: args["coding-model"],
@@ -111,159 +118,294 @@ const ui = tuiActive
       onInterrupt: () => interrupt(),
       onExit: () => shutdown(),
       onCycleVoice: () => cycleVoice(),
+      reducedMotion: args["reduce-motion"],
     })
   : createConsoleUI()
 ui.setStatus({ server: args.server, model: `${args["coding-model"]}:${args.variant}` })
 ui.meta(`opencode ${args.server} (version ${health.version})`)
-ui.meta(`project ${args.directory}`)
+ui.meta(`project ${activeDirectory}`)
+
+const toolError = (message: string, retryable = false) => ({ status: "error", message, retryable })
+const projectLabel = (project: { name?: string; worktree: string }) =>
+  project.name ?? project.worktree.replaceAll("\\", "/").split("/").at(-1) ?? "project"
+const listKnownProjects = async () => {
+  const seen = new Set<string>()
+  const temporary = realpathSync(tmpdir())
+  return (await client.project.list())
+    .sort((a, b) => b.time.updated - a.time.updated)
+    .filter((project) => {
+      if (project.id === "global" || project.worktree.startsWith(temporary) || seen.has(project.worktree)) return false
+      seen.add(project.worktree)
+      return true
+    })
+}
 
 const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
-  list_sessions: async (input) => {
+  find_projects: async (input) => {
+    const query = typeof input["query"] === "string" ? input["query"].toLowerCase() : undefined
     const limit = typeof input["limit"] === "number" ? input["limit"] : 10
-    const sessions = await client.session.list({ directory: args.directory, limit, order: "desc" })
-    return sessions.data.map((session) => ({
-      id: session.id,
-      title: session.title,
-      updated: new Date(session.time.updated).toISOString(),
-      active: session.id === activeSessionID,
-    }))
+    const projects = (await listKnownProjects())
+      .filter((project) => !query || projectLabel(project).toLowerCase().includes(query))
+      .slice(0, limit)
+    selectableProjectIDs.clear()
+    projects.forEach((project) => selectableProjectIDs.add(project.id))
+    return {
+      status: "ok",
+      projects: projects.map((project) => ({
+        id: project.id,
+        name: projectLabel(project),
+        directories: 1 + project.sandboxes.length,
+        updated: new Date(project.time.updated).toISOString(),
+        active: project.id === activeProjectID,
+      })),
+    }
   },
-  create_session: async () => {
+  select_project: async (input) => {
+    const projectID = input["project_id"]
+    if (typeof projectID !== "string" || !selectableProjectIDs.has(projectID))
+      return toolError("Select a project ID returned by the latest find_projects call.")
+    const project = (await listKnownProjects()).find((item) => item.id === projectID)
+    if (!project) return toolError("That project is no longer available.", true)
+    activeProjectID = project.id
+    activeDirectory = project.worktree
     activeSessionID = undefined
-    return { sessionID: await requireSession() }
+    selectableSessionIDs.clear()
+    ui.setStatus({ project: projectLabel(project), session: undefined })
+    ui.meta(`[project] selected ${projectLabel(project)}`)
+    return { status: "selected", projectID: project.id, name: projectLabel(project) }
+  },
+  find_sessions: async (input) => {
+    const query = typeof input["query"] === "string" ? input["query"] : undefined
+    const scope = input["scope"] === "all_projects" ? "all_projects" : "current_project"
+    const recency = typeof input["recency"] === "string" ? input["recency"] : "any"
+    const limit = typeof input["limit"] === "number" ? input["limit"] : 10
+    const durations: Record<string, number> = { day: 86_400_000, week: 604_800_000, month: 2_592_000_000 }
+    const threshold = recency === "any" ? 0 : Date.now() - (durations[recency] ?? 0)
+    const result = await client.session.list({
+      ...(scope === "current_project" ? { directory: activeDirectory } : {}),
+      search: query,
+      parentID: null,
+      limit: recency === "any" ? limit : Math.min(limit * 5, 100),
+      order: "desc",
+    })
+    const projects = new Map((await listKnownProjects()).map((project) => [project.id, projectLabel(project)]))
+    const sessions = result.data
+      .filter((session) => projects.has(session.projectID) && session.time.updated >= threshold)
+      .slice(0, limit)
+    selectableSessionIDs.clear()
+    sessions.forEach((session) => selectableSessionIDs.add(session.id))
+    return {
+      status: "ok",
+      scope,
+      sessions: sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        project: projects.get(session.projectID) ?? "project",
+        updated: new Date(session.time.updated).toISOString(),
+        active: session.id === activeSessionID,
+      })),
+    }
   },
   select_session: async (input) => {
     const sessionID = input["session_id"]
-    if (typeof sessionID !== "string") return { error: "session_id is required" }
-    activeSessionID = sessionID
-    ui.setStatus({ session: sessionID })
-    return { sessionID, active: true }
+    if (typeof sessionID !== "string" || !selectableSessionIDs.has(sessionID))
+      return toolError("Select a session ID returned by the latest find_sessions call.")
+    const session = await client.session.get({ sessionID }).catch(() => undefined)
+    if (!session) return toolError("That session is no longer available.", true)
+    activeSessionID = session.id
+    activeDirectory = session.location.directory
+    activeProjectID = session.projectID
+    const project = (await listKnownProjects()).find((item) => item.id === session.projectID)
+    ui.setStatus({ session: session.id, project: project ? projectLabel(project) : undefined })
+    return { status: "selected", sessionID: session.id, title: session.title }
   },
-  prompt_session: async (input) => {
+  start_task: async (input) => {
     const text = input["text"]
-    if (typeof text !== "string" || text.length === 0) return { error: "text is required" }
+    if (typeof text !== "string" || text.length === 0) return toolError("Task text is required.")
+    if (input["new_session"] === true) activeSessionID = undefined
     const sessionID = await requireSession()
     lastPromptAt = Date.now()
     await client.session.prompt({ sessionID, text })
     ui.meta(`[prompt] ${truncate(text, 120)}`)
-    return { sessionID, admitted: true, hint: "Work runs in the background. Use check_session or wait_for_reply." }
+    if (input["delivery"] === "background")
+      return { status: "started", sessionID, hint: "Use check_session only when the user asks for status." }
+    await client.session.wait({ sessionID })
+    const messages = await client.message.list({ sessionID, order: "desc", limit: 20 })
+    const assistant = latestAssistant(messages.data)
+    if (!assistant || assistant.time.created < lastPromptAt)
+      return { status: "completed", sessionID, text: "The coding agent finished without a text reply." }
+    return { status: "completed", sessionID, text: truncate(assistantText(assistant)) }
   },
   check_session: async () => {
-    if (!activeSessionID) return { error: "no active session" }
+    if (!activeSessionID) return toolError("No active session. Find one or start a task first.")
     const messages = await client.message.list({ sessionID: activeSessionID, order: "desc", limit: 20 })
     const assistant = latestAssistant(messages.data)
-    if (!assistant) return { status: "no assistant reply yet" }
+    if (!assistant) return { status: "waiting", runningTools: [], text: null }
     const tools = assistant.content.filter((part) => part.type === "tool").map((part) => part.name)
     return {
       status: assistant.time.completed ? "completed" : "working",
-      finish: assistant.finish,
       runningTools: tools,
       text: truncate(assistantText(assistant)),
     }
   },
-  wait_for_reply: async (input) => {
-    if (!activeSessionID) return { error: "no active session" }
-    const timeout = typeof input["timeout_seconds"] === "number" ? input["timeout_seconds"] : 60
-    const deadline = Date.now() + timeout * 1000
-    while (Date.now() < deadline) {
-      const messages = await client.message.list({ sessionID: activeSessionID, order: "desc", limit: 20 })
-      const assistant = latestAssistant(messages.data)
-      const done =
-        assistant !== undefined &&
-        assistant.time.created >= lastPromptAt &&
-        assistant.time.completed !== undefined &&
-        assistant.finish === "stop"
-      if (done) return { status: "completed", text: truncate(assistantText(assistant)) }
-      await Bun.sleep(1000)
-    }
-    return { status: "timeout", hint: "Still working. Check again with check_session." }
-  },
   interrupt_session: async () => {
-    if (!activeSessionID) return { error: "no active session" }
+    if (!activeSessionID) return toolError("No active session to interrupt.")
     await client.session.interrupt({ sessionID: activeSessionID })
-    return { interrupted: true }
+    return { status: "interrupted", sessionID: activeSessionID }
+  },
+  list_pending_permissions: async () => {
+    if (!activeSessionID) return toolError("No active session.")
+    const requests = await client.permission.list({ sessionID: activeSessionID })
+    return {
+      status: "ok",
+      requests: requests.map((request) => ({
+        id: request.id,
+        action: request.action,
+        resources: request.resources,
+      })),
+    }
+  },
+  reply_permission: async (input) => {
+    if (!activeSessionID) return toolError("No active session.")
+    const requestID = input["request_id"]
+    const decision = input["decision"]
+    if (typeof requestID !== "string" || (decision !== "allow_once" && decision !== "reject"))
+      return toolError("A valid request ID and decision are required.")
+    const requests = await client.permission.list({ sessionID: activeSessionID })
+    if (!requests.some((request) => request.id === requestID))
+      return toolError("That permission request is not pending.", true)
+    await client.permission.reply({
+      sessionID: activeSessionID,
+      requestID,
+      reply: decision === "allow_once" ? "once" : "reject",
+    })
+    return { status: decision === "allow_once" ? "allowed_once" : "rejected", requestID }
   },
   set_voice: async (input) => {
     const voice = input["voice"]
     if (typeof voice !== "string" || !voices.includes(voice))
-      return { error: `voice must be one of: ${voices.join(", ")}` }
-    // Reconnect shortly after replying so the confirmation isn't cut off.
+      return toolError(`Voice must be one of: ${voices.join(", ")}.`)
     setTimeout(() => setVoice(voice), 1000)
-    return { voice, note: "Switching requires a brief reconnect; conversation memory resets." }
+    return { status: "switching", voice, note: "Realtime conversation memory resets during reconnect." }
   },
 }
 
+const emptyParameters = { type: "object", additionalProperties: false, properties: {}, required: [] }
 const toolDefinitions = [
   {
     type: "function",
-    name: "list_sessions",
-    description: "List recent OpenCode sessions in the current project.",
+    name: "find_projects",
+    description:
+      "Find known OpenCode projects by display name. Returns opaque IDs, never filesystem paths. Use before select_project.",
     parameters: {
       type: "object",
-      properties: { limit: { type: "number", description: "Max sessions to return (default 10)." } },
-      required: [],
+      additionalProperties: false,
+      properties: {
+        query: { type: ["string", "null"], description: "Name fragment, or null for recent projects." },
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+      },
+      required: ["query", "limit"],
     },
   },
   {
     type: "function",
-    name: "create_session",
-    description: "Create a fresh OpenCode session and make it active.",
-    parameters: { type: "object", properties: {}, required: [] },
+    name: "select_project",
+    description: "Select a project returned by find_projects and clear the active session.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: { project_id: { type: "string", description: "Opaque project ID from find_projects." } },
+      required: ["project_id"],
+    },
+  },
+  {
+    type: "function",
+    name: "find_sessions",
+    description:
+      "Find root OpenCode sessions by title and recency. Search the current project by default; use all_projects only when the user asks or current-project search misses.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: { type: ["string", "null"], description: "Title words, or null for recent sessions." },
+        scope: { type: "string", enum: ["current_project", "all_projects"] },
+        recency: { type: "string", enum: ["day", "week", "month", "any"] },
+        limit: { type: "integer", minimum: 1, maximum: 20 },
+      },
+      required: ["query", "scope", "recency", "limit"],
+    },
   },
   {
     type: "function",
     name: "select_session",
-    description: "Make an existing session the active one.",
+    description: "Select a session returned by the latest find_sessions call.",
     parameters: {
       type: "object",
-      properties: { session_id: { type: "string", description: "Session ID from list_sessions." } },
+      additionalProperties: false,
+      properties: { session_id: { type: "string", description: "Session ID from find_sessions." } },
       required: ["session_id"],
     },
   },
   {
     type: "function",
-    name: "prompt_session",
+    name: "start_task",
     description:
-      "Send a task or question to the active OpenCode coding agent. Creates a session if none is active. Returns immediately; the agent works in the background.",
+      "Send work to the active coding session, creating one if needed. Use wait for quick questions whose answer should be spoken now; use background for coding work.",
     parameters: {
       type: "object",
-      properties: { text: { type: "string", description: "The instruction for the coding agent." } },
-      required: ["text"],
+      additionalProperties: false,
+      properties: {
+        text: { type: "string", description: "Clear instruction for the coding agent." },
+        new_session: { type: "boolean", description: "True only when the user explicitly asks for a new session." },
+        delivery: { type: "string", enum: ["wait", "background"] },
+      },
+      required: ["text", "new_session", "delivery"],
     },
   },
   {
     type: "function",
     name: "check_session",
-    description: "Check what the coding agent is doing right now: status, running tools, and its latest reply text.",
-    parameters: { type: "object", properties: {}, required: [] },
-  },
-  {
-    type: "function",
-    name: "wait_for_reply",
-    description: "Block until the coding agent finishes its current turn and return its final reply. Use for quick tasks.",
-    parameters: {
-      type: "object",
-      properties: { timeout_seconds: { type: "number", description: "Max seconds to wait (default 60)." } },
-      required: [],
-    },
+    description: "Check active coding-session status only when the user asks for an update.",
+    parameters: emptyParameters,
   },
   {
     type: "function",
     name: "interrupt_session",
-    description: "Stop whatever the coding agent is currently doing in the active session.",
-    parameters: { type: "object", properties: {}, required: [] },
+    description: "Interrupt active coding work. Call only after the user explicitly confirms the interruption.",
+    parameters: emptyParameters,
+  },
+  {
+    type: "function",
+    name: "list_pending_permissions",
+    description: "List permission requests blocking the active coding session.",
+    parameters: emptyParameters,
+  },
+  {
+    type: "function",
+    name: "reply_permission",
+    description:
+      "Allow once or reject a pending permission. Call only after stating the action and resource and receiving the user's explicit decision. Persistent approval is intentionally unavailable.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        request_id: { type: "string", description: "Request ID from list_pending_permissions." },
+        decision: { type: "string", enum: ["allow_once", "reject"] },
+      },
+      required: ["request_id", "decision"],
+    },
   },
   {
     type: "function",
     name: "set_voice",
-    description: "Change your own speaking voice. Requires a brief reconnect.",
+    description: "Change your speaking voice. Requires a brief reconnect and resets realtime conversation memory.",
     parameters: {
       type: "object",
+      additionalProperties: false,
       properties: {
         voice: {
           type: "string",
           enum: ["marin", "cedar", "coral", "sage", "ash", "ballad", "alloy", "verse"],
-          description: "The voice to switch to.",
         },
       },
       required: ["voice"],
@@ -272,15 +414,18 @@ const toolDefinitions = [
 ]
 
 const instructions = `You are the voice interface to OpenCode, a coding agent running on the user's machine.
-The user talks to you; you control OpenCode with tools. You never write code yourself — the coding agent does.
+The user talks to you; you navigate projects and sessions and delegate coding work with tools. You never write code yourself.
 
 Guidelines:
-- Keep spoken replies short: one or two sentences. This is a hands-free interface.
-- When the user asks for coding work, relay it with prompt_session, phrased clearly for a coding agent.
-- For quick questions use wait_for_reply and summarize the agent's answer out loud.
-- For longer tasks say the work has started, and use check_session when the user asks for status.
-- Summarize agent replies conversationally; never read code, diffs, or file paths aloud verbatim unless asked.
-- Confirm before interrupting a session or anything destructive.`
+- Keep spoken replies to one or two sentences.
+- Use find_projects and select_project for explicit project navigation. Never invent project IDs or expose filesystem paths.
+- Use find_sessions to resolve references such as "the audio session". Search the current project first unless the user asks across projects.
+- Use start_task with delivery wait for quick questions and background for coding work. Set new_session only when explicitly requested.
+- Use check_session only when the user asks for status; do not poll repeatedly.
+- Summarize coding-agent replies conversationally; do not read code, diffs, IDs, or paths aloud unless asked.
+- Before interrupt_session, state what will stop and obtain explicit confirmation.
+- Before reply_permission, state the requested action and resources and obtain an explicit allow-once or reject decision.
+- Never claim a tool succeeded when its status is error. Explain failures briefly and offer one retry or an alternative.`
 
 // ---------------------------------------------------------------------------
 // Realtime session over WebSocket

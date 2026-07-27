@@ -3,7 +3,7 @@
 // even though realtime events arrive out of order: a user row is inserted the
 // moment the audio buffer commits (before the assistant starts replying) and
 // its transcript is filled in when Whisper finishes.
-import { createCliRenderer } from "@opentui/core"
+import { createCliRenderer, RGBA } from "@opentui/core"
 import { render, useKeyboard, useTerminalDimensions } from "@opentui/solid"
 import { createSignal, For } from "solid-js"
 
@@ -13,6 +13,7 @@ export type VoiceStatus = {
   audio?: string
   voice?: string
   model?: string
+  project?: string
 }
 
 export type VoiceUI = {
@@ -29,7 +30,7 @@ export type VoiceUI = {
 
 type Message =
   | { kind: "user"; itemID: string; text?: string }
-  | { kind: "assistant"; text: string; streaming: boolean }
+  | { kind: "assistant"; text: string; streaming: boolean; reveals: Array<{ offset: number; at: number }> }
   | { kind: "tool"; callID: string; name: string; input: unknown; output?: unknown }
   | { kind: "meta"; text: string }
 
@@ -126,6 +127,30 @@ const theme = {
   literal: "#bb9af7",
 }
 
+const assistantText = RGBA.fromHex(theme.text)
+const REVEAL_DURATION_MS = 320
+const REVEAL_STAGGER_MS = 32
+const REVEAL_MAX_QUEUE_MS = 160
+const REVEAL_WORD_LIMIT = 24
+
+function springOpacity(now: number, start: number) {
+  const progress = Math.max(0, Math.min(1, (now - start) / REVEAL_DURATION_MS))
+  if (progress === 1) return 1
+  const time = progress * 8
+  return 1 - (1 + time) * Math.exp(-time)
+}
+
+function fade(color: RGBA, opacity: number) {
+  return RGBA.fromValues(color.r, color.g, color.b, color.a * opacity)
+}
+
+function revealOffsets(previous: string, delta: string) {
+  const text = previous + delta
+  return Array.from(delta.matchAll(/\S+/g))
+    .map((match) => previous.length + match.index)
+    .filter((offset) => offset === 0 || /\s/.test(text[offset - 1] ?? ""))
+}
+
 // Tiny JSON tokenizer for syntax-highlighted tool results.
 function jsonTokens(json: string) {
   const tokens: Array<{ text: string; color: string }> = []
@@ -151,7 +176,7 @@ function jsonTokens(json: string) {
 
 // `kind` never changes after creation, so branching once here is safe; the
 // property reads inside JSX stay reactive through the store proxy.
-function MessageRow(props: { message: Message; details: boolean }) {
+function MessageRow(props: { message: Message; details: boolean; now: () => number }) {
   const message = props.message
   if (message.kind === "user")
     return (
@@ -162,8 +187,21 @@ function MessageRow(props: { message: Message; details: boolean }) {
   if (message.kind === "assistant")
     return (
       <text fg={theme.assistant} marginTop={1}>
-        <b>● assistant</b> <span style={{ fg: theme.text }}>{message.text}</span>
-        <span style={{ fg: theme.muted }}>{message.streaming ? " …" : ""}</span>
+        <b>● assistant</b>{" "}
+        {message.reveals.length === 0 ? (
+          <span style={{ fg: theme.text }}>{message.text}</span>
+        ) : (
+          <>
+            <span style={{ fg: theme.text }}>{message.text.slice(0, message.reveals[0]!.offset)}</span>
+            <For each={message.reveals}>
+              {(reveal, index) => (
+                <span style={{ fg: fade(assistantText, springOpacity(props.now(), reveal.at)) }}>
+                  {message.text.slice(reveal.offset, message.reveals[index() + 1]?.offset ?? message.text.length)}
+                </span>
+              )}
+            </For>
+          </>
+        )}
       </text>
     )
   if (message.kind === "tool")
@@ -196,12 +234,17 @@ export async function createVoiceTUI(options: {
   onInterrupt(): void
   onExit(): void
   onCycleVoice(): void
+  reducedMotion?: boolean
 }): Promise<VoiceUI> {
   const [state, setState] = createSignal({
     messages: [] as Message[],
     status: {} as VoiceStatus,
     details: false,
   })
+  const [animationFrame, setAnimationFrame] = createSignal(performance.now())
+  let animationTimer: ReturnType<typeof setInterval> | undefined
+  let animationEndsAt = 0
+  let revealAt = 0
 
   const renderer = await createCliRenderer({
     useMouse: true,
@@ -214,8 +257,36 @@ export async function createVoiceTUI(options: {
     screenMode: "alternate-screen",
     externalOutputMode: "passthrough",
     consoleMode: "disabled",
-    onDestroy: options.onExit,
+    onDestroy: () => {
+      if (animationTimer) clearInterval(animationTimer)
+      options.onExit()
+    },
   })
+
+  const animateThrough = (end: number) => {
+    animationEndsAt = Math.max(animationEndsAt, end)
+    if (animationTimer) return
+    animationTimer = setInterval(() => {
+      const now = performance.now()
+      setAnimationFrame(now)
+      renderer.requestRender()
+      if (now < animationEndsAt) return
+      clearInterval(animationTimer)
+      animationTimer = undefined
+    }, 16)
+  }
+
+  const scheduleReveal = (previous: string, delta: string) => {
+    if (options.reducedMotion) return []
+    const now = performance.now()
+    const offsets = revealOffsets(previous, delta).slice(-REVEAL_WORD_LIMIT)
+    const start = Math.min(Math.max(revealAt, now), now + REVEAL_MAX_QUEUE_MS)
+    const reveals = offsets.map((offset, word) => ({ offset, at: start + word * REVEAL_STAGGER_MS }))
+    if (reveals.length === 0) return reveals
+    revealAt = reveals.at(-1)!.at + REVEAL_STAGGER_MS
+    animateThrough(reveals.at(-1)!.at + REVEAL_DURATION_MS)
+    return reveals
+  }
 
   function App() {
     const dimensions = useTerminalDimensions()
@@ -234,6 +305,7 @@ export async function createVoiceTUI(options: {
         state().status.audio ?? "connecting…",
         state().status.voice,
         state().status.model,
+        state().status.project,
         state().status.session ?? "no session",
         state().status.server,
         `v: voice · d: details ${state().details ? "on" : "off"} · any key interrupts · ctrl+c quits`,
@@ -251,7 +323,7 @@ export async function createVoiceTUI(options: {
         <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
           <box flexDirection="column" flexShrink={0}>
             <For each={state().messages}>
-              {(message) => <MessageRow message={message} details={state().details} />}
+              {(message) => <MessageRow message={message} details={state().details} now={animationFrame} />}
             </For>
           </box>
         </scrollbox>
@@ -288,16 +360,23 @@ export async function createVoiceTUI(options: {
       const index = state().messages.length - 1
       const last = state().messages[index]
       if (last?.kind === "assistant" && last.streaming) {
+        const reveals = scheduleReveal(last.text, text)
         setState((current) => ({
           ...current,
           messages: current.messages.map((message, i) =>
-            i === index && message.kind === "assistant" ? { ...message, text: message.text + text } : message,
+            i === index && message.kind === "assistant"
+              ? {
+                  ...message,
+                  text: message.text + text,
+                  reveals: [...message.reveals, ...reveals].slice(-REVEAL_WORD_LIMIT),
+                }
+              : message,
           ),
         }))
         redraw()
         return
       }
-      push({ kind: "assistant", text, streaming: true })
+      push({ kind: "assistant", text, streaming: true, reveals: scheduleReveal("", text) })
     },
     assistantDone: () => {
       const index = state().messages.length - 1
