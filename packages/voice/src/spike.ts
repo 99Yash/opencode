@@ -444,11 +444,14 @@ let inflightTools = 0
 
 async function handleFunctionCall(item: RealtimeItem) {
   inflightTools += 1
+  const callID = item.call_id ?? crypto.randomUUID()
+  const input = JSON.parse(item.arguments ?? "{}") as Record<string, unknown>
+  ui.toolStart(callID, item.name ?? "unknown", input)
   const handler = item.name ? toolHandlers[item.name] : undefined
   const output = handler
-    ? await handler(JSON.parse(item.arguments ?? "{}")).catch((error) => ({ error: String(error) }))
+    ? await handler(input).catch((error) => ({ error: String(error) }))
     : { error: `unknown tool ${item.name}` }
-  ui.tool(item.name ?? "unknown", output)
+  ui.toolDone(callID, output)
   send({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output: JSON.stringify(output) },

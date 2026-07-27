@@ -21,7 +21,8 @@ export type VoiceUI = {
   userTranscript(itemID: string, text: string): void
   assistantDelta(text: string): void
   assistantDone(): void
-  tool(name: string, output: unknown): void
+  toolStart(callID: string, name: string, input: unknown): void
+  toolDone(callID: string, output: unknown): void
   setStatus(patch: VoiceStatus): void
   close(): void
 }
@@ -29,13 +30,37 @@ export type VoiceUI = {
 type Message =
   | { kind: "user"; itemID: string; text?: string }
   | { kind: "assistant"; text: string; streaming: boolean }
-  | { kind: "tool"; name: string; json: string }
+  | { kind: "tool"; callID: string; name: string; input: unknown; output?: unknown }
   | { kind: "meta"; text: string }
 
 const truncate = (text: string, max: number) => (text.length > max ? text.slice(0, max) + "…" : text)
 
-const compactJson = (output: unknown) =>
-  JSON.stringify(output, (_, value) => (typeof value === "string" ? truncate(value, 200) : value)) ?? "null"
+const displayJson = (value: unknown) =>
+  JSON.stringify(value, (_, item) => (typeof item === "string" ? truncate(item, 500) : item), 2) ?? "null"
+
+function toolSummary(name: string, output?: unknown) {
+  if (output === undefined) return "running"
+  if (Array.isArray(output)) return `${output.length} result${output.length === 1 ? "" : "s"}`
+  if (!output || typeof output !== "object") return String(output)
+  const value = output as Record<string, unknown>
+  if (name === "wait_for_reply")
+    return `${String(value["status"] ?? "done")} · ${typeof value["text"] === "string" ? `${value["text"].length} chars` : "no reply"}`
+  if (name === "prompt_session")
+    return `${value["admitted"] ? "admitted" : "rejected"} · ${String(value["sessionID"] ?? "unknown session")}`
+  if (name === "check_session") {
+    const tools = Array.isArray(value["runningTools"]) ? ` · ${value["runningTools"].join(", ")}` : ""
+    return `${String(value["status"] ?? "checked")}${tools}`
+  }
+  if (name === "create_session" || name === "select_session")
+    return `${name === "create_session" ? "created" : "selected"} · ${String(value["sessionID"] ?? "unknown session")}`
+  if (name === "interrupt_session") return value["interrupted"] ? "interrupted" : "not interrupted"
+  if (name === "set_voice") return `switching to ${String(value["voice"] ?? "unknown")}`
+  const fields = Object.entries(value)
+    .filter(([, item]) => ["string", "number", "boolean"].includes(typeof item))
+    .slice(0, 2)
+    .map(([key, item]) => `${key}: ${String(item)}`)
+  return fields.join(" · ") || "completed"
+}
 
 // ---------------------------------------------------------------------------
 // Console fallback (--text mode, non-TTY)
@@ -48,6 +73,7 @@ export function createConsoleUI(): VoiceUI {
   const green = (text: string) => (tty ? `\x1b[1;32m${text}\x1b[0m` : text)
 
   let streaming = false
+  const tools = new Map<string, string>()
   const line = (text: string) => {
     if (streaming) {
       process.stdout.write("\n")
@@ -71,7 +97,15 @@ export function createConsoleUI(): VoiceUI {
       if (streaming) process.stdout.write("\n")
       streaming = false
     },
-    tool: (name, output) => line(dim(`  [${name}] `) + Bun.inspect(JSON.parse(compactJson(output)), { colors: tty })),
+    toolStart: (callID, name) => {
+      tools.set(callID, name)
+      line(dim(`  ◌ ${name}  running`))
+    },
+    toolDone: (callID, output) => {
+      const name = tools.get(callID) ?? "tool"
+      tools.delete(callID)
+      line(dim(`  ✓ ${name}  ${toolSummary(name, output)}`))
+    },
     setStatus: () => {},
     close: () => {},
   }
@@ -117,7 +151,7 @@ function jsonTokens(json: string) {
 
 // `kind` never changes after creation, so branching once here is safe; the
 // property reads inside JSX stay reactive through the store proxy.
-function MessageRow(props: { message: Message }) {
+function MessageRow(props: { message: Message; details: boolean }) {
   const message = props.message
   if (message.kind === "user")
     return (
@@ -134,14 +168,26 @@ function MessageRow(props: { message: Message }) {
     )
   if (message.kind === "tool")
     return (
-      <text fg={theme.muted} paddingLeft={2}>
-        [{message.name}]{" "}
-        <For each={jsonTokens(message.json)}>{(token) => <span style={{ fg: token.color }}>{token.text}</span>}</For>
-      </text>
+      <box flexDirection="column" paddingLeft={2}>
+        <text fg={theme.muted}>
+          <span style={{ fg: message.output === undefined ? theme.number : theme.assistant }}>
+            {message.output === undefined ? "◌" : "✓"}
+          </span>{" "}
+          <span style={{ fg: theme.key }}>{message.name}</span>{"  "}
+          {toolSummary(message.name, message.output)}
+        </text>
+        {props.details ? (
+          <text fg={theme.muted} paddingLeft={2}>
+            <For each={jsonTokens(displayJson({ input: message.input, output: message.output }))}>
+              {(token) => <span style={{ fg: token.color }}>{token.text}</span>}
+            </For>
+          </text>
+        ) : null}
+      </box>
     )
   return (
     <text fg={theme.muted} paddingLeft={2}>
-      {message.text}
+      · {message.text}
     </text>
   )
 }
@@ -154,6 +200,7 @@ export async function createVoiceTUI(options: {
   const [state, setState] = createSignal({
     messages: [] as Message[],
     status: {} as VoiceStatus,
+    details: false,
   })
 
   const renderer = await createCliRenderer({
@@ -175,6 +222,11 @@ export async function createVoiceTUI(options: {
     useKeyboard((evt) => {
       if (evt.ctrl && evt.name === "c") return
       if (evt.name === "v") return options.onCycleVoice()
+      if (evt.name === "d") {
+        setState((current) => ({ ...current, details: !current.details }))
+        renderer.requestRender()
+        return
+      }
       options.onInterrupt()
     })
     const statusLine = () =>
@@ -184,7 +236,7 @@ export async function createVoiceTUI(options: {
         state().status.model,
         state().status.session ?? "no session",
         state().status.server,
-        "v: voice · any key interrupts · ctrl+c quits",
+        `v: voice · d: details ${state().details ? "on" : "off"} · any key interrupts · ctrl+c quits`,
       ]
         .filter(Boolean)
         .join("   ")
@@ -198,7 +250,9 @@ export async function createVoiceTUI(options: {
       >
         <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
           <box flexDirection="column" flexShrink={0}>
-            <For each={state().messages}>{(message) => <MessageRow message={message} />}</For>
+            <For each={state().messages}>
+              {(message) => <MessageRow message={message} details={state().details} />}
+            </For>
           </box>
         </scrollbox>
         <box height={1} marginTop={1}>
@@ -256,7 +310,18 @@ export async function createVoiceTUI(options: {
       }))
       redraw()
     },
-    tool: (name, output) => push({ kind: "tool", name, json: compactJson(output) }),
+    toolStart: (callID, name, input) => push({ kind: "tool", callID, name, input }),
+    toolDone: (callID, output) => {
+      const index = state().messages.findIndex((message) => message.kind === "tool" && message.callID === callID)
+      if (index === -1) return
+      setState((current) => ({
+        ...current,
+        messages: current.messages.map((message, i) =>
+          i === index && message.kind === "tool" ? { ...message, output } : message,
+        ),
+      }))
+      redraw()
+    },
     setStatus: (patch) => {
       setState((current) => ({ ...current, status: { ...current.status, ...patch } }))
       redraw()
