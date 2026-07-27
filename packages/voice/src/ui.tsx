@@ -5,7 +5,10 @@
 // its transcript is filled in when Whisper finishes.
 import { createCliRenderer, RGBA } from "@opentui/core"
 import { render, useKeyboard, useTerminalDimensions } from "@opentui/solid"
+import { registerSpinner } from "opentui-spinner/solid"
 import { createSignal, For } from "solid-js"
+
+registerSpinner()
 
 export type VoiceStatus = {
   server?: string
@@ -18,8 +21,11 @@ export type VoiceStatus = {
 
 export type VoiceUI = {
   meta(text: string): void
+  userSpeaking(active: boolean): void
+  userAudioLevel(level?: number): void
   userCommitted(itemID: string): void
   userTranscript(itemID: string, text: string): void
+  assistantAudio(level: number, durationMs: number): void
   assistantDelta(text: string): void
   assistantDone(): void
   toolStart(callID: string, name: string, input: unknown): void
@@ -30,7 +36,7 @@ export type VoiceUI = {
 
 type Message =
   | { kind: "user"; itemID: string; text?: string }
-  | { kind: "assistant"; text: string; streaming: boolean; reveals: Array<{ offset: number; at: number }> }
+  | { kind: "assistant"; text: string; streaming: boolean }
   | { kind: "tool"; callID: string; name: string; input: unknown; output?: unknown }
   | { kind: "meta"; text: string }
 
@@ -85,8 +91,11 @@ export function createConsoleUI(): VoiceUI {
 
   return {
     meta: (text) => line(dim(`  ${text}`)),
+    userSpeaking: () => {},
+    userAudioLevel: () => {},
     userCommitted: () => {},
     userTranscript: (_, text) => line(cyan("● you ") + text),
+    assistantAudio: () => {},
     assistantDelta: (text) => {
       if (!streaming) {
         process.stdout.write(green("● assistant "))
@@ -127,28 +136,27 @@ const theme = {
   literal: "#bb9af7",
 }
 
-const assistantText = RGBA.fromHex(theme.text)
-const REVEAL_DURATION_MS = 320
-const REVEAL_STAGGER_MS = 32
-const REVEAL_MAX_QUEUE_MS = 160
-const REVEAL_WORD_LIMIT = 24
-
-function springOpacity(now: number, start: number) {
-  const progress = Math.max(0, Math.min(1, (now - start) / REVEAL_DURATION_MS))
-  if (progress === 1) return 1
-  const time = progress * 8
-  return 1 - (1 + time) * Math.exp(-time)
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+const colors = {
+  text: RGBA.fromHex(theme.text),
+  you: RGBA.fromHex(theme.you),
+  assistant: RGBA.fromHex(theme.assistant),
 }
+const AUDIO_FRAME_MS = 33
+const AUDIO_LEVEL_STALE_MS = 250
+const meterGlyphs = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 
 function fade(color: RGBA, opacity: number) {
   return RGBA.fromValues(color.r, color.g, color.b, color.a * opacity)
 }
 
-function revealOffsets(previous: string, delta: string) {
-  const text = previous + delta
-  return Array.from(delta.matchAll(/\S+/g))
-    .map((match) => previous.length + match.index)
-    .filter((offset) => offset === 0 || /\s/.test(text[offset - 1] ?? ""))
+function meter(level: number, phase: number) {
+  return [0, 1, 2, 3]
+    .map((index) => {
+      const value = Math.max(0, Math.min(1, level * (0.72 + Math.sin(phase + index * 1.4) * 0.28)))
+      return meterGlyphs[Math.round(value * (meterGlyphs.length - 1))]
+    })
+    .join("")
 }
 
 // Tiny JSON tokenizer for syntax-highlighted tool results.
@@ -176,44 +184,67 @@ function jsonTokens(json: string) {
 
 // `kind` never changes after creation, so branching once here is safe; the
 // property reads inside JSX stay reactive through the store proxy.
-function MessageRow(props: { message: Message; details: boolean; now: () => number }) {
+function MessageRow(props: { message: Message; details: boolean; assistantLevel: () => number; animate: boolean }) {
   const message = props.message
   if (message.kind === "user")
     return (
-      <text fg={theme.you} marginTop={1}>
-        <b>● you</b> <span style={{ fg: theme.text }}>{message.text ?? "…"}</span>
-      </text>
+      <box
+        flexDirection="column"
+        flexShrink={0}
+        border={["left"]}
+        borderColor={fade(colors.you, 0.38)}
+        backgroundColor={fade(colors.you, 0.035)}
+        paddingLeft={1}
+        paddingRight={1}
+        marginTop={1}
+      >
+        <text fg={fade(colors.you, 0.72)}>
+          <b>you</b>
+          {"  "}
+          <span style={{ fg: fade(colors.text, 0.74) }}>{message.text ?? "transcribing"}</span>
+        </text>
+      </box>
     )
-  if (message.kind === "assistant")
+  if (message.kind === "assistant") {
+    const pulse = () => (!props.animate || !message.streaming ? 0.5 : props.assistantLevel())
     return (
-      <text fg={theme.assistant} marginTop={1}>
-        <b>● assistant</b>{" "}
-        {message.reveals.length === 0 ? (
-          <span style={{ fg: theme.text }}>{message.text}</span>
-        ) : (
-          <>
-            <span style={{ fg: theme.text }}>{message.text.slice(0, message.reveals[0]!.offset)}</span>
-            <For each={message.reveals}>
-              {(reveal, index) => (
-                <span style={{ fg: fade(assistantText, springOpacity(props.now(), reveal.at)) }}>
-                  {message.text.slice(reveal.offset, message.reveals[index() + 1]?.offset ?? message.text.length)}
-                </span>
-              )}
-            </For>
-          </>
-        )}
-      </text>
+      <box
+        flexDirection="column"
+        flexShrink={0}
+        border={["left"]}
+        borderColor={fade(colors.assistant, message.streaming ? 0.58 + pulse() * 0.42 : 0.3)}
+        backgroundColor={fade(colors.assistant, message.streaming ? 0.055 + pulse() * 0.11 : 0.025)}
+        paddingLeft={1}
+        paddingRight={1}
+        marginTop={1}
+      >
+        <text fg={fade(colors.assistant, message.streaming ? 0.82 + pulse() * 0.18 : 0.58)}>
+          <b>assistant</b>
+          {"  "}
+          <span style={{ fg: fade(colors.text, message.streaming ? 1 : 0.7) }}>{message.text}</span>
+        </text>
+      </box>
     )
+  }
   if (message.kind === "tool")
     return (
       <box flexDirection="column" paddingLeft={2}>
-        <text fg={theme.muted}>
-          <span style={{ fg: message.output === undefined ? theme.number : theme.assistant }}>
-            {message.output === undefined ? "◌" : "✓"}
-          </span>{" "}
-          <span style={{ fg: theme.key }}>{message.name}</span>{"  "}
-          {toolSummary(message.name, message.output)}
-        </text>
+        <box flexDirection="row" gap={1}>
+          {message.output === undefined ? (
+            props.animate ? (
+              <spinner frames={SPINNER_FRAMES} interval={80} color={theme.number} />
+            ) : (
+              <text fg={theme.number}>⋯</text>
+            )
+          ) : (
+            <text fg={theme.assistant}>✓</text>
+          )}
+          <text fg={theme.muted}>
+            <span style={{ fg: theme.key }}>{message.name}</span>
+            {"  "}
+            {toolSummary(message.name, message.output)}
+          </text>
+        </box>
         {props.details ? (
           <text fg={theme.muted} paddingLeft={2}>
             <For each={jsonTokens(displayJson({ input: message.input, output: message.output }))}>
@@ -230,6 +261,32 @@ function MessageRow(props: { message: Message; details: boolean; now: () => numb
   )
 }
 
+function UserSpeakingBubble(props: { level: () => number | undefined; now: () => number; animate: boolean }) {
+  const pulse = () => (!props.animate ? 0.5 : (props.level() ?? 0.65))
+  const activity = () => {
+    if (!props.animate) return "voice"
+    return meter(Math.max(0.18, props.level() ?? 0.65), props.now() / (props.level() === undefined ? 220 : 320))
+  }
+  return (
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      border={["left"]}
+      borderColor={fade(colors.you, 0.58 + pulse() * 0.42)}
+      backgroundColor={fade(colors.you, 0.055 + pulse() * 0.11)}
+      paddingLeft={1}
+      paddingRight={1}
+      marginTop={1}
+    >
+      <text fg={fade(colors.you, 0.82 + pulse() * 0.18)}>
+        <b>you</b>
+        {"  "}
+        <span style={{ fg: fade(colors.text, 0.8) }}>{activity()}</span>
+      </text>
+    </box>
+  )
+}
+
 export async function createVoiceTUI(options: {
   onInterrupt(): void
   onExit(): void
@@ -242,9 +299,14 @@ export async function createVoiceTUI(options: {
     details: false,
   })
   const [animationFrame, setAnimationFrame] = createSignal(performance.now())
+  const [userActive, setUserActive] = createSignal(false)
   let animationTimer: ReturnType<typeof setInterval> | undefined
-  let animationEndsAt = 0
-  let revealAt = 0
+  let assistantSegments: Array<{ start: number; end: number; level: number }> = []
+  let assistantScheduledUntil = 0
+  let assistantLevel = 0
+  let userTargetLevel = 0
+  let userLevel = 0
+  let userLevelAt = 0
 
   const renderer = await createCliRenderer({
     useMouse: true,
@@ -263,29 +325,33 @@ export async function createVoiceTUI(options: {
     },
   })
 
-  const animateThrough = (end: number) => {
-    animationEndsAt = Math.max(animationEndsAt, end)
+  const startAnimation = () => {
+    if (options.reducedMotion) return renderer.requestRender()
     if (animationTimer) return
     animationTimer = setInterval(() => {
       const now = performance.now()
+      assistantSegments = assistantSegments.filter((segment) => segment.end > now)
+      const output = assistantSegments.find((segment) => segment.start <= now)
+      const assistantTarget = output?.level ?? 0
+      const userTarget = now - userLevelAt < AUDIO_LEVEL_STALE_MS ? userTargetLevel : 0
+      assistantLevel += (assistantTarget - assistantLevel) * (assistantTarget > assistantLevel ? 0.5 : 0.16)
+      userLevel += (userTarget - userLevel) * (userTarget > userLevel ? 0.5 : 0.18)
       setAnimationFrame(now)
       renderer.requestRender()
-      if (now < animationEndsAt) return
+      if (userActive() || assistantSegments.length > 0 || assistantLevel > 0.01 || userLevel > 0.01) return
       clearInterval(animationTimer)
       animationTimer = undefined
-    }, 16)
+    }, AUDIO_FRAME_MS)
   }
 
-  const scheduleReveal = (previous: string, delta: string) => {
-    if (options.reducedMotion) return []
-    const now = performance.now()
-    const offsets = revealOffsets(previous, delta).slice(-REVEAL_WORD_LIMIT)
-    const start = Math.min(Math.max(revealAt, now), now + REVEAL_MAX_QUEUE_MS)
-    const reveals = offsets.map((offset, word) => ({ offset, at: start + word * REVEAL_STAGGER_MS }))
-    if (reveals.length === 0) return reveals
-    revealAt = reveals.at(-1)!.at + REVEAL_STAGGER_MS
-    animateThrough(reveals.at(-1)!.at + REVEAL_DURATION_MS)
-    return reveals
+  const currentAssistantLevel = () => {
+    animationFrame()
+    return assistantLevel
+  }
+  const currentUserLevel = () => {
+    const now = animationFrame()
+    if (now - userLevelAt >= AUDIO_LEVEL_STALE_MS) return undefined
+    return userLevel
   }
 
   function App() {
@@ -323,8 +389,18 @@ export async function createVoiceTUI(options: {
         <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
           <box flexDirection="column" flexShrink={0}>
             <For each={state().messages}>
-              {(message) => <MessageRow message={message} details={state().details} now={animationFrame} />}
+              {(message) => (
+                <MessageRow
+                  message={message}
+                  details={state().details}
+                  assistantLevel={currentAssistantLevel}
+                  animate={!options.reducedMotion}
+                />
+              )}
             </For>
+            {userActive() ? (
+              <UserSpeakingBubble level={currentUserLevel} now={animationFrame} animate={!options.reducedMotion} />
+            ) : null}
           </box>
         </scrollbox>
         <box height={1} marginTop={1}>
@@ -344,7 +420,25 @@ export async function createVoiceTUI(options: {
 
   return {
     meta: (text) => push({ kind: "meta", text }),
-    userCommitted: (itemID) => push({ kind: "user", itemID }),
+    userSpeaking: (active) => {
+      setUserActive(active)
+      if (active) startAnimation()
+      if (!active) userTargetLevel = 0
+      redraw()
+    },
+    userAudioLevel: (level) => {
+      if (level === undefined) {
+        userLevelAt = 0
+        return
+      }
+      userTargetLevel = Math.max(0, Math.min(1, level))
+      userLevelAt = performance.now()
+      if (userActive()) startAnimation()
+    },
+    userCommitted: (itemID) => {
+      setUserActive(false)
+      push({ kind: "user", itemID })
+    },
     userTranscript: (itemID, text) => {
       const index = state().messages.findIndex((m) => m.kind === "user" && m.itemID === itemID)
       if (index === -1) return push({ kind: "user", itemID, text })
@@ -356,31 +450,45 @@ export async function createVoiceTUI(options: {
       }))
       redraw()
     },
+    assistantAudio: (level, durationMs) => {
+      if (options.reducedMotion) return redraw()
+      const now = performance.now()
+      const start = Math.max(now, assistantScheduledUntil)
+      const end = start + durationMs
+      assistantSegments.push({ start, end, level: Math.max(0, Math.min(1, level)) })
+      assistantScheduledUntil = end
+      startAnimation()
+    },
     assistantDelta: (text) => {
       const index = state().messages.length - 1
       const last = state().messages[index]
       if (last?.kind === "assistant" && last.streaming) {
-        const reveals = scheduleReveal(last.text, text)
         setState((current) => ({
           ...current,
           messages: current.messages.map((message, i) =>
-            i === index && message.kind === "assistant"
-              ? {
-                  ...message,
-                  text: message.text + text,
-                  reveals: [...message.reveals, ...reveals].slice(-REVEAL_WORD_LIMIT),
-                }
-              : message,
+            i === index && message.kind === "assistant" ? { ...message, text: message.text + text } : message,
           ),
         }))
         redraw()
         return
       }
-      push({ kind: "assistant", text, streaming: true, reveals: scheduleReveal("", text) })
+      setState((current) => ({
+        ...current,
+        messages: [
+          ...current.messages.map((message) =>
+            message.kind === "assistant" && message.streaming ? { ...message, streaming: false } : message,
+          ),
+          { kind: "assistant", text, streaming: true },
+        ],
+      }))
+      redraw()
     },
     assistantDone: () => {
-      const index = state().messages.length - 1
-      if (state().messages[index]?.kind !== "assistant") return
+      assistantSegments = []
+      assistantScheduledUntil = 0
+      assistantLevel = 0
+      const index = state().messages.findLastIndex((message) => message.kind === "assistant" && message.streaming)
+      if (index === -1) return
       setState((current) => ({
         ...current,
         messages: current.messages.map((message, i) =>

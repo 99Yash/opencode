@@ -51,7 +51,9 @@ if (!args.server) {
 const apiKey = process.env["OPENAI_API_KEY"]
 if (!apiKey) {
   console.error("OPENAI_API_KEY is required. Run via:")
-  console.error(`  2password run --env "OPENAI_API_KEY=op://Personal/OpenAI API Key/credential" -- bun src/spike.ts ...`)
+  console.error(
+    `  2password run --env "OPENAI_API_KEY=op://Personal/OpenAI API Key/credential" -- bun src/spike.ts ...`,
+  )
   process.exit(1)
 }
 
@@ -226,7 +228,6 @@ const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<u
     const sessionID = await requireSession()
     lastPromptAt = Date.now()
     await client.session.prompt({ sessionID, text })
-    ui.meta(`[prompt] ${truncate(text, 120)}`)
     if (input["delivery"] === "background")
       return { status: "started", sessionID, hint: "Use check_session only when the user asks for status." }
     await client.session.wait({ sessionID })
@@ -461,8 +462,7 @@ const aecBinary = await (async () => {
   if (args.text || process.platform !== "darwin") return undefined
   const source = Bun.fileURLToPath(new URL("./duplex-audio.swift", import.meta.url))
   const binary = Bun.fileURLToPath(new URL("../.build/duplex-audio", import.meta.url))
-  if ((await Bun.file(binary).exists()) && Bun.file(binary).lastModified > Bun.file(source).lastModified)
-    return binary
+  if ((await Bun.file(binary).exists()) && Bun.file(binary).lastModified > Bun.file(source).lastModified) return binary
   ui.meta("compiling echo-cancellation helper (first run only)...")
   const { mkdir } = await import("node:fs/promises")
   await mkdir(Bun.fileURLToPath(new URL("../.build", import.meta.url)), { recursive: true })
@@ -519,6 +519,24 @@ const soxFormat = ["-q", "-t", "raw", "-r", "24000", "-e", "signed-integer", "-b
 // PCM16 mono at 24kHz is 48 bytes per millisecond.
 let playbackEndsAt = 0
 const assistantSpeaking = () => Date.now() < playbackEndsAt
+let playbackDoneTimer: ReturnType<typeof setTimeout> | undefined
+const PLAYBACK_RELEASE_MS = 180
+
+function pcmLevel(bytes: Buffer) {
+  const samples = Math.floor(bytes.length / 2)
+  if (samples === 0) return 0
+  const stride = Math.max(1, Math.floor(samples / 1200))
+  let energy = 0
+  let count = 0
+  for (let index = 0; index < samples; index += stride) {
+    const sample = bytes.readInt16LE(index * 2) / 32768
+    energy += sample * sample
+    count += 1
+  }
+  const rms = Math.sqrt(energy / count)
+  if (rms < 0.008) return 0
+  return Math.min(1, Math.sqrt((rms - 0.008) / 0.18))
+}
 
 let micStarted = false
 
@@ -535,8 +553,10 @@ async function startMicrophone() {
     ui.setStatus({ audio: args.speakers ? "duplex+aec" : "duplex" })
     ui.meta("mic live — talk any time, even over the assistant")
     for await (const chunk of audio.stdout as ReadableStream<Uint8Array>) {
-      if (ws?.readyState === WebSocket.OPEN)
-        send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
+      if (ws?.readyState !== WebSocket.OPEN) continue
+      const bytes = Buffer.from(chunk)
+      ui.userAudioLevel(pcmLevel(bytes))
+      send({ type: "input_audio_buffer.append", audio: bytes.toString("base64") })
     }
     return
   }
@@ -549,7 +569,9 @@ async function startMicrophone() {
     // Half-duplex: drop mic audio while the assistant is audible (plus a
     // short tail) so speaker echo can't barge-in against itself.
     if (!args.duplex && Date.now() < playbackEndsAt + 300) continue
-    send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
+    const bytes = Buffer.from(chunk)
+    ui.userAudioLevel(pcmLevel(bytes))
+    send({ type: "input_audio_buffer.append", audio: bytes.toString("base64") })
   }
 }
 
@@ -563,15 +585,29 @@ async function forwardHelperLogs(stream: ReadableStream<Uint8Array>) {
 }
 
 function playAudio(base64: string) {
+  if (playbackDoneTimer) clearTimeout(playbackDoneTimer)
+  playbackDoneTimer = undefined
   if (!audio) {
     player ??= Bun.spawn(["play", ...soxFormat, "-"], { stdin: "pipe", stderr: "ignore" })
     if (args.debug) void player.exited.then((code) => ui.meta(`[debug] play exited (${code})`))
   }
   const stdin = (audio ?? player)!.stdin as import("bun").FileSink
   const bytes = Buffer.from(base64, "base64")
+  ui.assistantAudio(pcmLevel(bytes), bytes.length / 48)
   stdin.write(bytes)
   stdin.flush()
   playbackEndsAt = Math.max(playbackEndsAt, Date.now()) + bytes.length / 48
+}
+
+function finishPlayback() {
+  if (playbackDoneTimer) clearTimeout(playbackDoneTimer)
+  playbackDoneTimer = setTimeout(
+    () => {
+      playbackDoneTimer = undefined
+      ui.assistantDone()
+    },
+    Math.max(0, playbackEndsAt - Date.now()) + PLAYBACK_RELEASE_MS,
+  )
 }
 
 function flushPlayback() {
@@ -580,6 +616,9 @@ function flushPlayback() {
   player?.kill()
   player = undefined
   playbackEndsAt = 0
+  if (playbackDoneTimer) clearTimeout(playbackDoneTimer)
+  playbackDoneTimer = undefined
+  ui.assistantDone()
 }
 
 const createResponse = () =>
@@ -687,16 +726,21 @@ function onMessage(event: MessageEvent) {
       ui.assistantDelta(data.delta ?? "")
       break
     case "response.done": {
-      ui.assistantDone()
+      if (args.text) ui.assistantDone()
+      else finishPlayback()
       const calledFunction = data.response?.output?.some((item) => item.type === "function_call") ?? false
       if (args.text && !calledFunction && inflightTools === 0) shutdown()
       break
     }
     case "input_audio_buffer.speech_started":
+      ui.userSpeaking(true)
       // Voice barge-in needs full duplex (AEC helper or headphones). In
       // half-duplex, speech that slips past the mic gate must not kill
       // playback; keypress is the interrupt.
       if (fullDuplex) flushPlayback()
+      break
+    case "input_audio_buffer.speech_stopped":
+      ui.userSpeaking(false)
       break
     case "input_audio_buffer.committed":
       // Reserve the user's slot in the conversation now; the transcript
@@ -711,9 +755,6 @@ function onMessage(event: MessageEvent) {
       break
     case "response.output_audio_transcript.delta":
       ui.assistantDelta(data.delta ?? "")
-      break
-    case "response.output_audio_transcript.done":
-      ui.assistantDone()
       break
     case "response.output_item.done":
       if (data.item?.type === "function_call") void handleFunctionCall(data.item)

@@ -993,6 +993,7 @@
         "@opencode-ai/client": "workspace:*",
         "@opentui/core": "catalog:",
         "@opentui/solid": "catalog:",
+        "opentui-spinner": "catalog:",
         "solid-js": "1.9.12",
       },
       "devDependencies": {
