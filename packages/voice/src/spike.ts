@@ -25,6 +25,10 @@ const args = parseArgs({
     // usable with headphones: on speakers the mic hears the assistant and
     // interrupts it with its own echo. Default is half-duplex gating.
     duplex: { type: "boolean", default: false },
+    // Enable Apple voice processing (echo cancellation) in the audio helper.
+    // Needed for full duplex on speakers; harmful with Bluetooth headsets,
+    // where it can bind the wrong capture device.
+    speakers: { type: "boolean", default: false },
     // Start attached to an existing session instead of creating one lazily.
     session: { type: "string" },
     // Text mode: send one typed message instead of opening the microphone,
@@ -307,7 +311,11 @@ const assistantSpeaking = () => Date.now() < playbackEndsAt
 
 async function startMicrophone() {
   if (aecBinary) {
-    audio = Bun.spawn([aecBinary], { stdin: "pipe", stdout: "pipe", stderr: "ignore" })
+    audio = Bun.spawn([aecBinary, ...(args.speakers ? ["--aec"] : [])], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: args.debug ? "inherit" : "ignore",
+    })
     console.log("[voice] echo-cancelled duplex audio live — talk any time, even over the assistant (ctrl+c to quit)")
     for await (const chunk of audio.stdout as ReadableStream<Uint8Array>) {
       if (ws.readyState !== WebSocket.OPEN) break

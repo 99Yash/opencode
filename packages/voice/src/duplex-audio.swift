@@ -1,13 +1,23 @@
 // Full-duplex terminal audio bridge with Apple voice processing (AEC).
 //
 //   stdin  <- raw PCM16 mono 24kHz to play through the speakers
-//   stdout -> raw PCM16 mono 24kHz captured from the microphone,
-//             echo-cancelled against the audio this process plays
+//   stdout -> raw PCM16 mono 24kHz captured from the microphone
 //   SIGUSR1: drop any queued speaker audio (barge-in flush)
+//
+// Two independent engines: attaching a speaker source to a voice-processed
+// engine silently kills its input tap, so playback runs on its own plain
+// engine. Voice processing (echo cancellation) is attempted on the input
+// engine and abandoned if the mic delivers nothing: on some devices
+// (Bluetooth headsets mid-negotiation) the VP tap never fires. Without VP
+// there is no echo cancellation, which is acceptable exactly when it happens:
+// headphones have no echo path.
 //
 // Compiled on demand by spike.ts: swiftc -O duplex-audio.swift -o duplex-audio
 
 import AVFoundation
+
+let stderr = FileHandle.standardError
+func log(_ message: String) { stderr.write(Data("[audio] \(message)\n".utf8)) }
 
 final class SpeakerQueue {
   private var data = Data()
@@ -37,59 +47,105 @@ final class SpeakerQueue {
 }
 
 let queue = SpeakerQueue()
-let engine = AVAudioEngine()
+let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
+let captureFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
 
-do {
-  // Enables Apple's voice-processed IO unit (acoustic echo cancellation) on
-  // both sides of this engine. Conveniently it runs at 24kHz natively.
-  try engine.inputNode.setVoiceProcessingEnabled(true)
-} catch {
-  FileHandle.standardError.write(Data("voice processing unavailable: \(error)\n".utf8))
-  exit(2)
-}
-if #available(macOS 14.0, *) {
-  // Don't duck other system audio while the mic is hot.
-  engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration = .init(
-    enableAdvancedDucking: false,
-    duckingLevel: .min
-  )
-}
-
-let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
-
-// Speaker: pull PCM16 from the stdin-fed queue, emit silence when empty.
-let source = AVAudioSourceNode(format: format) { _, _, frameCount, audioBufferList -> OSStatus in
+// Speaker: its own engine, pulling PCM16 from the stdin-fed queue.
+let outputEngine = AVAudioEngine()
+let source = AVAudioSourceNode(format: playFormat) { _, _, frameCount, audioBufferList -> OSStatus in
   let samples = queue.pop(frames: Int(frameCount))
   let out = UnsafeMutableAudioBufferListPointer(audioBufferList)[0].mData!.assumingMemoryBound(to: Float.self)
   for i in 0..<Int(frameCount) { out[i] = Float(samples[i]) / 32768.0 }
   return noErr
 }
-engine.attach(source)
-// Directly to the output node: with voice processing enabled it runs mono
-// 24kHz, and routing through mainMixerNode (stereo 44.1k) fails AU init.
-engine.connect(source, to: engine.outputNode, format: format)
+outputEngine.attach(source)
+outputEngine.connect(source, to: outputEngine.mainMixerNode, format: playFormat)
+try outputEngine.start()
 
-// Microphone: convert the hardware format to PCM16 mono 24kHz for stdout.
-let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
-let micFormat = engine.inputNode.outputFormat(forBus: 0)
-let converter = AVAudioConverter(from: micFormat, to: target)!
+// Microphone: take channel 0 of whatever the hardware provides, resample to
+// 24kHz PCM16 for stdout. Channel extraction is manual because hardware
+// channel counts vary wildly (1, 2, 3, 22...) and AVAudioConverter cannot
+// downmix all of them.
+var tapCount = 0
+var inputEngine: AVAudioEngine?
 
-engine.inputNode.installTap(onBus: 0, bufferSize: 2400, format: micFormat) { buffer, _ in
-  let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 24000.0 / micFormat.sampleRate) + 32
-  guard let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
-  var consumed = false
-  converter.convert(to: converted, error: nil) { _, status in
-    if consumed {
-      status.pointee = .noDataNow
-      return nil
+func startInput(voiceProcessing: Bool) {
+  inputEngine?.stop()
+  let engine = AVAudioEngine()
+  inputEngine = engine
+  if voiceProcessing {
+    do {
+      try engine.inputNode.setVoiceProcessingEnabled(true)
+    } catch {
+      log("voice processing unavailable (\(error)) — no echo cancellation")
+      return startInput(voiceProcessing: false)
     }
-    consumed = true
-    status.pointee = .haveData
-    return buffer
+    if #available(macOS 14.0, *) {
+      engine.inputNode.voiceProcessingOtherAudioDuckingConfiguration = .init(
+        enableAdvancedDucking: false,
+        duckingLevel: .min
+      )
+    }
   }
-  guard converted.frameLength > 0, let channel = converted.int16ChannelData?[0] else { return }
-  FileHandle.standardOutput.write(Data(bytes: channel, count: Int(converted.frameLength) * 2))
+
+  let micFormat = engine.inputNode.outputFormat(forBus: 0)
+  let monoFormat = AVAudioFormat(
+    commonFormat: .pcmFormatFloat32, sampleRate: micFormat.sampleRate, channels: 1, interleaved: false)!
+  guard let converter = AVAudioConverter(from: monoFormat, to: captureFormat) else {
+    log("cannot convert \(micFormat.sampleRate)Hz to 24kHz")
+    exit(2)
+  }
+
+  engine.inputNode.installTap(onBus: 0, bufferSize: 2400, format: micFormat) { buffer, _ in
+    tapCount += 1
+    if tapCount == 1 { log("mic active (echo cancellation \(voiceProcessing ? "on" : "off"))") }
+    guard let channel = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return }
+    guard let mono = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: buffer.frameLength) else { return }
+    memcpy(mono.floatChannelData![0], channel, Int(buffer.frameLength) * 4)
+    mono.frameLength = buffer.frameLength
+
+    let capacity = AVAudioFrameCount(Double(buffer.frameLength) * 24000.0 / micFormat.sampleRate) + 32
+    guard let converted = AVAudioPCMBuffer(pcmFormat: captureFormat, frameCapacity: capacity) else { return }
+    var consumed = false
+    converter.convert(to: converted, error: nil) { _, status in
+      if consumed {
+        status.pointee = .noDataNow
+        return nil
+      }
+      consumed = true
+      status.pointee = .haveData
+      return mono
+    }
+    guard converted.frameLength > 0, let out = converted.int16ChannelData?[0] else { return }
+    FileHandle.standardOutput.write(Data(bytes: out, count: Int(converted.frameLength) * 2))
+  }
+
+  do {
+    try engine.start()
+  } catch {
+    if voiceProcessing {
+      log("input engine failed with voice processing (\(error)) — retrying without")
+      return startInput(voiceProcessing: false)
+    }
+    log("input engine failed: \(error)")
+    exit(2)
+  }
+
+  // Watchdog: on some devices the voice-processed tap simply never fires.
+  // Fall back to a plain tap; without VP the mic reliably delivers.
+  if voiceProcessing {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+      if tapCount > 0 { return }
+      log("voice-processed mic delivered nothing — restarting without echo cancellation")
+      startInput(voiceProcessing: false)
+    }
+  }
 }
+
+// Voice processing is opt-in (--aec): it is only needed on speakers, and on
+// some machines (observed with Bluetooth headsets active) the VP engine binds
+// to the wrong capture device entirely, delivering noise instead of the mic.
+startInput(voiceProcessing: CommandLine.arguments.contains("--aec"))
 
 signal(SIGUSR1, SIG_IGN)
 let flushSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
@@ -104,5 +160,4 @@ DispatchQueue.global().async {
   }
 }
 
-try engine.start()
 RunLoop.main.run()
