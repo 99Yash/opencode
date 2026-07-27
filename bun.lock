@@ -991,6 +991,9 @@
       "version": "0.0.0",
       "dependencies": {
         "@opencode-ai/client": "workspace:*",
+        "@opentui/core": "catalog:",
+        "@opentui/solid": "catalog:",
+        "solid-js": "catalog:",
       },
       "devDependencies": {
         "@tsconfig/bun": "catalog:",

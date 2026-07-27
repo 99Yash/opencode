@@ -16,6 +16,9 @@
     "typescript": "catalog:"
   },
   "dependencies": {
-    "@opencode-ai/client": "workspace:*"
+    "@opencode-ai/client": "workspace:*",
+    "@opentui/core": "catalog:",
+    "@opentui/solid": "catalog:",
+    "solid-js": "catalog:"
   }
 }

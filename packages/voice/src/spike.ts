@@ -29,8 +29,6 @@ const args = parseArgs({
     // Needed for full duplex on speakers; harmful with Bluetooth headsets,
     // where it can bind the wrong capture device.
     speakers: { type: "boolean", default: false },
-    // Start attached to an existing session instead of creating one lazily.
-    session: { type: "string" },
     // Text mode: send one typed message instead of opening the microphone,
     // print the reply, and exit. Useful for smoke-testing the tool loop.
     text: { type: "string" },
@@ -62,23 +60,12 @@ const health = await client.health.get().catch((error) => {
   console.error("or export OPENCODE_SERVER_PASSWORD.")
   process.exit(1)
 })
-console.log(`opencode server ${args.server} (version ${health.version})`)
-console.log(`project directory: ${args.directory}`)
-
 // ---------------------------------------------------------------------------
 // OpenCode tool surface exposed to the realtime model
 // ---------------------------------------------------------------------------
 
-let activeSessionID = args.session
+let activeSessionID: string | undefined
 let lastPromptAt = 0
-
-if (activeSessionID) {
-  const session = await client.session.get({ sessionID: activeSessionID }).catch(() => {
-    console.error(`Session ${activeSessionID} not found on this server.`)
-    process.exit(1)
-  })
-  console.log(`[voice] controlling session ${session.id} — ${session.title}`)
-}
 
 function assistantText(message: SessionMessageAssistant) {
   return message.content
@@ -95,44 +82,30 @@ async function requireSession() {
   if (activeSessionID) return activeSessionID
   const created = await client.session.create({ location: { directory: args.directory! } })
   activeSessionID = created.id
-  printLine(dim(`  [session] created ${activeSessionID}`))
+  ui.meta(`[session] created ${activeSessionID}`)
+  ui.setStatus({ session: activeSessionID })
   return created.id
 }
 
 const truncate = (text: string, max = 2000) => (text.length > max ? text.slice(0, max) + "…" : text)
 
 // ---------------------------------------------------------------------------
-// Terminal output: assistant text streams; everything else must not collide
-// with the open streaming line.
+// UI: OpenTUI in voice mode, plain console in --text mode. Created before the
+// WebSocket so no await sits between socket creation and handler registration.
 // ---------------------------------------------------------------------------
 
-const tty = process.stdout.isTTY
-const dim = (text: string) => (tty ? `\x1b[2m${text}\x1b[0m` : text)
-const cyan = (text: string) => (tty ? `\x1b[1;36m${text}\x1b[0m` : text)
-const green = (text: string) => (tty ? `\x1b[1;32m${text}\x1b[0m` : text)
-
-let assistantStreaming = false
-
-function printLine(line: string) {
-  if (assistantStreaming) {
-    process.stdout.write("\n")
-    assistantStreaming = false
-  }
-  console.log(line)
-}
-
-function printAssistantDelta(text: string) {
-  if (!assistantStreaming) {
-    process.stdout.write(green("● assistant ") )
-    assistantStreaming = true
-  }
-  process.stdout.write(text)
-}
-
-function printAssistantDone() {
-  if (assistantStreaming) process.stdout.write("\n")
-  assistantStreaming = false
-}
+const { createConsoleUI, createVoiceTUI } = await import("./ui")
+const tuiActive = !args.text && process.stdout.isTTY
+const ui = tuiActive
+  ? await createVoiceTUI({
+      onInterrupt: () => interrupt(),
+      onExit: () => shutdown(),
+      onCycleVoice: () => cycleVoice(),
+    })
+  : createConsoleUI()
+ui.setStatus({ server: args.server })
+ui.meta(`opencode ${args.server} (version ${health.version})`)
+ui.meta(`project ${args.directory}`)
 
 const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
   list_sessions: async (input) => {
@@ -153,6 +126,7 @@ const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<u
     const sessionID = input["session_id"]
     if (typeof sessionID !== "string") return { error: "session_id is required" }
     activeSessionID = sessionID
+    ui.setStatus({ session: sessionID })
     return { sessionID, active: true }
   },
   prompt_session: async (input) => {
@@ -161,7 +135,7 @@ const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<u
     const sessionID = await requireSession()
     lastPromptAt = Date.now()
     await client.session.prompt({ sessionID, text })
-    printLine(dim(`  [prompt] ${truncate(text, 120)}`))
+    ui.meta(`[prompt] ${truncate(text, 120)}`)
     return { sessionID, admitted: true, hint: "Work runs in the background. Use check_session or wait_for_reply." }
   },
   check_session: async () => {
@@ -198,6 +172,14 @@ const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<u
     if (!activeSessionID) return { error: "no active session" }
     await client.session.interrupt({ sessionID: activeSessionID })
     return { interrupted: true }
+  },
+  set_voice: async (input) => {
+    const voice = input["voice"]
+    if (typeof voice !== "string" || !voices.includes(voice))
+      return { error: `voice must be one of: ${voices.join(", ")}` }
+    // Reconnect shortly after replying so the confirmation isn't cut off.
+    setTimeout(() => setVoice(voice), 1000)
+    return { voice, note: "Switching requires a brief reconnect; conversation memory resets." }
   },
 }
 
@@ -261,6 +243,22 @@ const toolDefinitions = [
     description: "Stop whatever the coding agent is currently doing in the active session.",
     parameters: { type: "object", properties: {}, required: [] },
   },
+  {
+    type: "function",
+    name: "set_voice",
+    description: "Change your own speaking voice. Requires a brief reconnect.",
+    parameters: {
+      type: "object",
+      properties: {
+        voice: {
+          type: "string",
+          enum: ["marin", "cedar", "coral", "sage", "ash", "ballad", "alloy", "verse"],
+          description: "The voice to switch to.",
+        },
+      },
+      required: ["voice"],
+    },
+  },
 ]
 
 const instructions = `You are the voice interface to OpenCode, a coding agent running on the user's machine.
@@ -289,6 +287,7 @@ type RealtimeEvent = {
   type: string
   delta?: string
   transcript?: string
+  item_id?: string
   item?: RealtimeItem
   response?: { output?: ReadonlyArray<RealtimeItem> }
   error?: { type?: string; code?: string; message?: string }
@@ -309,13 +308,13 @@ const aecBinary = await (async () => {
   const binary = Bun.fileURLToPath(new URL("../.build/duplex-audio", import.meta.url))
   if ((await Bun.file(binary).exists()) && Bun.file(binary).lastModified > Bun.file(source).lastModified)
     return binary
-  console.log("[voice] compiling echo-cancellation helper (first run only)...")
+  ui.meta("compiling echo-cancellation helper (first run only)...")
   const { mkdir } = await import("node:fs/promises")
   await mkdir(Bun.fileURLToPath(new URL("../.build", import.meta.url)), { recursive: true })
   const compile = Bun.spawn(["swiftc", "-O", source, "-o", binary], { stdout: "ignore", stderr: "pipe" })
   if ((await compile.exited) === 0) return binary
-  console.error(await new Response(compile.stderr).text())
-  console.log("[voice] swiftc failed — falling back to sox audio")
+  ui.meta(await new Response(compile.stderr).text())
+  ui.meta("swiftc failed — falling back to sox audio")
   return undefined
 })()
 
@@ -323,12 +322,34 @@ const aecBinary = await (async () => {
 // voice barge-in is safe on speakers.
 const fullDuplex = aecBinary !== undefined || args.duplex
 
-const ws = new WebSocket(`wss://api.openai.com/v1/realtime?model=${args.model}`, {
-  // Bun extension: custom headers on the WebSocket handshake
-  headers: { Authorization: `Bearer ${apiKey}` },
-} as unknown as string[])
+// Voice can't change once a session has produced audio, so switching voices
+// reconnects the realtime socket (conversation context resets; the OpenCode
+// session is untouched).
+const voices = ["marin", "cedar", "coral", "sage", "ash", "ballad", "alloy", "verse"]
+let currentVoice = args.voice ?? "marin"
+let ws!: WebSocket
+let reconnecting = false
 
 const send = (event: Record<string, unknown>) => ws.send(JSON.stringify(event))
+
+function setVoice(voice: string) {
+  currentVoice = voice
+  ui.setStatus({ voice })
+  ui.meta(`[voice] switching to ${voice}…`)
+  reconnecting = true
+  flushPlayback()
+  ws.close(1000)
+  connectRealtime()
+}
+
+const cycleVoice = () => setVoice(voices[(voices.indexOf(currentVoice) + 1) % voices.length]!)
+
+function interrupt() {
+  if (!assistantSpeaking()) return
+  send({ type: "response.cancel" })
+  flushPlayback()
+  ui.meta("[interrupted]")
+}
 
 let recorder: ReturnType<typeof Bun.spawn> | undefined
 let player: ReturnType<typeof Bun.spawn> | undefined
@@ -342,25 +363,32 @@ const soxFormat = ["-q", "-t", "raw", "-r", "24000", "-e", "signed-integer", "-b
 let playbackEndsAt = 0
 const assistantSpeaking = () => Date.now() < playbackEndsAt
 
+let micStarted = false
+
 async function startMicrophone() {
+  if (micStarted) return // voice-switch reconnects reuse the running mic
+  micStarted = true
   if (aecBinary) {
     audio = Bun.spawn([aecBinary, ...(args.speakers ? ["--aec"] : [])], {
       stdin: "pipe",
       stdout: "pipe",
-      stderr: args.debug ? "inherit" : "ignore",
+      stderr: "pipe",
     })
-    console.log("[voice] echo-cancelled duplex audio live — talk any time, even over the assistant (ctrl+c to quit)")
+    void forwardHelperLogs(audio.stderr as ReadableStream<Uint8Array>)
+    ui.setStatus({ audio: args.speakers ? "duplex+aec" : "duplex" })
+    ui.meta("mic live — talk any time, even over the assistant")
     for await (const chunk of audio.stdout as ReadableStream<Uint8Array>) {
-      if (ws.readyState !== WebSocket.OPEN) break
-      send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
+      if (ws.readyState === WebSocket.OPEN)
+        send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
     }
     return
   }
   recorder = Bun.spawn(["rec", ...soxFormat, "-"], { stdout: "pipe", stderr: "ignore" })
-  console.log("[voice] microphone live — start talking (ctrl+c to quit)")
-  if (!args.duplex) console.log("[voice] mic mutes while the assistant speaks; press any key to interrupt it")
+  ui.setStatus({ audio: args.duplex ? "duplex (sox)" : "half-duplex (sox)" })
+  ui.meta("mic live — start talking")
+  if (!args.duplex) ui.meta("mic mutes while the assistant speaks; press any key to interrupt")
   for await (const chunk of recorder.stdout as ReadableStream<Uint8Array>) {
-    if (ws.readyState !== WebSocket.OPEN) break
+    if (ws.readyState !== WebSocket.OPEN) continue
     // Half-duplex: drop mic audio while the assistant is audible (plus a
     // short tail) so speaker echo can't barge-in against itself.
     if (!args.duplex && Date.now() < playbackEndsAt + 300) continue
@@ -368,10 +396,19 @@ async function startMicrophone() {
   }
 }
 
+async function forwardHelperLogs(stream: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder()
+  for await (const chunk of stream) {
+    for (const line of decoder.decode(chunk).split("\n")) {
+      if (line.trim()) ui.meta(line.trim())
+    }
+  }
+}
+
 function playAudio(base64: string) {
   if (!audio) {
     player ??= Bun.spawn(["play", ...soxFormat, "-"], { stdin: "pipe", stderr: "ignore" })
-    if (args.debug) void player.exited.then((code) => console.log(`[debug] play exited (${code})`))
+    if (args.debug) void player.exited.then((code) => ui.meta(`[debug] play exited (${code})`))
   }
   const stdin = (audio ?? player)!.stdin as import("bun").FileSink
   const bytes = Buffer.from(base64, "base64")
@@ -399,7 +436,7 @@ async function handleFunctionCall(item: RealtimeItem) {
   const output = handler
     ? await handler(JSON.parse(item.arguments ?? "{}")).catch((error) => ({ error: String(error) }))
     : { error: `unknown tool ${item.name}` }
-  printLine(dim(`  [${item.name}] ${truncate(JSON.stringify(output), 200)}`))
+  ui.tool(item.name ?? "unknown", output)
   send({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output: JSON.stringify(output) },
@@ -408,22 +445,32 @@ async function handleFunctionCall(item: RealtimeItem) {
   inflightTools -= 1
 }
 
-// In half-duplex mode voice barge-in is impossible (the mic is muted while
-// the assistant speaks), so any keypress interrupts the assistant instead.
-if (!args.text && process.stdin.isTTY) {
+// Keypress interrupt for voice mode without the TUI (the TUI handles its own
+// keyboard via useKeyboard).
+if (!args.text && process.stdin.isTTY && !tuiActive) {
   process.stdin.setRawMode(true)
   process.stdin.resume()
   process.stdin.on("data", (data: Buffer) => {
     if (data.includes(3)) return shutdown() // ctrl+c
-    if (!assistantSpeaking()) return
-    send({ type: "response.cancel" })
-    flushPlayback()
-    printLine(dim("  [interrupted]"))
+    if (data.toString() === "v") return cycleVoice()
+    interrupt()
   })
 }
 
-ws.addEventListener("open", () => {
-  console.log(`[voice] connected to ${args.model}`)
+function connectRealtime() {
+  ws = new WebSocket(`wss://api.openai.com/v1/realtime?model=${args.model}`, {
+    // Bun extension: custom headers on the WebSocket handshake
+    headers: { Authorization: `Bearer ${apiKey}` },
+  } as unknown as string[])
+  ws.addEventListener("open", onOpen)
+  ws.addEventListener("message", onMessage)
+  ws.addEventListener("close", onClose)
+}
+
+function onOpen() {
+  reconnecting = false
+  ui.meta(`connected to ${args.model} (voice: ${currentVoice})`)
+  ui.setStatus({ voice: currentVoice })
   send({
     type: "session.update",
     session: {
@@ -431,7 +478,7 @@ ws.addEventListener("open", () => {
       instructions,
       tools: toolDefinitions,
       tool_choice: "auto",
-      audio: { output: { voice: args.voice } },
+      audio: { output: { voice: currentVoice } },
     },
   })
   // Optional extras sent separately so a shape mismatch can't reject the core session config.
@@ -458,18 +505,18 @@ ws.addEventListener("open", () => {
       },
     },
   })
-})
+}
 
-ws.addEventListener("message", (event) => {
+function onMessage(event: MessageEvent) {
   const data = JSON.parse(String(event.data)) as RealtimeEvent
-  if (args.debug && !data.type?.endsWith(".delta")) console.log(`[debug] ${data.type}`)
+  if (args.debug && !data.type?.endsWith(".delta")) ui.meta(`[debug] ${data.type}`)
   switch (data.type) {
     case "session.created":
       if (!args.text) {
         void startMicrophone()
         break
       }
-      console.log(`You (typed): ${args.text}`)
+      ui.userTranscript("typed", args.text)
       send({
         type: "conversation.item.create",
         item: { type: "message", role: "user", content: [{ type: "input_text", text: args.text }] },
@@ -477,10 +524,10 @@ ws.addEventListener("message", (event) => {
       createResponse()
       break
     case "response.output_text.delta":
-      printAssistantDelta(data.delta ?? "")
+      ui.assistantDelta(data.delta ?? "")
       break
     case "response.done": {
-      printAssistantDone()
+      ui.assistantDone()
       const calledFunction = data.response?.output?.some((item) => item.type === "function_call") ?? false
       if (args.text && !calledFunction && inflightTools === 0) shutdown()
       break
@@ -491,33 +538,40 @@ ws.addEventListener("message", (event) => {
       // playback; keypress is the interrupt.
       if (fullDuplex) flushPlayback()
       break
+    case "input_audio_buffer.committed":
+      // Reserve the user's slot in the conversation now; the transcript
+      // arrives later and must not print after the assistant's reply.
+      ui.userCommitted(data.item_id ?? "")
+      break
     case "conversation.item.input_audio_transcription.completed":
-      printLine(cyan("● you ") + (data.transcript ?? "").trim())
+      ui.userTranscript(data.item_id ?? "", (data.transcript ?? "").trim())
       break
     case "response.output_audio.delta":
       if (data.delta) playAudio(data.delta)
       break
     case "response.output_audio_transcript.delta":
-      printAssistantDelta(data.delta ?? "")
+      ui.assistantDelta(data.delta ?? "")
       break
     case "response.output_audio_transcript.done":
-      printAssistantDone()
+      ui.assistantDone()
       break
     case "response.output_item.done":
       if (data.item?.type === "function_call") void handleFunctionCall(data.item)
       break
     case "error":
-      printLine(`[realtime error] ${data.error?.code}: ${data.error?.message}`)
+      ui.meta(`[realtime error] ${data.error?.code}: ${data.error?.message}`)
       break
   }
-})
+}
 
-ws.addEventListener("close", (event) => {
-  console.log(`\n[voice] realtime connection closed (${event.code})`)
+function onClose(event: CloseEvent) {
+  if (reconnecting) return
+  ui.meta(`realtime connection closed (${event.code})`)
   shutdown()
-})
+}
 
 function shutdown() {
+  ui.close()
   recorder?.kill()
   player?.kill()
   audio?.kill()
@@ -525,4 +579,10 @@ function shutdown() {
   process.exit(0)
 }
 
+// A surviving process keeps the microphone hot and the OpenAI meter running,
+// so every terminal-death signal must tear it down.
 process.on("SIGINT", shutdown)
+process.on("SIGHUP", shutdown)
+process.on("SIGTERM", shutdown)
+
+connectRealtime()
