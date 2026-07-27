@@ -138,6 +138,81 @@ test("session lifecycle updates the terminal title and prints the epilogue after
   }
 })
 
+test("session title generated while the session is loading updates the terminal title", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const titles: string[] = []
+  const setTitle = setup.renderer.setTerminalTitle.bind(setup.renderer)
+  setup.renderer.setTerminalTitle = (title) => {
+    titles.push(title)
+    setTitle(title)
+  }
+  let sessionRequested!: () => void
+  const requestStarted = new Promise<void>((resolve) => {
+    sessionRequested = resolve
+  })
+  let returnSession!: () => void
+  const releaseSession = new Promise<void>((resolve) => {
+    returnSession = resolve
+  })
+  const session = {
+    id: "dummy",
+    title: "New session - stale",
+    projectID: "project",
+    location: { directory },
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 0, updated: 0 },
+  }
+  const events = createEventStream()
+  const calls = createFetch(async (url) => {
+    if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
+    if (url.pathname === "/api/session/dummy") {
+      sessionRequested()
+      await releaseSession
+      return json({ data: session })
+    }
+    if (url.pathname === "/api/session/dummy/message") return json({ data: [], cursor: {} })
+    if (url.pathname === "/api/session/dummy/pending") return json({ data: [] })
+    if (url.pathname === "/api/session/dummy/permission") return json({ data: [] })
+  }, events)
+  const server = Bun.serve({ port: 0, fetch: (request) => calls.fetch(request) })
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        app: { name: "test", version: "test", channel: "test" },
+        server: { endpoint: { url: server.url.toString() } },
+        config: { get: async () => ({}), update: async () => ({}) },
+        packages: { resolve: async () => undefined },
+        args: { sessionID: "dummy" },
+        log: () => {},
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
+    )
+
+    await requestStarted
+    events.emit({
+      id: "evt_renamed",
+      created: 1,
+      type: "session.renamed",
+      durable: { aggregateID: "dummy", seq: 1, version: 1 },
+      data: { sessionID: "dummy", title: "Generated title" },
+    })
+    await Bun.sleep(10)
+    returnSession()
+    await Bun.sleep(10)
+
+    expect(titles).toContain("OC | Generated title")
+    setup.renderer.destroy()
+    await task
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    await server.stop()
+    mock.restore()
+  }
+})
+
 test("session startup prompt is submitted exactly once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
