@@ -24,7 +24,14 @@ import { executeTool, registerToolPlugin, toolIdentity } from "./lib/tool"
 const globToolNode = makeLocationNode({
   name: "test/glob-tool-plugin",
   layer: Layer.effectDiscard(registerToolPlugin(GlobTool.Plugin)),
-  deps: [Tool.node, FSUtil.node, Ripgrep.node, Location.node, LocationMutation.node, Permission.node],
+  deps: [
+    Tool.node,
+    FSUtil.node,
+    Ripgrep.node,
+    Location.node,
+    LocationMutation.node,
+    Permission.node,
+  ],
 })
 const grepToolNode = makeLocationNode({
   name: "test/grep-tool-plugin",
@@ -181,7 +188,9 @@ describe("search tools", () => {
       Effect.promise(() => tmpdir()),
       (tmp) =>
         Effect.promise(() => fs.writeFile(path.join(tmp.path, "file.txt"), "haystack\n")).pipe(
-          Effect.andThen(withTools(tmp.path, (registry) => executeTool(registry, call("grep", { pattern: "needle" })))),
+          Effect.andThen(
+            withTools(tmp.path, (registry) => executeTool(registry, call("grep", { pattern: "needle" }))),
+          ),
           Effect.tap((result) =>
             Effect.sync(() => {
               expect(result).toMatchObject({
@@ -290,7 +299,9 @@ describe("search tools", () => {
       (tmp) =>
         Effect.promise(() => fs.writeFile(path.join(tmp.path, "file.txt"), "content\n")).pipe(
           Effect.andThen(
-            withTools(tmp.path, (registry) => executeTool(registry, call("glob", { path: "file.txt", pattern: "*" }))),
+            withTools(tmp.path, (registry) =>
+              executeTool(registry, call("glob", { path: "file.txt", pattern: "*" })),
+            ),
           ),
           Effect.tap((result) =>
             Effect.sync(() => {
@@ -322,7 +333,9 @@ describe("search tools", () => {
             Effect.sync(() => {
               expect(result.status).toBe("completed")
               expect(assertions.map((input) => input.action)).toEqual(["external_directory", "glob"])
-              expect(assertions[0]?.resources).toEqual([path.join(outside.path, "*").replaceAll("\\", "/")])
+              expect(assertions[0]?.resources).toEqual([
+                path.join(outside.path, "*").replaceAll("\\", "/"),
+              ])
             }),
           ),
         )
