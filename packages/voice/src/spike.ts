@@ -95,7 +95,7 @@ const truncate = (text: string, max = 2000) => (text.length > max ? text.slice(0
 // ---------------------------------------------------------------------------
 
 const { createConsoleUI, createVoiceTUI } = await import("./ui")
-const tuiActive = !args.text && process.stdout.isTTY
+const tuiActive = !args.text
 const ui = tuiActive
   ? await createVoiceTUI({
       onInterrupt: () => interrupt(),
@@ -327,10 +327,12 @@ const fullDuplex = aecBinary !== undefined || args.duplex
 // session is untouched).
 const voices = ["marin", "cedar", "coral", "sage", "ash", "ballad", "alloy", "verse"]
 let currentVoice = args.voice ?? "marin"
-let ws!: WebSocket
+let ws: WebSocket | undefined
 let reconnecting = false
 
-const send = (event: Record<string, unknown>) => ws.send(JSON.stringify(event))
+const send = (event: Record<string, unknown>) => {
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(event))
+}
 
 function setVoice(voice: string) {
   currentVoice = voice
@@ -338,7 +340,7 @@ function setVoice(voice: string) {
   ui.meta(`[voice] switching to ${voice}…`)
   reconnecting = true
   flushPlayback()
-  ws.close(1000)
+  ws?.close(1000)
   connectRealtime()
 }
 
@@ -378,7 +380,7 @@ async function startMicrophone() {
     ui.setStatus({ audio: args.speakers ? "duplex+aec" : "duplex" })
     ui.meta("mic live — talk any time, even over the assistant")
     for await (const chunk of audio.stdout as ReadableStream<Uint8Array>) {
-      if (ws.readyState === WebSocket.OPEN)
+      if (ws?.readyState === WebSocket.OPEN)
         send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
     }
     return
@@ -388,7 +390,7 @@ async function startMicrophone() {
   ui.meta("mic live — start talking")
   if (!args.duplex) ui.meta("mic mutes while the assistant speaks; press any key to interrupt")
   for await (const chunk of recorder.stdout as ReadableStream<Uint8Array>) {
-    if (ws.readyState !== WebSocket.OPEN) continue
+    if (ws?.readyState !== WebSocket.OPEN) continue
     // Half-duplex: drop mic audio while the assistant is audible (plus a
     // short tail) so speaker echo can't barge-in against itself.
     if (!args.duplex && Date.now() < playbackEndsAt + 300) continue
@@ -570,12 +572,16 @@ function onClose(event: CloseEvent) {
   shutdown()
 }
 
+let shuttingDown = false
+
 function shutdown() {
-  ui.close()
+  if (shuttingDown) return
+  shuttingDown = true
   recorder?.kill()
   player?.kill()
   audio?.kill()
-  if (ws.readyState === WebSocket.OPEN) ws.close()
+  if (ws?.readyState === WebSocket.OPEN) ws.close()
+  ui.close()
   process.exit(0)
 }
 

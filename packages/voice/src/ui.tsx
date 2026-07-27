@@ -4,9 +4,8 @@
 // moment the audio buffer commits (before the assistant starts replying) and
 // its transcript is filled in when Whisper finishes.
 import { createCliRenderer } from "@opentui/core"
-import { render, useKeyboard } from "@opentui/solid"
-import { For } from "solid-js"
-import { createStore, produce } from "solid-js/store"
+import { render, useKeyboard, useTerminalDimensions } from "@opentui/solid"
+import { createSignal, For } from "solid-js"
 
 export type VoiceStatus = {
   server?: string
@@ -151,39 +150,53 @@ export async function createVoiceTUI(options: {
   onExit(): void
   onCycleVoice(): void
 }): Promise<VoiceUI> {
-  const [state, setState] = createStore({
+  const [state, setState] = createSignal({
     messages: [] as Message[],
     status: {} as VoiceStatus,
   })
 
   const renderer = await createCliRenderer({
     useMouse: true,
-    exitOnCtrlC: false,
+    // Handle Ctrl-C in OpenTUI's native input parser, before Solid handlers
+    // and rendering work. onDestroy performs process/audio cleanup below.
+    exitOnCtrlC: true,
+    exitSignals: [],
     autoFocus: false,
     openConsoleOnError: false,
+    screenMode: "alternate-screen",
+    externalOutputMode: "passthrough",
+    consoleMode: "disabled",
+    onDestroy: options.onExit,
   })
 
   function App() {
+    const dimensions = useTerminalDimensions()
     useKeyboard((evt) => {
-      if (evt.ctrl && evt.name === "c") return options.onExit()
+      if (evt.ctrl && evt.name === "c") return
       if (evt.name === "v") return options.onCycleVoice()
       options.onInterrupt()
     })
     const statusLine = () =>
       [
-        state.status.audio ?? "connecting…",
-        state.status.voice,
-        state.status.session ?? "no session",
-        state.status.server,
+        state().status.audio ?? "connecting…",
+        state().status.voice,
+        state().status.session ?? "no session",
+        state().status.server,
         "v: voice · any key interrupts · ctrl+c quits",
       ]
         .filter(Boolean)
         .join("   ")
     return (
-      <box flexDirection="column" width="100%" height="100%" paddingLeft={1} paddingRight={1}>
+      <box
+        flexDirection="column"
+        width={dimensions().width}
+        height={dimensions().height}
+        paddingLeft={1}
+        paddingRight={1}
+      >
         <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
           <box flexDirection="column" flexShrink={0}>
-            <For each={state.messages}>{(message) => <MessageRow message={message} />}</For>
+            <For each={state().messages}>{(message) => <MessageRow message={message} />}</For>
           </box>
         </scrollbox>
         <box height={1} marginTop={1}>
@@ -195,50 +208,57 @@ export async function createVoiceTUI(options: {
 
   void render(() => <App />, renderer)
 
-  const push = (message: Message) => setState("messages", state.messages.length, message)
+  const redraw = () => renderer.requestRender()
+  const push = (message: Message) => {
+    setState((current) => ({ ...current, messages: [...current.messages, message] }))
+    redraw()
+  }
 
   return {
     meta: (text) => push({ kind: "meta", text }),
     userCommitted: (itemID) => push({ kind: "user", itemID }),
     userTranscript: (itemID, text) => {
-      const index = state.messages.findIndex((m) => m.kind === "user" && m.itemID === itemID)
+      const index = state().messages.findIndex((m) => m.kind === "user" && m.itemID === itemID)
       if (index === -1) return push({ kind: "user", itemID, text })
-      setState(
-        "messages",
-        index,
-        produce((m) => {
-          if (m.kind === "user") m.text = text
-        }),
-      )
+      setState((current) => ({
+        ...current,
+        messages: current.messages.map((message, i) =>
+          i === index && message.kind === "user" ? { ...message, text } : message,
+        ),
+      }))
+      redraw()
     },
     assistantDelta: (text) => {
-      const index = state.messages.length - 1
-      const last = state.messages[index]
+      const index = state().messages.length - 1
+      const last = state().messages[index]
       if (last?.kind === "assistant" && last.streaming) {
-        setState(
-          "messages",
-          index,
-          produce((m) => {
-            if (m.kind === "assistant") m.text += text
-          }),
-        )
+        setState((current) => ({
+          ...current,
+          messages: current.messages.map((message, i) =>
+            i === index && message.kind === "assistant" ? { ...message, text: message.text + text } : message,
+          ),
+        }))
+        redraw()
         return
       }
       push({ kind: "assistant", text, streaming: true })
     },
     assistantDone: () => {
-      const index = state.messages.length - 1
-      if (state.messages[index]?.kind !== "assistant") return
-      setState(
-        "messages",
-        index,
-        produce((m) => {
-          if (m.kind === "assistant") m.streaming = false
-        }),
-      )
+      const index = state().messages.length - 1
+      if (state().messages[index]?.kind !== "assistant") return
+      setState((current) => ({
+        ...current,
+        messages: current.messages.map((message, i) =>
+          i === index && message.kind === "assistant" ? { ...message, streaming: false } : message,
+        ),
+      }))
+      redraw()
     },
     tool: (name, output) => push({ kind: "tool", name, json: compactJson(output) }),
-    setStatus: (patch) => setState("status", patch),
+    setStatus: (patch) => {
+      setState((current) => ({ ...current, status: { ...current.status, ...patch } }))
+      redraw()
+    },
     close: () => {
       if (!renderer.isDestroyed) renderer.destroy()
     },

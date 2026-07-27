@@ -6,7 +6,7 @@
   "description": "Prototype voice control for OpenCode via the OpenAI Realtime API",
   "type": "module",
   "scripts": {
-    "spike": "bun src/spike.ts",
+    "spike": "bun run --no-orphans --conditions=browser src/spike.ts",
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
@@ -19,6 +19,6 @@
     "@opencode-ai/client": "workspace:*",
     "@opentui/core": "catalog:",
     "@opentui/solid": "catalog:",
-    "solid-js": "catalog:"
+    "solid-js": "1.9.12"
   }
 }
