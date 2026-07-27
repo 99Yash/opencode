@@ -201,6 +201,10 @@ export const Commands = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCO
           Flag.withDefault(false),
         ),
         yolo: Flag.boolean("yolo").pipe(Flag.withDefault(false), Flag.withHidden),
+        dangerouslySkipPermissions: Flag.boolean("dangerously-skip-permissions").pipe(
+          Flag.withDefault(false),
+          Flag.withHidden,
+        ),
       },
     }),
     Spec.make("service", {
