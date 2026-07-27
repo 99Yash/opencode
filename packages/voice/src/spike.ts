@@ -30,6 +30,8 @@ const args = parseArgs({
     // Text mode: send one typed message instead of opening the microphone,
     // print the reply, and exit. Useful for smoke-testing the tool loop.
     text: { type: "string" },
+    // Log every realtime event type as it arrives.
+    debug: { type: "boolean", default: false },
   },
 }).values
 
@@ -352,10 +354,30 @@ ws.addEventListener("open", () => {
     type: "session.update",
     session: { type: "realtime", audio: { input: { transcription: { model: "whisper-1" } } } },
   })
+  send({
+    type: "session.update",
+    session: {
+      type: "realtime",
+      audio: {
+        input: {
+          turn_detection: {
+            type: "server_vad",
+            // Default 500ms makes the model jump in during natural pauses.
+            silence_duration_ms: 900,
+            // In half-duplex mode the server must never auto-cancel a response
+            // on detected speech: a trailing word or leaked echo would cut the
+            // assistant off mid-sentence. Keypress is the interrupt instead.
+            interrupt_response: args.duplex,
+          },
+        },
+      },
+    },
+  })
 })
 
 ws.addEventListener("message", (event) => {
   const data = JSON.parse(String(event.data)) as RealtimeEvent
+  if (args.debug && !data.type?.endsWith(".delta")) console.log(`[debug] ${data.type}`)
   switch (data.type) {
     case "session.created":
       if (!args.text) {
@@ -381,7 +403,10 @@ ws.addEventListener("message", (event) => {
       break
     }
     case "input_audio_buffer.speech_started":
-      flushPlayback() // barge-in: stop speaking as soon as the user does
+      // Voice barge-in only makes sense in duplex mode (headphones). In
+      // half-duplex, speech that slips past the mic gate must not kill
+      // playback; keypress is the interrupt.
+      if (args.duplex) flushPlayback()
       break
     case "conversation.item.input_audio_transcription.completed":
       console.log(`\nYou: ${data.transcript ?? ""}`)
