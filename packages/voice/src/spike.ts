@@ -257,6 +257,35 @@ type RealtimeEvent = {
   error?: { type?: string; code?: string; message?: string }
 }
 
+// ---------------------------------------------------------------------------
+// Echo-cancelled full-duplex audio (Apple voice processing)
+// ---------------------------------------------------------------------------
+
+// sox has no acoustic echo cancellation, so raw duplex on speakers feeds the
+// assistant's voice back into the mic. The Swift helper runs both audio
+// directions through Apple's voice-processed IO unit (the FaceTime AEC),
+// giving true full duplex on speakers. Compiled on demand; sox is the
+// fallback when swiftc is unavailable.
+const aecBinary = await (async () => {
+  if (args.text || process.platform !== "darwin") return undefined
+  const source = Bun.fileURLToPath(new URL("./duplex-audio.swift", import.meta.url))
+  const binary = Bun.fileURLToPath(new URL("../.build/duplex-audio", import.meta.url))
+  if ((await Bun.file(binary).exists()) && Bun.file(binary).lastModified > Bun.file(source).lastModified)
+    return binary
+  console.log("[voice] compiling echo-cancellation helper (first run only)...")
+  const { mkdir } = await import("node:fs/promises")
+  await mkdir(Bun.fileURLToPath(new URL("../.build", import.meta.url)), { recursive: true })
+  const compile = Bun.spawn(["swiftc", "-O", source, "-o", binary], { stdout: "ignore", stderr: "pipe" })
+  if ((await compile.exited) === 0) return binary
+  console.error(await new Response(compile.stderr).text())
+  console.log("[voice] swiftc failed — falling back to sox audio")
+  return undefined
+})()
+
+// With echo cancellation the mic stays hot while the assistant speaks and
+// voice barge-in is safe on speakers.
+const fullDuplex = aecBinary !== undefined || args.duplex
+
 const ws = new WebSocket(`wss://api.openai.com/v1/realtime?model=${args.model}`, {
   // Bun extension: custom headers on the WebSocket handshake
   headers: { Authorization: `Bearer ${apiKey}` },
@@ -266,6 +295,7 @@ const send = (event: Record<string, unknown>) => ws.send(JSON.stringify(event))
 
 let recorder: ReturnType<typeof Bun.spawn> | undefined
 let player: ReturnType<typeof Bun.spawn> | undefined
+let audio: ReturnType<typeof Bun.spawn> | undefined // AEC duplex helper (mic + speaker)
 
 // PCM16 mono 24kHz is the realtime API default; sox handles both directions.
 const soxFormat = ["-q", "-t", "raw", "-r", "24000", "-e", "signed-integer", "-b", "16", "-c", "1"]
@@ -276,6 +306,15 @@ let playbackEndsAt = 0
 const assistantSpeaking = () => Date.now() < playbackEndsAt
 
 async function startMicrophone() {
+  if (aecBinary) {
+    audio = Bun.spawn([aecBinary], { stdin: "pipe", stdout: "pipe", stderr: "ignore" })
+    console.log("[voice] echo-cancelled duplex audio live — talk any time, even over the assistant (ctrl+c to quit)")
+    for await (const chunk of audio.stdout as ReadableStream<Uint8Array>) {
+      if (ws.readyState !== WebSocket.OPEN) break
+      send({ type: "input_audio_buffer.append", audio: Buffer.from(chunk).toString("base64") })
+    }
+    return
+  }
   recorder = Bun.spawn(["rec", ...soxFormat, "-"], { stdout: "pipe", stderr: "ignore" })
   console.log("[voice] microphone live — start talking (ctrl+c to quit)")
   if (!args.duplex) console.log("[voice] mic mutes while the assistant speaks; press any key to interrupt it")
@@ -289,8 +328,11 @@ async function startMicrophone() {
 }
 
 function playAudio(base64: string) {
-  player ??= Bun.spawn(["play", ...soxFormat, "-"], { stdin: "pipe", stderr: "ignore" })
-  const stdin = player.stdin as import("bun").FileSink
+  if (!audio) {
+    player ??= Bun.spawn(["play", ...soxFormat, "-"], { stdin: "pipe", stderr: "ignore" })
+    if (args.debug) void player.exited.then((code) => console.log(`[debug] play exited (${code})`))
+  }
+  const stdin = (audio ?? player)!.stdin as import("bun").FileSink
   const bytes = Buffer.from(base64, "base64")
   stdin.write(bytes)
   stdin.flush()
@@ -298,6 +340,8 @@ function playAudio(base64: string) {
 }
 
 function flushPlayback() {
+  // The AEC helper flushes its queued speaker audio on SIGUSR1 and keeps running.
+  if (audio) process.kill(audio.pid, "SIGUSR1")
   player?.kill()
   player = undefined
   playbackEndsAt = 0
@@ -367,7 +411,7 @@ ws.addEventListener("open", () => {
             // In half-duplex mode the server must never auto-cancel a response
             // on detected speech: a trailing word or leaked echo would cut the
             // assistant off mid-sentence. Keypress is the interrupt instead.
-            interrupt_response: args.duplex,
+            interrupt_response: fullDuplex,
           },
         },
       },
@@ -403,10 +447,10 @@ ws.addEventListener("message", (event) => {
       break
     }
     case "input_audio_buffer.speech_started":
-      // Voice barge-in only makes sense in duplex mode (headphones). In
+      // Voice barge-in needs full duplex (AEC helper or headphones). In
       // half-duplex, speech that slips past the mic gate must not kill
       // playback; keypress is the interrupt.
-      if (args.duplex) flushPlayback()
+      if (fullDuplex) flushPlayback()
       break
     case "conversation.item.input_audio_transcription.completed":
       console.log(`\nYou: ${data.transcript ?? ""}`)
@@ -437,6 +481,7 @@ ws.addEventListener("close", (event) => {
 function shutdown() {
   recorder?.kill()
   player?.kill()
+  audio?.kill()
   if (ws.readyState === WebSocket.OPEN) ws.close()
   process.exit(0)
 }
