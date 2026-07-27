@@ -51,16 +51,26 @@ let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 2400
 let captureFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
 
 // Speaker: its own engine, pulling PCM16 from the stdin-fed queue.
-let outputEngine = AVAudioEngine()
-let source = AVAudioSourceNode(format: playFormat) { _, _, frameCount, audioBufferList -> OSStatus in
-  let samples = queue.pop(frames: Int(frameCount))
-  let out = UnsafeMutableAudioBufferListPointer(audioBufferList)[0].mData!.assumingMemoryBound(to: Float.self)
-  for i in 0..<Int(frameCount) { out[i] = Float(samples[i]) / 32768.0 }
-  return noErr
+var outputEngine: AVAudioEngine?
+
+func startOutput() {
+  outputEngine?.stop()
+  let engine = AVAudioEngine()
+  outputEngine = engine
+  let source = AVAudioSourceNode(format: playFormat) { _, _, frameCount, audioBufferList -> OSStatus in
+    let samples = queue.pop(frames: Int(frameCount))
+    let out = UnsafeMutableAudioBufferListPointer(audioBufferList)[0].mData!.assumingMemoryBound(to: Float.self)
+    for i in 0..<Int(frameCount) { out[i] = Float(samples[i]) / 32768.0 }
+    return noErr
+  }
+  engine.attach(source)
+  engine.connect(source, to: engine.mainMixerNode, format: playFormat)
+  do {
+    try engine.start()
+  } catch {
+    log("output engine failed: \(error)")
+  }
 }
-outputEngine.attach(source)
-outputEngine.connect(source, to: outputEngine.mainMixerNode, format: playFormat)
-try outputEngine.start()
 
 // Microphone: take channel 0 of whatever the hardware provides, resample to
 // 24kHz PCM16 for stdout. Channel extraction is manual because hardware
@@ -145,7 +155,29 @@ func startInput(voiceProcessing: Bool) {
 // Voice processing is opt-in (--aec): it is only needed on speakers, and on
 // some machines (observed with Bluetooth headsets active) the VP engine binds
 // to the wrong capture device entirely, delivering noise instead of the mic.
-startInput(voiceProcessing: CommandLine.arguments.contains("--aec"))
+let wantAEC = CommandLine.arguments.contains("--aec")
+
+// Mic first: activating the mic flips Bluetooth headsets from music mode to
+// headset mode, reconfiguring the output device. Starting output afterwards
+// (and rebuilding on any route change below) keeps playback on the live device.
+startInput(voiceProcessing: wantAEC)
+startOutput()
+
+// Device switches (Bluetooth profile flips, headphones plugged/unplugged,
+// default device changes) stop engines silently. Rebuild both, debounced.
+var rebuildScheduled = false
+NotificationCenter.default.addObserver(
+  forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
+) { _ in
+  if rebuildScheduled { return }
+  rebuildScheduled = true
+  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+    rebuildScheduled = false
+    log("audio route changed — rebuilding engines")
+    startInput(voiceProcessing: wantAEC)
+    startOutput()
+  }
+}
 
 signal(SIGUSR1, SIG_IGN)
 let flushSignal = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)

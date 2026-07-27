@@ -95,11 +95,44 @@ async function requireSession() {
   if (activeSessionID) return activeSessionID
   const created = await client.session.create({ location: { directory: args.directory! } })
   activeSessionID = created.id
-  console.log(`\n[voice] created session ${activeSessionID}`)
+  printLine(dim(`  [session] created ${activeSessionID}`))
   return created.id
 }
 
 const truncate = (text: string, max = 2000) => (text.length > max ? text.slice(0, max) + "…" : text)
+
+// ---------------------------------------------------------------------------
+// Terminal output: assistant text streams; everything else must not collide
+// with the open streaming line.
+// ---------------------------------------------------------------------------
+
+const tty = process.stdout.isTTY
+const dim = (text: string) => (tty ? `\x1b[2m${text}\x1b[0m` : text)
+const cyan = (text: string) => (tty ? `\x1b[1;36m${text}\x1b[0m` : text)
+const green = (text: string) => (tty ? `\x1b[1;32m${text}\x1b[0m` : text)
+
+let assistantStreaming = false
+
+function printLine(line: string) {
+  if (assistantStreaming) {
+    process.stdout.write("\n")
+    assistantStreaming = false
+  }
+  console.log(line)
+}
+
+function printAssistantDelta(text: string) {
+  if (!assistantStreaming) {
+    process.stdout.write(green("● assistant ") )
+    assistantStreaming = true
+  }
+  process.stdout.write(text)
+}
+
+function printAssistantDone() {
+  if (assistantStreaming) process.stdout.write("\n")
+  assistantStreaming = false
+}
 
 const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<unknown>> = {
   list_sessions: async (input) => {
@@ -128,7 +161,7 @@ const toolHandlers: Record<string, (input: Record<string, unknown>) => Promise<u
     const sessionID = await requireSession()
     lastPromptAt = Date.now()
     await client.session.prompt({ sessionID, text })
-    console.log(`\n[voice] prompted ${sessionID}: ${text}`)
+    printLine(dim(`  [prompt] ${truncate(text, 120)}`))
     return { sessionID, admitted: true, hint: "Work runs in the background. Use check_session or wait_for_reply." }
   },
   check_session: async () => {
@@ -366,7 +399,7 @@ async function handleFunctionCall(item: RealtimeItem) {
   const output = handler
     ? await handler(JSON.parse(item.arguments ?? "{}")).catch((error) => ({ error: String(error) }))
     : { error: `unknown tool ${item.name}` }
-  console.log(`\n[tool] ${item.name} -> ${truncate(JSON.stringify(output), 300)}`)
+  printLine(dim(`  [${item.name}] ${truncate(JSON.stringify(output), 200)}`))
   send({
     type: "conversation.item.create",
     item: { type: "function_call_output", call_id: item.call_id, output: JSON.stringify(output) },
@@ -385,7 +418,7 @@ if (!args.text && process.stdin.isTTY) {
     if (!assistantSpeaking()) return
     send({ type: "response.cancel" })
     flushPlayback()
-    console.log("\n[voice] interrupted")
+    printLine(dim("  [interrupted]"))
   })
 }
 
@@ -444,14 +477,12 @@ ws.addEventListener("message", (event) => {
       createResponse()
       break
     case "response.output_text.delta":
-      process.stdout.write(data.delta ?? "")
+      printAssistantDelta(data.delta ?? "")
       break
     case "response.done": {
+      printAssistantDone()
       const calledFunction = data.response?.output?.some((item) => item.type === "function_call") ?? false
-      if (args.text && !calledFunction && inflightTools === 0) {
-        process.stdout.write("\n")
-        shutdown()
-      }
+      if (args.text && !calledFunction && inflightTools === 0) shutdown()
       break
     }
     case "input_audio_buffer.speech_started":
@@ -461,22 +492,22 @@ ws.addEventListener("message", (event) => {
       if (fullDuplex) flushPlayback()
       break
     case "conversation.item.input_audio_transcription.completed":
-      console.log(`\nYou: ${data.transcript ?? ""}`)
+      printLine(cyan("● you ") + (data.transcript ?? "").trim())
       break
     case "response.output_audio.delta":
       if (data.delta) playAudio(data.delta)
       break
     case "response.output_audio_transcript.delta":
-      process.stdout.write(data.delta ?? "")
+      printAssistantDelta(data.delta ?? "")
       break
     case "response.output_audio_transcript.done":
-      process.stdout.write("\n")
+      printAssistantDone()
       break
     case "response.output_item.done":
       if (data.item?.type === "function_call") void handleFunctionCall(data.item)
       break
     case "error":
-      console.error(`\n[realtime error] ${data.error?.code}: ${data.error?.message}`)
+      printLine(`[realtime error] ${data.error?.code}: ${data.error?.message}`)
       break
   }
 })
