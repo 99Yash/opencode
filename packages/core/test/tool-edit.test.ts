@@ -99,13 +99,7 @@ const withTool = <A, E, R>(directory: string, body: (registry: Tool.Interface) =
   }).pipe(
     Effect.provide(
       AppNodeBuilder.build(
-        LayerNode.group([
-          Tool.node,
-          Tool.node,
-          LocationMutation.node,
-          FileMutation.node,
-          editToolNode,
-        ]),
+        LayerNode.group([Tool.node, Tool.node, LocationMutation.node, FileMutation.node, editToolNode]),
         [
           [FSUtil.node, filesystem],
           [Location.node, activeLocation],
@@ -302,7 +296,7 @@ describe("EditTool", () => {
             error: { type: "permission.rejected", message: "Permission denied: edit" },
           })
           expect(assertions.map((input) => input.action)).toEqual(["external_directory", "edit"])
-          expect(reads).toBe(0)
+          expect(reads).toBe(1)
           expect(writes).toEqual([])
           expect(yield* Effect.promise(() => fs.readFile(external, "utf8"))).toBe("before")
         }),
@@ -313,7 +307,7 @@ describe("EditTool", () => {
     ),
   )
 
-  it.live("denied edit reads no target content and does not disclose whether oldString matches", () =>
+  it.live("validates the replacement before requesting edit approval", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -337,9 +331,20 @@ describe("EditTool", () => {
                   status: "error",
                   error: { type: "permission.rejected", message: "Permission denied: edit" },
                 })
-                expect(missing).toEqual(matching)
-                expect(assertions.map((input) => input.action)).toEqual(["edit", "edit"])
-                expect(reads).toBe(0)
+                expect(missing).toEqual({
+                  status: "error",
+                  error: {
+                    type: "tool.execution",
+                    message:
+                      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
+                  },
+                })
+                expect(assertions.map((input) => input.action)).toEqual(["edit"])
+                expect(assertions[0]?.metadata).toMatchObject({
+                  filepath: yield* Effect.promise(() => fs.realpath(target)),
+                  diff: expect.stringContaining("+replacement"),
+                })
+                expect(reads).toBe(2)
                 expect(writes).toEqual([])
               }),
             ),
@@ -350,7 +355,7 @@ describe("EditTool", () => {
     ),
   )
 
-  it.live("rejects no-op, empty, missing, and ambiguous exact replacements", () =>
+  it.live("rejects no-op, invalid empty, missing, and ambiguous replacements", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -375,7 +380,8 @@ describe("EditTool", () => {
                   status: "error",
                   error: {
                     type: "tool.execution",
-                    message: "oldString must not be empty. Use write to create or overwrite a file.",
+                    message:
+                      "oldString cannot be empty when editing an existing file. Provide the exact text to replace, or use write for an intentional full-file replacement.",
                   },
                 })
                 expect(
@@ -385,7 +391,7 @@ describe("EditTool", () => {
                   error: {
                     type: "tool.execution",
                     message:
-                      "Could not find oldString in the file. It must match exactly, including whitespace and indentation.",
+                      "Could not find oldString in the file. It must match exactly, including whitespace, indentation, and line endings.",
                   },
                 })
                 expect(
@@ -395,12 +401,67 @@ describe("EditTool", () => {
                   error: {
                     type: "tool.execution",
                     message:
-                      "Found multiple exact matches for oldString. Provide more surrounding context or set replaceAll to true.",
+                      "Found multiple matches for oldString. Provide more surrounding context to make the match unique.",
                   },
                 })
                 expect(writes).toEqual([])
               }),
             ),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("creates a missing file when oldString is empty", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        const target = path.join(tmp.path, "nested", "new.txt")
+        return withTool(tmp.path, (registry) =>
+          executeTool(registry, call({ path: "nested/new.txt", oldString: "", newString: "new content" })),
+        ).pipe(
+          Effect.andThen((settled) =>
+            Effect.gen(function* () {
+              expect(settled.status).toBe("completed")
+              expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("new content")
+              expect(assertions[0]?.metadata).toMatchObject({ diff: expect.stringContaining("+new content") })
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("uses the V1 fallback matchers", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        const target = path.join(tmp.path, "fallback.ts")
+        return Effect.promise(() => fs.writeFile(target, "function value() {\n  return 1\n}\n")).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              executeTool(
+                registry,
+                call({
+                  path: "fallback.ts",
+                  oldString: "function value() {\nreturn 1\n}",
+                  newString: "function value() {\n  return 2\n}",
+                }),
+              ),
+            ),
+          ),
+          Effect.andThen((settled) =>
+            Effect.gen(function* () {
+              expect(settled.status).toBe("completed")
+              expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe(
+                "function value() {\n  return 2\n}\n",
+              )
+            }),
           ),
         )
       },
@@ -455,7 +516,7 @@ describe("EditTool", () => {
     ),
   )
 
-  it.live("rejects an in-place content change after matching but before conditional commit", () =>
+  it.live("applies the approved edit when another process writes after the read", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -470,17 +531,51 @@ describe("EditTool", () => {
           ),
           Effect.andThen((result) =>
             Effect.gen(function* () {
-              // The message-less StaleContentError cause must not erase the tool's
-              // curated failure message; the canonical error is the sole authority.
-              expect(result).toEqual({
-                status: "error",
-                error: {
-                  type: "tool.execution",
-                  message: "File changed after permission approval. Read it again before editing.",
-                },
-              })
-              expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("newer\n")
-              expect(writes).toEqual([])
+              expect(result.status).toBe("completed")
+              expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after\n")
+              expect(writes).toHaveLength(1)
+            }),
+          ),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
+  it.live("serializes concurrent edits to different sections of one file", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        const target = path.join(tmp.path, "concurrent-sections.txt")
+        afterRead = () => (reads === 1 ? Effect.sleep("50 millis") : Effect.void)
+        return Effect.promise(() => fs.writeFile(target, "top = 0\nmiddle = keep\nbottom = 0\n")).pipe(
+          Effect.andThen(
+            withTool(tmp.path, (registry) =>
+              Effect.all(
+                [
+                  executeTool(
+                    registry,
+                    call({ path: "concurrent-sections.txt", oldString: "top = 0", newString: "top = 1" }, "top"),
+                  ),
+                  executeTool(
+                    registry,
+                    call(
+                      { path: "concurrent-sections.txt", oldString: "bottom = 0", newString: "bottom = 2" },
+                      "bottom",
+                    ),
+                  ),
+                ],
+                { concurrency: "unbounded" },
+              ),
+            ),
+          ),
+          Effect.andThen((results) =>
+            Effect.gen(function* () {
+              expect(results.map((result) => result.status)).toEqual(["completed", "completed"])
+              expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe(
+                "top = 1\nmiddle = keep\nbottom = 2\n",
+              )
             }),
           ),
         )
