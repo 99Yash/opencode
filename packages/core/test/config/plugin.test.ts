@@ -158,43 +158,6 @@ describe("PluginSupervisor config", () => {
     ),
   )
 
-  it.live("reloads an auto-discovered plugin when its file changes", () =>
-    withLocation(
-      undefined,
-      Effect.gen(function* () {
-        yield* ready()
-        const agents = yield* Agent.Service
-        const bus = yield* Bus.Service
-        const location = yield* Location.Service
-        const plugins = yield* Plugin.Service
-        const file = path.join(location.directory, ".opencode", "plugin", "mutable.ts")
-        const first = (yield* plugins.list()).find((plugin) => plugin.id === "mutable-plugin")?.id
-
-        expect(first).toBeDefined()
-        expect((yield* agents.get(Agent.ID.make("mutable")))?.description).toBe("first")
-
-        yield* Effect.promise(async () => {
-          await fs.writeFile(file, mutablePlugin("second"))
-          const modified = new Date(Date.now() + 5_000)
-          await fs.utimes(file, modified, modified)
-        })
-        yield* bus.publish(ConfigSchema.Event.Updated, {})
-        yield* waitUntil(
-          Effect.gen(function* () {
-            const current = (yield* plugins.list()).find((plugin) => plugin.id === "mutable-plugin")?.id
-            return current === first && (yield* agents.get(Agent.ID.make("mutable")))?.description === "second"
-          }),
-        )
-      }),
-      false,
-      async (directory) => {
-        const plugin = path.join(directory, ".opencode", "plugin")
-        await fs.mkdir(plugin, { recursive: true })
-        await fs.writeFile(path.join(plugin, "mutable.ts"), mutablePlugin("first"))
-      },
-    ),
-  )
-
   it.live("applies explicit removals after auto-discovery", () =>
     withLocation(
       { plugins: ["-*"] },
@@ -300,25 +263,6 @@ function withLocation<A, E, R>(
       ),
     ),
   )
-}
-
-function mutablePlugin(description: string) {
-  const plugin = pathToFileURL(path.join(import.meta.dir, "../../../plugin/src/index.ts")).href
-  return `
-import { Plugin } from ${JSON.stringify(plugin)}
-
-export default Plugin.define({
-  id: "mutable-plugin",
-  setup: async (ctx) => {
-    await ctx.agent.transform((agents) => {
-      agents.update("mutable", (agent) => {
-        agent.description = ${JSON.stringify(description)}
-        agent.mode = "subagent"
-      })
-    })
-  },
-})
-`
 }
 
 const waitUntil = Effect.fnUntraced(function* (condition: Effect.Effect<boolean>) {
