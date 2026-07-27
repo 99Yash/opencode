@@ -25,6 +25,8 @@ const args = parseArgs({
     // usable with headphones: on speakers the mic hears the assistant and
     // interrupts it with its own echo. Default is half-duplex gating.
     duplex: { type: "boolean", default: false },
+    // Start attached to an existing session instead of creating one lazily.
+    session: { type: "string" },
     // Text mode: send one typed message instead of opening the microphone,
     // print the reply, and exit. Useful for smoke-testing the tool loop.
     text: { type: "string" },
@@ -61,8 +63,16 @@ console.log(`project directory: ${args.directory}`)
 // OpenCode tool surface exposed to the realtime model
 // ---------------------------------------------------------------------------
 
-let activeSessionID: string | undefined
+let activeSessionID = args.session
 let lastPromptAt = 0
+
+if (activeSessionID) {
+  const session = await client.session.get({ sessionID: activeSessionID }).catch(() => {
+    console.error(`Session ${activeSessionID} not found on this server.`)
+    process.exit(1)
+  })
+  console.log(`[voice] controlling session ${session.id} — ${session.title}`)
+}
 
 function assistantText(message: SessionMessageAssistant) {
   return message.content
