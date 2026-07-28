@@ -1,12 +1,15 @@
 import { AISDK } from "@opencode-ai/core/aisdk"
 import { Money } from "@opencode-ai/schema/money"
 import { describe, expect } from "bun:test"
+import { LLM } from "@opencode-ai/ai"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { Effect } from "effect"
+import { Headers } from "effect/unstable/http"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Integration } from "@opencode-ai/core/integration"
 import { Model } from "@opencode-ai/core/model"
+import { ModelResolver } from "@opencode-ai/core/model-resolver"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { OpenAIPlugin } from "@opencode-ai/core/plugin/provider/openai"
@@ -192,16 +195,17 @@ describe("OpenAIPlugin", () => {
         catalog.model.update(item.id, Model.ID.make("gpt-5.6-sol"), () => {})
         catalog.model.update(item.id, Model.ID.make("gpt-4.1"), () => {})
       })
+      const credential = Credential.OAuth.make({
+        type: "oauth",
+        methodID: Integration.MethodID.make("chatgpt-browser"),
+        access: "chatgpt-token",
+        refresh: "refresh",
+        expires: Date.now() + 60_000,
+        metadata: { accountID: "acct_123" },
+      })
       yield* credentials.create({
         integrationID: Integration.ID.make("openai"),
-        value: Credential.OAuth.make({
-          type: "oauth",
-          methodID: Integration.MethodID.make("chatgpt-browser"),
-          access: "chatgpt-token",
-          refresh: "refresh",
-          expires: Date.now() + 60_000,
-          metadata: { accountID: "acct_123" },
-        }),
+        value: credential,
       })
       yield* addPlugin()
 
@@ -209,6 +213,18 @@ describe("OpenAIPlugin", () => {
       expect(eligible.cost).toEqual([])
       expect(eligible.enabled).toBe(true)
       expect(eligible.settings?.baseURL).toBe("https://chatgpt.com/backend-api/codex")
+      expect(eligible.headers?.["chatgpt-account-id"]).toBe("acct_123")
+      const resolved = yield* ModelResolver.fromCatalogModel(eligible, credential)
+      const headers = yield* resolved.route.auth.apply({
+        request: LLM.request({ model: resolved, prompt: "Hello" }),
+        method: "POST",
+        url: "https://chatgpt.com/backend-api/codex/responses",
+        body: "{}",
+        headers: Headers.fromInput(resolved.route.defaults.headers),
+      })
+      expect(resolved.route.endpoint.baseURL).toBe("https://chatgpt.com/backend-api/codex")
+      expect(headers.authorization).toBe("Bearer chatgpt-token")
+      expect(headers["chatgpt-account-id"]).toBe("acct_123")
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5-pro"))).enabled).toBe(
         false,
       )
@@ -226,9 +242,11 @@ describe("OpenAIPlugin", () => {
           provider.settings = Provider.mergeOverlay(provider.settings, { baseURL: "https://proxy.example/v1" })
         })
       })
-      expect(
-        required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5"))).settings?.baseURL,
-      ).toBe("https://proxy.example/v1")
+      const configured = required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5")))
+      expect(configured.settings?.baseURL).toBe("https://proxy.example/v1")
+      expect((yield* ModelResolver.fromCatalogModel(configured, credential)).route.endpoint.baseURL).toBe(
+        "https://proxy.example/v1",
+      )
     }),
   )
 

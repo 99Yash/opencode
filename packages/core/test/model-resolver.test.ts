@@ -307,7 +307,7 @@ describe("ModelResolver", () => {
     }),
   )
 
-  it.effect("keeps an explicit endpoint for ChatGPT OAuth credentials", () =>
+  it.effect("does not reinterpret an explicit endpoint based on the OAuth method", () =>
     Effect.gen(function* () {
       const resolved = yield* ModelResolver.fromCatalogModel(
         model(Provider.aisdk("@ai-sdk/openai"), {
@@ -338,7 +338,7 @@ describe("ModelResolver", () => {
         endpoint: { baseURL: "https://openai.example/v1" },
       })
       expect(headers.authorization).toBe("Bearer chatgpt-token")
-      expect(headers["chatgpt-account-id"]).toBe("acct_123")
+      expect(headers["chatgpt-account-id"]).toBeUndefined()
     }),
   )
 
@@ -367,7 +367,7 @@ describe("ModelResolver", () => {
 
       expect(resolved.route.endpoint.baseURL).toBe("https://openai.example/v1")
       expect(headers.authorization).toBe("Bearer chatgpt-token")
-      expect(headers["chatgpt-account-id"]).toBe("acct_123")
+      expect(headers["chatgpt-account-id"]).toBeUndefined()
     }),
   )
 
@@ -404,37 +404,6 @@ describe("ModelResolver", () => {
         "OpenAI-Organization": "org_123",
         "OpenAI-Project": "proj_123",
       })
-    }),
-  )
-
-  it.effect("keeps an explicit endpoint for ChatGPT OAuth credentials without an account id", () =>
-    Effect.gen(function* () {
-      const resolved = yield* ModelResolver.fromCatalogModel(
-        model(Provider.aisdk("@ai-sdk/openai"), {
-          settings: { baseURL: "https://openai.example/v1" },
-          headers: {},
-          body: {},
-        }),
-        Credential.OAuth.make({
-          type: "oauth",
-          methodID: Integration.MethodID.make("chatgpt-headless"),
-          access: "chatgpt-token",
-          refresh: "refresh",
-          expires: Date.now() + 60_000,
-        }),
-      )
-      const request = LLM.request({ model: resolved, prompt: "Hello" })
-      const headers = yield* resolved.route.auth.apply({
-        request,
-        method: "POST",
-        url: "https://openai.example/v1/responses",
-        body: "{}",
-        headers: Headers.empty,
-      })
-
-      expect(resolved.route.endpoint.baseURL).toBe("https://openai.example/v1")
-      expect(headers.authorization).toBe("Bearer chatgpt-token")
-      expect(headers["chatgpt-account-id"]).toBeUndefined()
     }),
   )
 

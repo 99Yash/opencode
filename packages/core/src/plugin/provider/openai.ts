@@ -164,14 +164,14 @@ export const OpenAIPlugin = define({
   effect: Effect.fn(function* (ctx) {
     const bus = yield* Bus.Service
     const loading = Semaphore.makeUnsafe(1)
-    let chatgpt = false
+    let chatgpt: Credential.OAuth | undefined
 
     const load = Effect.fn("OpenAIPlugin.load")(function* () {
       const connection = yield* ctx.integration.connection.active("openai")
       const credential = connection
         ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
-      chatgpt = OpenAICodex.isChatGPT(credential)
+      chatgpt = credential?.type === "oauth" && OpenAICodex.isChatGPT(credential) ? credential : undefined
     })
 
     yield* ctx.integration.transform((draft) => {
@@ -194,6 +194,11 @@ export const OpenAIPlugin = define({
       const item = evt.provider.get(Provider.ID.openai)
       if (!item) return
       item.provider.settings = Provider.mergeOverlay(item.provider.settings, { baseURL: OpenAICodex.baseURL })
+      const account = OpenAICodex.accountID(chatgpt)
+      item.provider.headers = Provider.mergeHeaders(
+        item.provider.headers,
+        account === undefined ? undefined : { "chatgpt-account-id": account },
+      )
       for (const model of item.models.values()) {
         // ChatGPT-plan tokens only authorize codex-eligible models, and the
         // subscription covers usage, so hide the rest and zero the cost.
