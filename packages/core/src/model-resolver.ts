@@ -256,7 +256,6 @@ const codexModel = (
   const account = OpenAICodex.accountID(credential)
   return withDefaults(model, OpenAIResponses.route)
     .with({
-      endpoint: { baseURL: OpenAICodex.baseURL },
       auth: (key === undefined ? Auth.none : Auth.bearer(key)).andThen(
         account === undefined ? Auth.none : Auth.headers({ "chatgpt-account-id": account }),
       ),

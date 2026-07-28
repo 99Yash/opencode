@@ -208,6 +208,7 @@ describe("OpenAIPlugin", () => {
       const eligible = required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5")))
       expect(eligible.cost).toEqual([])
       expect(eligible.enabled).toBe(true)
+      expect(eligible.settings?.baseURL).toBe("https://chatgpt.com/backend-api/codex")
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5-pro"))).enabled).toBe(
         false,
       )
@@ -219,6 +220,15 @@ describe("OpenAIPlugin", () => {
         true,
       )
       expect(required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-4.1"))).enabled).toBe(false)
+
+      yield* catalog.transform((catalog) => {
+        catalog.provider.update(Provider.ID.openai, (provider) => {
+          provider.settings = Provider.mergeOverlay(provider.settings, { baseURL: "https://proxy.example/v1" })
+        })
+      })
+      expect(
+        required(yield* catalog.model.get(Provider.ID.openai, Model.ID.make("gpt-5.5"))).settings?.baseURL,
+      ).toBe("https://proxy.example/v1")
     }),
   )
 

@@ -193,6 +193,7 @@ export const OpenAIPlugin = define({
       if (!chatgpt) return
       const item = evt.provider.get(Provider.ID.openai)
       if (!item) return
+      item.provider.settings = Provider.mergeOverlay(item.provider.settings, { baseURL: OpenAICodex.baseURL })
       for (const model of item.models.values()) {
         // ChatGPT-plan tokens only authorize codex-eligible models, and the
         // subscription covers usage, so hide the rest and zero the cost.
