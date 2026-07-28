@@ -72,17 +72,23 @@ export function getCurrentCli(target = RUST_TARGET ?? nativeTarget()) {
 export async function downloadCliToResources() {
   const cli = getCurrentCli()
   const directory = await mkdtemp(join(tmpdir(), "opencode-cli-"))
-  await $`bun install --no-save --cwd ${directory} ${`${cli.package}@${CLI_VERSION}`} ${`--os=${cli.os}`} ${`--cpu=${cli.cpu}`}`
-  const source = join(directory, "node_modules", cli.package, "bin", cli.os === "win32" ? "opencode2.exe" : "opencode2")
   const dest = windowsify("resources/opencode-cli")
-  await copyFile(source, dest).finally(() => rm(directory, { recursive: true, force: true }))
+  try {
+    await $`bun install --no-save --cwd ${directory} ${`${cli.package}@${CLI_VERSION}`} ${`--os=${cli.os}`} ${`--cpu=${cli.cpu}`}`
+    await copyFile(
+      join(directory, "node_modules", cli.package, "bin", cli.os === "win32" ? "opencode2.exe" : "opencode2"),
+      dest,
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
   if (process.platform !== "win32") await chmod(dest, 0o755)
   if (process.platform === "win32" && process.env.GITHUB_ACTIONS === "true") {
     await $`pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File ../../script/sign-windows.ps1 ${dest}`
   }
   if (process.platform === "darwin") await $`codesign --force --sign - ${dest}`
 
-  console.log(`Copied ${source} to ${dest}`)
+  console.log(`Copied ${cli.package} to ${dest}`)
 }
 
 export function windowsify(path: string) {

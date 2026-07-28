@@ -16,7 +16,7 @@ type Logger = {
   error(message: string, meta?: Record<string, unknown>): void
 }
 
-export async function startBackgroundCli(logger: Logger) {
+export async function startBackgroundCli(logger: Logger, shellStateHome?: string) {
   const bundled = app.isPackaged
     ? join(process.resourcesPath, executableName())
     : join(root, "../../resources", executableName())
@@ -25,7 +25,7 @@ export async function startBackgroundCli(logger: Logger) {
   const binary = app.isPackaged ? await installCli(bundled, version, logger) : bundled
 
   const candidates = [
-    ...new Set([stateHome, ...desktopStateNames.map((name) => join(app.getPath("appData"), name))]),
+    ...new Set([stateHome, shellStateHome, ...desktopStateNames.map((name) => join(app.getPath("appData"), name))]),
   ].filter((candidate) => candidate === undefined || existsSync(candidate))
   const discovered = await Promise.all(
     candidates.map(async (candidate) => ({
@@ -40,7 +40,7 @@ export async function startBackgroundCli(logger: Logger) {
   })
 
   const daemonStateHome = found?.stateHome ?? stateHome
-  const url = found?.url ?? (await run(binary, ["service", "start"], logger, { stateHome: daemonStateHome }))
+  const url = await run(binary, ["service", "start"], logger, { stateHome: daemonStateHome })
   const password = await run(binary, ["service", "get", "password"], logger, {
     redact: true,
     stateHome: daemonStateHome,
