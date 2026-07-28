@@ -676,4 +676,17 @@ describe("SessionV2.create", () => {
       expect(events.filter((event) => event.type === "session.archived")).toHaveLength(1)
     }),
   )
+
+  it.effect("rejects archiving a missing Session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+
+      expect(
+        yield* session.archive(SessionV2.ID.make("ses_missing_archive")).pipe(
+          Effect.flip,
+          Effect.map((error) => error._tag),
+        ),
+      ).toBe("Session.NotFoundError")
+    }),
+  )
 })
