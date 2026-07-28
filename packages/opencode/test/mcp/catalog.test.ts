@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Client, InMemoryTransport } from "@modelcontextprotocol/client"
+import { Client, InMemoryTransport, SdkErrorCode, SdkHttpError } from "@modelcontextprotocol/client"
 import { Server } from "@modelcontextprotocol/server"
 import { McpCatalog } from "@/mcp/catalog"
 import { Effect } from "effect"
@@ -85,6 +85,51 @@ describe("McpCatalog.callTool", () => {
     })
 
     await expect(McpCatalog.callTool({ def: mcpTool(), client }, {})).rejects.toThrow("first\n\nsecond")
+  })
+
+  test("retries a stale session only once", async () => {
+    const error = new SdkHttpError(SdkErrorCode.SendFailed, "expired", { status: 404 })
+    const client = { callTool: () => Promise.reject(error) } as unknown as Client
+    let recoveries = 0
+
+    await expect(
+      McpCatalog.callTool(
+        {
+          def: mcpTool(),
+          client,
+          recover: async () => {
+            recoveries++
+            return client
+          },
+        },
+        {},
+      ),
+    ).rejects.toBe(error)
+    expect(recoveries).toBe(1)
+  })
+
+  test("does not replay after cancellation during recovery", async () => {
+    const error = new SdkHttpError(SdkErrorCode.SendFailed, "expired", { status: 404 })
+    const controller = new AbortController()
+    let calls = 0
+    const stale = { callTool: () => Promise.reject(error) } as unknown as Client
+    const fresh = { callTool: async () => ({ content: [], calls: ++calls }) } as unknown as Client
+
+    await expect(
+      McpCatalog.callTool(
+        {
+          def: mcpTool(),
+          client: stale,
+          recover: async () => {
+            controller.abort()
+            return fresh
+          },
+        },
+        {},
+        controller.signal,
+      ),
+    ).rejects.toBeInstanceOf(DOMException)
+    expect(calls).toBe(0)
   })
 })
 

@@ -593,8 +593,13 @@ const layer = Layer.effect(
       listed: MCPToolDef[],
       instructions: string | undefined,
       timeout?: number,
+      expected?: MCPClient,
     ) {
       const bridge = yield* EffectBridge.make()
+      if (expected && s.clients[name] !== expected) {
+        yield* Effect.tryPromise(() => client.close()).pipe(Effect.ignore)
+        return s.status[name] ?? { status: "disabled" }
+      }
       const previous = s.clients[name]
       s.status[name] = { status: "connected" }
       s.clients[name] = client
@@ -656,6 +661,37 @@ const layer = Layer.effect(
       return yield* storeClient(s, name, result.mcpClient, result.defs!, result.instructions, mcp.timeout)
     })
 
+    const reconnectStale = Effect.fn("MCP.reconnectStale")(function* (name: string, stale: MCPClient) {
+      const s = yield* InstanceState.get(state)
+      if (s.clients[name] !== stale) return undefined
+      const mcp = yield* getMcpConfig(name)
+      if (!mcp) return undefined
+
+      yield* Effect.logWarning("reconnecting MCP server after stale session", { server: name })
+      const result = yield* create(name, { ...mcp, enabled: true })
+      if (s.clients[name] !== stale) {
+        if (result.mcpClient) yield* Effect.tryPromise(() => result.mcpClient!.close()).pipe(Effect.ignore)
+        return undefined
+      }
+      if (!result.mcpClient) {
+        s.status[name] = result.status
+        yield* closeClient(s, name)
+        return undefined
+      }
+      yield* storeClient(
+        s,
+        name,
+        result.mcpClient,
+        result.defs!,
+        result.instructions,
+        mcp.timeout,
+        stale,
+      )
+      return s.clients[name]
+    })
+
+    const recoveries = new WeakMap<MCPClient, Promise<MCPClient | undefined>>()
+
     const add = Effect.fn("MCP.add")(function* (name: string, mcp: ConfigMCPV1.Info) {
       const s = yield* InstanceState.get(state)
       s.config[name] = mcp
@@ -684,6 +720,7 @@ const layer = Layer.effect(
     const tools = Effect.fn("MCP.tools")(function* () {
       const result: Record<string, McpTool> = {}
       const s = yield* InstanceState.get(state)
+      const bridge = yield* EffectBridge.make()
 
       const cfg = yield* cfgSvc.get()
       const config = cfg.mcp ?? {}
@@ -698,8 +735,19 @@ const layer = Layer.effect(
           continue
         }
         const timeout = requestTimeout(s, clientName, mcpConfig, defaultTimeout)
+        const transport = client.transport
+        const recover =
+          transport instanceof StreamableHTTPClientTransport && transport.sessionId && client.getProtocolEra() === "legacy"
+            ? () => {
+                const current = recoveries.get(client)
+                if (current) return current
+                const created = bridge.promise(reconnectStale(clientName, client))
+                recoveries.set(client, created)
+                return created
+              }
+            : undefined
         for (const def of listed) {
-          result[McpCatalog.toolName(clientName, def.name)] = { def, client, timeout }
+          result[McpCatalog.toolName(clientName, def.name)] = { def, client, timeout, recover }
         }
       }
       return result

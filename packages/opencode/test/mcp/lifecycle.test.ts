@@ -11,6 +11,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Cause, Effect, Exit } from "effect"
 import type { MCP as MCPNS } from "../../src/mcp/index"
 import { MCP } from "../../src/mcp/index"
+import { McpCatalog } from "../../src/mcp/catalog"
 import { McpOAuthCallback } from "../../src/mcp/oauth-callback"
 import { TestInstance } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
@@ -36,7 +37,12 @@ interface LifecycleServerState {
   aborted: number
 }
 
-function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructions?: string; requestRoots?: boolean }) {
+function lifecycleServer(input?: {
+  capabilities?: ServerCapabilities
+  instructions?: string
+  requestRoots?: boolean
+  legacy?: boolean
+}) {
   const capabilities = input?.capabilities ?? { tools: {}, prompts: {}, resources: {} }
   return Effect.acquireRelease(
     Effect.promise(async () => {
@@ -52,7 +58,11 @@ function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructio
       const makeProtocol = async () => {
         const protocol = new Server(
           { name: "mcp-lifecycle", version: "1.0.0" },
-          { capabilities, instructions: input?.instructions },
+          {
+            capabilities,
+            instructions: input?.instructions,
+            supportedProtocolVersions: input?.legacy ? ["2025-11-25"] : undefined,
+          },
         )
         const transport = new WebStandardStreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
@@ -65,6 +75,9 @@ function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructio
             const page = state.toolPages?.[request.params?.cursor ?? "initial"]
             return Promise.resolve({ tools: page?.items ?? state.tools, nextCursor: page?.nextCursor })
           })
+          protocol.setRequestHandler("tools/call", (request) =>
+            Promise.resolve({ content: [{ type: "text", text: request.params.name }] }),
+          )
         }
         if (capabilities.prompts) {
           protocol.setRequestHandler("prompts/list", (request) => {
@@ -114,6 +127,10 @@ function lifecycleServer(input?: { capabilities?: ServerCapabilities; instructio
         fetch(request) {
           state.requests.push(request.method)
           request.signal.addEventListener("abort", () => state.aborted++)
+          const session = request.headers.get("mcp-session-id")
+          if (request.method === "POST" && session && session !== current.transport.sessionId) {
+            return new Response("Session not found", { status: 404 })
+          }
           return current.transport.handleRequest(request)
         },
       })
@@ -319,6 +336,28 @@ it.instance("disconnect removes protocol data and reconnect establishes a new se
     yield* mcp.connect("reconnect-server")
     expect((yield* mcp.status())["reconnect-server"]?.status).toBe("connected")
     expect(Object.keys(yield* mcp.tools())).toEqual(["reconnect-server_test_tool"])
+  }),
+)
+
+it.instance("recovers a legacy HTTP session after the server discards it", () =>
+  Effect.gen(function* () {
+    const server = yield* lifecycleServer({ legacy: true })
+    const mcp = yield* MCP.Service
+    yield* mcp.add("session-server", remote(server.url))
+    const tool = (yield* mcp.tools())["session-server_test_tool"]
+    const client = tool?.client
+    expect(tool).toBeDefined()
+
+    yield* Effect.promise(server.restart)
+    const results = yield* Effect.promise(() =>
+      Promise.all([McpCatalog.callTool(tool!, {}), McpCatalog.callTool(tool!, {})]),
+    )
+
+    expect(results.map((result) => result.content)).toEqual([
+      [{ type: "text", text: "test_tool" }],
+      [{ type: "text", text: "test_tool" }],
+    ])
+    expect((yield* mcp.clients())["session-server"]).not.toBe(client)
   }),
 )
 

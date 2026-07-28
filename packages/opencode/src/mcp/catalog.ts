@@ -1,4 +1,4 @@
-import { Client, type CallToolResult, type Tool as MCPToolDef } from "@modelcontextprotocol/client"
+import { Client, SdkHttpError, type CallToolResult, type Tool as MCPToolDef } from "@modelcontextprotocol/client"
 import { dynamicTool, jsonSchema, type JSONSchema7, type Tool } from "ai"
 import { Effect } from "effect"
 
@@ -8,6 +8,7 @@ export interface McpTool {
   readonly def: MCPToolDef
   readonly client: Client
   readonly timeout?: number
+  readonly recover?: () => Promise<Client | undefined>
 }
 
 export async function callTool(
@@ -15,16 +16,24 @@ export async function callTool(
   args: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<CallToolResult> {
-  const result = await tool.client.callTool(
-    { name: tool.def.name, arguments: args },
-    {
-      resetTimeoutOnProgress: true,
-      signal,
-      timeout: tool.timeout,
-      // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
-      onprogress: () => {},
-    },
-  )
+  const invoke = (client: Client) =>
+    client.callTool(
+      { name: tool.def.name, arguments: args },
+      {
+        resetTimeoutOnProgress: true,
+        signal,
+        timeout: tool.timeout,
+        // The MCP SDK only sends a progress token when this hook is present, enabling timeout resets.
+        onprogress: () => {},
+      },
+    )
+  const result = await invoke(tool.client).catch(async (error) => {
+    if (!tool.recover || !(error instanceof SdkHttpError) || error.status !== 404) throw error
+    const client = await tool.recover()
+    if (!client) throw error
+    signal?.throwIfAborted()
+    return invoke(client)
+  })
   if (result.isError)
     throw new Error(
       result.content
