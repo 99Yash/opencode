@@ -15,6 +15,7 @@ import {
   type Tool as MCPToolDef,
 } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
+import { Ajv, AjvJsonSchemaValidator, addFormats } from "@modelcontextprotocol/client/validators/ajv"
 import { Config } from "@/config/config"
 import { ConfigMCPV1 } from "@opencode-ai/core/v1/config/mcp"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -34,8 +35,16 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { McpCatalog } from "./catalog"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
 import { McpBrowser } from "./browser"
+import { lazy } from "@/util/lazy"
 
 const DEFAULT_TIMEOUT = 30_000
+const draft7Validator = lazy(() => {
+  const ajv = new Ajv({ strict: false, validateFormats: true, validateSchema: false, allErrors: true })
+  addFormats(ajv)
+  return new AjvJsonSchemaValidator(ajv)
+})
+const defaultValidator = new AjvJsonSchemaValidator()
+
 export const CLIENT_OPTIONS = {
   capabilities: {
     // https://github.com/anomalyco/opencode/issues/11948
@@ -49,6 +58,12 @@ export const CLIENT_OPTIONS = {
   },
   versionNegotiation: { mode: "auto" },
   listMaxPages: 1_000,
+  jsonSchemaValidator: {
+    getValidator: <T>(schema: { $schema?: string }) => {
+      if (!schema.$schema?.toLowerCase().includes("draft-07")) return defaultValidator.getValidator<T>(schema)
+      return draft7Validator().getValidator<T>(schema)
+    },
+  },
 } satisfies ClientOptions
 
 export const Resource = Schema.Struct({
