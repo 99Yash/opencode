@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client"
 import { Server } from "@modelcontextprotocol/server"
 import { McpCatalog } from "@/mcp/catalog"
-import { CLIENT_OPTIONS } from "@/mcp"
+import { clientOptions } from "@/mcp"
 import { Effect } from "effect"
 
 const options = { toolCallId: "call_mcp", abortSignal: new AbortController().signal } as any
@@ -167,7 +167,7 @@ test("accepts and validates draft-07 tool output schemas", async () => {
     return Promise.resolve({ content: [], structuredContent: { value: calls === 1 ? "valid" : 42 } })
   })
 
-  const client = new Client({ name: "draft-07-test", version: "1.0.0" }, CLIENT_OPTIONS)
+  const client = new Client({ name: "draft-07-test", version: "1.0.0" }, clientOptions())
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
 
@@ -182,4 +182,20 @@ test("accepts and validates draft-07 tool output schemas", async () => {
   } finally {
     await Promise.all([client.close(), server.close()])
   }
+})
+
+test("isolates output schema caches between MCP clients", () => {
+  const stringSchema = {
+    $schema: "http://json-schema.org/draft-07/schema#",
+    $id: "https://example.com/shared-schema",
+    type: "string",
+  }
+  const numberSchema = { ...stringSchema, type: "number" }
+  const stringValidator = clientOptions().jsonSchemaValidator!.getValidator(stringSchema)
+  const numberValidator = clientOptions().jsonSchemaValidator!.getValidator(numberSchema)
+
+  expect(stringValidator("value").valid).toBe(true)
+  expect(stringValidator(42).valid).toBe(false)
+  expect(numberValidator(42).valid).toBe(true)
+  expect(numberValidator("value").valid).toBe(false)
 })

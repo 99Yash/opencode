@@ -5,7 +5,7 @@ import { Cause } from "effect"
 import { Client, StreamableHTTPClientTransport, UnauthorizedError } from "@modelcontextprotocol/client"
 import * as prompts from "@clack/prompts"
 import { UI } from "../ui"
-import { CLIENT_OPTIONS, MCP } from "../../mcp"
+import { clientOptions, MCP } from "../../mcp"
 import { McpAuth } from "../../mcp/auth"
 import { McpOAuthProvider } from "../../mcp/oauth-provider"
 import { Config } from "@/config/config"
@@ -751,7 +751,7 @@ export const McpDebugCommand = effectCmd({
         authProvider,
         requestInit: serverConfig.headers ? { headers: serverConfig.headers } : undefined,
       })
-      const client = new Client({ name: "opencode-debug", version: InstallationVersion }, CLIENT_OPTIONS)
+      const client = new Client({ name: "opencode-debug", version: InstallationVersion }, clientOptions())
 
       try {
         await client.connect(transport)

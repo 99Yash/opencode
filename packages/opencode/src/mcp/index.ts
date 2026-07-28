@@ -38,33 +38,36 @@ import { McpBrowser } from "./browser"
 import { lazy } from "@/util/lazy"
 
 const DEFAULT_TIMEOUT = 30_000
-const draft7Validator = lazy(() => {
-  const ajv = new Ajv({ strict: false, validateFormats: true, validateSchema: false, allErrors: true })
-  addFormats(ajv)
-  return new AjvJsonSchemaValidator(ajv)
-})
-const defaultValidator = new AjvJsonSchemaValidator()
 
-export const CLIENT_OPTIONS = {
-  capabilities: {
-    // https://github.com/anomalyco/opencode/issues/11948
-    // sampling: {},
-    // https://github.com/anomalyco/opencode/issues/23066
-    // elicitation: {},
-    // https://github.com/anomalyco/opencode/issues/2308
-    roots: {},
-    // https://github.com/anomalyco/opencode/issues/28567
-    // tasks: {},
-  },
-  versionNegotiation: { mode: "auto" },
-  listMaxPages: 1_000,
-  jsonSchemaValidator: {
-    getValidator: <T>(schema: { $schema?: string }) => {
-      if (!schema.$schema?.toLowerCase().includes("draft-07")) return defaultValidator.getValidator<T>(schema)
-      return draft7Validator().getValidator<T>(schema)
+export function clientOptions(): ClientOptions {
+  const draft7Validator = lazy(() => {
+    const ajv = new Ajv({ strict: false, validateFormats: true, validateSchema: false, allErrors: true })
+    addFormats(ajv)
+    return new AjvJsonSchemaValidator(ajv)
+  })
+  const defaultValidator = new AjvJsonSchemaValidator()
+
+  return {
+    capabilities: {
+      // https://github.com/anomalyco/opencode/issues/11948
+      // sampling: {},
+      // https://github.com/anomalyco/opencode/issues/23066
+      // elicitation: {},
+      // https://github.com/anomalyco/opencode/issues/2308
+      roots: {},
+      // https://github.com/anomalyco/opencode/issues/28567
+      // tasks: {},
     },
-  },
-} satisfies ClientOptions
+    versionNegotiation: { mode: "auto" },
+    listMaxPages: 1_000,
+    jsonSchemaValidator: {
+      getValidator: <T>(schema: { $schema?: string }) => {
+        if (!schema.$schema?.toLowerCase().includes("draft-07")) return defaultValidator.getValidator<T>(schema)
+        return draft7Validator().getValidator<T>(schema)
+      },
+    },
+  }
+}
 
 export const Resource = Schema.Struct({
   name: Schema.String,
@@ -93,7 +96,7 @@ function createClient(directory: string) {
   const client: MCPClient = new Client(
     { name: "opencode", version: InstallationVersion },
     {
-      ...CLIENT_OPTIONS,
+      ...clientOptions(),
       listChanged: {
         tools: { autoRefresh: false, onChanged: (error) => client.onToolsChanged?.(error) },
       },
