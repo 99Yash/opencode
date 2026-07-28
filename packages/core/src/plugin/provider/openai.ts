@@ -164,14 +164,16 @@ export const OpenAIPlugin = define({
   effect: Effect.fn(function* (ctx) {
     const bus = yield* Bus.Service
     const loading = Semaphore.makeUnsafe(1)
-    let chatgpt: Credential.OAuth | undefined
+    let chatgpt = false
+    let account: string | undefined
 
     const load = Effect.fn("OpenAIPlugin.load")(function* () {
       const connection = yield* ctx.integration.connection.active("openai")
       const credential = connection
         ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
-      chatgpt = credential?.type === "oauth" && OpenAICodex.isChatGPT(credential) ? credential : undefined
+      chatgpt = OpenAICodex.isChatGPT(credential)
+      account = OpenAICodex.accountID(credential)
     })
 
     yield* ctx.integration.transform((draft) => {
@@ -194,7 +196,6 @@ export const OpenAIPlugin = define({
       const item = evt.provider.get(Provider.ID.openai)
       if (!item) return
       item.provider.settings = Provider.mergeOverlay(item.provider.settings, { baseURL: OpenAICodex.baseURL })
-      const account = OpenAICodex.accountID(chatgpt)
       item.provider.headers = Provider.mergeHeaders(
         item.provider.headers,
         account === undefined ? undefined : { "chatgpt-account-id": account },
