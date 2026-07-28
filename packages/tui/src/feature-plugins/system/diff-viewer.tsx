@@ -16,7 +16,6 @@ import path from "path"
 import { createEffect, createMemo, createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js"
 import { DiffViewerFileTree } from "./diff-viewer-file-tree"
 import { Panel, PanelGroup, Separator } from "./diff-viewer-ui"
-import { useDialog } from "../../ui/dialog"
 import { DialogSelect } from "../../ui/dialog-select"
 import { getScrollAcceleration } from "../../util/scroll"
 import { useConfig } from "../../config"
@@ -83,7 +82,7 @@ function diffSourceLabel(mode: DiffMode) {
 function DiffViewer(props: { context: Plugin.Context }) {
   const dimensions = useTerminalDimensions()
   const config = useConfig()
-  const dialog = useDialog()
+  const dialog = props.context.ui.dialog
   const themeState = useTheme()
   const themeV2 = themeState.themeV2
   const params = () => {
@@ -141,7 +140,7 @@ function DiffViewer(props: { context: Plugin.Context }) {
   const fileRows = createMemo(() => flattenFileTree(fileTree(), expandedFileNodes()))
   const patchFileIndexes = createMemo(() => orderedPatchFileIndexes(flattenFileTree(fileTree())))
   const focusRunner = (input: Record<DiffViewerFocus, () => void>) => () => input[focus()]()
-  const shortcut = (id: string) => () => props.context.keymap.shortcut(id)
+  const shortcut = (id: string) => () => props.context.keymap.shortcuts(id)[0]
   const switchFocusShortcut = shortcut("diff.switch_focus")
   const nextHunkShortcut = shortcut("diff.next_hunk")
   const previousHunkShortcut = shortcut("diff.previous_hunk")
@@ -703,7 +702,7 @@ function DiffViewer(props: { context: Plugin.Context }) {
   })
 
   const openSwitchDiffDialog = () => {
-    dialog.replace(() => (
+    dialog.show(() => (
       <DialogSelect
         title="Switch source"
         skipFilter={true}
@@ -711,7 +710,7 @@ function DiffViewer(props: { context: Plugin.Context }) {
         current={mode()}
         options={switchDiffOptions().map((option) => ({
           ...option,
-          onSelect(dialog) {
+          onSelect() {
             dialog.clear()
             props.context.ui.router.navigate({
               type: "plugin",
@@ -729,8 +728,8 @@ function DiffViewer(props: { context: Plugin.Context }) {
   }
 
   const openHelpDialog = () => {
-    dialog.replace(() => <DiffViewerHelpDialog context={props.context} />)
-    dialog.setSize("large")
+    dialog.show(() => <DiffViewerHelpDialog context={props.context} />)
+    dialog.set({ size: "large" })
   }
 
   props.context.keymap.layer(() => ({
@@ -952,7 +951,7 @@ function DiffViewer(props: { context: Plugin.Context }) {
 
 function DiffViewerHelpDialog(props: { context: Plugin.Context }) {
   const { themeV2 } = useTheme().contextual("elevated")
-  const shortcut = (id: string) => () => props.context.keymap.shortcut(id)
+  const shortcut = (id: string) => () => props.context.keymap.shortcuts(id)[0]
   const rows = [
     {
       shortcut: () => "q",
@@ -1051,7 +1050,6 @@ function DiffViewerHelpDialog(props: { context: Plugin.Context }) {
 }
 
 function Commands(props: { context: Plugin.Context }) {
-  const dialog = useDialog()
   props.context.keymap.layer(() => ({
     mode: "global",
     commands: [
@@ -1083,7 +1081,7 @@ function Commands(props: { context: Plugin.Context }) {
               returnRoute,
             },
           })
-          dialog.clear()
+          props.context.ui.dialog.clear()
         },
       },
     ],

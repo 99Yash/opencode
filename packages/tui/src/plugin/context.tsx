@@ -13,15 +13,25 @@ import {
 import path from "path"
 import { stat } from "fs/promises"
 import { fileURLToPath, pathToFileURL } from "url"
-import type { Context, Page, Slot } from "@opencode-ai/plugin/tui/context"
+import type { Context, Dialog, Page, Slot, SlotMap, SlotName, Toast } from "@opencode-ai/plugin/tui/context"
 import { createStore, produce, reconcile as reconcileStore } from "solid-js/store"
+import { useRenderer } from "@opentui/solid"
 import { useConfig } from "../config"
 import { useClient } from "../context/client"
 import { useData } from "../context/data"
 import { Keymap } from "../context/keymap"
 import { useRoute } from "../context/route"
-import { useTuiLifecycle } from "../context/runtime"
+import { useTuiApp, useTuiLifecycle, useTuiPaths } from "../context/runtime"
 import { useLocation } from "../context/location"
+import { useTheme } from "../context/theme"
+import { DialogAlert } from "../ui/dialog-alert"
+import { DialogConfirm } from "../ui/dialog-confirm"
+import { DialogPrompt } from "../ui/dialog-prompt"
+import { DialogSelect } from "../ui/dialog-select"
+import { useDialog } from "../ui/dialog"
+import { useToast } from "../ui/toast"
+import { useAttention } from "../context/attention"
+import { abbreviateHome } from "../util/path-format"
 import { builtins } from "./builtins"
 
 export interface PackageResolver {
@@ -38,7 +48,7 @@ type Value = {
   readonly ready: () => boolean
   readonly list: () => ReadonlyArray<State>
   readonly route: (id: string, name: string) => Page["render"] | undefined
-  readonly slot: (name: string) => ReadonlyArray<Slot>
+  readonly slot: <Name extends SlotName>(name: Name) => ReadonlyArray<Slot<Name>>
   readonly activate: (id: string) => Promise<boolean>
   readonly deactivate: (id: string) => Promise<boolean>
 }
@@ -57,14 +67,22 @@ type Registration = {
 const PluginContext = createContext<Value>()
 
 export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>) {
+  const renderer = useRenderer()
   const client = useClient()
   const data = useData()
   const route = useRoute()
   const config = useConfig()
   const keymap = Keymap.use()
   const shortcuts = Keymap.useShortcuts()
+  const keymapState = Keymap.useState()
   const lifecycle = useTuiLifecycle()
+  const app = useTuiApp()
+  const paths = useTuiPaths()
   const location = useLocation()
+  const theme = useTheme()
+  const dialog = useDialog()
+  const toast = useToast()
+  const attention = useAttention()
   const directory = config.path ? path.dirname(config.path) : process.cwd()
   const [store, setStore] = createStore({
     ready: false,
@@ -82,20 +100,147 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
       setStore("registrations", id, "cleanups", [])
     })
     const owned: Dispose[] = []
+    let activeDialog: symbol | undefined
+    const dialogApi: Dialog = {
+      show(render, onClose) {
+        const token = Symbol()
+        let closed = false
+        activeDialog = token
+        dialog.replace(render, () => {
+          if (closed) return
+          closed = true
+          if (activeDialog === token) activeDialog = undefined
+          onClose?.()
+        })
+        return () => {
+          if (closed || activeDialog !== token) return
+          dialog.clear()
+        }
+      },
+      set(options) {
+        if (!activeDialog) return
+        dialog.setSize(options.size ?? "medium")
+        dialog.setCentered(options.centered ?? false)
+      },
+      clear() {
+        dialog.clear()
+      },
+      alert(options) {
+        return new Promise<void>((resolve) => {
+          let settled = false
+          const done = () => {
+            if (settled) return
+            settled = true
+            resolve()
+          }
+          dialogApi.show(() => <DialogAlert title={options.title} message={options.message} onConfirm={done} />, done)
+        })
+      },
+      confirm(options) {
+        return new Promise<boolean | undefined>((resolve) => {
+          let settled = false
+          const done = (result: boolean | undefined) => {
+            if (settled) return
+            settled = true
+            resolve(result)
+          }
+          dialogApi.show(
+            () => (
+              <DialogConfirm
+                title={options.title}
+                message={options.message}
+                label={options.label}
+                onConfirm={() => done(true)}
+                onCancel={() => done(false)}
+              />
+            ),
+            () => done(undefined),
+          )
+        })
+      },
+      prompt(options) {
+        return new Promise<string | undefined>((resolve) => {
+          let settled = false
+          const done = (result: string | undefined) => {
+            if (settled) return
+            settled = true
+            resolve(result)
+          }
+          dialogApi.show(
+            () => (
+              <DialogPrompt
+                title={options.title}
+                description={options.description ? () => <text>{options.description}</text> : undefined}
+                placeholder={options.placeholder}
+                value={options.value}
+                onConfirm={(value) => {
+                  done(value)
+                  dialogApi.clear()
+                }}
+              />
+            ),
+            () => done(undefined),
+          )
+        })
+      },
+      select(options) {
+        return new Promise((resolve) => {
+          let settled = false
+          const done = (result: (typeof options.options)[number]["value"] | undefined) => {
+            if (settled) return
+            settled = true
+            resolve(result)
+          }
+          dialogApi.show(
+            () => (
+              <DialogSelect
+                title={options.title}
+                placeholder={options.placeholder}
+                options={options.options.map((option) => ({ ...option }))}
+                current={options.current}
+                onSelect={(option) => {
+                  done(option.value)
+                  dialogApi.clear()
+                }}
+              />
+            ),
+            () => done(undefined),
+          )
+        })
+      },
+    }
+    const toastApi: Toast = {
+      show(options) {
+        toast.show({ ...options, variant: options.variant ?? "info" })
+      },
+    }
+    owned.push(async () => dialogApi.clear())
     const context: Context = {
       options: item.options ?? {},
       get location() {
         return location.current
       },
+      app: { version: app.version, channel: app.channel },
+      renderer,
       client: client.api,
       data,
+      attention,
+      theme,
       keymap: {
         layer: Keymap.createLayer,
         dispatch: keymap.dispatch,
-        shortcut: shortcuts.get,
+        shortcuts: shortcuts.list,
+        commands: keymapState.commands,
+        pending: keymapState.pending,
+        active: keymapState.active,
         mode: keymap.mode,
       },
       ui: {
+        dialog: dialogApi,
+        toast: toastApi,
+        format: {
+          path: (value) => abbreviateHome(value, paths.home),
+        },
         router: {
           register(page) {
             if (store.registrations[item.plugin.id]?.routes[page.name])
@@ -391,7 +536,16 @@ export function PluginRoute(props: { readonly fallback: (id: string, name: strin
   return <>{content()}</>
 }
 
-export function PluginSlot(props: { readonly name: string; readonly input?: Record<string, any> }) {
+export function PluginSlot<Name extends SlotName>(props: {
+  readonly name: Name
+  readonly input: SlotMap[Name]
+  readonly mode: "all" | "replace"
+}) {
   const plugins = usePlugin()
-  return <For each={plugins.slot(props.name)}>{(render) => render(props.input ?? {})}</For>
+  const renderers = createMemo(() => {
+    const items = plugins.slot(props.name)
+    if (props.mode === "replace") return items.slice(-1)
+    return items
+  })
+  return <For each={renderers()}>{(render) => render(props.input)}</For>
 }

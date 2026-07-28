@@ -77,7 +77,6 @@ import { nextThinkingMode, reasoningSummary, type ThinkingMode } from "../../con
 import { getScrollAcceleration } from "../../util/scroll"
 import { collapseToolOutput } from "../../util/collapse-tool-output"
 import { usePluginRuntime } from "../../plugin/runtime"
-import { PluginSlot } from "../../plugin/context"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { useLocation } from "../../context/location"
@@ -158,6 +157,7 @@ export function Session() {
       (sessionID) => data.session.permission.list(sessionID) ?? [],
     )
   })
+  const promptedPermissions = createMemo(() => (local.permission.mode === "auto" ? [] : permissions()))
   const forms = createMemo(() => {
     const global = data.session.form.list("global", location()) ?? []
     if (session()?.parentID) return global
@@ -169,7 +169,7 @@ export function Session() {
     open: false,
     tab: undefined as string | undefined,
   })
-  const disabled = createMemo(() => permissions().length > 0 || forms().length > 0)
+  const disabled = createMemo(() => promptedPermissions().length > 0 || forms().length > 0)
 
   const pending = createMemo(() => {
     const completed = messages().findLast((x) => x.type === "assistant" && x.time.completed)?.id
@@ -915,7 +915,6 @@ export function Session() {
     >
       <box flexDirection="row" flexGrow={1} minHeight={0}>
         <box flexGrow={1} minHeight={0} paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1}>
-          <PluginSlot name="session.header" input={{ sessionID: route.sessionID }} />
           <Show when={session()}>
             <scrollbox
               ref={(r) => (scroll = r)}
@@ -960,7 +959,6 @@ export function Session() {
               </Show>
             </scrollbox>
             <box flexShrink={0}>
-              <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} />
               <Composer
                 sessionID={route.sessionID}
                 open={composer.open || (!!session()?.parentID && forms().length === 0)}
@@ -969,10 +967,10 @@ export function Session() {
               />
               <Switch>
                 <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
-                <Match when={permissions().length > 0}>
-                  <Show when={permissions()[0]?.id} keyed>
+                <Match when={promptedPermissions().length > 0}>
+                  <Show when={promptedPermissions()[0]?.id} keyed>
                     {(_) => {
-                      const request = permissions()[0]
+                      const request = promptedPermissions()[0]
                       return request ? (
                         <PermissionPrompt request={request} directory={session()?.location.directory} />
                       ) : null
@@ -2327,6 +2325,17 @@ function GenericTool(props: ToolProps) {
   )
 }
 
+function useToolPermission(part: () => SessionMessageAssistantTool | undefined) {
+  const ctx = use()
+  const data = useData()
+  const local = useLocal()
+  return createMemo(() => {
+    if (local.permission.mode === "auto") return false
+    const request = data.session.permission.list(ctx.sessionID)?.[0]
+    return request?.source?.type === "tool" && request.source.callID === part()?.id
+  })
+}
+
 function InlineTool(props: {
   icon: string
   iconColor?: RGBA
@@ -2341,16 +2350,10 @@ function InlineTool(props: {
   onClick?: () => void
 }) {
   const { themeV2 } = useTheme()
-  const ctx = use()
-  const data = useData()
   const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
   const [errorExpanded, setErrorExpanded] = createSignal(false)
-
-  const permission = createMemo(() => {
-    const request = data.session.permission.list(ctx.sessionID)?.[0]
-    return request?.source?.type === "tool" && request.source.callID === props.part.id
-  })
+  const permission = useToolPermission(() => props.part)
 
   const error = createMemo(() => (props.part.state.status === "error" ? props.part.state.error.message : undefined))
 
@@ -2529,15 +2532,10 @@ function BlockTool(props: BlockToolProps) {
 function BlockToolContent(props: BlockToolProps & { borderColor: RGBA }) {
   const { themeV2 } = useTheme()
   const ctx = use()
-  const data = useData()
   const renderer = useRenderer()
   const [hover, setHover] = createSignal(false)
   const error = createMemo(() => (props.part?.state.status === "error" ? props.part.state.error.message : undefined))
-  const permission = createMemo(() => {
-    if (!props.part) return false
-    const request = data.session.permission.list(ctx.sessionID)?.[0]
-    return request?.source?.type === "tool" && request.source.callID === props.part.id
-  })
+  const permission = useToolPermission(() => props.part)
   return (
     <box
       border={["left"]}
@@ -2614,10 +2612,7 @@ function Shell(props: ToolProps) {
   const client = useClient()
   const data = useData()
   const pathFormatter = usePathFormatter()
-  const permission = createMemo(() => {
-    const request = data.session.permission.list(ctx.sessionID)?.[0]
-    return request?.source?.type === "tool" && request.source.callID === props.part.id
-  })
+  const permission = useToolPermission(() => props.part)
   const color = createMemo(() => (permission() ? themeV2.text.feedback.warning.default : themeV2.text.default))
   const shellID = createMemo(() => stringValue(props.metadata.shellID))
   const background = createMemo(() => Boolean(shellID()) && props.part.state.status !== "running")
