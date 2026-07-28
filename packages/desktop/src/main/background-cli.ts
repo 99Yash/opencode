@@ -54,9 +54,6 @@ export async function startBackgroundCli(logger: Logger) {
     url,
     username: "opencode",
     password,
-    listener: {
-      stop: () => run(binary, ["service", "stop"], logger, { stateHome: daemonStateHome }).then(() => undefined),
-    },
   }
 }
 

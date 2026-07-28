@@ -351,7 +351,6 @@ const main = Effect.gen(function* () {
     if (SIDECAR_VERSION === "v2") {
       logger.log("spawning v2 sidecar")
       const sidecar = yield* Effect.promise(() => startBackgroundCli(logger))
-      server = sidecar.listener
       yield* Deferred.succeed(serverReady, {
         url: sidecar.url,
         username: sidecar.username,
