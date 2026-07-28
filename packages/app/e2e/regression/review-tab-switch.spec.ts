@@ -4,6 +4,7 @@ import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/OpenCode/ReviewTabSwitch"
+const otherDirectory = "C:/OpenCode/ReviewTabSwitchOther"
 const projectID = "proj_review_tab_switch"
 const sessionA = "ses_review_tab_a"
 const sessionB = "ses_review_tab_b"
@@ -58,6 +59,23 @@ test("keeps the v2 review pane mounted when switching session tabs in a workspac
   await expect(page.getByRole("button", { name: "generated-2739.ts" })).toBeVisible()
 })
 
+test("keeps the v2 review pane mounted when switching session tabs across worktrees", async ({ page }) => {
+  await setup(page, otherDirectory)
+
+  await page.goto(sessionHref(sessionA))
+  await expectSessionTitle(page, titleA)
+
+  await page.getByRole("button", { name: "Toggle review" }).click()
+  const review = page.locator('#review-panel [data-component="session-review-v2"]')
+  await expectAppVisible(review)
+  await writeProbe(page)
+
+  await switchTab(page, titleB)
+  await expectSessionTitle(page, titleB)
+  await expectAppVisible(review)
+  expect(await readProbe(page)).toBe(PROBE)
+})
+
 type Probed = HTMLElement & { __e2eProbe?: string }
 
 async function switchTab(page: Page, title: string) {
@@ -74,7 +92,7 @@ async function readProbe(page: Page) {
   return page.locator('#review-panel [data-component="session-review-v2"]').evaluate((el) => (el as Probed).__e2eProbe)
 }
 
-async function setup(page: Page) {
+async function setup(page: Page, destinationDirectory = directory) {
   await mockOpenCodeServer(page, {
     directory,
     project: {
@@ -96,19 +114,22 @@ async function setup(page: Page) {
       connected: ["opencode"],
       default: { providerID: "opencode", modelID: "test" },
     },
-    sessions: [session(sessionA, titleA, 1700000000000), session(sessionB, titleB, 1700000001000)],
+    sessions: [
+      session(sessionA, titleA, 1700000000000, directory),
+      session(sessionB, titleB, 1700000001000, destinationDirectory),
+    ],
     vcsDiff: diffs,
     pageMessages: () => ({ items: [] }),
   })
 
   await page.addInitScript(
-    ({ directory, server, sessions }) => {
+    ({ directories, server, sessions }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem(
         "opencode.global.dat:server",
         JSON.stringify({
-          projects: { local: [{ worktree: directory, expanded: true }] },
-          lastProject: { local: directory },
+          projects: { local: directories.map((worktree: string) => ({ worktree, expanded: true })) },
+          lastProject: { local: directories[0] },
         }),
       )
       localStorage.setItem(
@@ -116,16 +137,16 @@ async function setup(page: Page) {
         JSON.stringify(sessions.map((sessionId: string) => ({ type: "session", server, sessionId }))),
       )
     },
-    { directory, server, sessions: [sessionA, sessionB] },
+    { directories: [...new Set([directory, destinationDirectory])], server, sessions: [sessionA, sessionB] },
   )
 }
 
-function session(id: string, title: string, created: number) {
+function session(id: string, title: string, created: number, worktree: string) {
   return {
     id,
     slug: id,
     projectID,
-    directory,
+    directory: worktree,
     title,
     version: "dev",
     time: { created, updated: created },
