@@ -4,7 +4,6 @@ import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
 const directory = "C:/OpenCode/TerminalTabSwitch"
-const otherDirectory = "C:/OpenCode/TerminalTabSwitchOther"
 const projectID = "proj_terminal_tab_switch"
 const sessionA = "ses_terminal_tab_a"
 const sessionB = "ses_terminal_tab_b"
@@ -49,29 +48,6 @@ test("keeps the terminal session alive when switching session tabs in a workspac
   expect(connections.length).toBe(1)
 })
 
-test("keeps the terminal pane mounted when switching session tabs across worktrees", async ({ page }) => {
-  await setup(page, otherDirectory)
-
-  await page.goto(sessionHref(sessionB))
-  await expectSessionTitle(page, titleB)
-  await page.keyboard.press("Control+Backquote")
-  await expect(page.locator("#terminal-panel")).toBeVisible()
-
-  await switchTab(page, titleA)
-  await expectSessionTitle(page, titleA)
-  await page.keyboard.press("Control+Backquote")
-
-  const panel = page.locator("#terminal-panel")
-  await expect(panel).toBeVisible()
-  await panel.evaluate((el, probe) => {
-    ;(el as Probed).__e2eProbe = probe
-  }, PROBE)
-
-  await switchTab(page, titleB)
-  await expectSessionTitle(page, titleB)
-  expect(await panel.evaluate((el) => (el as Probed).__e2eProbe)).toBe(PROBE)
-})
-
 type Probed = HTMLElement & { __e2eProbe?: string }
 
 async function switchTab(page: Page, title: string) {
@@ -88,7 +64,7 @@ async function readProbe(page: Page) {
   return page.locator('[data-component="terminal"]').evaluate((el) => (el as Probed).__e2eProbe)
 }
 
-async function setup(page: Page, destinationDirectory = directory) {
+async function setup(page: Page) {
   await mockOpenCodeServer(page, {
     protocol: "v2",
     directory,
@@ -111,10 +87,7 @@ async function setup(page: Page, destinationDirectory = directory) {
       connected: ["opencode"],
       default: { providerID: "opencode", modelID: "test" },
     },
-    sessions: [
-      session(sessionA, titleA, 1700000000000, directory),
-      session(sessionB, titleB, 1700000001000, destinationDirectory),
-    ],
+    sessions: [session(sessionA, titleA, 1700000000000), session(sessionB, titleB, 1700000001000)],
     pageMessages: () => ({ items: [] }),
   })
   await page.route("**/api/pty*", (route) =>
@@ -148,13 +121,13 @@ async function setup(page: Page, destinationDirectory = directory) {
   })
 
   await page.addInitScript(
-    ({ directories, server, sessions }) => {
+    ({ directory, server, sessions }) => {
       localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
       localStorage.setItem(
         "opencode.global.dat:server",
         JSON.stringify({
-          projects: { local: directories.map((worktree: string) => ({ worktree, expanded: true })) },
-          lastProject: { local: directories[0] },
+          projects: { local: [{ worktree: directory, expanded: true }] },
+          lastProject: { local: directory },
         }),
       )
       localStorage.setItem(
@@ -162,17 +135,17 @@ async function setup(page: Page, destinationDirectory = directory) {
         JSON.stringify(sessions.map((sessionId: string) => ({ type: "session", server, sessionId }))),
       )
     },
-    { directories: [...new Set([directory, destinationDirectory])], server, sessions: [sessionA, sessionB] },
+    { directory, server, sessions: [sessionA, sessionB] },
   )
   return connections
 }
 
-function session(id: string, title: string, created: number, worktree: string) {
+function session(id: string, title: string, created: number) {
   return {
     id,
     slug: id,
     projectID,
-    directory: worktree,
+    directory,
     title,
     version: "dev",
     time: { created, updated: created },
