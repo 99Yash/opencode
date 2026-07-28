@@ -1,6 +1,13 @@
 import { test, expect, describe } from "bun:test"
-import { McpOAuthProvider, OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_PATH } from "../../src/mcp/oauth-provider"
+import {
+  McpOAuthPendingProvider,
+  McpOAuthProvider,
+  OAUTH_CALLBACK_PORT,
+  OAUTH_CALLBACK_PATH,
+} from "../../src/mcp/oauth-provider"
 import type { McpAuth } from "../../src/mcp/auth"
+import type { OAuthDiscoveryState } from "@modelcontextprotocol/client"
+import { Effect } from "effect"
 
 // Stub auth — only synchronous getters are exercised in these tests
 const stubAuth = {} as McpAuth.Interface
@@ -57,5 +64,62 @@ describe("McpOAuthProvider.clientMetadata", () => {
   test("sets token_endpoint_auth_method to none when no clientSecret", () => {
     const provider = makeProvider({})
     expect(provider.clientMetadata.token_endpoint_auth_method).toBe("none")
+  })
+})
+
+describe("McpOAuthProvider.discoveryState", () => {
+  const discoveryState: OAuthDiscoveryState = {
+    authorizationServerUrl: "https://auth.example.com",
+    authorizationServerMetadata: {
+      issuer: "https://auth.example.com",
+      authorization_endpoint: "https://auth.example.com/authorize",
+      token_endpoint: "https://auth.example.com/token",
+      response_types_supported: ["code"],
+    },
+    resourceMetadataUrl: "https://mcp.example.com/.well-known/oauth-protected-resource",
+  }
+
+  test("persists discovery state through the auth store", async () => {
+    let saved: OAuthDiscoveryState | undefined
+    const auth = {
+      ...stubAuth,
+      get: () => Effect.succeed(saved ? { discoveryState: saved } : undefined),
+      updateDiscoveryState: (_name: string, value: OAuthDiscoveryState) => Effect.sync(() => void (saved = value)),
+      clearDiscoveryState: () => Effect.sync(() => void (saved = undefined)),
+    } satisfies McpAuth.Interface
+    const provider = new McpOAuthProvider(
+      "test-server",
+      "https://mcp.example.com/mcp",
+      {},
+      { onRedirect: async () => {} },
+      auth,
+    )
+
+    await provider.saveDiscoveryState(discoveryState)
+
+    expect(await provider.discoveryState()).toEqual(discoveryState)
+    await provider.invalidateCredentials("discovery")
+    expect(await provider.discoveryState()).toBeUndefined()
+  })
+
+  test("commits pending discovery state with OAuth credentials", async () => {
+    let entry: McpAuth.Entry | undefined
+    const auth = {
+      ...stubAuth,
+      set: (_name: string, value: McpAuth.Entry) => Effect.sync(() => void (entry = value)),
+    } satisfies McpAuth.Interface
+    const provider = new McpOAuthPendingProvider(
+      "test-server",
+      "https://mcp.example.com/mcp",
+      {},
+      { onRedirect: async () => {} },
+      auth,
+    )
+
+    await provider.saveDiscoveryState(discoveryState)
+    await provider.saveTokens({ access_token: "token", token_type: "Bearer" })
+    await provider.commit()
+
+    expect(entry?.discoveryState).toEqual(discoveryState)
   })
 })

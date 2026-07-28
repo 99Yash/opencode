@@ -3,6 +3,7 @@ import type {
   OAuthClientMetadata,
   StoredOAuthTokens,
   StoredOAuthClientInformation,
+  OAuthDiscoveryState,
 } from "@modelcontextprotocol/client"
 import { Effect } from "effect"
 import { McpAuth } from "./auth"
@@ -195,7 +196,16 @@ export class McpOAuthProvider implements OAuthClientProvider {
     return newState
   }
 
-  async invalidateCredentials(type: "all" | "client" | "tokens"): Promise<void> {
+  async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
+    await Effect.runPromise(this.auth.updateDiscoveryState(this.mcpName, state))
+  }
+
+  async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
+    const entry = await Effect.runPromise(this.auth.get(this.mcpName))
+    return entry?.discoveryState
+  }
+
+  async invalidateCredentials(type: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
     const entry = await Effect.runPromise(this.auth.get(this.mcpName))
     if (!entry) return
     switch (type) {
@@ -210,6 +220,12 @@ export class McpOAuthProvider implements OAuthClientProvider {
         delete entry.tokens
         await Effect.runPromise(this.auth.set(this.mcpName, entry))
         break
+      case "verifier":
+        await Effect.runPromise(this.auth.clearCodeVerifier(this.mcpName))
+        break
+      case "discovery":
+        await Effect.runPromise(this.auth.clearDiscoveryState(this.mcpName))
+        break
     }
   }
 }
@@ -217,6 +233,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 export class McpOAuthPendingProvider extends McpOAuthProvider {
   private pendingClientInfo?: StoredOAuthClientInformation
   private pendingTokens?: StoredOAuthTokens
+  private pendingDiscoveryState?: OAuthDiscoveryState
 
   override async clientInformation(): Promise<StoredOAuthClientInformation | undefined> {
     if (!this.config.clientId) return this.pendingClientInfo
@@ -238,9 +255,21 @@ export class McpOAuthPendingProvider extends McpOAuthProvider {
     this.pendingTokens = tokens
   }
 
-  override async invalidateCredentials(type: "all" | "client" | "tokens"): Promise<void> {
+  override async saveDiscoveryState(state: OAuthDiscoveryState): Promise<void> {
+    this.pendingDiscoveryState = state
+  }
+
+  override async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
+    return this.pendingDiscoveryState
+  }
+
+  override async invalidateCredentials(
+    type: "all" | "client" | "tokens" | "verifier" | "discovery",
+  ): Promise<void> {
     if (type === "all" || type === "client") this.pendingClientInfo = undefined
     if (type === "all" || type === "tokens") this.pendingTokens = undefined
+    if (type === "all" || type === "discovery") this.pendingDiscoveryState = undefined
+    if (type === "verifier") await super.invalidateCredentials(type)
   }
 
   async commit(): Promise<void> {
@@ -271,6 +300,7 @@ export class McpOAuthPendingProvider extends McpOAuthProvider {
                   issuer: this.pendingClientInfo.issuer,
                 }
               : undefined,
+          discoveryState: this.pendingDiscoveryState,
         },
         this.serverUrl,
       ),

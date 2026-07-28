@@ -5,6 +5,15 @@ import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Context, Option, Schema } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
+import type { OAuthDiscoveryState } from "@modelcontextprotocol/client"
+
+const DiscoveryState = Schema.declare<OAuthDiscoveryState>(
+  (value): value is OAuthDiscoveryState =>
+    typeof value === "object" &&
+    value !== null &&
+    "authorizationServerUrl" in value &&
+    typeof value.authorizationServerUrl === "string",
+)
 
 export const Tokens = Schema.Struct({
   accessToken: Schema.mutableKey(Schema.String),
@@ -31,6 +40,7 @@ export const Entry = Schema.Struct({
   clientInfo: Schema.mutableKey(Schema.optional(ClientInfo)),
   codeVerifier: Schema.mutableKey(Schema.optional(Schema.String)),
   oauthState: Schema.mutableKey(Schema.optional(Schema.String)),
+  discoveryState: Schema.mutableKey(Schema.optional(DiscoveryState)),
   serverUrl: Schema.mutableKey(Schema.optional(Schema.String)),
 })
 export type Entry = Schema.Schema.Type<typeof Entry>
@@ -54,6 +64,8 @@ export interface Interface {
   readonly updateOAuthState: (mcpName: string, oauthState: string) => Effect.Effect<void>
   readonly getOAuthState: (mcpName: string) => Effect.Effect<string | undefined>
   readonly clearOAuthState: (mcpName: string) => Effect.Effect<void>
+  readonly updateDiscoveryState: (mcpName: string, discoveryState: OAuthDiscoveryState) => Effect.Effect<void>
+  readonly clearDiscoveryState: (mcpName: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/McpAuth") {}
@@ -137,8 +149,10 @@ const layer = Layer.effect(
     const updateClientInfo = updateField("clientInfo", "updateClientInfo")
     const updateCodeVerifier = updateField("codeVerifier", "updateCodeVerifier")
     const updateOAuthState = updateField("oauthState", "updateOAuthState")
+    const updateDiscoveryState = updateField("discoveryState", "updateDiscoveryState")
     const clearCodeVerifier = clearField("codeVerifier", "clearCodeVerifier")
     const clearOAuthState = clearField("oauthState", "clearOAuthState")
+    const clearDiscoveryState = clearField("discoveryState", "clearDiscoveryState")
 
     const getOAuthState = Effect.fn("McpAuth.getOAuthState")(function* (mcpName: string) {
       const entry = yield* get(mcpName)
@@ -158,6 +172,8 @@ const layer = Layer.effect(
       updateOAuthState,
       getOAuthState,
       clearOAuthState,
+      updateDiscoveryState,
+      clearDiscoveryState,
     })
   }),
 )
