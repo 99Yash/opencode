@@ -53,7 +53,6 @@ function setup(
 }
 
 describe("createCompatibleApi", () => {
-  /*
   test("routes V1 archive through the legacy session update", async () => {
     const { api, requests } = setup("v1")
     await api.session.archive({ sessionID: "ses_1", directory: "/repo" })
@@ -64,7 +63,6 @@ describe("createCompatibleApi", () => {
     expect(requests[0]!.method).toBe("PATCH")
     expect(await requests[0]!.json()).toMatchObject({ time: { archived: expect.any(Number) } })
   })
-  */
 
   test("converts current prompts to the V1 prompt contract", async () => {
     const { api, requests } = setup("v1")
@@ -147,7 +145,6 @@ describe("createCompatibleApi", () => {
     expect(detections).toBe(1)
   })
 
-  /*
   test("keeps V2 session actions on the current API", async () => {
     const { api, requests } = setup("v2")
     await api.session.archive({ sessionID: "ses_1" })
@@ -155,7 +152,6 @@ describe("createCompatibleApi", () => {
     expect(new URL(requests[0]!.url).pathname).toBe("/api/session/ses_1/archive")
     expect(requests[0]!.method).toBe("POST")
   })
-  */
 
   test("uses the global V1 session search endpoint", async () => {
     const { api, requests } = setup("v1")
