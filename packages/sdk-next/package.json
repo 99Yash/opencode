@@ -5,13 +5,19 @@
   "type": "module",
   "license": "MIT",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": {
+      "types": "./src/server-interface.ts",
+      "default": "./src/server.ts"
+    },
+    "./vite": "./src/vite.ts"
   },
   "scripts": {
     "test": "bun test --timeout 5000",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
     "@opencode-ai/client": "workspace:*",
     "@opencode-ai/core": "workspace:*",
     "@opencode-ai/plugin": "workspace:*",
@@ -24,6 +30,8 @@
     "@opencode-ai/protocol": "workspace:*",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
-    "@typescript/native-preview": "catalog:"
+    "@typescript/native-preview": "catalog:",
+    "vite": "catalog:",
+    "ws": "8.21.0"
   }
 }

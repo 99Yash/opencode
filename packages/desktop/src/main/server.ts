@@ -47,6 +47,9 @@ export function preferAppEnv(userDataPath: string) {
     ...(shell ? loadShellEnv(shell, getLogger()) : null),
     OPENCODE_EXPERIMENTAL_ICON_DISCOVERY: "true",
     OPENCODE_CLIENT: "desktop",
+    OPENCODE_NODE_PTY_PATH:
+      process.env.OPENCODE_NODE_PTY_PATH ??
+      join(serverAssetsPath(), `@lydell/node-pty-${process.platform}-${process.arch}`, "lib/index.js"),
     XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
   })
 }
@@ -132,6 +135,9 @@ export async function spawnLocalServer(
       port,
       password,
       userDataPath: options.userDataPath,
+      version: app.getVersion(),
+      channel: import.meta.env.OPENCODE_CHANNEL,
+      serverAssetsPath: serverAssetsPath(),
     })
   }).catch((error) => {
     if (!exited) child.kill()
@@ -166,18 +172,23 @@ export async function spawnLocalServer(
       stop: () => {
         if (stopping) return stopping
         if (exited) return Promise.resolve()
-        child.postMessage({ type: "stop" })
-        stopping = Promise.race([
-          exit.promise.then(() => undefined),
-          delay(SIDECAR_STOP_TIMEOUT).then(() => {
-            if (!exited) child.kill()
-          }),
-        ])
+        stopping = (async () => {
+          child.postMessage({ type: "stop" })
+          if (await settlesWithin(exit.promise, SIDECAR_STOP_TIMEOUT)) return
+          if (!exited) child.kill()
+          await exit.promise
+        })()
         return stopping
       },
     },
     health: { wait },
   }
+}
+
+function serverAssetsPath() {
+  return app.isPackaged
+    ? join(process.resourcesPath, "server-assets")
+    : join(app.getAppPath(), "resources/server-assets")
 }
 
 export async function checkHealth(url: string, password?: string | null): Promise<boolean> {
@@ -216,8 +227,15 @@ function createSidecarEnv(): Record<string, string> {
   return env
 }
 
-function delay(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+function settlesWithin(promise: Promise<unknown>, ms: number) {
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => resolve(false), ms)
+    timeout.unref()
+    void promise.then(() => {
+      clearTimeout(timeout)
+      resolve(true)
+    })
+  })
 }
 
 function serializeError(error: unknown) {

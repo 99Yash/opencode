@@ -46,3 +46,20 @@ test("keeps a hidden prod launcher for old Linux pins", async () => {
   expect(desktop).toContain("StartupWMClass=ai.opencode.desktop")
   expect(desktop).toContain("NoDisplay=true")
 })
+
+test("packages server native assets outside ASAR", async () => {
+  const module = await import("./electron-builder.config")
+  const config = module.default
+  const resources = Array.isArray(config.extraResources) ? config.extraResources : []
+
+  expect(config.files).toContain("!resources/server-assets/**/*")
+  expect(resources).toContainEqual({ from: "resources/server-assets/", to: "server-assets/" })
+})
+
+test("keeps target native variants out of packaged production dependencies", async () => {
+  const pkg = await Bun.file("package.json").json()
+
+  expect(pkg.optionalDependencies).toBeUndefined()
+  expect(pkg.devDependencies["@lydell/node-pty-win32-arm64"]).toBe("1.2.0-beta.12")
+  expect(pkg.devDependencies["@parcel/watcher-win32-arm64"]).toBe("2.5.1")
+})

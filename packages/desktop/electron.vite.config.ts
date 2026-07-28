@@ -1,9 +1,8 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { defineConfig } from "electron-vite"
 import appPlugin from "@opencode-ai/app/vite"
-import * as fs from "node:fs/promises"
-
-const OPENCODE_SERVER_DIST = "../opencode/dist/node"
+import { serverVite } from "@opencode-ai/sdk-next/vite"
+import { getServerTarget } from "./scripts/target"
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
@@ -12,7 +11,8 @@ const channel = (() => {
   return "dev"
 })()
 
-const nodePtyPkg = `@lydell/node-pty-${process.platform}-${process.arch}`
+const server = serverVite()
+const target = getServerTarget()
 
 const sentry =
   process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT
@@ -33,12 +33,18 @@ const sentry =
 
 export default defineConfig({
   main: {
+    resolve: server.resolve,
     define: {
       "import.meta.env.OPENCODE_CHANNEL": JSON.stringify(channel),
+      OPENCODE_LIBC: target.platform === "linux" ? JSON.stringify("glibc") : "undefined",
+      FFF_LIBC: target.platform === "linux" ? JSON.stringify("gnu") : "undefined",
     },
     build: {
+      target: "node24",
+      externalizeDeps: { exclude: ["@opencode-ai/client"] },
       rollupOptions: {
         input: { index: "src/main/index.ts", sidecar: "src/main/sidecar.ts" },
+        external: [/^@opencode-ai\/simulation(?:\/|$)/],
         // Keep this identical to electron-vite's Node 20.11+ shim. Its regex insertion can
         // corrupt bundled TypeScript, while a Rollup banner places the shim safely.
         output: {
@@ -51,33 +57,8 @@ const require = __cjs_mod__.createRequire(import.meta.url);
 `,
         },
       },
-      externalizeDeps: { include: [nodePtyPkg] },
     },
-    plugins: [
-      {
-        name: "opencode:node-pty-narrower",
-        enforce: "pre",
-        resolveId(s) {
-          if (s === "@lydell/node-pty") return nodePtyPkg
-        },
-      },
-      {
-        name: "opencode:virtual-server-module",
-        enforce: "pre",
-        resolveId(id) {
-          if (id === "virtual:opencode-server") return this.resolve(`${OPENCODE_SERVER_DIST}/node.js`)
-        },
-      },
-      {
-        name: "opencode:copy-server-assets",
-        async writeBundle() {
-          for (const l of await fs.readdir(OPENCODE_SERVER_DIST)) {
-            if (!l.endsWith(".wasm")) continue
-            await fs.writeFile(`./out/main/chunks/${l}`, await fs.readFile(`${OPENCODE_SERVER_DIST}/${l}`))
-          }
-        },
-      },
-    ],
+    plugins: server.plugins,
   },
   preload: {
     build: {

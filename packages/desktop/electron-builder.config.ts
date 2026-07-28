@@ -52,12 +52,16 @@ const getBase = (appId: string): Configuration => ({
   extraMetadata: {
     desktopName: `${appId}.desktop`,
   },
-  files: ["out/**/*", "resources/**/*"],
+  files: ["out/**/*", "resources/**/*", "!resources/server-assets/**/*"],
   extraResources: [
     {
       from: "native/",
       to: "native/",
       filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
+    },
+    {
+      from: "resources/server-assets/",
+      to: "server-assets/",
     },
   ],
   mac: {

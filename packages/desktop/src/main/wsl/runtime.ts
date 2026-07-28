@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
-import * as pty from "@lydell/node-pty"
 import type { WslDistroProbe, WslInstalledDistro, WslOnlineDistro, WslRuntimeCheck } from "../../preload/types"
 import { wslTerminalArgs } from "./policy"
 
@@ -32,6 +32,7 @@ export type RunWslOptions = {
 
 const DEFAULT_WSL_TIMEOUT_MS = 20_000
 const DEFAULT_WSL_INSTALL_TIMEOUT_MS = 15 * 60_000
+let nodePty: typeof import("@lydell/node-pty") | undefined
 
 export function wslArgs(args: string[], distro?: string | null, user?: string | null) {
   return [...(distro ? ["-d", distro] : []), ...(user ? ["--user", user] : []), "--", ...args]
@@ -112,7 +113,7 @@ function runCommand(command: string, args: string[], opts: RunWslOptions = {}) {
 
 function runInteractiveCommand(command: string, args: string[], opts: RunWslOptions = {}, defaultTimeoutMs: number) {
   return new Promise<WslCommandResult>((resolve, reject) => {
-    const child = pty.spawn(command, args, {
+    const child = loadNodePty().spawn(command, args, {
       name: "xterm-color",
       cols: 80,
       rows: 24,
@@ -170,6 +171,15 @@ function runInteractiveCommand(command: string, args: string[], opts: RunWslOpti
       resolve({ code: event.exitCode, signal: null, stdout, stderr: "" })
     })
   })
+}
+
+function loadNodePty() {
+  if (nodePty) return nodePty
+  const loaded: typeof import("@lydell/node-pty") = createRequire(import.meta.url)(
+    process.env.OPENCODE_NODE_PTY_PATH ?? "@lydell/node-pty",
+  )
+  nodePty = loaded
+  return loaded
 }
 
 function createOutputDecoder() {

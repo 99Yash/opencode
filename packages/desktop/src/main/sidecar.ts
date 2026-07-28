@@ -1,5 +1,6 @@
 import * as http from "node:http"
 import * as tls from "node:tls"
+import path from "node:path"
 
 type NodeHttpWithEnvProxy = typeof http & {
   setGlobalProxyFromEnv: () => void
@@ -16,6 +17,9 @@ type StartCommand = {
   port: number
   password: string
   userDataPath: string
+  version: string
+  channel: string
+  serverAssetsPath: string
 }
 
 type StopCommand = { type: "stop" }
@@ -50,18 +54,17 @@ parentPort.on("message", (event) => {
 
 async function start(command: StartCommand) {
   try {
-    prepareSidecarEnv(command.password, command.userDataPath)
+    prepareSidecarEnv(command)
     ensureLoopbackNoProxy()
     useSystemCertificates()
     useEnvProxy()
-    const { Server } = await import("virtual:opencode-server")
+    const { Server } = await import("@opencode-ai/sdk-next/server")
 
     listener = await Server.listen({
+      app: { name: "desktop", version: command.version, channel: command.channel },
       port: command.port,
       hostname: command.hostname,
-      username: "opencode",
       password: command.password,
-      cors: ["oc://renderer"],
     })
     parentPort.postMessage({ type: "ready" })
   } catch (error) {
@@ -80,11 +83,17 @@ async function stop() {
   }
 }
 
-function prepareSidecarEnv(password: string, userDataPath: string) {
+function prepareSidecarEnv(command: StartCommand) {
+  const nodePtyPackage = `@lydell/node-pty-${process.platform}-${process.arch}`
+  const parcelWatcherPackage = `@parcel/watcher-${process.platform}-${process.arch}${process.platform === "linux" ? "-glibc" : ""}`
   Object.assign(process.env, {
     OPENCODE_SERVER_USERNAME: "opencode",
-    OPENCODE_SERVER_PASSWORD: password,
-    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? userDataPath,
+    OPENCODE_SERVER_PASSWORD: command.password,
+    XDG_STATE_HOME: process.env.XDG_STATE_HOME ?? command.userDataPath,
+    OPENCODE_NODE_ASSETS_DIR: command.serverAssetsPath,
+    OPENCODE_NODE_PTY_PATH: path.join(command.serverAssetsPath, nodePtyPackage, "lib/index.js"),
+    OPENCODE_PARCEL_WATCHER_PATH: path.join(command.serverAssetsPath, parcelWatcherPackage, "watcher.node"),
+    OPENCODE_PHOTON_WASM_PATH: path.join(command.serverAssetsPath, "@silvia-odwyer/photon-node/photon_rs_bg.wasm"),
   })
 }
 
@@ -136,12 +145,18 @@ function parseCommand(value: unknown): SidecarCommand | undefined {
   if (typeof command.port !== "number") return
   if (typeof command.password !== "string") return
   if (typeof command.userDataPath !== "string") return
+  if (typeof command.version !== "string") return
+  if (typeof command.channel !== "string") return
+  if (typeof command.serverAssetsPath !== "string") return
   return {
     type: "start",
     hostname: command.hostname,
     port: command.port,
     password: command.password,
     userDataPath: command.userDataPath,
+    version: command.version,
+    channel: command.channel,
+    serverAssetsPath: command.serverAssetsPath,
   }
 }
 

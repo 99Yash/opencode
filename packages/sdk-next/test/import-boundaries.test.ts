@@ -8,19 +8,26 @@ const core = resolve(import.meta.dir, "../../core")
 const server = resolve(import.meta.dir, "../../server")
 
 test("bundles the client and in-memory host", async () => {
-  const inputs = await bundleInputs()
+  const inputs = await bundleInputs("@opencode-ai/sdk-next")
 
   expect(within(inputs, client).length).toBeGreaterThan(0)
   expect(within(inputs, core).length).toBeGreaterThan(0)
   expect(within(inputs, server).length).toBeGreaterThan(0)
 })
 
-async function bundleInputs() {
+test("declares the Node server composition entrypoint", async () => {
+  const inputs = await bundleInputs("@opencode-ai/sdk-next/server")
+
+  expect(within(inputs, core).length).toBeGreaterThan(0)
+  expect(within(inputs, server).length).toBeGreaterThan(0)
+})
+
+async function bundleInputs(specifier: string) {
   const temporary = await mkdtemp(join(import.meta.dir, ".import-boundary-"))
   const entrypoint = join(temporary, "index.ts")
   const metafile = join(temporary, "meta.json")
   try {
-    await Bun.write(entrypoint, 'export * from "@opencode-ai/sdk-next"')
+    await Bun.write(entrypoint, `export * from ${JSON.stringify(specifier)}`)
     const child = Bun.spawn(
       [
         process.execPath,

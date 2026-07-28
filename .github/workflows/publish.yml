@@ -308,6 +308,7 @@ jobs:
           - host: "windows-2025"
             target: aarch64-pc-windows-msvc
             platform_flag: --win --arm64
+            bun_install_flags: --os=win32 --cpu=arm64
           - host: "blacksmith-4vcpu-windows-2025"
             target: x86_64-pc-windows-msvc
             platform_flag: --win
@@ -388,6 +389,7 @@ jobs:
         working-directory: packages/desktop
         env:
           NODE_OPTIONS: --max-old-space-size=4096
+          RUST_TARGET: ${{ matrix.settings.target }}
           OPENCODE_CHANNEL: ${{ (github.ref_name == 'beta' && 'beta') || 'prod' }}
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ vars.SENTRY_ORG }}
