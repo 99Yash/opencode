@@ -168,7 +168,7 @@ function InvalidServerRoute() {
   const language = useLanguage()
   const navigate = useNavigate()
   return (
-    <div class="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 text-center">
+    <div class="flex-1 w-full min-h-0 flex flex-col items-center justify-center gap-3 text-center">
       <div class="text-16-medium text-text-strong">Invalid server route</div>
       <button
         type="button"
