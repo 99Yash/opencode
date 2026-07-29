@@ -171,6 +171,28 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("orders reused sessions by prompt admission time", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
+      const reused = yield* session.create({ location, title: "reused" })
+      const newer = yield* session.create({ location, title: "newer" })
+      yield* db.update(SessionTable).set({ time_updated: -2 }).where(eq(SessionTable.id, reused.id)).run()
+      yield* db.update(SessionTable).set({ time_updated: -1 }).where(eq(SessionTable.id, newer.id)).run()
+
+      const admitted = yield* events.publish(SessionEvent.InputAdmitted, {
+        sessionID: reused.id,
+        inputID: SessionMessage.ID.create(),
+        input: { type: "user", data: { text: "continue" }, delivery: "steer" },
+      })
+
+      const page = yield* session.list({ directory: location.directory, parentID: null, order: "desc" })
+      expect(page.data.map((item) => item.id)).toEqual([reused.id, newer.id])
+      expect(page.data[0]!.time.updated).toEqual(admitted.created)
+    }),
+  )
+
   it.effect("filters direct child sessions by parent ID", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
