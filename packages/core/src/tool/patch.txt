@@ -12,6 +12,8 @@ Each operation starts with one of three headers:
 *** Delete File: <path> - remove an existing file. Nothing follows.
 *** Update File: <path> - patch an existing file in place (optionally with a rename).
 
+In update hunks, lines prefixed with a space are unchanged context and must match the current file exactly. If a line changes, emit the old line with `-` and the new line with `+`; never place the intended new version in an unchanged context line.
+
 Example patch:
 
 ```
