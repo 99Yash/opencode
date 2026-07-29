@@ -185,18 +185,7 @@ export const Plugin = {
                     )
                   const preview =
                     replacements > 0 && (replacements === 1 || input.replaceAll === true)
-                      ? {
-                          file: target.resource,
-                          patch: createTwoFilesPatch(target.resource, target.resource, source, replaced),
-                          status: "modified" as const,
-                          ...diffLines(source, replaced).reduce(
-                            (result, item) => ({
-                              additions: result.additions + (item.added ? (item.count ?? 0) : 0),
-                              deletions: result.deletions + (item.removed ? (item.count ?? 0) : 0),
-                            }),
-                            { additions: 0, deletions: 0 },
-                          ),
-                        }
+                      ? fileDiff(target.resource, source, replaced)
                       : undefined
                   yield* permission.assert({
                     action: "edit",
@@ -226,22 +215,8 @@ export const Plugin = {
                   const formatted = (yield* formatter.file(target.canonical))
                     ? yield* Bom.syncFile(fs, target.canonical, bom)
                     : (yield* Bom.readFile(fs, target.canonical)).text
-                  const counts = diffLines(source, formatted).reduce(
-                    (result, item) => ({
-                      additions: result.additions + (item.added ? (item.count ?? 0) : 0),
-                      deletions: result.deletions + (item.removed ? (item.count ?? 0) : 0),
-                    }),
-                    { additions: 0, deletions: 0 },
-                  )
                   return {
-                    files: [
-                      {
-                        file: result.resource,
-                        patch: createTwoFilesPatch(result.resource, result.resource, source, formatted),
-                        status: "modified" as const,
-                        ...counts,
-                      },
-                    ],
+                    files: [fileDiff(result.resource, source, formatted)],
                     replacements,
                   } satisfies Output
                 }).pipe(
@@ -262,4 +237,20 @@ export const Plugin = {
       )
       .pipe(Effect.orDie)
   }),
+}
+
+function fileDiff(file: string, before: string, after: string): typeof FileDiff.Info.Type {
+  const counts = diffLines(before, after).reduce(
+    (result, item) => ({
+      additions: result.additions + (item.added ? (item.count ?? 0) : 0),
+      deletions: result.deletions + (item.removed ? (item.count ?? 0) : 0),
+    }),
+    { additions: 0, deletions: 0 },
+  )
+  return {
+    file,
+    patch: createTwoFilesPatch(file, file, before, after),
+    status: "modified",
+    ...counts,
+  }
 }
