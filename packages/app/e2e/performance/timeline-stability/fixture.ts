@@ -2,16 +2,8 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Event } from "@opencode-ai/schema/event"
 import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
-import type {
-  AssistantMessage,
-  Message,
-  Part,
-  SessionV1Info,
-  SessionStatus,
-  ToolPart,
-  ToolState,
-  UserMessage,
-} from "@opencode-ai/client/promise"
+import type { SessionV1Info, SessionStatus } from "@opencode-ai/client/promise"
+import type { AssistantMessage, Message, Part, ToolPart, ToolState, UserMessage } from "../../../src/types"
 import { expect, type Page } from "@playwright/test"
 import { Schema } from "effect"
 import { mockOpenCodeServer } from "../../utils/mock-server"

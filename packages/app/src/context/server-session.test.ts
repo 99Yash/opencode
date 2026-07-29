@@ -28,6 +28,7 @@ const session = (id: string, parentID?: string): Session => ({
 type UserMessage = Extract<Message, { role: "user" }>
 type AssistantMessage = Extract<Message, { role: "assistant" }>
 type TextPart = Extract<Part, { type: "text" }>
+type CurrentToolObject = Extract<SessionMessageAssistantTool["state"], { status: "running" }>["input"]
 type MessageResponse = {
   data: { info: Message; parts: Part[] }[]
   response: { headers: Headers }
@@ -97,21 +98,21 @@ function currentMessages(data: MessageResponse["data"]): SessionMessageInfo[] {
           if (part.state.status === "running")
             return {
               status: "running" as const,
-              input: part.state.input,
-              metadata: part.state.metadata ?? {},
+              input: part.state.input as CurrentToolObject,
+              metadata: (part.state.metadata ?? {}) as CurrentToolObject,
             }
           if (part.state.status === "error")
             return {
               status: "error" as const,
-              input: part.state.input,
+              input: part.state.input as CurrentToolObject,
               error: { type: "tool_error", message: part.state.error },
-              metadata: part.state.metadata,
+              metadata: part.state.metadata as CurrentToolObject | undefined,
             }
           return {
             status: "completed" as const,
-            input: part.state.input,
+            input: part.state.input as CurrentToolObject,
             content: [{ type: "text" as const, text: part.state.output }],
-            metadata: part.state.metadata,
+            metadata: part.state.metadata as CurrentToolObject,
           }
         })()
         return [

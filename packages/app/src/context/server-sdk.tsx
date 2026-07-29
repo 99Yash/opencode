@@ -1,5 +1,5 @@
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
-import type { Event } from "@/types"
+import type { Event, PermissionRequest } from "@/types"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { makeEventListener } from "@solid-primitives/event-listener"
@@ -39,9 +39,9 @@ export function adaptServerEvent(event: OpenCodeEvent): ServerEvent {
           event.data.source?.type === "tool"
             ? { messageID: event.data.source.messageID, callID: event.data.source.callID }
             : undefined,
-      },
+      } satisfies PermissionRequest,
       current: event,
-    } as ServerEvent
+    }
   }
   return { id: event.id, type: event.type, properties: event.data, current: event } as ServerEvent
 }
