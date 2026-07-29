@@ -25,15 +25,16 @@ import { Spinner, SPINNER_FRAMES } from "../../component/spinner"
 import { ThemeContextProvider, useTheme, useThemes } from "../../context/theme"
 import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
-import type {
-  ModelInfo,
-  SessionMessageInfo,
-  SessionMessageAssistant,
-  SessionMessageAssistantReasoning,
-  SessionMessageAssistantText,
-  SessionMessageAssistantTool,
-  SessionMessageUser,
-  SessionInfo,
+import {
+  isSessionNotFoundError,
+  type ModelInfo,
+  type SessionMessageInfo,
+  type SessionMessageAssistant,
+  type SessionMessageAssistantReasoning,
+  type SessionMessageAssistantText,
+  type SessionMessageAssistantTool,
+  type SessionMessageUser,
+  type SessionInfo,
 } from "@opencode-ai/client"
 import { useLocal } from "../../context/local"
 import { Locale } from "../../util/locale"
@@ -282,7 +283,7 @@ export function Session() {
         variant: "error",
         duration: 5000,
       })
-      navigate({ type: "home" })
+      if (isSessionNotFoundError(error)) navigate({ type: "home" })
     })
   })
 
