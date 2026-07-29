@@ -41,7 +41,7 @@ describe("session routes", () => {
     expect(parseServerKey(href.split("/")[2])).toBe(server)
   })
 
-  test("returns an invalid state for malformed server routes", () => {
+  test("returns undefined for malformed server routes", () => {
     expect(parseServerKey("not-base64")).toBeUndefined()
   })
 

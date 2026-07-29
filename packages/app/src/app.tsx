@@ -132,7 +132,7 @@ function TargetServerRoute(props: ParentProps) {
     // Owns the server-identity remount. Session changes must NOT remount this
     // subtree (SessionRouteErrorBoundary resets and createSessionLineage
     // re-resolves reactively instead); both rely on this key for server changes.
-    <Show when={key()} keyed fallback={<InvalidServerRoute />}>
+    <Show when={key()} keyed fallback={<Navigate href="/" />}>
       <ServerSDKProvider server={conn}>
         <ServerSyncProvider server={conn}>{props.children}</ServerSyncProvider>
       </ServerSDKProvider>
@@ -161,23 +161,6 @@ function LegacyTargetSessionRouteContent() {
     <SessionRouteErrorBoundary sessionID={params.id} serverKey={ServerConnection.key(serverSDK().server)}>
       <LegacyTargetSessionRedirect />
     </SessionRouteErrorBoundary>
-  )
-}
-
-function InvalidServerRoute() {
-  const language = useLanguage()
-  const navigate = useNavigate()
-  return (
-    <div class="flex-1 w-full min-h-0 flex flex-col items-center justify-center gap-3 text-center">
-      <div class="text-16-medium text-text-strong">Invalid server route</div>
-      <button
-        type="button"
-        class="text-13-regular text-text-interactive-base"
-        onClick={() => navigate("/", { replace: true })}
-      >
-        {language.t("home.title")}
-      </button>
-    </div>
   )
 }
 
