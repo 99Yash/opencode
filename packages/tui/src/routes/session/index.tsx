@@ -8,7 +8,6 @@ import {
   Match,
   on,
   onCleanup,
-  onMount,
   Show,
   Switch,
   useContext,
@@ -20,10 +19,10 @@ import { useRoute, useRouteData } from "../../context/route"
 import { createStore } from "solid-js/store"
 import { useData } from "../../context/data"
 import { SplitBorder } from "../../ui/border"
-import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
+import { useTuiTerminalEnvironment } from "../../context/runtime"
 import { Spinner, SPINNER_FRAMES } from "../../component/spinner"
 import { ThemeContextProvider, useTheme, useThemes } from "../../context/theme"
-import { BoxRenderable, ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
+import { ScrollBoxRenderable, addDefaultParsers, TextAttributes, RGBA } from "@opentui/core"
 import { Prompt, type PromptRef } from "../../component/prompt"
 import type {
   ModelInfo,
@@ -49,7 +48,6 @@ import {
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useClient } from "../../context/client"
 import { useEditorContext } from "../../context/editor"
-import { openEditor } from "../../editor"
 import { useDialog } from "../../ui/dialog"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
 import { DialogMessage } from "./dialog-message"
@@ -130,7 +128,6 @@ export function Session() {
   const data = useData()
   const local = useLocal()
   const args = useArgs()
-  const paths = useTuiPaths()
   const configState = useConfig()
   const config = configState.data
   const theme = useTheme()
@@ -170,16 +167,6 @@ export function Session() {
     tab: undefined as string | undefined,
   })
   const disabled = createMemo(() => promptedPermissions().length > 0 || forms().length > 0)
-
-  const pending = createMemo(() => {
-    const completed = messages().findLast((x) => x.type === "assistant" && x.time.completed)?.id
-    return messages().findLast((x) => x.type === "assistant" && !x.time.completed && (!completed || x.id > completed))
-      ?.id
-  })
-
-  const lastAssistant = createMemo(() => {
-    return messages().findLast((x) => x.type === "assistant")
-  })
 
   const dimensions = useTerminalDimensions()
   const sidebar = createMemo(() => config.session?.sidebar ?? "auto")
@@ -650,7 +637,7 @@ export function Session() {
         const messages = data.session.message.list(route.sessionID)
         if (!messages || !messages.length) return
 
-        // Find the most recent user message with non-ignored, non-synthetic text parts
+        // Find the most recent visible user message in the V2 transcript.
         for (let i = messages.length - 1; i >= 0; i--) {
           const message = messages[i]
           if (!message || message.type !== "user" || !message.text.trim()) continue
@@ -1879,122 +1866,6 @@ function UserMessage(props: { message: SessionMessageUser }) {
   )
 }
 
-function AssistantMessage(props: { message: SessionMessageAssistant; last: boolean }) {
-  const ctx = use()
-  const local = useLocal()
-  const theme = useThemes().contextual("elevated")
-  const model = createMemo(
-    () =>
-      ctx
-        .models()
-        .find((model) => model.providerID === props.message.model.providerID && model.id === props.message.model.id)
-        ?.name ?? `${props.message.model.providerID}/${props.message.model.id}`,
-  )
-
-  const final = createMemo(() => {
-    return props.message.finish && !["tool-calls", "unknown"].includes(props.message.finish)
-  })
-
-  const duration = createMemo(() => {
-    if (!final()) return 0
-    if (!props.message.time.completed) return 0
-    return props.message.time.completed - props.message.time.created
-  })
-
-  const exploration = createMemo(() => {
-    const grouped = new Map<string, { first: boolean; parts: SessionMessageAssistantTool[]; active: boolean }>()
-    if (!ctx.groupExploration()) return grouped
-    const runs = props.message.content
-      .map((part) =>
-        part.type === "tool" &&
-        ["read", "glob", "grep"].includes(toolDisplay(part.name)) &&
-        part.state.status !== "streaming"
-          ? part
-          : undefined,
-      )
-      .reduce<SessionMessageAssistantTool[][]>(
-        (runs, part) => {
-          if (part) runs[runs.length - 1].push(part)
-          if (!part && runs[runs.length - 1].length) runs.push([])
-          return runs
-        },
-        [[]],
-      )
-      .filter((run) => run.length > 0)
-    for (const run of runs) {
-      const summary = {
-        parts: run,
-        active: false,
-      }
-      run.forEach((part, index) => grouped.set(part.id, { ...summary, first: index === 0 }))
-    }
-    return grouped
-  })
-
-  return (
-    <>
-      <For each={props.message.content}>
-        {(content, index) => (
-          <Switch>
-            <Match when={content.type === "text"}>
-              <TextPart
-                part={content as SessionMessageAssistantText}
-                last={index() === props.message.content.length - 1}
-              />
-            </Match>
-            <Match when={content.type === "reasoning"}>
-              <ReasoningPart
-                part={content as SessionMessageAssistantReasoning}
-                message={props.message}
-                last={index() === props.message.content.length - 1}
-              />
-            </Match>
-            <Match when={content.type === "tool"}>
-              <Show when={exploration().get((content as SessionMessageAssistantTool).id)?.first !== false}>
-                <Show
-                  when={exploration().get((content as SessionMessageAssistantTool).id)}
-                  fallback={<ToolPart part={content as SessionMessageAssistantTool} />}
-                >
-                  {(summary) => <ExplorationSummary {...summary()} />}
-                </Show>
-              </Show>
-            </Match>
-          </Switch>
-        )}
-      </For>
-      <Show when={props.message.error}>
-        <box
-          border={["left"]}
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
-          backgroundColor={theme.background.default}
-          customBorderChars={SplitBorder.customBorderChars}
-          borderColor={theme.text.feedback.error.default}
-        >
-          <text fg={theme.text.subdued}>{errorMessage(props.message.error)}</text>
-        </box>
-      </Show>
-      <AssistantRetry retry={props.message.retry} />
-      <Switch>
-        <Match when={props.last || final() || props.message.error}>
-          <box paddingLeft={3}>
-            <text>
-              <span style={{ fg: props.message.error ? theme.text.subdued : local.agent.color(props.message.agent) }}>
-                {Locale.titlecase(props.message.agent)}
-              </span>
-              <span style={{ fg: theme.text.subdued }}> · {model()}</span>
-              <Show when={duration()}>
-                <span style={{ fg: theme.text.subdued }}> · {Locale.duration(duration())}</span>
-              </Show>
-            </text>
-          </box>
-        </Match>
-      </Switch>
-    </>
-  )
-}
-
 function AssistantRetry(props: { retry: SessionMessageAssistant["retry"] }) {
   const theme = useTheme()
   return (
@@ -2007,40 +1878,6 @@ function AssistantRetry(props: { retry: SessionMessageAssistant["retry"] }) {
         </box>
       )}
     </Show>
-  )
-}
-
-function ExplorationSummary(props: { parts: SessionMessageAssistantTool[]; active: boolean }) {
-  const theme = useTheme()
-  const pathFormatter = usePathFormatter()
-  const label = (part: SessionMessageAssistantTool) => {
-    const input = typeof part.state.input === "string" ? {} : part.state.input
-    const tool = toolDisplay(part.name)
-    if (tool === "read") return `Read ${pathFormatter.format(stringValue(input.path))}`
-    if (tool === "glob") return `Glob "${stringValue(input.pattern)}"`
-    return `Grep "${stringValue(input.pattern)}"`
-  }
-  return (
-    <box flexDirection="column">
-      <InlineToolRow
-        icon="✱"
-        color={theme.text.subdued}
-        complete={!props.active}
-        pending="Exploring"
-        spinner={props.active}
-      >
-        {props.active ? "Exploring" : "Explored"}
-      </InlineToolRow>
-      <For each={props.parts}>
-        {(part, index) => (
-          <box paddingLeft={5}>
-            <text fg={part.state.status === "error" ? theme.text.feedback.error.default : theme.text.subdued}>
-              {index() === props.parts.length - 1 ? "└" : "├"} {label(part)}
-            </text>
-          </box>
-        )}
-      </For>
-    </box>
   )
 }
 
@@ -2193,8 +2030,6 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
     </Show>
   )
 }
-
-// Pending messages moved to individual tool pending functions
 
 function ToolPart(props: { part: SessionMessageAssistantTool }) {
   const display = createMemo(() => toolDisplay(props.part.name))
