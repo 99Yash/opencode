@@ -1,35 +1,17 @@
-Use the `patch` tool to edit files. Your patch language is a stripped‑down, file‑oriented diff format designed to be easy to parse and safe to apply. You can think of it as a high‑level envelope:
+Use the `patch` tool to edit files. Pass one patch enclosed by:
 
 *** Begin Patch
-[ one or more file sections ]
+[one or more file operations]
 *** End Patch
 
-Within that envelope, you get a sequence of file operations.
-You MUST include a header to specify the action you are taking.
-Each operation starts with one of three headers:
+Each file operation starts with one of:
 
-*** Add File: <path> - create a new file. Every following line is a + line (the initial contents).
-*** Delete File: <path> - remove an existing file. Nothing follows.
-*** Update File: <path> - patch an existing file in place (optionally with a rename).
+*** Add File: <path>
+*** Delete File: <path>
+*** Update File: <path>
 
-In update hunks, lines prefixed with a space are unchanged context and must match the current file exactly. If a line changes, emit the old line with `-` and the new line with `+`; never place the intended new version in an unchanged context line.
+Add operations contain `+` lines. Delete operations contain no body. Update operations may include `*** Move to: <path>` followed by one or more hunks.
 
-Example patch:
+Each hunk starts with `@@` or `@@ <context>`. Hunk lines start with a space for unchanged context, `-` for content to remove, or `+` for content to add. An optional `*** End of File` marker anchors a hunk to the end of the file.
 
-```
-*** Begin Patch
-*** Add File: hello.txt
-+Hello world
-*** Update File: src/app.py
-*** Move to: src/main.py
-@@ def greet():
--print("Hi")
-+print("Hello, world!")
-*** Delete File: obsolete.txt
-*** End Patch
-```
-
-It is important to remember:
-
-- You must include a header with your intended action (Add/Delete/Update)
-- You must prefix new lines with `+` even when creating a new file
+Unchanged context must match the current file exactly. If a line changes, emit the old line with `-` and the new line with `+`; never place intended new content in unchanged context.
