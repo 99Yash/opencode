@@ -1,17 +1,9 @@
-Use the `patch` tool to edit files. Pass one patch enclosed by:
+Use the `patch` tool to edit files. Provide one patch in this format:
 
 *** Begin Patch
 [one or more file operations]
 *** End Patch
 
-Each file operation starts with one of:
+Each operation starts with `*** Add File: <path>`, `*** Delete File: <path>`, or `*** Update File: <path>`. Add file contents use `+` lines; delete operations have no body.
 
-*** Add File: <path>
-*** Delete File: <path>
-*** Update File: <path>
-
-Add operations contain `+` lines. Delete operations contain no body. Update operations may include `*** Move to: <path>` followed by one or more hunks.
-
-Each hunk starts with `@@` or `@@ <context>`. Hunk lines start with a space for unchanged context, `-` for content to remove, or `+` for content to add. An optional `*** End of File` marker anchors a hunk to the end of the file.
-
-Unchanged context must match the current file exactly. If a line changes, emit the old line with `-` and the new line with `+`; never place intended new content in unchanged context.
+An update may start with `*** Move to: <path>` and contains change lines, optionally separated by `@@` or `@@ <context>` markers. Change lines start with a space for unchanged context, `-` for removed content, or `+` for added content. An optional `*** End of File` marker anchors the final change to the end of the file.

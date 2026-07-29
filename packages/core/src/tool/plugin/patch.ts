@@ -17,7 +17,7 @@ export const name = "patch"
 
 export const Input = Schema.Struct({
   patchText: Schema.String.annotate({
-    description: "The complete patch, including the `*** Begin Patch` and `*** End Patch` markers",
+    description: "The complete patch text",
   }),
 })
 
