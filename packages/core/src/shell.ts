@@ -35,6 +35,7 @@ type Active = {
   done: Deferred.Deferred<Info, NotFoundError>
   timeoutFiber?: Fiber.Fiber<void>
   timeout?: (duration: number) => Effect.Effect<void>
+  kill?: () => Effect.Effect<void>
 }
 
 /**
@@ -59,6 +60,8 @@ export interface Interface {
   readonly wait: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
   // Replaces the running command's timeout from now; zero clears it.
   readonly timeout: (id: Shell.ID, duration: number) => Effect.Effect<Shell.Info, NotFoundError>
+  // Stops a running command while retaining its terminal state and output.
+  readonly kill: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
   readonly output: (id: Shell.ID, input?: Shell.OutputInput) => Effect.Effect<Shell.Output, NotFoundError>
   readonly remove: (id: Shell.ID) => Effect.Effect<void, NotFoundError>
 }
@@ -118,6 +121,12 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
     const remove = Effect.fn("Shell.remove")(function* (id: Shell.ID) {
       yield* require(id)
       yield* removeSession(id)
+    })
+
+    const kill = Effect.fn("Shell.kill")(function* (id: Shell.ID) {
+      const session = yield* require(id)
+      if (session.kill) yield* session.kill()
+      return yield* Deferred.await(session.done)
     })
 
     const list = Effect.fn("Shell.list")(function* () {
@@ -313,6 +322,8 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
                 )
               })
 
+            session.kill = () => finish("exited", undefined, handle.kill().pipe(Effect.catch(() => Effect.void)))
+
             yield* session.timeout(invocation.timeout)
 
             runFork(
@@ -335,7 +346,7 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
       return session.info
     })
 
-    return Service.of({ name, create, list, get, wait, timeout, output, remove })
+    return Service.of({ name, create, list, get, wait, timeout, kill, output, remove })
   }),
 )
 

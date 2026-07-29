@@ -480,6 +480,44 @@ describe("ShellTool", () => {
     ),
   )
 
+  it.live("retains partial output when a foreground command is interrupted", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const jobs = yield* Job.Service
+            const shell = yield* Shell.Service
+            const scope = yield* Scope.Scope
+            const waiting = yield* executeTool(
+              registry,
+              call({ command: steadyProgressCommand }, "call-interrupt-output"),
+            ).pipe(Effect.forkIn(scope, { startImmediately: true }))
+
+            const waitForShell = (remaining = 1000): Effect.Effect<ShellSchema.ID, Error> =>
+              Effect.gen(function* () {
+                const job = yield* jobs.get("call-interrupt-output")
+                const shellID = job?.metadata?.shellID
+                if (typeof shellID === "string") return ShellSchema.ID.make(shellID)
+                if (remaining <= 0) return yield* Effect.fail(new Error("Timed out waiting for foreground shell"))
+                yield* Effect.promise(() => Bun.sleep(1))
+                return yield* waitForShell(remaining - 1)
+              })
+            const id = yield* waitForShell()
+            yield* Effect.sleep(Duration.millis(100))
+            yield* Fiber.interrupt(waiting)
+
+            expect((yield* shell.get(id)).status).toBe("exited")
+            expect((yield* shell.output(id)).output).toContain("steady")
+            yield* shell.remove(id)
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+    ),
+  )
+
   it.live("returns the shell id for a background command", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

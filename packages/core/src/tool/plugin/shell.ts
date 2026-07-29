@@ -224,7 +224,7 @@ export const Plugin = {
                 const run = settleShell().pipe(
                   Effect.tap((output) => Deferred.succeed(settled, output)),
                   Effect.map((output) => output.output),
-                  Effect.onInterrupt(() => shell.remove(info.id).pipe(Effect.ignore)),
+                  Effect.onInterrupt(() => shell.kill(info.id).pipe(Effect.ignore)),
                 )
                 const job = yield* runtime.job.start({
                   id: context.callID,
