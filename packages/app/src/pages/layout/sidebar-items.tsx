@@ -1,4 +1,4 @@
-import type { Session } from "@opencode-ai/sdk/v2/client"
+import type { Session } from "@/types"
 import { Avatar } from "@opencode-ai/ui/avatar"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
@@ -241,7 +241,8 @@ export const SessionItem = (props: SessionItemProps): JSX.Element => {
             </Show>
           </div>
 
-          <Show when={!props.level}>
+          {/* TODO: Restore the archive action when the V2 client exposes session archive. */}
+          <Show when={false}>
             <div
               class="shrink-0 overflow-hidden transition-[width,opacity]"
               classList={{

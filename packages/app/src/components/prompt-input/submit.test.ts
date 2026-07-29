@@ -125,13 +125,6 @@ beforeAll(async () => {
     useSearchParams: () => [search, () => undefined],
   }))
 
-  mock.module("@opencode-ai/sdk/v2/client", () => ({
-    createOpencodeClient: (input: { directory: string }) => {
-      createdClients.push(input.directory)
-      return clientFor(input.directory)
-    },
-  }))
-
   mock.module("@opencode-ai/ui/toast", () => ({
     Toast: { Region: () => null },
     showToast: () => 0,
@@ -197,12 +190,8 @@ beforeAll(async () => {
       const sdk = {
         scope: "local",
         directory: "/repo/main",
-        client: rootClient,
         api: rootClient.api,
         url: "http://localhost:4096",
-        createClient(opts: any) {
-          return clientFor(opts.directory)
-        },
       }
       return () => sdk
     },
@@ -332,7 +321,7 @@ describe("prompt submit worktree selection", () => {
     selected = "/repo/worktree-b"
     await submit.handleSubmit(event)
 
-    expect(createdClients).toEqual(["/repo/worktree-a", "/repo/worktree-b"])
+    expect(createdClients).toEqual([])
     expect(createdSessions).toEqual(["/repo/worktree-a", "/repo/worktree-b"])
     expect(sessionCreateInputs).toEqual([
       {
@@ -489,9 +478,6 @@ describe("prompt submit worktree selection", () => {
       agents: [],
     })
     expect((promptInputs[0] as { id?: string }).id).toStartWith("msg_")
-    expect((promptInputs[0] as { legacyParts?: { id: string; type: string; text?: string }[] }).legacyParts).toEqual([
-      { id: expect.stringMatching(/^prt_/), type: "text", text: "ls" },
-    ])
   })
 
   test("submits slash commands through the current session API", async () => {

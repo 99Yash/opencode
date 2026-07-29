@@ -181,9 +181,8 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
       return json(route, true)
     }
     if (requestDirectory && requestDirectory !== directory) return json(route, { name: "InvalidDirectory" }, 500)
-    if (url.pathname === "/global/event" || url.pathname === "/event" || url.pathname === "/api/event")
+    if (url.pathname === "/api/event")
       return sse(route)
-    if (url.pathname === "/global/health") return json(route, { healthy: true })
     if (url.pathname === "/api/provider" || url.pathname === "/api/model" || url.pathname === "/api/agent")
       return json(route, { data: [] })
     if (url.pathname === "/api/model/default") return json(route, { data: null })
@@ -211,8 +210,6 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     if (currentSessionInfo) return json(route, { data: currentSession(currentSessionInfo) })
     if (sessions.some((session) => url.pathname === `/api/session/${session.id}/message`))
       return json(route, { data: [], cursor: {} })
-    const current = sessions.find((session) => url.pathname === `/session/${session.id}`)
-    if (current) return json(route, current)
     if (/^\/session\/[^/]+$/.test(url.pathname)) return json(route, { name: "NotFoundError" }, 404)
     if (/^\/session\/[^/]+\/message$/.test(url.pathname)) return json(route, [])
     if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(url.pathname)) return json(route, [])
@@ -222,7 +219,6 @@ async function mockServers(page: Page, permissionRequests: string[], permissionR
     }
     if (["/skill", "/command", "/lsp", "/formatter", "/question", "/vcs/diff", "/pty/shells"].includes(url.pathname))
       return json(route, [])
-    if (["/global/config", "/config", "/provider/auth", "/mcp"].includes(url.pathname)) return json(route, {})
     if (url.pathname === "/provider") return json(route, provider(remote ? "server-b" : "server-a"))
     if (url.pathname === "/agent") return json(route, [{ name: "build", mode: "primary" }])
     if (url.pathname === "/project" || url.pathname === "/project/current") {

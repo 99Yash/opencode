@@ -1,4 +1,4 @@
-import type { Event, Session, SessionV2Info, V2SessionListResponse } from "@opencode-ai/sdk/v2/client"
+import type { Event, Session, SessionV2Info, V2SessionListResponse } from "@/types"
 import type { QueryClient } from "@tanstack/solid-query"
 import { trimSessions } from "./session-trim"
 import { pathKey } from "@/utils/path-key"
@@ -21,13 +21,11 @@ export type HomeSessionIndex = {
 export const homeSessionIndexKey = (server: string) => ["home", "session-index", server] as const
 export const homeSessionEventsKey = (server: string) => ["home", "session-events", server] as const
 
-type HomeSessionPage = { data?: V2SessionListResponse }
-
 export async function loadHomeSessionIndex(
   list: (
     input: { limit: number; order: "desc"; cursor?: string },
     options: { signal?: AbortSignal },
-  ) => Promise<HomeSessionPage>,
+  ) => Promise<V2SessionListResponse>,
   eventSequence = 0,
   signal?: AbortSignal,
 ) {
@@ -43,7 +41,7 @@ export async function loadHomeSessionIndex(
       },
       { signal },
     )
-    const page = response.data!
+    const page = response
     data.push(...page.data)
     if (page.data.length < HOME_V2_SESSION_PAGE_LIMIT || !page.cursor.next)
       return { sessions: parseHomeSessionIndex(data), eventSequence }
@@ -75,10 +73,7 @@ export function homeSessionIndexSessions(index: HomeSessionIndex | undefined, ev
 
 export function homeSessionIndexRefresh(event: Event["type"], connected: boolean) {
   if (event === "server.connected") return { connected: true, refetch: connected }
-  return {
-    connected,
-    refetch: event === "global.disposed" || event === "session.next.moved",
-  }
+  return { connected, refetch: false }
 }
 
 export function createHomeSessionIndexCache(queryClient: QueryClient, server: string) {
@@ -145,7 +140,7 @@ export function retainHomeSessions(sessions: Session[], limit: number, now: numb
 export function applyHomeSessionEvent(sessions: Session[], event: HomeSessionEvent) {
   const info = event.properties.info
   const index = sessions.findIndex((session) => session.id === info.id)
-  if (event.type === "session.deleted" || info.parentID || typeof info.time.archived === "number") {
+    if (event.type === "session.deleted" || info.parentID || typeof info.time.archived === "number") {
     if (index === -1) return sessions
     return sessions.toSpliced(index, 1)
   }

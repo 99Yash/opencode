@@ -25,7 +25,6 @@ test("keeps the review tree and terminal sized when both panels are open", async
   let detailFailures = 1
   await page.setViewportSize({ width: 1400, height: 900 })
   await mockOpenCodeServer(page, {
-    protocol: "v1",
     directory,
     project: {
       id: projectID,
@@ -109,7 +108,7 @@ test("keeps the review tree and terminal sized when both panels are open", async
       }),
     }),
   )
-  await page.route("**/pty/pty_review_terminal*", (route) =>
+  await page.route("**/api/pty/pty_review_terminal*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -127,7 +126,7 @@ test("keeps the review tree and terminal sized when both panels are open", async
       }),
     }),
   )
-  await page.route("**/pty/pty_review_terminal/connect-token*", (route) =>
+  await page.route("**/api/pty/pty_review_terminal/connect-token*", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -137,7 +136,7 @@ test("keeps the review tree and terminal sized when both panels are open", async
       }),
     }),
   )
-  await page.routeWebSocket("**/pty/pty_review_terminal/connect", () => undefined)
+  await page.routeWebSocket("**/api/pty/pty_review_terminal/connect", () => undefined)
   await page.addInitScript(() => {
     localStorage.setItem("settings.v3", JSON.stringify({ general: { newLayoutDesigns: true } }))
     localStorage.setItem(
