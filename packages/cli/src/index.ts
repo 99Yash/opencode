@@ -25,6 +25,7 @@ const Handlers = Runtime.handlers(Commands, {
   },
   console: {
     login: () => import("./commands/handlers/console/login"),
+    logout: () => import("./commands/handlers/console/logout"),
   },
   mcp: {
     list: () => import("./commands/handlers/mcp/list"),
