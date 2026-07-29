@@ -153,14 +153,6 @@ export const Plugin = {
                     })
                   }
 
-                  yield* permission.assert({
-                    action: "edit",
-                    resources: [target.resource],
-                    save: ["*"],
-                    sessionID: context.sessionID,
-                    agent: context.agent,
-                    source: permissionSource,
-                  })
                   const info = yield* fs.stat(target.canonical).pipe(
                     Effect.catchReason("PlatformError", "NotFound", () =>
                       Effect.fail(new ToolFailure({ message: `File not found: ${input.path}` })),
@@ -184,6 +176,37 @@ export const Plugin = {
                       : findLineOccurrences(source, oldString)
                   const matches = exact.length > 0 ? exact : unicode.length > 0 ? unicode : trailing
                   const replacements = matches.length
+                  const replaced = (input.replaceAll === true ? matches : matches.slice(0, 1))
+                    .toReversed()
+                    .reduce(
+                      (content, match) =>
+                        `${content.slice(0, match.start)}${newString}${content.slice(match.end)}`,
+                      source,
+                    )
+                  const preview =
+                    replacements > 0 && (replacements === 1 || input.replaceAll === true)
+                      ? {
+                          file: target.resource,
+                          patch: createTwoFilesPatch(target.resource, target.resource, source, replaced),
+                          status: "modified" as const,
+                          ...diffLines(source, replaced).reduce(
+                            (result, item) => ({
+                              additions: result.additions + (item.added ? (item.count ?? 0) : 0),
+                              deletions: result.deletions + (item.removed ? (item.count ?? 0) : 0),
+                            }),
+                            { additions: 0, deletions: 0 },
+                          ),
+                        }
+                      : undefined
+                  yield* permission.assert({
+                    action: "edit",
+                    resources: [target.resource],
+                    save: ["*"],
+                    metadata: preview ? { files: [preview] } : undefined,
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source: permissionSource,
+                  })
                   if (replacements === 0) {
                     return yield* new ToolFailure({
                       message: `Could not find oldString in ${input.path}. It must match exactly, including whitespace and indentation.`,
@@ -194,14 +217,6 @@ export const Plugin = {
                       message: `Found ${replacements} matches for oldString, but expected exactly one. Add more surrounding context to make oldString unique, or set replaceAll to true to replace every occurrence.`,
                     })
                   }
-
-                  const replaced = (input.replaceAll === true ? matches : matches.slice(0, 1))
-                    .toReversed()
-                    .reduce(
-                      (content, match) =>
-                        `${content.slice(0, match.start)}${newString}${content.slice(match.end)}`,
-                      source,
-                    )
                   const replacementBom = replaced.startsWith("\uFEFF")
                   const result = yield* files.write({
                     target,
