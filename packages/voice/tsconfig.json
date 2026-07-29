@@ -7,5 +7,5 @@
     "noUncheckedIndexedAccess": false,
     "noUnusedLocals": true
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

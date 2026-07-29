@@ -20,35 +20,123 @@ let stderr = FileHandle.standardError
 func log(_ message: String) { stderr.write(Data("[audio] \(message)\n".utf8)) }
 
 final class SpeakerQueue {
-  private var data = Data()
+  private static let capacity = 24_000 * 2 * 30
+  private var data = [UInt8](repeating: 0, count: capacity)
+  private var readIndex = 0
+  private var writeIndex = 0
+  private var count = 0
   private let lock = NSLock()
   func push(_ chunk: Data) {
-    lock.lock()
-    data.append(chunk)
-    lock.unlock()
-  }
-  func pop(frames: Int) -> [Int16] {
+    if chunk.isEmpty { return }
     lock.lock()
     defer { lock.unlock() }
-    let bytes = min(frames * 2, data.count - data.count % 2)
-    var samples = [Int16](repeating: 0, count: frames)
-    data.prefix(bytes).withUnsafeBytes { raw in
-      let int16 = raw.bindMemory(to: Int16.self)
-      for i in 0..<int16.count { samples[i] = int16[i] }
+    chunk.withUnsafeBytes { source in
+      let skipped = max(0, source.count - Self.capacity)
+      let start = skipped + skipped % 2
+      let bytes = source.count - start
+      let overflow = max(0, count + bytes - Self.capacity)
+      let dropped = min(count, overflow + overflow % 2)
+      readIndex = (readIndex + dropped) % Self.capacity
+      count -= dropped
+      let first = min(bytes, Self.capacity - writeIndex)
+      data.withUnsafeMutableBytes { destination in
+        destination.baseAddress!.advanced(by: writeIndex).copyMemory(
+          from: source.baseAddress!.advanced(by: start), byteCount: first)
+        destination.baseAddress!.copyMemory(
+          from: source.baseAddress!.advanced(by: start + first), byteCount: bytes - first)
+      }
+      writeIndex = (writeIndex + bytes) % Self.capacity
+      count += bytes
     }
-    data.removeFirst(bytes)
-    return samples
+  }
+  func render(frames: Int, into output: UnsafeMutablePointer<Float>) {
+    lock.lock()
+    defer { lock.unlock() }
+    let samples = min(frames, count / 2)
+    for index in 0..<samples {
+      let low = UInt16(data[readIndex])
+      let high = UInt16(data[(readIndex + 1) % Self.capacity])
+      output[index] = Float(Int16(bitPattern: low | high << 8)) / 32768.0
+      readIndex = (readIndex + 2) % Self.capacity
+    }
+    count -= samples * 2
+    for index in samples..<frames { output[index] = 0 }
   }
   func flush() {
     lock.lock()
-    data.removeAll()
+    readIndex = writeIndex
+    count = 0
     lock.unlock()
   }
 }
 
+#if QUEUE_BENCHMARK
+let correctnessQueue = SpeakerQueue()
+correctnessQueue.push(Data([0x00, 0x80, 0xff, 0x7f]))
+var correctnessOutput = [Float](repeating: 1, count: 3)
+correctnessOutput.withUnsafeMutableBufferPointer {
+  correctnessQueue.render(frames: 3, into: $0.baseAddress!)
+}
+precondition(correctnessOutput[0] == -1)
+precondition(abs(correctnessOutput[1] - Float(Int16.max) / 32768) < 0.000_001)
+precondition(correctnessOutput[2] == 0)
+correctnessQueue.push(Data([1, 0]))
+correctnessQueue.flush()
+correctnessOutput.withUnsafeMutableBufferPointer {
+  correctnessQueue.render(frames: 3, into: $0.baseAddress!)
+}
+precondition(correctnessOutput.allSatisfy { $0 == 0 })
+
+let benchmarkQueue = SpeakerQueue()
+let benchmarkFrames = 512
+let benchmarkChunk = Data(repeating: 1, count: benchmarkFrames * 2)
+var benchmarkOutput = [Float](repeating: 0, count: benchmarkFrames)
+for _ in 0..<48 { benchmarkQueue.push(benchmarkChunk) }
+for _ in 0..<2_000 {
+  benchmarkOutput.withUnsafeMutableBufferPointer {
+    benchmarkQueue.render(frames: benchmarkFrames, into: $0.baseAddress!)
+  }
+  benchmarkQueue.push(benchmarkChunk)
+}
+var benchmarkDurations = [UInt64]()
+benchmarkDurations.reserveCapacity(30_000)
+var benchmarkChecksum: Float = 0
+for _ in 0..<30_000 {
+  let started = DispatchTime.now().uptimeNanoseconds
+  benchmarkOutput.withUnsafeMutableBufferPointer {
+    benchmarkQueue.render(frames: benchmarkFrames, into: $0.baseAddress!)
+  }
+  benchmarkQueue.push(benchmarkChunk)
+  benchmarkDurations.append(DispatchTime.now().uptimeNanoseconds - started)
+  benchmarkChecksum += benchmarkOutput[0]
+}
+benchmarkDurations.sort()
+print("METRIC speaker_queue_median_ns=\(benchmarkDurations[benchmarkDurations.count / 2])")
+print("METRIC speaker_queue_p99_ns=\(benchmarkDurations[benchmarkDurations.count * 99 / 100])")
+print("METRIC speaker_queue_worst_ns=\(benchmarkDurations.last!)")
+print("CHECKSUM \(benchmarkChecksum)")
+exit(0)
+#endif
+
 let queue = SpeakerQueue()
 let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
 let captureFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 24000, channels: 1, interleaved: true)!
+var rebuildScheduled = false
+var ignoreRouteChangesUntil = Date.distantPast
+
+func scheduleRebuild(_ message: String, after delay: TimeInterval = 0.5) {
+  if rebuildScheduled { return }
+  rebuildScheduled = true
+  DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+    rebuildScheduled = false
+    // Starting an engine emits configuration changes of its own. AirPods can
+    // otherwise turn one real route change into a perpetual rebuild loop.
+    ignoreRouteChangesUntil = Date().addingTimeInterval(1.5)
+    log(message)
+    startInput(voiceProcessing: useAEC)
+    startOutput()
+  }
+}
 
 // Speaker: its own engine, pulling PCM16 from the stdin-fed queue.
 var outputEngine: AVAudioEngine?
@@ -58,17 +146,19 @@ func startOutput() {
   let engine = AVAudioEngine()
   outputEngine = engine
   let source = AVAudioSourceNode(format: playFormat) { _, _, frameCount, audioBufferList -> OSStatus in
-    let samples = queue.pop(frames: Int(frameCount))
     let out = UnsafeMutableAudioBufferListPointer(audioBufferList)[0].mData!.assumingMemoryBound(to: Float.self)
-    for i in 0..<Int(frameCount) { out[i] = Float(samples[i]) / 32768.0 }
+    queue.render(frames: Int(frameCount), into: out)
     return noErr
   }
   engine.attach(source)
   engine.connect(source, to: engine.mainMixerNode, format: playFormat)
   do {
     try engine.start()
+    let format = engine.outputNode.outputFormat(forBus: 0)
+    log("output active (\(Int(format.sampleRate))Hz, \(format.channelCount)ch)")
   } catch {
     log("output engine failed: \(error)")
+    scheduleRebuild("audio engines unavailable — retrying")
   }
 }
 
@@ -78,6 +168,7 @@ func startOutput() {
 // downmix all of them.
 var tapCount = 0
 var inputEngine: AVAudioEngine?
+var useAEC = CommandLine.arguments.contains("--aec")
 
 func startInput(voiceProcessing: Bool) {
   inputEngine?.stop()
@@ -88,6 +179,7 @@ func startInput(voiceProcessing: Bool) {
       try engine.inputNode.setVoiceProcessingEnabled(true)
     } catch {
       log("voice processing unavailable (\(error)) — no echo cancellation")
+      useAEC = false
       return startInput(voiceProcessing: false)
     }
     if #available(macOS 14.0, *) {
@@ -99,11 +191,17 @@ func startInput(voiceProcessing: Bool) {
   }
 
   let micFormat = engine.inputNode.outputFormat(forBus: 0)
-  let monoFormat = AVAudioFormat(
-    commonFormat: .pcmFormatFloat32, sampleRate: micFormat.sampleRate, channels: 1, interleaved: false)!
+  guard micFormat.sampleRate > 0, micFormat.channelCount > 0, let monoFormat = AVAudioFormat(
+    commonFormat: .pcmFormatFloat32, sampleRate: micFormat.sampleRate, channels: 1, interleaved: false)
+  else {
+    log("microphone route is not ready — retrying")
+    scheduleRebuild("audio engines unavailable — retrying")
+    return
+  }
   guard let converter = AVAudioConverter(from: monoFormat, to: captureFormat) else {
-    log("cannot convert \(micFormat.sampleRate)Hz to 24kHz")
-    exit(2)
+    log("cannot convert \(micFormat.sampleRate)Hz to 24kHz — retrying")
+    scheduleRebuild("audio engines unavailable — retrying")
+    return
   }
 
   engine.inputNode.installTap(onBus: 0, bufferSize: 2400, format: micFormat) { buffer, _ in
@@ -132,13 +230,16 @@ func startInput(voiceProcessing: Bool) {
 
   do {
     try engine.start()
+    log("input active (\(Int(micFormat.sampleRate))Hz, \(micFormat.channelCount)ch, echo cancellation \(voiceProcessing ? "on" : "off"))")
   } catch {
     if voiceProcessing {
       log("input engine failed with voice processing (\(error)) — retrying without")
+      useAEC = false
       return startInput(voiceProcessing: false)
     }
     log("input engine failed: \(error)")
-    exit(2)
+    scheduleRebuild("audio engines unavailable — retrying")
+    return
   }
 
   // Watchdog: on some devices the voice-processed tap simply never fires.
@@ -147,6 +248,7 @@ func startInput(voiceProcessing: Bool) {
     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
       if tapCount > 0 { return }
       log("voice-processed mic delivered nothing — restarting without echo cancellation")
+      useAEC = false
       startInput(voiceProcessing: false)
     }
   }
@@ -155,28 +257,19 @@ func startInput(voiceProcessing: Bool) {
 // Voice processing is opt-in (--aec): it is only needed on speakers, and on
 // some machines (observed with Bluetooth headsets active) the VP engine binds
 // to the wrong capture device entirely, delivering noise instead of the mic.
-let wantAEC = CommandLine.arguments.contains("--aec")
-
 // Mic first: activating the mic flips Bluetooth headsets from music mode to
 // headset mode, reconfiguring the output device. Starting output afterwards
 // (and rebuilding on any route change below) keeps playback on the live device.
-startInput(voiceProcessing: wantAEC)
+startInput(voiceProcessing: useAEC)
 startOutput()
 
 // Device switches (Bluetooth profile flips, headphones plugged/unplugged,
 // default device changes) stop engines silently. Rebuild both, debounced.
-var rebuildScheduled = false
 NotificationCenter.default.addObserver(
   forName: .AVAudioEngineConfigurationChange, object: nil, queue: .main
 ) { _ in
-  if rebuildScheduled { return }
-  rebuildScheduled = true
-  DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-    rebuildScheduled = false
-    log("audio route changed — rebuilding engines")
-    startInput(voiceProcessing: wantAEC)
-    startOutput()
-  }
+  if Date() < ignoreRouteChangesUntil { return }
+  scheduleRebuild("audio route changed — rebuilding engines")
 }
 
 signal(SIGUSR1, SIG_IGN)

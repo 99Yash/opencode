@@ -3,10 +3,12 @@
   "name": "@opencode-ai/voice",
   "version": "0.0.0",
   "private": true,
-  "description": "Prototype voice control for OpenCode via the OpenAI Realtime API",
+  "description": "Prototype voice control for OpenCode via the OpenAI Realtime and Live APIs",
   "type": "module",
   "scripts": {
+    "bench:audio": "bun scripts/bench-speaker-queue.ts",
     "spike": "bun run --no-orphans --conditions=browser src/spike.ts",
+    "test": "bun test",
     "typecheck": "tsgo --noEmit"
   },
   "devDependencies": {
@@ -17,9 +19,11 @@
   },
   "dependencies": {
     "@opencode-ai/client": "workspace:*",
+    "@opencode-ai/plugin": "workspace:*",
     "@opentui/core": "catalog:",
     "@opentui/solid": "catalog:",
+    "effect": "catalog:",
     "opentui-spinner": "catalog:",
-    "solid-js": "1.9.12"
+    "solid-js": "catalog:"
   }
 }

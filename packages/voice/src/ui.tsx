@@ -5,15 +5,26 @@
 // its transcript is filled in when Whisper finishes.
 import { createCliRenderer, RGBA } from "@opentui/core"
 import { render, useKeyboard, useTerminalDimensions } from "@opentui/solid"
-import { registerSpinner } from "opentui-spinner/solid"
+import "opentui-spinner/solid"
 import { createSignal, For } from "solid-js"
+import { createStore, reconcile } from "solid-js/store"
+import {
+  connectionMeterLevels,
+  connectionTransitioning,
+  textRevealOpacity,
+  transcriptionPulse,
+  type TextReveal,
+} from "./animation"
+import { PCM_METER_FRAME_MS } from "./pcm"
+import { initialVoiceView, transitionVoiceView, type Message, type VoiceViewEvent } from "./ui-model"
 
-registerSpinner()
+export { joinAssistantText } from "./ui-model"
 
 export type VoiceStatus = {
   server?: string
-  session?: string
   audio?: string
+  microphoneMuted?: boolean
+  speakerMuted?: boolean
   voice?: string
   model?: string
   project?: string
@@ -22,11 +33,14 @@ export type VoiceStatus = {
 export type VoiceUI = {
   meta(text: string): void
   userSpeaking(active: boolean): void
+  userReset(): void
   userAudioLevel(level?: number): void
   userCommitted(itemID: string): void
-  userTranscript(itemID: string, text: string): void
+  userTranscript(itemID: string, text: string, final?: boolean): void
   assistantAudio(level: number, durationMs: number): void
+  assistantPlaybackStopped(): void
   assistantDelta(text: string): void
+  assistantTranscript(text: string): void
   assistantDone(): void
   toolStart(callID: string, name: string, input: unknown): void
   toolDone(callID: string, output: unknown): void
@@ -34,36 +48,49 @@ export type VoiceUI = {
   close(): void
 }
 
-type Message =
-  | { kind: "user"; itemID: string; text?: string }
-  | { kind: "assistant"; text: string; streaming: boolean }
-  | { kind: "tool"; callID: string; name: string; input: unknown; output?: unknown }
-  | { kind: "meta"; text: string }
-
 const truncate = (text: string, max: number) => (text.length > max ? text.slice(0, max) + "…" : text)
 
 const displayJson = (value: unknown) =>
-  JSON.stringify(value, (_, item) => (typeof item === "string" ? truncate(item, 500) : item), 2) ?? "null"
+  truncate(
+    (() => {
+      try {
+        return (
+          JSON.stringify(
+            value,
+            (_, item) =>
+              typeof item === "string" ? truncate(item, 500) : typeof item === "bigint" ? String(item) : item,
+            2,
+          ) ?? "null"
+        )
+      } catch {
+        return "[unserializable value]"
+      }
+    })(),
+    8_000,
+  )
 
 function toolSummary(name: string, output?: unknown) {
   if (output === undefined) return "running"
   if (Array.isArray(output)) return `${output.length} result${output.length === 1 ? "" : "s"}`
-  if (!output || typeof output !== "object") return String(output)
-  const value = output as Record<string, unknown>
-  if (name === "wait_for_reply")
-    return `${String(value["status"] ?? "done")} · ${typeof value["text"] === "string" ? `${value["text"].length} chars` : "no reply"}`
-  if (name === "prompt_session")
-    return `${value["admitted"] ? "admitted" : "rejected"} · ${String(value["sessionID"] ?? "unknown session")}`
-  if (name === "check_session") {
-    const tools = Array.isArray(value["runningTools"]) ? ` · ${value["runningTools"].join(", ")}` : ""
-    return `${String(value["status"] ?? "checked")}${tools}`
-  }
-  if (name === "create_session" || name === "select_session")
-    return `${name === "create_session" ? "created" : "selected"} · ${String(value["sessionID"] ?? "unknown session")}`
-  if (name === "interrupt_session") return value["interrupted"] ? "interrupted" : "not interrupted"
-  if (name === "set_voice") return `switching to ${String(value["voice"] ?? "unknown")}`
-  const fields = Object.entries(value)
-    .filter(([, item]) => ["string", "number", "boolean"].includes(typeof item))
+  if (typeof output === "string") return truncate(output, 160)
+  if (typeof output === "number" || typeof output === "boolean" || typeof output === "bigint") return String(output)
+  if (output === null || typeof output !== "object") return "completed"
+  if (
+    "status" in output &&
+    output.status === "error" &&
+    "message" in output &&
+    typeof output.message === "string"
+  )
+    return `error · ${truncate(output.message, 120)}`
+  if ("status" in output && typeof output.status === "string")
+    return output.status === "started" && "notification" in output && output.notification === "registered"
+      ? "started · notification registered"
+      : output.status
+  const fields = Object.entries(output)
+    .filter(
+      ([key, item]) =>
+        !key.endsWith("_id") && key !== "notification" && ["string", "number", "boolean"].includes(typeof item),
+    )
     .slice(0, 2)
     .map(([key, item]) => `${key}: ${String(item)}`)
   return fields.join(" · ") || "completed"
@@ -92,10 +119,12 @@ export function createConsoleUI(): VoiceUI {
   return {
     meta: (text) => line(dim(`  ${text}`)),
     userSpeaking: () => {},
+    userReset: () => {},
     userAudioLevel: () => {},
     userCommitted: () => {},
     userTranscript: (_, text) => line(cyan("● you ") + text),
     assistantAudio: () => {},
+    assistantPlaybackStopped: () => {},
     assistantDelta: (text) => {
       if (!streaming) {
         process.stdout.write(green("● assistant "))
@@ -103,6 +132,7 @@ export function createConsoleUI(): VoiceUI {
       }
       process.stdout.write(text)
     },
+    assistantTranscript: (text) => line(green("● assistant ") + text),
     assistantDone: () => {
       if (streaming) process.stdout.write("\n")
       streaming = false
@@ -114,7 +144,7 @@ export function createConsoleUI(): VoiceUI {
     toolDone: (callID, output) => {
       const name = tools.get(callID) ?? "tool"
       tools.delete(callID)
-      line(dim(`  ✓ ${name}  ${toolSummary(name, output)}`))
+      line(dim(`  ✓ ${name} ${toolSummary(name, output)}`))
     },
     setStatus: () => {},
     close: () => {},
@@ -126,6 +156,8 @@ export function createConsoleUI(): VoiceUI {
 // ---------------------------------------------------------------------------
 
 const theme = {
+  background: "#1a1b26",
+  surface: "#0d1018",
   text: "#c0caf5",
   muted: "#565f89",
   you: "#7dcfff",
@@ -138,31 +170,38 @@ const theme = {
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 const colors = {
+  background: RGBA.fromHex(theme.background),
   text: RGBA.fromHex(theme.text),
   you: RGBA.fromHex(theme.you),
   assistant: RGBA.fromHex(theme.assistant),
 }
-const AUDIO_FRAME_MS = 33
 const AUDIO_LEVEL_STALE_MS = 250
+const TOOL_DISPLAY_DELAY_MS = 160
 const meterGlyphs = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
 
 function fade(color: RGBA, opacity: number) {
   return RGBA.fromValues(color.r, color.g, color.b, color.a * opacity)
 }
 
-function meter(level: number, phase: number) {
-  return [0, 1, 2, 3]
-    .map((index) => {
-      const value = Math.max(0, Math.min(1, level * (0.72 + Math.sin(phase + index * 1.4) * 0.28)))
-      return meterGlyphs[Math.round(value * (meterGlyphs.length - 1))]
-    })
+function surface(color: RGBA, opacity: number) {
+  return RGBA.fromValues(
+    colors.background.r + (color.r - colors.background.r) * opacity,
+    colors.background.g + (color.g - colors.background.g) * opacity,
+    colors.background.b + (color.b - colors.background.b) * opacity,
+    1,
+  )
+}
+
+function meter(levels: ReadonlyArray<number>) {
+  return levels
+    .map((value) => meterGlyphs[Math.round(Math.max(0, Math.min(1, value)) * (meterGlyphs.length - 1))])
     .join("")
 }
 
 // Tiny JSON tokenizer for syntax-highlighted tool results.
 function jsonTokens(json: string) {
   const tokens: Array<{ text: string; color: string }> = []
-  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|(true|false|null)|([{}\[\],:]+|\s+)/g
+  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|(true|false|null)|([{}[\],:]+|\s+)/g
   for (const match of json.matchAll(pattern)) {
     if (match[1] !== undefined) {
       tokens.push({ text: match[1], color: match[2] ? theme.key : theme.string })
@@ -182,71 +221,114 @@ function jsonTokens(json: string) {
   return tokens
 }
 
-// `kind` never changes after creation, so branching once here is safe; the
-// property reads inside JSX stay reactive through the store proxy.
-function MessageRow(props: { message: Message; details: boolean; assistantLevel: () => number; animate: boolean }) {
+function RevealedText(props: {
+  text: string
+  reveals: ReadonlyArray<TextReveal>
+  now: () => number
+  opacity: () => number
+}) {
+  return (
+    <>
+      <span style={{ fg: fade(colors.text, props.opacity()) }}>
+        {props.text.slice(0, props.reveals[0]?.offset ?? props.text.length)}
+      </span>
+      <For each={props.reveals}>
+        {(reveal, index) => (
+          <span style={{ fg: fade(colors.text, props.opacity() * textRevealOpacity(props.now(), reveal.at)) }}>
+            {props.text.slice(reveal.offset, props.reveals[index() + 1]?.offset ?? props.text.length)}
+          </span>
+        )}
+      </For>
+    </>
+  )
+}
+
+// Message transitions preserve unchanged object identities. A changed message
+// gets a new object, so keyed <For> replaces that row and this branch reruns.
+function MessageRow(props: {
+  message: Message
+  details: boolean
+  assistantLevel: () => number
+  userLevel: () => number
+  now: () => number
+  animate: boolean
+  microphoneMuted: boolean
+  previousKind?: Message["kind"]
+}) {
   const message = props.message
-  if (message.kind === "user")
+  if (message.kind === "user") {
+    const transcribing = () => message.transcribing && !props.microphoneMuted
+    const pulse = () =>
+      !props.animate || !transcribing() ? 0 : Math.max(props.userLevel(), transcriptionPulse(props.now()) * 0.12)
     return (
       <box
+        width="100%"
         flexDirection="column"
         flexShrink={0}
         border={["left"]}
-        borderColor={fade(colors.you, 0.38)}
-        backgroundColor={fade(colors.you, 0.035)}
+        borderColor={fade(colors.you, 0.38 + pulse() * 0.32)}
+        backgroundColor={surface(colors.you, 0.035 + pulse() * 0.07)}
         paddingLeft={1}
         paddingRight={1}
         marginTop={1}
       >
-        <text fg={fade(colors.you, 0.72)}>
-          <b>you</b>
-          {"  "}
-          <span style={{ fg: fade(colors.text, 0.74) }}>{message.text ?? "transcribing"}</span>
+        <text width="100%" minWidth={0} wrapMode="word">
+          <RevealedText
+            text={message.text ?? "transcribing"}
+            reveals={message.reveals}
+            now={props.now}
+            opacity={() => 0.74 + pulse() * 0.2}
+          />
         </text>
       </box>
     )
+  }
   if (message.kind === "assistant") {
     const pulse = () => (!props.animate || !message.streaming ? 0.5 : props.assistantLevel())
     return (
       <box
+        width="100%"
         flexDirection="column"
         flexShrink={0}
         border={["left"]}
         borderColor={fade(colors.assistant, message.streaming ? 0.58 + pulse() * 0.42 : 0.3)}
-        backgroundColor={fade(colors.assistant, message.streaming ? 0.055 + pulse() * 0.11 : 0.025)}
+        backgroundColor={surface(colors.assistant, message.streaming ? 0.055 + pulse() * 0.11 : 0.025)}
         paddingLeft={1}
         paddingRight={1}
         marginTop={1}
       >
-        <text fg={fade(colors.assistant, message.streaming ? 0.82 + pulse() * 0.18 : 0.58)}>
-          <b>assistant</b>
-          {"  "}
-          <span style={{ fg: fade(colors.text, message.streaming ? 1 : 0.7) }}>{message.text}</span>
+        <text width="100%" minWidth={0} wrapMode="word">
+          <RevealedText
+            text={message.text}
+            reveals={message.reveals}
+            now={props.now}
+            opacity={() => (message.streaming ? 1 : 0.7)}
+          />
         </text>
       </box>
     )
   }
   if (message.kind === "tool")
     return (
-      <box flexDirection="column" paddingLeft={2}>
-        <box flexDirection="row" gap={1}>
-          {message.output === undefined ? (
-            props.animate ? (
-              <spinner frames={SPINNER_FRAMES} interval={80} color={theme.number} />
+      <box width="100%" flexDirection="column" paddingLeft={2} marginTop={props.previousKind === "tool" ? 0 : 1}>
+        <box width="100%" minWidth={0} flexDirection="row">
+          <box width={2} flexShrink={0}>
+            {message.output === undefined ? (
+              props.animate ? (
+                <spinner frames={SPINNER_FRAMES} interval={80} color={theme.number} />
+              ) : (
+                <text fg={theme.number}>⋯</text>
+              )
             ) : (
-              <text fg={theme.number}>⋯</text>
-            )
-          ) : (
-            <text fg={theme.assistant}>✓</text>
-          )}
-          <text fg={theme.muted}>
-            <span style={{ fg: theme.key }}>{message.name}</span>
-            {"  "}
-            {toolSummary(message.name, message.output)}
+              <text fg={theme.assistant}>✓</text>
+            )}
+          </box>
+          <text flexGrow={1} minWidth={0} wrapMode="word" fg={theme.muted}>
+            <span style={{ fg: theme.key }}>{message.name}</span> {toolSummary(message.name, message.output)}
           </text>
         </box>
         {props.details ? (
-          <text fg={theme.muted} paddingLeft={2}>
+          <text width="100%" minWidth={0} wrapMode="word" fg={theme.muted} paddingLeft={2}>
             <For each={jsonTokens(displayJson({ input: message.input, output: message.output }))}>
               {(token) => <span style={{ fg: token.color }}>{token.text}</span>}
             </For>
@@ -255,33 +337,12 @@ function MessageRow(props: { message: Message; details: boolean; assistantLevel:
       </box>
     )
   return (
-    <text fg={theme.muted} paddingLeft={2}>
-      · {message.text}
-    </text>
-  )
-}
-
-function UserSpeakingBubble(props: { level: () => number | undefined; now: () => number; animate: boolean }) {
-  const pulse = () => (!props.animate ? 0.5 : (props.level() ?? 0.65))
-  const activity = () => {
-    if (!props.animate) return "voice"
-    return meter(Math.max(0.18, props.level() ?? 0.65), props.now() / (props.level() === undefined ? 220 : 320))
-  }
-  return (
-    <box
-      flexDirection="column"
-      flexShrink={0}
-      border={["left"]}
-      borderColor={fade(colors.you, 0.58 + pulse() * 0.42)}
-      backgroundColor={fade(colors.you, 0.055 + pulse() * 0.11)}
-      paddingLeft={1}
-      paddingRight={1}
-      marginTop={1}
-    >
-      <text fg={fade(colors.you, 0.82 + pulse() * 0.18)}>
-        <b>you</b>
-        {"  "}
-        <span style={{ fg: fade(colors.text, 0.8) }}>{activity()}</span>
+    <box width="100%" minWidth={0} flexDirection="row" paddingLeft={2}>
+      <text width={3} flexShrink={0} fg={theme.muted}>
+        ·
+      </text>
+      <text flexGrow={1} minWidth={0} wrapMode="word" fg={theme.muted}>
+        {message.text}
       </text>
     </box>
   )
@@ -291,22 +352,38 @@ export async function createVoiceTUI(options: {
   onInterrupt(): void
   onExit(): void
   onCycleVoice(): void
+  onToggleMicrophone(): void
+  onToggleSpeaker(): void
   reducedMotion?: boolean
 }): Promise<VoiceUI> {
-  const [state, setState] = createSignal({
-    messages: [] as Message[],
-    status: {} as VoiceStatus,
-    details: false,
-  })
+  let view = initialVoiceView()
+  const [messageState, setMessageState] = createStore({ items: [...view.messages] })
+  const [status, setStatus] = createSignal<VoiceStatus>({})
+  const [details, setDetails] = createSignal(false)
   const [animationFrame, setAnimationFrame] = createSignal(performance.now())
+  const animationStartedAt = performance.now()
   const [userActive, setUserActive] = createSignal(false)
   let animationTimer: ReturnType<typeof setInterval> | undefined
   let assistantSegments: Array<{ start: number; end: number; level: number }> = []
+  let assistantSegmentIndex = 0
   let assistantScheduledUntil = 0
   let assistantLevel = 0
   let userTargetLevel = 0
   let userLevel = 0
   let userLevelAt = 0
+  let connectedAt: number | undefined
+  const pendingTools = new Map<
+    string,
+    {
+      name: string
+      input: unknown
+      output?: unknown
+      completed: boolean
+      showAt: number
+      timer: ReturnType<typeof setTimeout>
+    }
+  >()
+  const pendingMetaTimers = new Set<ReturnType<typeof setTimeout>>()
 
   const renderer = await createCliRenderer({
     useMouse: true,
@@ -321,27 +398,50 @@ export async function createVoiceTUI(options: {
     consoleMode: "disabled",
     onDestroy: () => {
       if (animationTimer) clearInterval(animationTimer)
+      pendingTools.forEach((tool) => clearTimeout(tool.timer))
+      pendingMetaTimers.forEach(clearTimeout)
       options.onExit()
     },
   })
 
+  const applyView = (event: VoiceViewEvent) => {
+    const next = transitionVoiceView(view, event)
+    if (next === view) return false
+    view = next
+    setMessageState("items", reconcile([...view.messages], { key: "key" }))
+    return true
+  }
+
   const startAnimation = () => {
-    if (options.reducedMotion) return renderer.requestRender()
+    if (options.reducedMotion) return
     if (animationTimer) return
     animationTimer = setInterval(() => {
       const now = performance.now()
-      assistantSegments = assistantSegments.filter((segment) => segment.end > now)
-      const output = assistantSegments.find((segment) => segment.start <= now)
+      while (assistantSegments[assistantSegmentIndex]?.end <= now) assistantSegmentIndex += 1
+      const segment = assistantSegments[assistantSegmentIndex]
+      const output = segment?.start <= now ? segment : undefined
       const assistantTarget = output?.level ?? 0
       const userTarget = now - userLevelAt < AUDIO_LEVEL_STALE_MS ? userTargetLevel : 0
       assistantLevel += (assistantTarget - assistantLevel) * (assistantTarget > assistantLevel ? 0.5 : 0.16)
       userLevel += (userTarget - userLevel) * (userTarget > userLevel ? 0.5 : 0.18)
       setAnimationFrame(now)
-      renderer.requestRender()
-      if (userActive() || assistantSegments.length > 0 || assistantLevel > 0.01 || userLevel > 0.01) return
+      if (view.revealAnimationEndsAt > 0 && now >= view.revealAnimationEndsAt) applyView({ type: "reveals.completed" })
+      const transcribing =
+        !status().microphoneMuted &&
+        messageState.items.some((message) => message.kind === "user" && message.transcribing)
+      if (
+        userActive() ||
+        transcribing ||
+        now < view.revealAnimationEndsAt ||
+        assistantSegmentIndex < assistantSegments.length ||
+        assistantLevel > 0.01 ||
+        userLevel > 0.01 ||
+        connectionTransitioning(now, connectedAt)
+      )
+        return
       clearInterval(animationTimer)
       animationTimer = undefined
-    }, AUDIO_FRAME_MS)
+    }, PCM_METER_FRAME_MS)
   }
 
   const currentAssistantLevel = () => {
@@ -349,8 +449,7 @@ export async function createVoiceTUI(options: {
     return assistantLevel
   }
   const currentUserLevel = () => {
-    const now = animationFrame()
-    if (now - userLevelAt >= AUDIO_LEVEL_STALE_MS) return undefined
+    animationFrame()
     return userLevel
   }
 
@@ -358,26 +457,49 @@ export async function createVoiceTUI(options: {
     const dimensions = useTerminalDimensions()
     useKeyboard((evt) => {
       if (evt.ctrl && evt.name === "c") return
-      if (evt.name === "v") return options.onCycleVoice()
+      if (evt.repeated || evt.ctrl || evt.meta || evt.option || evt.shift) return
+      if (evt.name === "v") {
+        evt.preventDefault()
+        return options.onCycleVoice()
+      }
+      if (evt.name === "m") {
+        evt.preventDefault()
+        return options.onToggleMicrophone()
+      }
+      if (evt.name === "s") {
+        evt.preventDefault()
+        return options.onToggleSpeaker()
+      }
       if (evt.name === "d") {
-        setState((current) => ({ ...current, details: !current.details }))
-        renderer.requestRender()
+        evt.preventDefault()
+        setDetails((current) => !current)
         return
       }
-      options.onInterrupt()
+      if (evt.name === "escape") {
+        evt.preventDefault()
+        options.onInterrupt()
+      }
     })
-    const statusLine = () =>
+    const runtimeLine = () =>
       [
-        state().status.audio ?? "connecting…",
-        state().status.voice,
-        state().status.model,
-        state().status.project,
-        state().status.session ?? "no session",
-        state().status.server,
-        `v: voice · d: details ${state().details ? "on" : "off"} · any key interrupts · ctrl+c quits`,
+        status().audio ?? "connecting…",
+        status().microphoneMuted ? "mic muted" : undefined,
+        status().speakerMuted ? "speaker muted" : undefined,
+        status().voice,
+        status().model,
+        status().project,
       ]
         .filter(Boolean)
         .join("   ")
+    const microphoneLevel = () => {
+      if (status().microphoneMuted) return 0
+      return Math.max(userActive() ? 0.16 : 0.1, currentUserLevel())
+    }
+    const microphoneOpacity = () => (status().microphoneMuted ? 0.16 : userActive() ? 0.9 : 0.38)
+    const microphoneMeter = () => {
+      if (options.reducedMotion) return meter(connectionMeterLevels(0, microphoneLevel(), -480))
+      return meter(connectionMeterLevels(animationFrame(), microphoneLevel(), connectedAt, animationStartedAt))
+    }
     return (
       <box
         flexDirection="column"
@@ -385,46 +507,102 @@ export async function createVoiceTUI(options: {
         height={dimensions().height}
         paddingLeft={1}
         paddingRight={1}
+        backgroundColor={theme.background}
       >
-        <scrollbox flexGrow={1} stickyScroll stickyStart="bottom" scrollbarOptions={{ visible: false }}>
-          <box flexDirection="column" flexShrink={0}>
-            <For each={state().messages}>
-              {(message) => (
-                <MessageRow
-                  message={message}
-                  details={state().details}
-                  assistantLevel={currentAssistantLevel}
-                  animate={!options.reducedMotion}
-                />
-              )}
-            </For>
-            {userActive() ? (
-              <UserSpeakingBubble level={currentUserLevel} now={animationFrame} animate={!options.reducedMotion} />
-            ) : null}
+        <box width="100%" flexGrow={1} minHeight={0} minWidth={0} backgroundColor={theme.background}>
+          <scrollbox
+            width="100%"
+            height="100%"
+            stickyScroll
+            stickyStart="bottom"
+            scrollbarOptions={{ visible: false }}
+            backgroundColor={theme.background}
+          >
+            <box
+              width="100%"
+              minWidth={0}
+              minHeight={Math.max(0, dimensions().height - 3)}
+              flexDirection="column"
+              flexShrink={0}
+              justifyContent="flex-end"
+              backgroundColor={theme.background}
+            >
+              <For each={messageState.items}>
+                {(message, index) => (
+                  <MessageRow
+                    message={message}
+                    previousKind={messageState.items[index() - 1]?.kind}
+                    details={details()}
+                    assistantLevel={currentAssistantLevel}
+                    userLevel={currentUserLevel}
+                    now={animationFrame}
+                    animate={!options.reducedMotion}
+                    microphoneMuted={status().microphoneMuted === true}
+                  />
+                )}
+              </For>
+            </box>
+          </scrollbox>
+        </box>
+        <box width="100%" height={1} flexShrink={0} backgroundColor={theme.background} />
+        <box width="100%" height={2} flexShrink={0} backgroundColor={theme.surface} paddingLeft={1} paddingRight={1}>
+          <box width="100%" height={1} minWidth={0} flexDirection="row">
+            <text width={5} flexShrink={0} fg={fade(colors.you, microphoneOpacity())}>
+              <b>
+                {status().microphoneMuted
+                  ? "────"
+                  : microphoneMeter()}
+              </b>
+            </text>
+            <text flexGrow={1} minWidth={0} wrapMode="none" truncate fg={fade(colors.text, 0.78)}>
+              {runtimeLine()}
+            </text>
           </box>
-        </scrollbox>
-        <box height={1} marginTop={1}>
-          <text fg={theme.muted}>{statusLine()}</text>
+          <text width="100%" wrapMode="none" truncate fg={theme.muted}>
+            <span style={{ fg: theme.key }}>esc</span> interrupt {"  "}
+            <span style={{ fg: theme.key }}>v</span> voice {"  "}
+            <span style={{ fg: theme.key }}>m</span> mic {"  "}
+            <span style={{ fg: theme.key }}>s</span> speaker {"  "}
+            <span style={{ fg: theme.key }}>d</span> details {details() ? "on" : "off"} {"  "}
+            <span style={{ fg: theme.key }}>ctrl+c</span> quit
+          </text>
         </box>
       </box>
     )
   }
 
-  void render(() => <App />, renderer)
+  await render(() => <App />, renderer)
+  startAnimation()
 
-  const redraw = () => renderer.requestRender()
-  const push = (message: Message) => {
-    setState((current) => ({ ...current, messages: [...current.messages, message] }))
-    redraw()
+  const pushMeta = (text: string) => {
+    if (pendingTools.size === 0) {
+      applyView({ type: "meta", text })
+      return
+    }
+    const showAt = Math.max(...[...pendingTools.values()].map((tool) => tool.showAt))
+    const timer = setTimeout(
+      () => {
+        pendingMetaTimers.delete(timer)
+        applyView({ type: "meta", text })
+      },
+      Math.max(0, showAt - performance.now()) + 1,
+    )
+    pendingMetaTimers.add(timer)
   }
 
   return {
-    meta: (text) => push({ kind: "meta", text }),
+    meta: pushMeta,
     userSpeaking: (active) => {
+      if (active) applyView({ type: "user.started" })
       setUserActive(active)
       if (active) startAnimation()
       if (!active) userTargetLevel = 0
-      redraw()
+    },
+    userReset: () => {
+      setUserActive(false)
+      userTargetLevel = 0
+      userLevel = 0
+      applyView({ type: "user.reset" })
     },
     userAudioLevel: (level) => {
       if (level === undefined) {
@@ -433,25 +611,35 @@ export async function createVoiceTUI(options: {
       }
       userTargetLevel = Math.max(0, Math.min(1, level))
       userLevelAt = performance.now()
-      if (userActive()) startAnimation()
+      if (options.reducedMotion) {
+        userLevel = userTargetLevel
+        setAnimationFrame(userLevelAt)
+        return
+      }
+      startAnimation()
     },
     userCommitted: (itemID) => {
       setUserActive(false)
-      push({ kind: "user", itemID })
+      applyView({ type: "user.committed", itemID })
+      startAnimation()
     },
-    userTranscript: (itemID, text) => {
-      const index = state().messages.findIndex((m) => m.kind === "user" && m.itemID === itemID)
-      if (index === -1) return push({ kind: "user", itemID, text })
-      setState((current) => ({
-        ...current,
-        messages: current.messages.map((message, i) =>
-          i === index && message.kind === "user" ? { ...message, text } : message,
-        ),
-      }))
-      redraw()
+    userTranscript: (itemID, text, final = true) => {
+      applyView({
+        type: "user.transcript",
+        itemID,
+        text,
+        final,
+        now: performance.now(),
+        animate: !options.reducedMotion,
+      })
+      if (!final || view.revealAnimationEndsAt > 0) startAnimation()
     },
     assistantAudio: (level, durationMs) => {
-      if (options.reducedMotion) return redraw()
+      if (options.reducedMotion) return
+      if (assistantSegmentIndex > 512) {
+        assistantSegments = assistantSegments.slice(assistantSegmentIndex)
+        assistantSegmentIndex = 0
+      }
       const now = performance.now()
       const start = Math.max(now, assistantScheduledUntil)
       const end = start + durationMs
@@ -459,59 +647,79 @@ export async function createVoiceTUI(options: {
       assistantScheduledUntil = end
       startAnimation()
     },
+    assistantPlaybackStopped: () => {
+      assistantSegments = []
+      assistantSegmentIndex = 0
+      assistantScheduledUntil = 0
+      assistantLevel = 0
+      setAnimationFrame(performance.now())
+    },
     assistantDelta: (text) => {
-      const index = state().messages.length - 1
-      const last = state().messages[index]
-      if (last?.kind === "assistant" && last.streaming) {
-        setState((current) => ({
-          ...current,
-          messages: current.messages.map((message, i) =>
-            i === index && message.kind === "assistant" ? { ...message, text: message.text + text } : message,
-          ),
-        }))
-        redraw()
-        return
-      }
-      setState((current) => ({
-        ...current,
-        messages: [
-          ...current.messages.map((message) =>
-            message.kind === "assistant" && message.streaming ? { ...message, streaming: false } : message,
-          ),
-          { kind: "assistant", text, streaming: true },
-        ],
-      }))
-      redraw()
+      applyView({
+        type: "assistant.delta",
+        text,
+        now: performance.now(),
+        animate: !options.reducedMotion,
+      })
+      if (view.revealAnimationEndsAt > 0) startAnimation()
+    },
+    assistantTranscript: (text) => {
+      applyView({
+        type: "assistant.transcript",
+        text,
+        now: performance.now(),
+        animate: !options.reducedMotion,
+      })
+      if (view.revealAnimationEndsAt > 0) startAnimation()
     },
     assistantDone: () => {
       assistantSegments = []
+      assistantSegmentIndex = 0
       assistantScheduledUntil = 0
       assistantLevel = 0
-      const index = state().messages.findLastIndex((message) => message.kind === "assistant" && message.streaming)
-      if (index === -1) return
-      setState((current) => ({
-        ...current,
-        messages: current.messages.map((message, i) =>
-          i === index && message.kind === "assistant" ? { ...message, streaming: false } : message,
-        ),
-      }))
-      redraw()
+      applyView({ type: "assistant.done" })
     },
-    toolStart: (callID, name, input) => push({ kind: "tool", callID, name, input }),
+    toolStart: (callID, name, input) => {
+      if (
+        pendingTools.has(callID) ||
+        view.messages.some((message) => message.kind === "tool" && message.callID === callID)
+      )
+        return
+      const pending = {
+        name,
+        input,
+        completed: false,
+        showAt: performance.now() + TOOL_DISPLAY_DELAY_MS,
+        timer: setTimeout(() => {
+          const current = pendingTools.get(callID)
+          if (!current) return
+          pendingTools.delete(callID)
+          applyView({
+            type: "tool.started",
+            callID,
+            name: current.name,
+            input: current.input,
+          })
+          if (current.completed) applyView({ type: "tool.done", callID, output: current.output })
+        }, TOOL_DISPLAY_DELAY_MS),
+      }
+      pendingTools.set(callID, pending)
+    },
     toolDone: (callID, output) => {
-      const index = state().messages.findIndex((message) => message.kind === "tool" && message.callID === callID)
-      if (index === -1) return
-      setState((current) => ({
-        ...current,
-        messages: current.messages.map((message, i) =>
-          i === index && message.kind === "tool" ? { ...message, output } : message,
-        ),
-      }))
-      redraw()
+      const pending = pendingTools.get(callID)
+      if (pending) {
+        pending.output = output
+        pending.completed = true
+        return
+      }
+      applyView({ type: "tool.done", callID, output })
     },
     setStatus: (patch) => {
-      setState((current) => ({ ...current, status: { ...current.status, ...patch } }))
-      redraw()
+      if (connectedAt === undefined && patch.audio !== undefined) {
+        connectedAt = performance.now()
+        startAnimation()
+      }
+      setStatus((current) => ({ ...current, ...patch }))
     },
     close: () => {
       if (!renderer.isDestroyed) renderer.destroy()
