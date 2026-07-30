@@ -60,6 +60,8 @@ interface EffectCmdOpts<Args, A> {
  *
  * Errors propagate to the existing top-level handler in `src/index.ts`; use
  * `fail("...")` for user-visible domain failures (clean exit, formatted message).
+ * The AppRuntime is disposed after the command finishes so its scoped resources
+ * are released without making the CLI entrypoint import the full application graph.
  *
  * Handlers are typically `Effect.fn("Cli.<name>")(function*(args) { ... })`,
  * which adds a named tracing span per CLI invocation. Once all commands use
@@ -74,23 +76,27 @@ export const effectCmd = <Args, A>(opts: EffectCmdOpts<Args, A>) =>
     builder: opts.builder as never,
     async handler(rawArgs) {
       const { AppRuntime } = await import("@/effect/app-runtime")
-      // yargs typing wraps Args in ArgumentsCamelCase<WithDoubleDash<...>>; cast at the boundary.
-      const args = rawArgs as unknown as WithDoubleDash<Args>
-      const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
-      if (!useInstance) {
-        await AppRuntime.runPromise(opts.handler(args))
-        return
-      }
-      const { InstanceStore } = await import("@/project/instance-store")
-      const { InstanceRef } = await import("@/effect/instance-ref")
-      const directory = opts.directory?.(args) ?? process.cwd()
-      const { store, ctx } = await AppRuntime.runPromise(
-        InstanceStore.Service.use((store) => store.load({ directory }).pipe(Effect.map((ctx) => ({ store, ctx })))),
-      )
       try {
-        await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)))
+        // yargs typing wraps Args in ArgumentsCamelCase<WithDoubleDash<...>>; cast at the boundary.
+        const args = rawArgs as unknown as WithDoubleDash<Args>
+        const useInstance = typeof opts.instance === "function" ? opts.instance(args) : opts.instance !== false
+        if (!useInstance) {
+          await AppRuntime.runPromise(opts.handler(args))
+          return
+        }
+        const { InstanceStore } = await import("@/project/instance-store")
+        const { InstanceRef } = await import("@/effect/instance-ref")
+        const directory = opts.directory?.(args) ?? process.cwd()
+        const { store, ctx } = await AppRuntime.runPromise(
+          InstanceStore.Service.use((store) => store.load({ directory }).pipe(Effect.map((ctx) => ({ store, ctx })))),
+        )
+        try {
+          await AppRuntime.runPromise(opts.handler(args).pipe(Effect.provideService(InstanceRef, ctx)))
+        } finally {
+          await AppRuntime.runPromise(store.dispose(ctx))
+        }
       } finally {
-        await AppRuntime.runPromise(store.dispose(ctx))
+        await AppRuntime.dispose().catch(() => {})
       }
     },
   })
