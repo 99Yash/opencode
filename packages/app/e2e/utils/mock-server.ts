@@ -243,7 +243,7 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
       if (config.messageDelay !== undefined) await new Promise((resolve) => setTimeout(resolve, config.messageDelay))
       const message = config.message?.(currentMessageMatch[1]!, currentMessageMatch[2]!)
       if (message === undefined) return json(route, { error: "Message not found" }, undefined, 404)
-      return json(route, currentMessage(message))
+      return json(route, { data: currentMessage(message) })
     }
 
     const currentMessagesMatch = path.match(/^\/api\/session\/([^/]+)\/message$/)
@@ -306,7 +306,12 @@ function currentModels(value: unknown) {
             providerID: provider.id,
             name: model.name,
             capabilities: { tools: true, input: ["text"], output: ["text"] },
-            variants: [],
+            variants: record(model.variants)
+              ? Object.entries(model.variants).map(([id, settings]) => ({
+                  id,
+                  ...(jsonRecord(settings) ? { settings: jsonRecord(settings) } : {}),
+                }))
+              : [],
             time: { released: Date.now() },
             cost: [
               {
@@ -577,14 +582,20 @@ function finish(value: unknown): SessionMessageAssistant["finish"] | undefined {
 }
 
 function jsonRecord(value: unknown): Record<string, JsonValue> | undefined {
-  if (!record(value) || !Object.values(value).every(jsonValue)) return
-  return value as Record<string, JsonValue>
+  if (!record(value)) return
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, item]) => {
+      const next = jsonValue(item)
+      return next === undefined ? [] : [[key, next]]
+    }),
+  )
 }
 
-function jsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return true
-  if (Array.isArray(value)) return value.every(jsonValue)
-  return record(value) && Object.values(value).every(jsonValue)
+function jsonValue(value: unknown): JsonValue | undefined {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") return Number.isFinite(value) ? value : null
+  if (Array.isArray(value)) return value.map((item) => jsonValue(item) ?? null)
+  return jsonRecord(value)
 }
 
 function record(value: unknown): value is Record<string, unknown> {

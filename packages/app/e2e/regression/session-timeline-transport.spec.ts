@@ -111,6 +111,6 @@ test("passes through non-event fetches", async ({ page }) => {
     return response.json()
   })
 
-  expect(health).toEqual({ healthy: true })
+  expect(health).toEqual({ healthy: true, version: "2.0.0", pid: 1 })
   expect(await timeline.transport.connections()).toHaveLength(1)
 })
