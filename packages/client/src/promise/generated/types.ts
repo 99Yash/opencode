@@ -3170,13 +3170,6 @@ export type SessionPendingListInput = { readonly sessionID: { readonly sessionID
 
 export type SessionPendingListOutput = { data: Array<SessionPendingInfo> }["data"]
 
-export type SessionPendingWithdrawInput = {
-  readonly sessionID: { readonly sessionID: string; readonly inputID: string }["sessionID"]
-  readonly inputID: { readonly sessionID: string; readonly inputID: string }["inputID"]
-}
-
-export type SessionPendingWithdrawOutput = { data: boolean }["data"]
-
 export type SessionInstructionsEntryListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
 export type SessionInstructionsEntryListOutput = { data: Array<InstructionEntryInfo> }["data"]
@@ -3225,6 +3218,13 @@ export type SessionMessageInput = {
 }
 
 export type SessionMessageOutput = { data: SessionMessageInfo }["data"]
+
+export type SessionPendingWithdrawInput = {
+  readonly sessionID: { readonly sessionID: string; readonly inputID: string }["sessionID"]
+  readonly inputID: { readonly sessionID: string; readonly inputID: string }["inputID"]
+}
+
+export type SessionPendingWithdrawOutput = { data: boolean }["data"]
 
 export type MessageListInput = {
   readonly sessionID: { readonly sessionID: string }["sessionID"]

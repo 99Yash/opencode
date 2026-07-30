@@ -495,22 +495,6 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         ),
     )
     .add(
-      HttpApiEndpoint.post("session.pending.withdraw", "/api/session/:sessionID/pending/:inputID/withdraw", {
-        params: { sessionID: Session.ID, inputID: SessionMessage.ID },
-        success: Schema.Struct({ data: Schema.Boolean }),
-        error: SessionNotFoundError,
-      })
-        .middleware(sessionLocationMiddleware)
-        .annotateMerge(
-          OpenApi.annotations({
-            identifier: "v2.session.pending.withdraw",
-            summary: "Withdraw pending session input",
-            description:
-              "Withdraw one admitted input before promotion. Returns true when the input was withdrawn or had already been withdrawn, and false when it is no longer pending so callers can fall back to reverting projected history.",
-          }),
-        ),
-    )
-    .add(
       HttpApiEndpoint.get("session.instructions.entry.list", "/api/session/:sessionID/instructions/entries", {
         params: { sessionID: Session.ID },
         success: Schema.Struct({ data: Schema.Array(InstructionEntry.Info) }),
@@ -641,6 +625,22 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
             identifier: "v2.session.message",
             summary: "Get session message",
             description: "Retrieve one projected message owned by the Session.",
+          }),
+        ),
+    )
+    .add(
+      HttpApiEndpoint.post("session.pending.withdraw", "/api/session/:sessionID/pending/:inputID/withdraw", {
+        params: { sessionID: Session.ID, inputID: SessionMessage.ID },
+        success: Schema.Struct({ data: Schema.Boolean }),
+        error: SessionNotFoundError,
+      })
+        .middleware(sessionLocationMiddleware)
+        .annotateMerge(
+          OpenApi.annotations({
+            identifier: "v2.session.pending.withdraw",
+            summary: "Withdraw pending session input",
+            description:
+              "Withdraw one admitted input before promotion. Returns true when the input was withdrawn or had already been withdrawn, and false when it is no longer pending so callers can fall back to reverting projected history.",
           }),
         ),
     )

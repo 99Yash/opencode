@@ -594,7 +594,6 @@ export function Session() {
         void undoMessage(client.api, {
           sessionID: route.sessionID,
           messageID: message.id,
-          pending: data.session.input.has(route.sessionID, message.id),
         }).catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
         prompt()?.set({
           ...projectedPromptInput(message),

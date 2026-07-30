@@ -188,6 +188,12 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
         index.set(item.id, messages.length)
         messages.push(item)
       },
+      reindex(messages: SessionMessageInfo[], index: Map<string, number>, start: number) {
+        for (let position = start; position < messages.length; position++) {
+          const item = messages[position]
+          if (item) index.set(item.id, position)
+        }
+      },
       activeAssistant(messages: SessionMessageInfo[]) {
         const item = messages.findLast((item) => item.type === "assistant" && !item.time.completed)
         return item?.type === "assistant" ? item : undefined
@@ -395,8 +401,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             existing.time.created = event.created
             draft.splice(position, 1)
             draft.push(existing)
-            index.clear()
-            draft.forEach((message, indexValue) => index.set(message.id, indexValue))
+            message.reindex(draft, index, position)
           })
           setStore(
             "session",
@@ -445,15 +450,16 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               const position = index.get(event.data.inputID)
               if (position === undefined) return
               draft.splice(position, 1)
-              index.clear()
-              draft.forEach((message, indexValue) => index.set(message.id, indexValue))
+              index.delete(event.data.inputID)
+              message.reindex(draft, index, position)
             })
-          setStore(
-            "session",
-            "input",
-            event.data.sessionID,
-            (store.session.input[event.data.sessionID] ?? []).filter((id) => id !== event.data.inputID),
-          )
+          if (store.session.input[event.data.sessionID]?.includes(event.data.inputID))
+            setStore(
+              "session",
+              "input",
+              event.data.sessionID,
+              (store.session.input[event.data.sessionID] ?? []).filter((id) => id !== event.data.inputID),
+            )
           break
         }
         case "session.instructions.updated":

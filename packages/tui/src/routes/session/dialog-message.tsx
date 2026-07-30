@@ -46,7 +46,6 @@ export function DialogMessage(props: {
             void undoMessage(client.api, {
               sessionID: props.sessionID,
               messageID: props.messageID,
-              pending: data.session.input.has(props.sessionID, props.messageID),
             }).catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
             dialog.clear()
           },

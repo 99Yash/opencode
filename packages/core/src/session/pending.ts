@@ -1,6 +1,6 @@
 export * as SessionPending from "./pending"
 
-import { and, asc, eq, or } from "drizzle-orm"
+import { and, asc, eq, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
 import {
   Compaction,
@@ -113,20 +113,24 @@ const admittedFromHistory = Effect.fn("SessionPending.admittedFromHistory")(func
   sessionID: SessionSchema.ID,
   id: SessionMessage.ID,
 ) {
-  const rows = yield* db
+  const row = yield* db
     .select()
     .from(EventTable)
-    .where(and(eq(EventTable.aggregate_id, sessionID), eq(EventTable.type, admittedEventType)))
-    .all()
+    .where(
+      and(
+        eq(EventTable.aggregate_id, sessionID),
+        eq(EventTable.type, admittedEventType),
+        sql`json_extract(${EventTable.data}, '$.inputID') = ${id}`,
+      ),
+    )
+    .limit(1)
+    .get()
     .pipe(Effect.orDie)
-  for (const row of rows) {
+  if (row) {
     const decoded = decodeAdmittedEvent(row.data)
-    if (decoded._tag !== "Some" || decoded.value.inputID !== id) continue
-    const base = {
-      id,
-      sessionID,
-      timeCreated: DateTime.makeUnsafe(row.created),
-    }
+    if (decoded._tag !== "Some" || decoded.value.inputID !== id)
+      return yield* Effect.die(new LifecycleConflict({ id }))
+    const base = { id, sessionID, timeCreated: DateTime.makeUnsafe(row.created) }
     return decoded.value.input.type === "user"
       ? User.make({ ...base, ...decoded.value.input })
       : Synthetic.make({ ...base, ...decoded.value.input })
@@ -164,16 +168,22 @@ const wasWithdrawn = Effect.fn("SessionPending.wasWithdrawn")(function* (
   sessionID: SessionSchema.ID,
   id: SessionMessage.ID,
 ) {
-  const rows = yield* db
+  const row = yield* db
     .select({ data: EventTable.data })
     .from(EventTable)
-    .where(and(eq(EventTable.aggregate_id, sessionID), eq(EventTable.type, withdrawnEventType)))
-    .all()
+    .where(
+      and(
+        eq(EventTable.aggregate_id, sessionID),
+        eq(EventTable.type, withdrawnEventType),
+        sql`json_extract(${EventTable.data}, '$.inputID') = ${id}`,
+      ),
+    )
+    .limit(1)
+    .get()
     .pipe(Effect.orDie)
-  return rows.some((row) => {
-    const decoded = decodeWithdrawnEvent(row.data)
-    return decoded._tag === "Some" && decoded.value.inputID === id
-  })
+  if (!row) return false
+  const decoded = decodeWithdrawnEvent(row.data)
+  return decoded._tag === "Some" && decoded.value.inputID === id
 })
 
 export const admit = Effect.fn("SessionPending.admit")(function* (
@@ -341,14 +351,13 @@ export const projectCompactionAdmitted = Effect.fn("SessionPending.projectCompac
  * message insert inside the same event transaction; the deleted row is what
  * makes the table pending-only.
  */
-export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(function* (
+const consumeInput = Effect.fn("SessionPending.consumeInput")(function* (
   db: DatabaseService,
   input: {
     readonly id: SessionMessage.ID
     readonly sessionID: SessionSchema.ID
   },
 ) {
-  if (yield* compaction(db, input.sessionID)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
   const deleted = yield* db
     .delete(SessionPendingTable)
     .where(and(eq(SessionPendingTable.id, input.id), eq(SessionPendingTable.session_id, input.sessionID)))
@@ -361,6 +370,17 @@ export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(funct
   return stored
 })
 
+export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(function* (
+  db: DatabaseService,
+  input: {
+    readonly id: SessionMessage.ID
+    readonly sessionID: SessionSchema.ID
+  },
+) {
+  if (yield* compaction(db, input.sessionID)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  return yield* consumeInput(db, input)
+})
+
 export const projectWithdrawn = Effect.fn("SessionPending.projectWithdrawn")(function* (
   db: DatabaseService,
   input: {
@@ -368,16 +388,7 @@ export const projectWithdrawn = Effect.fn("SessionPending.projectWithdrawn")(fun
     readonly sessionID: SessionSchema.ID
   },
 ) {
-  const deleted = yield* db
-    .delete(SessionPendingTable)
-    .where(and(eq(SessionPendingTable.id, input.id), eq(SessionPendingTable.session_id, input.sessionID)))
-    .returning()
-    .get()
-    .pipe(Effect.orDie)
-  if (!deleted) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
-  const stored = fromRow(deleted)
-  if (stored.type === "compaction") return yield* Effect.die(new LifecycleConflict({ id: input.id }))
-  return stored
+  return yield* consumeInput(db, input)
 })
 
 export const settleCompaction = Effect.fn("SessionPending.settleCompaction")(function* (

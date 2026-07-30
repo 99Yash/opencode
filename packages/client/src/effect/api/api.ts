@@ -249,44 +249,38 @@ export type Endpoint5_21Input = { readonly sessionID: Session.ID }
 export type Endpoint5_21Output = ReadonlyArray<SessionPending.Info>
 export type SessionPendingListOperation<E = never> = (input: Endpoint5_21Input) => Effect.Effect<Endpoint5_21Output, E>
 
-export type Endpoint5_22Input = { readonly sessionID: Session.ID; readonly inputID: SessionMessage.ID }
-export type Endpoint5_22Output = boolean
-export type SessionPendingWithdrawOperation<E = never> = (
+export type Endpoint5_22Input = { readonly sessionID: Session.ID }
+export type Endpoint5_22Output = ReadonlyArray<InstructionEntry.Info>
+export type SessionInstructionsEntryListOperation<E = never> = (
   input: Endpoint5_22Input,
 ) => Effect.Effect<Endpoint5_22Output, E>
 
-export type Endpoint5_23Input = { readonly sessionID: Session.ID }
-export type Endpoint5_23Output = ReadonlyArray<InstructionEntry.Info>
-export type SessionInstructionsEntryListOperation<E = never> = (
-  input: Endpoint5_23Input,
-) => Effect.Effect<Endpoint5_23Output, E>
-
-export type Endpoint5_24Input = {
+export type Endpoint5_23Input = {
   readonly sessionID: Session.ID
   readonly key: InstructionEntry.Key
   readonly value: Schema.Json
 }
-export type Endpoint5_24Output = void
+export type Endpoint5_23Output = void
 export type SessionInstructionsEntryPutOperation<E = never> = (
+  input: Endpoint5_23Input,
+) => Effect.Effect<Endpoint5_23Output, E>
+
+export type Endpoint5_24Input = { readonly sessionID: Session.ID; readonly key: InstructionEntry.Key }
+export type Endpoint5_24Output = void
+export type SessionInstructionsEntryRemoveOperation<E = never> = (
   input: Endpoint5_24Input,
 ) => Effect.Effect<Endpoint5_24Output, E>
 
-export type Endpoint5_25Input = { readonly sessionID: Session.ID; readonly key: InstructionEntry.Key }
-export type Endpoint5_25Output = void
-export type SessionInstructionsEntryRemoveOperation<E = never> = (
-  input: Endpoint5_25Input,
-) => Effect.Effect<Endpoint5_25Output, E>
+export type Endpoint5_25Input = { readonly sessionID: Session.ID; readonly prompt: string }
+export type Endpoint5_25Output = { readonly text: string }
+export type SessionGenerateOperation<E = never> = (input: Endpoint5_25Input) => Effect.Effect<Endpoint5_25Output, E>
 
-export type Endpoint5_26Input = { readonly sessionID: Session.ID; readonly prompt: string }
-export type Endpoint5_26Output = { readonly text: string }
-export type SessionGenerateOperation<E = never> = (input: Endpoint5_26Input) => Effect.Effect<Endpoint5_26Output, E>
-
-export type Endpoint5_27Input = {
+export type Endpoint5_26Input = {
   readonly sessionID: Session.ID
   readonly after?: Event.Seq | undefined
   readonly follow?: boolean | undefined
 }
-export type Endpoint5_27Output =
+export type Endpoint5_26Output =
   | (
       | {
           readonly id: Event.ID
@@ -842,19 +836,25 @@ export type Endpoint5_27Output =
         }
     )
   | EventLog.Synced
-export type SessionLogOperation<E = never> = (input: Endpoint5_27Input) => Stream.Stream<Endpoint5_27Output, E>
+export type SessionLogOperation<E = never> = (input: Endpoint5_26Input) => Stream.Stream<Endpoint5_26Output, E>
+
+export type Endpoint5_27Input = { readonly sessionID: Session.ID }
+export type Endpoint5_27Output = void
+export type SessionInterruptOperation<E = never> = (input: Endpoint5_27Input) => Effect.Effect<Endpoint5_27Output, E>
 
 export type Endpoint5_28Input = { readonly sessionID: Session.ID }
 export type Endpoint5_28Output = void
-export type SessionInterruptOperation<E = never> = (input: Endpoint5_28Input) => Effect.Effect<Endpoint5_28Output, E>
+export type SessionBackgroundOperation<E = never> = (input: Endpoint5_28Input) => Effect.Effect<Endpoint5_28Output, E>
 
-export type Endpoint5_29Input = { readonly sessionID: Session.ID }
-export type Endpoint5_29Output = void
-export type SessionBackgroundOperation<E = never> = (input: Endpoint5_29Input) => Effect.Effect<Endpoint5_29Output, E>
+export type Endpoint5_29Input = { readonly sessionID: Session.ID; readonly messageID: SessionMessage.ID }
+export type Endpoint5_29Output = SessionMessage.Info
+export type SessionMessageOperation<E = never> = (input: Endpoint5_29Input) => Effect.Effect<Endpoint5_29Output, E>
 
-export type Endpoint5_30Input = { readonly sessionID: Session.ID; readonly messageID: SessionMessage.ID }
-export type Endpoint5_30Output = SessionMessage.Info
-export type SessionMessageOperation<E = never> = (input: Endpoint5_30Input) => Effect.Effect<Endpoint5_30Output, E>
+export type Endpoint5_30Input = { readonly sessionID: Session.ID; readonly inputID: SessionMessage.ID }
+export type Endpoint5_30Output = boolean
+export type SessionPendingWithdrawOperation<E = never> = (
+  input: Endpoint5_30Input,
+) => Effect.Effect<Endpoint5_30Output, E>
 
 export interface SessionApi<E = never> {
   readonly list: SessionListOperation<E>

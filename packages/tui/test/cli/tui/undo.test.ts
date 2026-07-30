@@ -3,10 +3,9 @@ import { OpenCode } from "@opencode-ai/client"
 import { undoMessage } from "../../../src/routes/session/undo"
 
 test.each([
-  { pending: true, withdrawn: true, expected: ["withdraw"] },
-  { pending: true, withdrawn: false, expected: ["withdraw", "revert"] },
-  { pending: false, withdrawn: false, expected: ["revert"] },
-])("routes undo for pending=$pending withdrawn=$withdrawn", async ({ pending, withdrawn, expected }) => {
+  { withdrawn: true, expected: ["withdraw"] },
+  { withdrawn: false, expected: ["withdraw", "revert"] },
+])("routes undo for withdrawn=$withdrawn", async ({ withdrawn, expected }) => {
   const calls: string[] = []
   const client = OpenCode.make({
     baseUrl: "http://localhost:3000",
@@ -21,7 +20,7 @@ test.each([
     ),
   })
 
-  await undoMessage(client, { sessionID: "ses_test", messageID: "msg_user", pending })
+  await undoMessage(client, { sessionID: "ses_test", messageID: "msg_user" })
 
   expect(calls).toEqual([...expected])
 })
