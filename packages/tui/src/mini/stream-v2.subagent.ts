@@ -643,6 +643,10 @@ export function createSubagentTracker(input: SubagentTrackerInput): SubagentTrac
       if (event.data.input.type === "user") child.prompts.set(event.data.inputID, event.data.input.data.text)
       return
     }
+    if (event.type === "session.input.withdrawn") {
+      child.prompts.delete(event.data.inputID)
+      return
+    }
     if (event.type === "session.input.promoted") {
       const prompt = child.prompts.get(event.data.inputID)
       if (prompt === undefined) return

@@ -438,6 +438,24 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             )
           })
           break
+        case "session.input.withdrawn": {
+          removePending(event.data.sessionID, event.data.inputID)
+          if (store.session.input[event.data.sessionID]?.includes(event.data.inputID))
+            message.update(event.data.sessionID, (draft, index) => {
+              const position = index.get(event.data.inputID)
+              if (position === undefined) return
+              draft.splice(position, 1)
+              index.clear()
+              draft.forEach((message, indexValue) => index.set(message.id, indexValue))
+            })
+          setStore(
+            "session",
+            "input",
+            event.data.sessionID,
+            (store.session.input[event.data.sessionID] ?? []).filter((id) => id !== event.data.inputID),
+          )
+          break
+        }
         case "session.instructions.updated":
           const instructions = event.metadata?.instructions
           if (

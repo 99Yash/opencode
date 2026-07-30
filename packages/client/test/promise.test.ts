@@ -300,7 +300,7 @@ test("session instructions methods use the public HTTP contract", async () => {
   ])
 })
 
-test("session.pending.list uses the public HTTP contract", async () => {
+test("session.pending uses the public HTTP contract", async () => {
   const requests: Array<{ method: string; url: string }> = []
   const pending = [
     {
@@ -317,14 +317,22 @@ test("session.pending.list uses the public HTTP contract", async () => {
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init)
       requests.push({ method: request.method, url: request.url })
-      return Response.json({ data: pending })
+      return Response.json({ data: request.method === "GET" ? pending : true })
     },
   })
 
   const result = await client.session.pending.list({ sessionID: "ses_test" })
+  const withdrawn = await client.session.pending.withdraw({ sessionID: "ses_test", inputID: "msg_pending" })
 
   expect(result).toEqual(pending)
-  expect(requests).toEqual([{ method: "GET", url: "http://localhost:3000/api/session/ses_test/pending" }])
+  expect(withdrawn).toBe(true)
+  expect(requests).toEqual([
+    { method: "GET", url: "http://localhost:3000/api/session/ses_test/pending" },
+    {
+      method: "POST",
+      url: "http://localhost:3000/api/session/ses_test/pending/msg_pending/withdraw",
+    },
+  ])
 })
 
 test("event.subscribe exposes the Promise event stream wire projection", async () => {

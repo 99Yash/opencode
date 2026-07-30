@@ -911,6 +911,12 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       })
       return
     }
+    if (event.type === "session.input.withdrawn") {
+      state.admitted.delete(event.data.inputID)
+      state.pending.delete(event.data.inputID)
+      syncPending()
+      return
+    }
     if (event.type === "session.input.promoted") {
       const waiting = state.wait?.messageID === event.data.inputID
       if (state.wait) promoteWait(state.wait, true, event.data.inputID)

@@ -76,6 +76,8 @@ import type {
   Endpoint5_28Output,
   Endpoint5_29Input,
   Endpoint5_29Output,
+  Endpoint5_30Input,
+  Endpoint5_30Output,
   Endpoint6_0Input,
   Endpoint6_0Output,
   Endpoint7_0Input,
@@ -490,7 +492,7 @@ const Endpoint5_21 = (raw: RawClient["server.session"]) => (input: Endpoint5_21I
 
 const Endpoint5_22 = (raw: RawClient["server.session"]) => (input: Endpoint5_22Input) =>
   preserveEffect<Endpoint5_22Output>()(
-    raw["session.instructions.entry.list"]({ params: { sessionID: input["sessionID"] } }).pipe(
+    raw["session.pending.withdraw"]({ params: { sessionID: input["sessionID"], inputID: input["inputID"] } }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
@@ -498,29 +500,37 @@ const Endpoint5_22 = (raw: RawClient["server.session"]) => (input: Endpoint5_22I
 
 const Endpoint5_23 = (raw: RawClient["server.session"]) => (input: Endpoint5_23Input) =>
   preserveEffect<Endpoint5_23Output>()(
+    raw["session.instructions.entry.list"]({ params: { sessionID: input["sessionID"] } }).pipe(
+      Effect.mapError(mapClientError),
+      Effect.map((value) => value.data),
+    ),
+  )
+
+const Endpoint5_24 = (raw: RawClient["server.session"]) => (input: Endpoint5_24Input) =>
+  preserveEffect<Endpoint5_24Output>()(
     raw["session.instructions.entry.put"]({
       params: { sessionID: input["sessionID"], key: input["key"] },
       payload: { value: input["value"] },
     }).pipe(Effect.mapError(mapClientError)),
   )
 
-const Endpoint5_24 = (raw: RawClient["server.session"]) => (input: Endpoint5_24Input) =>
-  preserveEffect<Endpoint5_24Output>()(
+const Endpoint5_25 = (raw: RawClient["server.session"]) => (input: Endpoint5_25Input) =>
+  preserveEffect<Endpoint5_25Output>()(
     raw["session.instructions.entry.remove"]({ params: { sessionID: input["sessionID"], key: input["key"] } }).pipe(
       Effect.mapError(mapClientError),
     ),
   )
 
-const Endpoint5_25 = (raw: RawClient["server.session"]) => (input: Endpoint5_25Input) =>
-  preserveEffect<Endpoint5_25Output>()(
+const Endpoint5_26 = (raw: RawClient["server.session"]) => (input: Endpoint5_26Input) =>
+  preserveEffect<Endpoint5_26Output>()(
     raw["session.generate"]({ params: { sessionID: input["sessionID"] }, payload: { prompt: input["prompt"] } }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
     ),
   )
 
-const Endpoint5_26 = (raw: RawClient["server.session"]) => (input: Endpoint5_26Input) =>
-  preserveStream<Endpoint5_26Output>()(
+const Endpoint5_27 = (raw: RawClient["server.session"]) => (input: Endpoint5_27Input) =>
+  preserveStream<Endpoint5_27Output>()(
     Stream.unwrap(
       raw["session.log"]({
         params: { sessionID: input["sessionID"] },
@@ -532,18 +542,18 @@ const Endpoint5_26 = (raw: RawClient["server.session"]) => (input: Endpoint5_26I
     ),
   )
 
-const Endpoint5_27 = (raw: RawClient["server.session"]) => (input: Endpoint5_27Input) =>
-  preserveEffect<Endpoint5_27Output>()(
-    raw["session.interrupt"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
-  )
-
 const Endpoint5_28 = (raw: RawClient["server.session"]) => (input: Endpoint5_28Input) =>
   preserveEffect<Endpoint5_28Output>()(
-    raw["session.background"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
+    raw["session.interrupt"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
   )
 
 const Endpoint5_29 = (raw: RawClient["server.session"]) => (input: Endpoint5_29Input) =>
   preserveEffect<Endpoint5_29Output>()(
+    raw["session.background"]({ params: { sessionID: input["sessionID"] } }).pipe(Effect.mapError(mapClientError)),
+  )
+
+const Endpoint5_30 = (raw: RawClient["server.session"]) => (input: Endpoint5_30Input) =>
+  preserveEffect<Endpoint5_30Output>()(
     raw["session.message"]({ params: { sessionID: input["sessionID"], messageID: input["messageID"] } }).pipe(
       Effect.mapError(mapClientError),
       Effect.map((value) => value.data),
@@ -570,13 +580,13 @@ const adaptGroup5 = (raw: RawClient["server.session"]) => ({
   wait: Endpoint5_16(raw),
   revert: { stage: Endpoint5_17(raw), clear: Endpoint5_18(raw), commit: Endpoint5_19(raw) },
   context: Endpoint5_20(raw),
-  pending: { list: Endpoint5_21(raw) },
-  instructions: { entry: { list: Endpoint5_22(raw), put: Endpoint5_23(raw), remove: Endpoint5_24(raw) } },
-  generate: Endpoint5_25(raw),
-  log: Endpoint5_26(raw),
-  interrupt: Endpoint5_27(raw),
-  background: Endpoint5_28(raw),
-  message: Endpoint5_29(raw),
+  pending: { list: Endpoint5_21(raw), withdraw: Endpoint5_22(raw) },
+  instructions: { entry: { list: Endpoint5_23(raw), put: Endpoint5_24(raw), remove: Endpoint5_25(raw) } },
+  generate: Endpoint5_26(raw),
+  log: Endpoint5_27(raw),
+  interrupt: Endpoint5_28(raw),
+  background: Endpoint5_29(raw),
+  message: Endpoint5_30(raw),
 })
 
 const Endpoint6_0 = (raw: RawClient["server.message"]) => (input: Endpoint6_0Input) =>

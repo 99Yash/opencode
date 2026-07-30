@@ -175,6 +175,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.forked": () => Effect.void,
       "session.input.promoted": () => Effect.void,
       "session.input.admitted": () => Effect.void,
+      "session.input.withdrawn": () => Effect.void,
       "session.execution.started": () => Effect.void,
       "session.execution.succeeded": () => clearCurrentRetry,
       "session.execution.failed": () => clearCurrentRetry,

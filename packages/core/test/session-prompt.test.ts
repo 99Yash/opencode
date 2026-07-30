@@ -996,6 +996,52 @@ describe("Session.pending", () => {
     }),
   )
 
+  it.effect("withdraws an interrupted input before promotion without resurrecting exact retries", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+
+      const admitted = yield* session.prompt({
+        id: SessionMessage.ID.make("msg_withdrawn"),
+        sessionID,
+        text: "Withdraw me",
+        resume: false,
+      })
+
+      yield* session.interrupt(sessionID)
+      expect(yield* session.withdraw({ sessionID, inputID: admitted.id })).toBe(true)
+      expect(yield* session.pending(sessionID)).toEqual([])
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* session.withdraw({ sessionID, inputID: admitted.id })).toBe(true)
+
+      const retried = yield* session.prompt({
+        id: admitted.id,
+        sessionID,
+        text: "Withdraw me",
+        resume: false,
+      })
+      expect(retried.id).toBe(admitted.id)
+      expect(yield* session.pending(sessionID)).toEqual([])
+      expect(yield* eventCount(Bus.versionedType(SessionEvent.InputAdmitted.type, 1))).toBe(1)
+      expect(yield* eventCount(Bus.versionedType(SessionEvent.InputWithdrawn.type, 1))).toBe(1)
+    }),
+  )
+
+  it.effect("leaves promoted input for revert when withdrawal loses the race", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const bus = yield* Bus.Service
+      const { db } = yield* Database.Service
+      const admitted = yield* session.prompt({ sessionID, text: "Promote me", resume: false })
+
+      yield* SessionPending.promote(db, bus, sessionID, "steer")
+
+      expect(yield* session.withdraw({ sessionID, inputID: admitted.id })).toBe(false)
+      expect(yield* session.messages({ sessionID })).toMatchObject([{ id: admitted.id, type: "user" }])
+    }),
+  )
+
   it.effect("lists an unhandled compaction barrier until it settles", () =>
     Effect.gen(function* () {
       yield* setup

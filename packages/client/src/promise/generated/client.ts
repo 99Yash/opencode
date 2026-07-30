@@ -54,6 +54,8 @@ import type {
   SessionContextOutput,
   SessionPendingListInput,
   SessionPendingListOutput,
+  SessionPendingWithdrawInput,
+  SessionPendingWithdrawOutput,
   SessionInstructionsEntryListInput,
   SessionInstructionsEntryListOutput,
   SessionInstructionsEntryPutInput,
@@ -726,6 +728,17 @@ export function make(options: ClientOptions) {
             {
               method: "GET",
               path: `/api/session/${encodeURIComponent(input.sessionID)}/pending`,
+              successStatus: 200,
+              declaredStatuses: [404, 400, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        withdraw: (input: SessionPendingWithdrawInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: SessionPendingWithdrawOutput }>(
+            {
+              method: "POST",
+              path: `/api/session/${encodeURIComponent(input.sessionID)}/pending/${encodeURIComponent(input.inputID)}/withdraw`,
               successStatus: 200,
               declaredStatuses: [404, 400, 401],
               empty: false,

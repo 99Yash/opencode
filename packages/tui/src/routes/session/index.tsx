@@ -64,6 +64,7 @@ import { useToast } from "../../ui/toast"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
 import { projectedPromptInput } from "../../prompt/codec"
+import { undoMessage } from "./undo"
 import { useEpilogue } from "../../context/epilogue"
 import { normalizePath } from "../../util/path"
 import { PermissionPrompt } from "./permission"
@@ -590,9 +591,11 @@ export function Session() {
           dialog.clear()
           return
         }
-        void client.api.session.revert
-          .stage({ sessionID: route.sessionID, messageID: message.id })
-          .catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
+        void undoMessage(client.api, {
+          sessionID: route.sessionID,
+          messageID: message.id,
+          pending: data.session.input.has(route.sessionID, message.id),
+        }).catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
         prompt()?.set({
           ...projectedPromptInput(message),
           pasted: [],

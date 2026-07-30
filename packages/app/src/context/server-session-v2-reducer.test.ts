@@ -153,4 +153,42 @@ describe("v2 session reducer", () => {
 
     expect(result).toMatchObject({ sessionID: "ses_1", missing: "msg_user", touched: [] })
   })
+
+  test("forgets withdrawn input before a later promotion", () => {
+    const reducer = createV2SessionReducer()
+    reducer.reduce(
+      [],
+      event({
+        ...base,
+        id: "evt_admitted",
+        type: "session.input.admitted",
+        data: {
+          sessionID: "ses_1",
+          inputID: "msg_user",
+          input: { type: "user", delivery: "steer", data: { text: "hello" } },
+        },
+      }),
+    )
+    reducer.reduce(
+      [],
+      event({
+        ...base,
+        id: "evt_withdrawn",
+        type: "session.input.withdrawn",
+        data: { sessionID: "ses_1", inputID: "msg_user" },
+      }),
+    )
+
+    const result = reducer.reduce(
+      [],
+      event({
+        ...base,
+        id: "evt_promoted",
+        type: "session.input.promoted",
+        data: { sessionID: "ses_1", inputID: "msg_user" },
+      }),
+    )
+
+    expect(result).toMatchObject({ sessionID: "ses_1", missing: "msg_user", touched: [] })
+  })
 })

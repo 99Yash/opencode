@@ -209,6 +209,10 @@ export interface Interface {
    * unhandled compaction barriers.
    */
   readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<SessionPending.Info[], NotFoundError>
+  readonly withdraw: (input: {
+    sessionID: SessionSchema.ID
+    inputID: SessionMessage.ID
+  }) => Effect.Effect<boolean, NotFoundError>
   /**
    * Durable, ordered session log read. Replays durable session bus after
    * the exclusive `after` cursor, emits a `Synced` marker at the captured
@@ -539,6 +543,10 @@ const layer = Layer.effect(
       pending: Effect.fn("Session.pending")(function* (sessionID) {
         yield* result.get(sessionID)
         return yield* SessionPending.list(db, sessionID)
+      }),
+      withdraw: Effect.fn("Session.withdraw")(function* (input) {
+        yield* result.get(input.sessionID)
+        return yield* SessionPending.withdraw(db, bus, input)
       }),
       log: (input) =>
         Stream.unwrap(

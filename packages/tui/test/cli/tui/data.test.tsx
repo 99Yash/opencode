@@ -853,6 +853,65 @@ test("completes exploration when a queued prompt is promoted", async () => {
   }
 })
 
+test("removes optimistic input when it is withdrawn", async () => {
+  const events = createEventStream()
+  const sessionID = "session-withdrawal"
+  const calls = createFetch((url) => {
+    if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
+  }, events)
+  let data!: ReturnType<typeof useData>
+  let client!: ReturnType<typeof useClient>
+
+  function Probe() {
+    data = useData()
+    client = useClient()
+    return <box />
+  }
+
+  const app = await testRender(() => (
+    <TestTuiContexts>
+      <ClientProvider api={createApi(calls.fetch)}>
+        <ProjectProvider>
+          <DataProvider>
+            <Probe />
+          </DataProvider>
+        </ProjectProvider>
+      </ClientProvider>
+    </TestTuiContexts>
+  ))
+
+  try {
+    await wait(() => client.connection.status() === "connected")
+    emitEvent(events, {
+      id: "evt_prompt_admitted",
+      created: 1,
+      type: "session.input.admitted",
+      durable: durable(sessionID, 1),
+      data: {
+        sessionID,
+        inputID: "message-user",
+        input: { type: "user", data: { text: "Never mind" }, delivery: "steer" },
+      },
+    })
+    await wait(() => data.session.message.get(sessionID, "message-user") !== undefined)
+    expect(data.session.input.has(sessionID, "message-user")).toBe(true)
+
+    emitEvent(events, {
+      id: "evt_prompt_withdrawn",
+      created: 2,
+      type: "session.input.withdrawn",
+      durable: durable(sessionID, 2),
+      data: { sessionID, inputID: "message-user" },
+    })
+
+    await wait(() => data.session.message.get(sessionID, "message-user") === undefined)
+    expect(data.session.input.has(sessionID, "message-user")).toBe(false)
+    expect(data.session.pending.list(sessionID)).toEqual([])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
 test("classifies live tool rows independently of their call ID", async () => {
   const events = createEventStream()
   const sessionID = "session-tool-call-id"

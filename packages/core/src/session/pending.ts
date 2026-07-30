@@ -38,9 +38,14 @@ const encodeUser = Schema.encodeSync(UserData)
 const decodeSynthetic = Schema.decodeUnknownSync(SyntheticData)
 const encodeSynthetic = Schema.encodeSync(SyntheticData)
 const decodeAdmittedEvent = Schema.decodeUnknownOption(SessionEvent.InputAdmitted.data)
+const decodeWithdrawnEvent = Schema.decodeUnknownOption(SessionEvent.InputWithdrawn.data)
 const admittedEventType = Bus.versionedType(
   SessionEvent.InputAdmitted.type,
   SessionEvent.InputAdmitted.durable.version,
+)
+const withdrawnEventType = Bus.versionedType(
+  SessionEvent.InputWithdrawn.type,
+  SessionEvent.InputWithdrawn.durable.version,
 )
 const inboxLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
 
@@ -103,26 +108,11 @@ export const compaction = Effect.fn("SessionPending.compaction")(function* (
   return entry.type === "compaction" ? entry : undefined
 })
 
-/**
- * Reconstruct the admitted record for a pending row that was already consumed
- * by promotion. The projected `session_message` row proves promotion happened;
- * the durable `session.input.admitted` event retains the exact admitted
- * message, including delivery.
- */
-const promotedFromHistory = Effect.fn("SessionPending.promotedFromHistory")(function* (
+const admittedFromHistory = Effect.fn("SessionPending.admittedFromHistory")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
   id: SessionMessage.ID,
 ) {
-  const message = yield* db
-    .select()
-    .from(SessionMessageTable)
-    .where(eq(SessionMessageTable.id, id))
-    .get()
-    .pipe(Effect.orDie)
-  if (message === undefined) return undefined
-  if (message.session_id !== sessionID || (message.type !== "user" && message.type !== "synthetic"))
-    return yield* Effect.die(new LifecycleConflict({ id }))
   const rows = yield* db
     .select()
     .from(EventTable)
@@ -146,6 +136,46 @@ const promotedFromHistory = Effect.fn("SessionPending.promotedFromHistory")(func
   return yield* Effect.die(new LifecycleConflict({ id }))
 })
 
+/**
+ * Reconstruct the admitted record for a pending row that was already consumed
+ * by promotion. The projected `session_message` row proves promotion happened;
+ * the durable `session.input.admitted` event retains the exact admitted
+ * message, including delivery.
+ */
+const promotedFromHistory = Effect.fn("SessionPending.promotedFromHistory")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  id: SessionMessage.ID,
+) {
+  const message = yield* db
+    .select()
+    .from(SessionMessageTable)
+    .where(eq(SessionMessageTable.id, id))
+    .get()
+    .pipe(Effect.orDie)
+  if (message === undefined) return undefined
+  if (message.session_id !== sessionID || (message.type !== "user" && message.type !== "synthetic"))
+    return yield* Effect.die(new LifecycleConflict({ id }))
+  return yield* admittedFromHistory(db, sessionID, id)
+})
+
+const wasWithdrawn = Effect.fn("SessionPending.wasWithdrawn")(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  id: SessionMessage.ID,
+) {
+  const rows = yield* db
+    .select({ data: EventTable.data })
+    .from(EventTable)
+    .where(and(eq(EventTable.aggregate_id, sessionID), eq(EventTable.type, withdrawnEventType)))
+    .all()
+    .pipe(Effect.orDie)
+  return rows.some((row) => {
+    const decoded = decodeWithdrawnEvent(row.data)
+    return decoded._tag === "Some" && decoded.value.inputID === id
+  })
+})
+
 export const admit = Effect.fn("SessionPending.admit")(function* (
   db: DatabaseService,
   bus: Bus.Interface,
@@ -162,6 +192,8 @@ export const admit = Effect.fn("SessionPending.admit")(function* (
   }
   const promoted = yield* promotedFromHistory(db, request.sessionID, request.id)
   if (promoted !== undefined) return promoted
+  if (yield* wasWithdrawn(db, request.sessionID, request.id))
+    return yield* admittedFromHistory(db, request.sessionID, request.id)
   return yield* bus
     .publish(SessionEvent.InputAdmitted, {
       inputID: request.id,
@@ -329,6 +361,25 @@ export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(funct
   return stored
 })
 
+export const projectWithdrawn = Effect.fn("SessionPending.projectWithdrawn")(function* (
+  db: DatabaseService,
+  input: {
+    readonly id: SessionMessage.ID
+    readonly sessionID: SessionSchema.ID
+  },
+) {
+  const deleted = yield* db
+    .delete(SessionPendingTable)
+    .where(and(eq(SessionPendingTable.id, input.id), eq(SessionPendingTable.session_id, input.sessionID)))
+    .returning()
+    .get()
+    .pipe(Effect.orDie)
+  if (!deleted) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  const stored = fromRow(deleted)
+  if (stored.type === "compaction") return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  return stored
+})
+
 export const settleCompaction = Effect.fn("SessionPending.settleCompaction")(function* (
   db: DatabaseService,
   input: { readonly sessionID: SessionSchema.ID },
@@ -405,6 +456,30 @@ export const equivalent = (
     return JSON.stringify(encodeSynthetic(input.data)) === JSON.stringify(encodeSynthetic(expected.input.data))
   return false
 }
+
+export const withdraw = Effect.fn("SessionPending.withdraw")(function* (
+  db: DatabaseService,
+  bus: Bus.Interface,
+  input: { readonly sessionID: SessionSchema.ID; readonly inputID: SessionMessage.ID },
+) {
+  return yield* inboxLocks.withLock(input.sessionID)(
+    Effect.gen(function* () {
+      const pending = yield* find(db, input.inputID)
+      if (!pending) return yield* wasWithdrawn(db, input.sessionID, input.inputID)
+      if (pending.sessionID !== input.sessionID || pending.type === "compaction") return false
+      yield* bus
+        .publish(SessionEvent.InputWithdrawn, input)
+        .pipe(
+          Effect.catchDefect((defect) =>
+            wasWithdrawn(db, input.sessionID, input.inputID).pipe(
+              Effect.flatMap((withdrawn) => (withdrawn ? Effect.void : Effect.die(defect))),
+            ),
+          ),
+        )
+      return true
+    }),
+  )
+})
 
 const publish = Effect.fn("SessionPending.publish")(function* (
   db: DatabaseService,

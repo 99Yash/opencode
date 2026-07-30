@@ -8,6 +8,7 @@ import { errorMessage } from "../../util/error"
 import { DialogFork } from "./dialog-fork"
 import type { PromptInfo } from "../../prompt/history"
 import { projectedPromptInput } from "../../prompt/codec"
+import { undoMessage } from "./undo"
 
 export function DialogMessage(props: {
   messageID: string
@@ -42,9 +43,11 @@ export function DialogMessage(props: {
                 pasted: [],
               })
             }
-            void client.api.session.revert
-              .stage({ sessionID: props.sessionID, messageID: props.messageID })
-              .catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
+            void undoMessage(client.api, {
+              sessionID: props.sessionID,
+              messageID: props.messageID,
+              pending: data.session.input.has(props.sessionID, props.messageID),
+            }).catch((error) => toast.show({ message: errorMessage(error), variant: "error", duration: 5000 }))
             dialog.clear()
           },
         },

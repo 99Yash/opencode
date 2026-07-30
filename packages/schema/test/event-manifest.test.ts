@@ -108,6 +108,7 @@ describe("public event manifest", () => {
         "session.forked.2",
         "session.input.promoted.1",
         "session.input.admitted.1",
+        "session.input.withdrawn.1",
         "session.execution.started.1",
         "session.execution.succeeded.1",
         "session.execution.failed.1",

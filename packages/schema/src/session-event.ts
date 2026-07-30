@@ -155,6 +155,16 @@ export const InputAdmitted = Event.durable({
 })
 export type InputAdmitted = typeof InputAdmitted.Type
 
+export const InputWithdrawn = Event.durable({
+  type: "session.input.withdrawn",
+  ...options,
+  schema: {
+    ...Base,
+    inputID: SessionMessage.ID,
+  },
+})
+export type InputWithdrawn = typeof InputWithdrawn.Type
+
 export namespace Execution {
   export const Started = Event.durable({ type: "session.execution.started", ...options, schema: Base })
   export type Started = typeof Started.Type
@@ -556,6 +566,7 @@ export const Definitions = Event.inventory(
   Forked,
   InputPromoted,
   InputAdmitted,
+  InputWithdrawn,
   Execution.Started,
   Execution.Succeeded,
   Execution.Failed,
