@@ -11,6 +11,7 @@ import type {
   OpenCodeEvent,
   PermissionSavedInfo,
   PermissionRequest,
+  Project,
   ProviderInfo,
   ReferenceInfo,
   SessionInfo,
@@ -19,8 +20,19 @@ import type {
   ShellInfo,
   SkillInfo,
 } from "@opencode-ai/client"
+import type { ResolvedTheme } from "@opencode-ai/theme/tui"
 import type { CliRenderer, KeyEvent, Renderable } from "@opentui/core"
 import type { JSX } from "@opentui/solid"
+import type { Store } from "solid-js/store"
+
+export interface Storage {
+  store<Value extends object>(
+    key: string,
+    options: {
+      readonly initial: Value
+    },
+  ): readonly [Store<Value>, (mutation: (draft: Value) => void) => Promise<void>]
+}
 
 interface LocationCollection<Value> {
   list(location?: LocationRef): Value[] | undefined
@@ -66,6 +78,10 @@ export interface Data {
     }
   }
   readonly project: {
+    list(): Project[]
+    get(projectID: string): Project | undefined
+    sync(): Promise<void>
+    invalidate(): void
     readonly permission: {
       list(projectID: string): PermissionSavedInfo[] | undefined
       sync(projectID: string): Promise<void>
@@ -116,6 +132,10 @@ export interface Page {
 export interface SlotMap {
   readonly app: Readonly<Record<string, never>>
   readonly "home.footer": Readonly<Record<string, never>>
+  readonly "prompt.footer.end": {
+    readonly sessionID?: string
+    readonly mode: "normal" | "shell"
+  }
   readonly "sidebar.content": {
     readonly sessionID: string
   }
@@ -331,6 +351,25 @@ export interface UI {
     navigate(destination: Destination): void
     current(): Route
   }
+  readonly tabs: {
+    /** Returns whether session tabs are enabled for this TUI. */
+    enabled(): boolean
+    /** Returns the currently open root-session tabs. Reactive when read in a Solid computation. */
+    list(): readonly {
+      readonly sessionID: string
+      readonly title?: string
+      readonly active: boolean
+      readonly busy: boolean
+      readonly attention: boolean
+      readonly unread?: "activity" | "error"
+    }[]
+    /** Opens (or focuses) a tab for a session, adding it when not already open. Returns false when tabs are disabled. */
+    open(sessionID: string): boolean
+    /** Focuses an already-open tab and returns false when it is not open. */
+    focus(sessionID: string): boolean
+    /** Closes an open tab, or the active tab when omitted, and returns false when no tab matched. */
+    close(sessionID?: string): boolean
+  }
   readonly slot: <Name extends SlotName>(name: Name, render: Slot<Name>) => () => void
 }
 
@@ -342,7 +381,8 @@ export interface Context {
   readonly client: OpenCodeClient
   readonly data: Data
   readonly attention: Attention
-  readonly theme: any
+  readonly theme: ResolvedTheme
   readonly keymap: Keymap
+  readonly storage: Storage
   readonly ui: UI
 }

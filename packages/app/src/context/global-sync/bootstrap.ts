@@ -131,8 +131,8 @@ export const loadProjectsQuery = (scope: ServerScope, api: ProjectApi) =>
         api.list().then((projects) => {
           return projects
             .filter((p) => !!p?.id)
-            .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
             .map(normalizeProjectInfo)
+            .filter((p) => !!p.worktree && !p.worktree.includes("opencode-test"))
             .slice()
             .sort((a, b) => cmp(a.id, b.id))
         }),

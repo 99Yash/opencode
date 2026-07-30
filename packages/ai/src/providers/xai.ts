@@ -5,13 +5,22 @@ import * as OpenAICompatibleProfiles from "./openai-compatible-profile"
 import * as OpenAICompatibleChat from "../protocols/openai-compatible-chat"
 import * as OpenAIResponses from "../protocols/openai-responses"
 import { XAIImages } from "../protocols/xai-images"
+import type { OpenAIProviderOptionsInput } from "./openai-options"
+import type { ProviderPackage } from "../provider-package"
 
 export const id = ProviderID.make("xai")
 
-export type ModelOptions = RouteDefaultsInput &
+export type ModelOptions = Omit<RouteDefaultsInput, "providerOptions"> &
   ProviderAuthOption<"optional"> & {
     readonly baseURL?: string
+    readonly providerOptions?: OpenAIProviderOptionsInput
   }
+
+export interface Settings extends ProviderPackage.Settings {
+  readonly apiKey?: string
+  readonly baseURL?: string
+  readonly providerOptions?: OpenAIProviderOptionsInput
+}
 
 export type { XAIImageOptions } from "../protocols/xai-images"
 
@@ -42,8 +51,8 @@ const configuredChatRoute = (input: ModelOptions) => {
 export const configure = (input: ModelOptions = {}) => {
   const responsesRoute = configuredResponsesRoute(input)
   const chatRoute = configuredChatRoute(input)
-  const responses = (modelID: string | ModelID) => responsesRoute.model({ id: modelID })
-  const chat = (modelID: string | ModelID) => chatRoute.model({ id: modelID })
+  const responses = (modelID: string | ModelID) => responsesRoute.model<OpenAIProviderOptionsInput>({ id: modelID })
+  const chat = (modelID: string | ModelID) => chatRoute.model<OpenAIProviderOptionsInput>({ id: modelID })
   const image = (modelID: string | ModelID) =>
     XAIImages.model({
       id: modelID,
@@ -63,7 +72,15 @@ export const configure = (input: ModelOptions = {}) => {
 }
 
 export const provider = configure()
-export const model = provider.model
+export const model: ProviderPackage.Definition<Settings, OpenAIProviderOptionsInput>["model"] = (modelID, settings) =>
+  configure({
+    apiKey: settings.apiKey,
+    baseURL: settings.baseURL,
+    headers: settings.headers,
+    http: settings.body === undefined ? undefined : { body: { ...settings.body } },
+    limits: settings.limits,
+    providerOptions: settings.providerOptions,
+  }).model(modelID)
 export const responses = provider.responses
 export const chat = provider.chat
 export const image = provider.image

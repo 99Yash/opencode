@@ -14,6 +14,7 @@ import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
 import { Bus } from "../bus"
 import { FileMutation } from "../file-mutation"
+import { Formatter } from "../formatter"
 import { FileSystem } from "../filesystem"
 import { Watcher } from "../filesystem/watcher"
 import { Form } from "../form"
@@ -253,7 +254,8 @@ const layer = Layer.effect(
         // inside), so don't watch what can't trigger anything.
         if (yield* fs.isDir(operation.target)) continue
         watched.add(operation.target)
-        yield* watcher.subscribe({ path: operation.target, type: "file" }).pipe(
+        const updates = yield* watcher.subscribe({ path: operation.target, type: "file" })
+        yield* updates.pipe(
           Stream.runForEach(() => PubSub.publish(configuredChanges, undefined)),
           Effect.catchCause((cause) =>
             Effect.logError("configured plugin watch failed", { target: operation.target, cause }),
@@ -317,6 +319,7 @@ export const node = makeLocationNode({
     Config.node,
     Bus.node,
     FileMutation.node,
+    Formatter.node,
     FileSystem.node,
     FSUtil.node,
     Global.node,
