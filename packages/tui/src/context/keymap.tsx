@@ -1,6 +1,6 @@
 import type { KeymapActive, KeymapCommand, KeymapLayer, KeymapPending } from "@opencode-ai/plugin/tui/context"
 import { InputRenderable, TextareaRenderable, type KeyEvent, type Renderable } from "@opentui/core"
-import { stringifyKeyStroke, type Binding, type CommandContext, type NormalizedKeyStroke } from "@opentui/keymap"
+import { stringifyKeyStroke, type Binding, type CommandContext } from "@opentui/keymap"
 import {
   registerBackspacePopsPendingSequence,
   registerBaseLayoutFallback,
@@ -337,17 +337,6 @@ function useActiveKeys() {
   return useKeymapSelector((keymap) => keymap.getActiveKeys({ includeMetadata: true }))
 }
 
-function useCommandKeys(commands: Accessor<readonly string[]>): Accessor<readonly NormalizedKeyStroke[]> {
-  useValue()
-  return useKeymapSelector((keymap) => {
-    const ids = commands()
-    const bindings = keymap.getCommandBindings({ visibility: "registered", commands: ids })
-    return ids.flatMap((id) =>
-      (bindings.get(id) ?? []).flatMap((binding) => (binding.sequence[0] ? [binding.sequence[0].stroke] : [])),
-    )
-  })
-}
-
 function useState() {
   const value = useValue()
   const commands = useCommands()
@@ -399,7 +388,6 @@ export const Keymap = {
   useCommands,
   usePendingSequence,
   useActiveKeys,
-  useCommandKeys,
   useState,
 } as const
 

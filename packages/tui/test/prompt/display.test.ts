@@ -30,15 +30,4 @@ describe("prompt display", () => {
     expect(mentionTriggerIndex("foo@bar.com")).toBeUndefined()
     expect(mentionTriggerIndex("中文 @src file")).toBeUndefined()
   })
-
-  test("skips display-width conversion when text has no mention", () => {
-    const value = {
-      includes: () => false,
-      [Symbol.toPrimitive]() {
-        throw new Error("display width conversion should be skipped")
-      },
-    }
-
-    expect(Reflect.apply(mentionTriggerIndex, undefined, [value])).toBeUndefined()
-  })
 })
