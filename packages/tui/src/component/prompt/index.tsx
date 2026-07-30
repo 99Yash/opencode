@@ -144,6 +144,8 @@ function argumentSlash(input: string, commands: readonly KeymapCommand[]) {
 export function Prompt(props: PromptProps) {
   let input: TextareaRenderable
   let anchor: BoxRenderable
+  let promptSyncQueued = false
+  let promptContentChanged = false
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = Keymap.useLeaderActive()
@@ -1223,6 +1225,25 @@ export function Prompt(props: PromptProps) {
     }, 0)
   }
 
+  function queuePromptSync(contentChanged: boolean) {
+    promptContentChanged ||= contentChanged
+    if (promptSyncQueued) return
+    promptSyncQueued = true
+    queueMicrotask(() => {
+      promptSyncQueued = false
+      const syncContent = promptContentChanged
+      promptContentChanged = false
+      if (!input || input.isDestroyed) return
+      if (syncContent) {
+        const value = input.plainText
+        setStore("prompt", "text", value)
+        auto()?.onInput(value)
+        syncExtmarksWithPromptParts()
+      }
+      setCursorVersion((value) => value + 1)
+    })
+  }
+
   async function pasteAttachment(file: { filename?: string; uri: string }) {
     const currentOffset = input.cursorOffset
     const extmarkStart = currentOffset
@@ -1390,14 +1411,8 @@ export function Prompt(props: PromptProps) {
               focusedTextColor={leader() ? theme.text.subdued : theme.text.default}
               minHeight={1}
               maxHeight={maxHeight()}
-              onContentChange={() => {
-                const value = input.plainText
-                setStore("prompt", "text", value)
-                auto()?.onInput(value)
-                syncExtmarksWithPromptParts()
-                setCursorVersion((value) => value + 1)
-              }}
-              onCursorChange={() => setCursorVersion((value) => value + 1)}
+              onContentChange={() => queuePromptSync(true)}
+              onCursorChange={() => queuePromptSync(false)}
               onKeyDown={(e: { preventDefault(): void }) => {
                 if (props.disabled) {
                   e.preventDefault()

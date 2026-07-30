@@ -1,4 +1,5 @@
 import { expect, mock, test } from "bun:test"
+import { TextareaRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -296,6 +297,49 @@ test("session startup prompt is submitted exactly once", async () => {
 
     expect(bodies).toHaveLength(1)
     expect(bodies[0]).toMatchObject({ text: "RESUME_READY" })
+  } finally {
+    if (!setup.renderer.isDestroyed) setup.renderer.destroy()
+    await server.stop()
+    mock.restore()
+  }
+})
+
+test("one raw text burst avoids per-key prompt synchronization", async () => {
+  const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
+  const core = await import("@opentui/core")
+  mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
+  const events = createEventStream()
+  const calls = createFetch(undefined, events)
+  const server = Bun.serve({ port: 0, fetch: (request) => calls.fetch(request) })
+
+  try {
+    const { run } = await import("../src/app")
+    const task = Effect.runPromise(
+      run({
+        app: { name: "test", version: "test", channel: "test" },
+        server: { endpoint: { url: server.url.toString() } },
+        config: { get: async () => ({}), update: async () => ({}) },
+        packages: { resolve: async () => undefined },
+        args: {},
+        log: () => {},
+      }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
+    )
+    while (!(setup.renderer.currentFocusedEditor instanceof TextareaRenderable)) {
+      await Bun.sleep(10)
+    }
+    const input = setup.renderer.currentFocusedEditor
+    const text = "x".repeat(1_000)
+    const start = performance.now()
+    setup.renderer.stdin.emit("data", Buffer.from(text))
+    while (input.plainText.length < text.length && performance.now() - start < 1_000) {
+      await Bun.sleep(1)
+    }
+
+    expect(input.plainText).toBe(text)
+    expect(performance.now() - start).toBeLessThan(1_000)
+
+    setup.renderer.destroy()
+    await task
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     await server.stop()

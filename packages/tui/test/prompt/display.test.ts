@@ -30,4 +30,8 @@ describe("prompt display", () => {
     expect(mentionTriggerIndex("foo@bar.com")).toBeUndefined()
     expect(mentionTriggerIndex("中文 @src file")).toBeUndefined()
   })
+
+  test("skips display-width conversion when text has no mention", () => {
+    expect(mentionTriggerIndex("dictated text ".repeat(5_000))).toBeUndefined()
+  })
 })
