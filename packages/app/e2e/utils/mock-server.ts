@@ -1,10 +1,17 @@
 import type { Page, Route } from "@playwright/test"
+import type {
+  JsonValue,
+  PromptAgentAttachment,
+  PromptFileAttachment,
+  SessionMessageAssistant,
+  SessionMessageInfo,
+  SessionStructuredError,
+} from "@opencode-ai/client/promise"
 
 export interface MockServerConfig {
   provider: unknown | (() => unknown)
   integrationMethods?: Record<string, unknown[]>
   onConnectKey?: (input: { integrationID: string; body: unknown }) => void
-  onInstanceDispose?: () => void
   directory: string
   project: unknown
   sessions: ({ id: string } & Record<string, unknown>)[]
@@ -69,6 +76,15 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
           },
         ],
       })
+    if (path === "/api/provider")
+      return json(route, {
+        location: location(config),
+        data: currentProviders(providerConfig(config)),
+      })
+    if (path === "/api/model") return json(route, { location: location(config), data: currentModels(providerConfig(config)) })
+    if (path === "/api/model/default")
+      return json(route, { location: location(config), data: currentDefaultModel(providerConfig(config)) })
+    if (path === "/api/integration") return json(route, { location: location(config), data: [] })
     if (path === "/api/command") return json(route, { location: location(config), data: [] })
     if (path === "/api/plugin") return json(route, { location: location(config), data: [] })
     if (path === "/api/mcp") return json(route, { location: location(config), data: [] })
@@ -78,7 +94,12 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (integration && route.request().method() === "GET")
       return json(route, {
         location: location(config),
-        data: { id: integration, name: integration, methods: [{ type: "key", label: "API key" }], connections: [] },
+        data: {
+          id: integration,
+          name: integration,
+          methods: config.integrationMethods?.[integration] ?? [{ type: "key", label: "API key" }],
+          connections: [],
+        },
       })
     const integrationConnect = path.match(/^\/api\/integration\/([^/]+)\/connect\/key$/)?.[1]
     if (integrationConnect && route.request().method() === "POST") {
@@ -114,25 +135,40 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
       return json(route, { location: location(config), data: { branch: "main", defaultBranch: "main" } })
     if (path === "/api/vcs/status") return json(route, { location: location(config), data: [] })
     if (path === "/api/vcs/diff") return json(route, { location: location(config), data: config.vcsDiff ?? [] })
-    if (path === "/api/file" && config.fileList)
+    if (path === "/api/fs/list" && config.fileList)
       return json(route, {
         location: location(config),
         data: await config.fileList(url.searchParams.get("path") ?? ""),
       })
-    if (path === "/api/file/read" && config.fileContent) {
-      const value = await config.fileContent(url.searchParams.get("path") ?? "")
+    const fileRead = path.match(/^\/api\/fs\/read\/(.+)$/)?.[1]
+    if (fileRead && config.fileContent) {
+      const value = await config.fileContent(decodeURIComponent(fileRead))
       const content = value && typeof value === "object" && "content" in value ? String(value.content) : String(value ?? "")
       return route.fulfill({ status: 200, body: content, headers: { "content-type": "application/octet-stream" } })
     }
-    if (path === "/api/file/find" && config.findFiles)
+    if (path === "/api/fs/find" && config.findFiles) {
+      const entries = await config.findFiles({
+        query: url.searchParams.get("query") ?? "",
+        dirs: url.searchParams.get("type") ?? undefined,
+        limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined,
+      })
       return json(route, {
         location: location(config),
-        data: await config.findFiles({
-          query: url.searchParams.get("query") ?? "",
-          dirs: url.searchParams.get("type") ?? undefined,
-          limit: url.searchParams.has("limit") ? Number(url.searchParams.get("limit")) : undefined,
-        }),
+        data: Array.isArray(entries)
+          ? entries.map((entry) =>
+              typeof entry === "string"
+                ? {
+                    name: entry.split(/[\\/]/).at(-1) ?? entry,
+                    path: entry,
+                    absolute: `${config.directory}/${entry}`,
+                    type: "directory",
+                    ignored: false,
+                  }
+                : entry,
+            )
+          : entries,
       })
+    }
     if (path === "/api/pty/shells") return json(route, { location: location(config), data: [] })
     if (/^\/api\/pty\/[^/]+\/connect-token$/.test(path))
       return json(route, { location: location(config), data: { ticket: "e2e-ticket", expires_in: 60 } })
@@ -162,7 +198,9 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
       })
     }
     if (path === "/api/session/active") {
-      const statuses = (config.sessionStatus ?? {}) as Record<string, { type?: string }>
+      const statuses = (
+        typeof config.sessionStatus === "function" ? config.sessionStatus() : (config.sessionStatus ?? {})
+      ) as Record<string, { type?: string }>
       return json(route, {
         data: Object.fromEntries(
           Object.entries(statuses).flatMap(([id, status]) =>
@@ -234,8 +272,68 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
 function location(config: MockServerConfig) {
   return {
     directory: config.directory,
-    project: { id: (config.project as { id?: string }).id, directory: config.directory },
+    project: { id: (config.project as { id?: string }).id, directory: config.directory, canonical: config.directory },
   }
+}
+
+function providerConfig(config: MockServerConfig) {
+  return typeof config.provider === "function" ? config.provider() : config.provider
+}
+
+function currentProviders(value: unknown) {
+  if (!record(value) || !Array.isArray(value.all)) return Array.isArray(value) ? value : []
+  return value.all.filter(record).flatMap((provider) =>
+    typeof provider.id === "string" && typeof provider.name === "string"
+      ? [{ id: provider.id, name: provider.name, package: provider.id }]
+      : [],
+  )
+}
+
+function currentModels(value: unknown) {
+  if (!record(value) || !Array.isArray(value.all)) return []
+  return value.all.filter(record).flatMap((provider) => {
+    if (typeof provider.id !== "string" || !record(provider.models)) return []
+    return Object.values(provider.models)
+      .filter(record)
+      .flatMap((model) => {
+        if (typeof model.id !== "string" || typeof model.name !== "string") return []
+        const limit = record(model.limit) ? model.limit : {}
+        const cost = record(model.cost) ? model.cost : {}
+        return [
+          {
+            id: model.id,
+            modelID: model.id,
+            providerID: provider.id,
+            name: model.name,
+            capabilities: { tools: true, input: ["text"], output: ["text"] },
+            variants: [],
+            time: { released: Date.now() },
+            cost: [
+              {
+                input: typeof cost.input === "number" ? cost.input : 0,
+                output: typeof cost.output === "number" ? cost.output : 0,
+                cache: { read: 0, write: 0 },
+              },
+            ],
+            status: "active",
+            enabled: true,
+            limit: {
+              context: typeof limit.context === "number" ? limit.context : 200_000,
+              output: typeof limit.output === "number" ? limit.output : 32_000,
+            },
+          },
+        ]
+      })
+  })
+}
+
+function currentDefaultModel(value: unknown) {
+  if (!record(value) || !record(value.default)) return null
+  const selected = value.default
+  const models = currentModels(value)
+  return models.find(
+    (model) => model.providerID === selected.providerID && model.id === selected.modelID,
+  ) ?? null
 }
 
 function currentPermission(value: unknown) {
@@ -281,63 +379,216 @@ export function currentSession(session: { id: string } & Record<string, unknown>
   }
 }
 
-function currentMessage(value: unknown) {
-  const item = value as {
-    info: Record<string, unknown> & { id: string; role: "user" | "assistant"; time: { created: number } }
-    parts: Array<Record<string, unknown> & { type: string }>
+export function currentMessage(value: unknown): SessionMessageInfo {
+  if (isCurrentMessage(value)) return value
+  if (!record(value) || !record(value.info) || !Array.isArray(value.parts)) throw new Error("Invalid message fixture")
+
+  const info = value.info
+  const parts = value.parts.filter(record)
+  if (typeof info.id !== "string" || !record(info.time) || typeof info.time.created !== "number")
+    throw new Error("Invalid legacy message fixture")
+
+  const time = {
+    created: info.time.created,
+    ...(typeof info.time.completed === "number" ? { completed: info.time.completed } : {}),
   }
-  if (item.info.role === "user") {
+  if (info.role === "user") {
     return {
-      id: item.info.id,
+      id: info.id,
       type: "user",
-      time: item.info.time,
-      text: item.parts
+      time: { created: time.created },
+      text: parts
         .flatMap((part) => (part.type === "text" && typeof part.text === "string" ? [part.text] : []))
         .join("\n"),
+      files: parts.flatMap((part) => (part.type === "file" ? legacyFile(part) : [])),
+      agents: parts.flatMap((part) => (part.type === "agent" ? legacyAgent(part) : [])),
     }
   }
+  if (info.role !== "assistant") throw new Error("Invalid legacy message role")
+
   return {
-    id: item.info.id,
+    id: info.id,
     type: "assistant",
-    time: item.info.time,
-    agent: item.info.agent ?? "build",
-    model: { id: item.info.modelID ?? "model", providerID: item.info.providerID ?? "provider" },
-    cost: item.info.cost,
-    tokens: item.info.tokens,
-    error: item.info.error,
-    content: item.parts.flatMap<unknown>((part) => {
-      if (part.type === "text" || part.type === "reasoning") return [{ type: part.type, text: part.text ?? "" }]
-      if (part.type !== "tool") return []
-      const state = part.state as Record<string, unknown>
-      return [
-        {
-          type: "tool",
-          id: part.id,
-          name: part.tool,
-          time: state.time ?? { created: item.info.time.created },
-          state:
-            state.status === "pending"
-              ? { status: "streaming", input: state.raw ?? JSON.stringify(state.input ?? {}) }
-              : state.status === "completed"
-                ? {
-                    status: "completed",
-                    input: state.input ?? {},
-                    structured: state.metadata ?? {},
-                    content: [{ type: "text", text: state.output ?? "" }],
-                  }
-                : state.status === "error"
-                  ? {
-                      status: "error",
-                      input: state.input ?? {},
-                      structured: state.metadata ?? {},
-                      content: [],
-                      error: { type: "ToolError", message: state.error ?? "Tool failed" },
-                    }
-                  : { status: "running", input: state.input ?? {}, structured: state.metadata ?? {}, content: [] },
-        },
-      ]
-    }),
+    time,
+    agent: typeof info.agent === "string" ? info.agent : typeof info.mode === "string" ? info.mode : "build",
+    model: {
+      id: typeof info.modelID === "string" ? info.modelID : "model",
+      providerID: typeof info.providerID === "string" ? info.providerID : "provider",
+      ...(typeof info.variant === "string" ? { variant: info.variant } : {}),
+    },
+    content: parts.flatMap((part) => legacyAssistantContent(part, time.created)),
+    ...(typeof info.cost === "number" ? { cost: info.cost } : {}),
+    ...(tokens(info.tokens) ? { tokens: tokens(info.tokens) } : {}),
+    ...(structuredError(info.error) ? { error: structuredError(info.error) } : {}),
+    ...(finish(info.finish) ? { finish: finish(info.finish) } : {}),
   }
+}
+
+function isCurrentMessage(value: unknown): value is SessionMessageInfo {
+  return record(value) && typeof value.id === "string" && typeof value.type === "string" && !record(value.info)
+}
+
+function legacyFile(part: Record<string, unknown>): PromptFileAttachment[] {
+  if (typeof part.mime !== "string" || typeof part.url !== "string") return []
+  const data = part.url.match(/^data:[^,]*;base64,(.*)$/)?.[1] ?? ""
+  const source = record(part.source) ? part.source : undefined
+  const sourceText = source && record(source.text) ? source.text : undefined
+  const mention = mentionFrom(sourceText)
+  const uri = source?.type === "resource" && typeof source.uri === "string" ? source.uri : part.url
+  return [
+    {
+      data,
+      mime: part.mime,
+      source: part.url.startsWith("data:") ? { type: "inline" } : { type: "uri", uri },
+      ...(typeof part.filename === "string" ? { name: part.filename } : {}),
+      ...(mention ? { mention } : {}),
+    },
+  ]
+}
+
+function legacyAgent(part: Record<string, unknown>): PromptAgentAttachment[] {
+  if (typeof part.name !== "string") return []
+  const mention = mentionFrom(record(part.source) ? part.source : undefined)
+  return [{ name: part.name, ...(mention ? { mention } : {}) }]
+}
+
+function mentionFrom(value: Record<string, unknown> | undefined) {
+  if (
+    !value ||
+    typeof value.value !== "string" ||
+    typeof value.start !== "number" ||
+    typeof value.end !== "number"
+  )
+    return
+  return { text: value.value, start: value.start, end: value.end }
+}
+
+function legacyAssistantContent(
+  part: Record<string, unknown>,
+  created: number,
+): SessionMessageAssistant["content"] {
+  if (part.type === "text" && typeof part.text === "string")
+    return [{ type: "text", text: part.text, ...(jsonRecord(part.metadata) ? { state: jsonRecord(part.metadata) } : {}) }]
+  if (part.type === "reasoning" && typeof part.text === "string") {
+    const time = record(part.time) ? part.time : undefined
+    return [
+      {
+        type: "reasoning",
+        text: part.text,
+        ...(jsonRecord(part.metadata) ? { state: jsonRecord(part.metadata) } : {}),
+        ...(time && typeof time.start === "number"
+          ? {
+              time: {
+                created: time.start,
+                ...(typeof time.end === "number" ? { completed: time.end } : {}),
+              },
+            }
+          : {}),
+      },
+    ]
+  }
+  if (part.type !== "tool" || typeof part.id !== "string" || typeof part.tool !== "string" || !record(part.state))
+    return []
+
+  const state = part.state
+  const time = record(state.time) ? state.time : undefined
+  const toolTime = {
+    created: time && typeof time.start === "number" ? time.start : created,
+    ...(time && typeof time.start === "number" ? { ran: time.start } : {}),
+    ...(time && typeof time.end === "number" ? { completed: time.end } : {}),
+  }
+  const input = jsonRecord(state.input) ?? {}
+  const metadata = jsonRecord(state.metadata)
+  const base = {
+    type: "tool" as const,
+    id: typeof part.callID === "string" ? part.callID : part.id,
+    name: part.tool,
+    time: toolTime,
+    ...(typeof part.executed === "boolean" ? { executed: part.executed } : {}),
+    ...(jsonRecord(part.providerState) ? { providerState: jsonRecord(part.providerState) } : {}),
+    ...(jsonRecord(part.providerResultState) ? { providerResultState: jsonRecord(part.providerResultState) } : {}),
+  }
+  if (state.status === "pending")
+    return [{ ...base, state: { status: "streaming", input: typeof state.raw === "string" ? state.raw : JSON.stringify(input) } }]
+  if (state.status === "completed")
+    return [
+      {
+        ...base,
+        state: {
+          status: "completed",
+          input,
+          content: [{ type: "text", text: typeof state.output === "string" ? state.output : "" }],
+          ...(metadata ? { metadata } : {}),
+        },
+      },
+    ]
+  if (state.status === "error")
+    return [
+      {
+        ...base,
+        state: {
+          status: "error",
+          input,
+          error: structuredError(state.error) ?? { type: "ToolError", message: "Tool failed" },
+          ...(metadata ? { metadata } : {}),
+        },
+      },
+    ]
+  return [{ ...base, state: { status: "running", input, metadata: metadata ?? {} } }]
+}
+
+function structuredError(value: unknown): SessionStructuredError | undefined {
+  if (typeof value === "string") return { type: "Error", message: value }
+  if (!record(value)) return
+  if (typeof value.type === "string" && typeof value.message === "string")
+    return { type: value.type, message: value.message }
+  if (typeof value.name !== "string" || !record(value.data) || typeof value.data.message !== "string") return
+  return { type: value.name, message: value.data.message }
+}
+
+function tokens(value: unknown): SessionMessageAssistant["tokens"] | undefined {
+  if (!record(value) || !record(value.cache)) return
+  if (
+    typeof value.input !== "number" ||
+    typeof value.output !== "number" ||
+    typeof value.reasoning !== "number" ||
+    typeof value.cache.read !== "number" ||
+    typeof value.cache.write !== "number"
+  )
+    return
+  return {
+    input: value.input,
+    output: value.output,
+    reasoning: value.reasoning,
+    cache: { read: value.cache.read, write: value.cache.write },
+  }
+}
+
+function finish(value: unknown): SessionMessageAssistant["finish"] | undefined {
+  if (
+    value === "stop" ||
+    value === "length" ||
+    value === "tool-calls" ||
+    value === "content-filter" ||
+    value === "error" ||
+    value === "unknown"
+  )
+    return value
+}
+
+function jsonRecord(value: unknown): Record<string, JsonValue> | undefined {
+  if (!record(value) || !Object.values(value).every(jsonValue)) return
+  return value as Record<string, JsonValue>
+}
+
+function jsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") return true
+  if (Array.isArray(value)) return value.every(jsonValue)
+  return record(value) && Object.values(value).every(jsonValue)
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
 function json(route: Route, body: unknown, headers?: Record<string, string>, status = 200) {

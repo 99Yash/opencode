@@ -2,7 +2,7 @@ import type {
   EventSubscribeOutput,
   FileDiffInfo,
   FileDiffLegacyInfo,
-  Project,
+  ProjectListOutput,
   QuestionAnswer,
   QuestionInfo,
   QuestionRequest,
@@ -16,7 +16,6 @@ import type {
 import type { NormalizedProviderListResponse } from "@opencode-ai/session-ui/context"
 
 export type {
-  Project,
   QuestionAnswer,
   QuestionRequest,
   ReferenceInfo,
@@ -24,6 +23,7 @@ export type {
   SessionStatus,
 }
 
+export type Project = Omit<ProjectListOutput[number], "canonical"> & { worktree: string }
 export type Session = SessionV1Info
 export type SessionV2Info = SessionInfo
 export type V2SessionListResponse = SessionsResponse

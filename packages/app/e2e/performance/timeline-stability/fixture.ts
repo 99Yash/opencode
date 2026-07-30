@@ -460,7 +460,7 @@ export function toolPart(
   input: Record<string, unknown>,
   options: ToolOptions<ToolStatus> = {},
 ): Omit<ToolPart, "sessionID" | "messageID"> {
-  const base = { id, type: "tool" as const, callID: `call_${id}`, tool }
+  const base = { id, type: "tool" as const, callID: id, tool }
   if (state === "pending") return { ...base, state: { status: state, input, raw: "" } }
   if (state === "running")
     return {
