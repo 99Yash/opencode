@@ -193,6 +193,7 @@ function QueryProvider(props: ParentProps) {
 function BodyDesignClass() {
   createRenderEffect(() => {
     if (typeof document === "undefined") return
+    document.body.toggleAttribute("data-new-layout", true)
     document.body.classList.remove("text-12-regular")
     document.body.classList.add("font-(family-name:--font-family-text)", "text-[13px]", "font-[440]")
   })
