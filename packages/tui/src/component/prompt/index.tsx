@@ -91,6 +91,20 @@ export type PromptRef = {
 }
 
 const DRAFT_RETENTION_MIN_CHARS = 20
+const PROMPT_SYNC_COMMANDS = [
+  "app.exit",
+  "prompt.clear",
+  "prompt.submit",
+  "prompt.editor",
+  "prompt.stash",
+  "prompt.stash.pop",
+  "prompt.stash.list",
+  "prompt.autocomplete.prev",
+  "prompt.autocomplete.next",
+  "prompt.autocomplete.hide",
+  "prompt.autocomplete.select",
+  "prompt.autocomplete.complete",
+]
 
 function randomIndex(count: number) {
   if (count <= 0) return 0
@@ -146,6 +160,7 @@ export function Prompt(props: PromptProps) {
   let anchor: BoxRenderable
   let promptSyncQueued = false
   let promptContentChanged = false
+  let promptTextInputPending = false
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = Keymap.useLeaderActive()
@@ -167,7 +182,53 @@ export function Prompt(props: PromptProps) {
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = Keymap.use()
+  const activeKeys = Keymap.useActiveKeys()
+  const commandKeys = Keymap.useCommandKeys(() => PROMPT_SYNC_COMMANDS)
+  // Commands must see earlier burst text, while native textarea edits remain frame-batched.
+  const stopPromptSyncInterceptor = keymap.intercept("key", ({ event }) => {
+    const code = event.sequence.charCodeAt(0)
+    const textInput =
+      !event.ctrl &&
+      !event.meta &&
+      !event.super &&
+      !event.hyper &&
+      (event.name === "space" || (code >= 32 && code !== 127))
+    const pending = promptSyncQueued || promptTextInputPending
+    const rawBase = event.baseCode === undefined ? undefined : String.fromCodePoint(event.baseCode)
+    const base = rawBase && rawBase >= "A" && rawBase <= "Z" ? rawBase.toLowerCase() : rawBase
+    const configured = commandKeys().some(
+      (stroke) =>
+        (stroke.name === event.name || stroke.name === base) &&
+        stroke.ctrl === event.ctrl &&
+        stroke.shift === event.shift &&
+        stroke.meta === event.meta &&
+        stroke.super === !!event.super &&
+        (stroke.hyper ?? false) === !!event.hyper,
+    )
+    const matched = pending
+      ? activeKeys().filter(
+          (key) =>
+            (key.stroke.name === event.name || key.stroke.name === base) &&
+            key.stroke.ctrl === event.ctrl &&
+            key.stroke.shift === event.shift &&
+            key.stroke.meta === event.meta &&
+            key.stroke.super === !!event.super &&
+            (key.stroke.hyper ?? false) === !!event.hyper,
+        )
+      : []
+    const bound = matched.some((key) => typeof key.command !== "string" || !key.command.startsWith("input."))
+    if (textInput && (!input?.focused || !pending || (!bound && !configured))) {
+      if (input?.focused) promptTextInputPending = true
+      return
+    }
+    if (!textInput && matched.length > 0 && !bound && !configured) return
+    const value = promptTextInputPending && input && !input.isDestroyed ? input.plainText : undefined
+    promptTextInputPending = false
+    flushPromptSync(value)
+    if (textInput && input?.focused) promptTextInputPending = true
+  })
   const renderer = useRenderer()
+  const flushPromptSyncFrame = async () => flushPromptSync()
   const exit = useExit()
   const dimensions = useTerminalDimensions()
   const theme = useTheme()
@@ -579,6 +640,11 @@ export function Prompt(props: PromptProps) {
   })
 
   onCleanup(() => {
+    stopPromptSyncInterceptor()
+    flushPromptSync(!input || input.isDestroyed ? undefined : input.plainText)
+    if (promptSyncQueued) flushPromptSync(!input || input.isDestroyed ? undefined : input.plainText)
+    renderer.removeFrameCallback(flushPromptSyncFrame)
+    promptSyncQueued = false
     if (store.prompt.text) {
       stashed = { prompt: unwrap(store.prompt), cursor: input.cursorOffset }
     }
@@ -1225,23 +1291,30 @@ export function Prompt(props: PromptProps) {
     }, 0)
   }
 
+  function flushPromptSync(value?: string) {
+    const contentChanged = value !== undefined && value !== store.prompt.text
+    if (!promptSyncQueued && !contentChanged) return
+    promptSyncQueued = false
+    renderer.removeFrameCallback(flushPromptSyncFrame)
+    const syncContent = promptContentChanged || contentChanged
+    promptContentChanged = false
+    if (!input || input.isDestroyed) return
+    if (syncContent) {
+      const text = value ?? input.plainText
+      setStore("prompt", "text", text)
+      auto()?.onInput(text)
+      syncExtmarksWithPromptParts()
+    }
+    setCursorVersion((value) => value + 1)
+  }
+
   function queuePromptSync(contentChanged: boolean) {
     promptContentChanged ||= contentChanged
+    if (contentChanged) promptTextInputPending = false
     if (promptSyncQueued) return
     promptSyncQueued = true
-    queueMicrotask(() => {
-      promptSyncQueued = false
-      const syncContent = promptContentChanged
-      promptContentChanged = false
-      if (!input || input.isDestroyed) return
-      if (syncContent) {
-        const value = input.plainText
-        setStore("prompt", "text", value)
-        auto()?.onInput(value)
-        syncExtmarksWithPromptParts()
-      }
-      setCursorVersion((value) => value + 1)
-    })
+    // Keep derived prompt state to one update per rendered frame across split stdin chunks.
+    renderer.setFrameCallback(flushPromptSyncFrame)
   }
 
   async function pasteAttachment(file: { filename?: string; uri: string }) {

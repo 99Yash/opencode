@@ -32,6 +32,13 @@ describe("prompt display", () => {
   })
 
   test("skips display-width conversion when text has no mention", () => {
-    expect(mentionTriggerIndex("dictated text ".repeat(5_000))).toBeUndefined()
+    const value = {
+      includes: () => false,
+      [Symbol.toPrimitive]() {
+        throw new Error("display width conversion should be skipped")
+      },
+    }
+
+    expect(Reflect.apply(mentionTriggerIndex, undefined, [value])).toBeUndefined()
   })
 })

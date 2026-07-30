@@ -304,7 +304,7 @@ test("session startup prompt is submitted exactly once", async () => {
   }
 })
 
-test("one raw text burst avoids per-key prompt synchronization", async () => {
+test("raw text bursts coalesce prompt synchronization without hiding text from control keys", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
   const core = await import("@opentui/core")
   mock.module("@opentui/core", () => ({ ...core, createCliRenderer: async () => setup.renderer }))
@@ -318,7 +318,7 @@ test("one raw text burst avoids per-key prompt synchronization", async () => {
       run({
         app: { name: "test", version: "test", channel: "test" },
         server: { endpoint: { url: server.url.toString() } },
-        config: { get: async () => ({}), update: async () => ({}) },
+        config: { get: async () => ({ keybinds: { input_clear: "q, z" } }), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         args: {},
         log: () => {},
@@ -328,15 +328,56 @@ test("one raw text burst avoids per-key prompt synchronization", async () => {
       await Bun.sleep(10)
     }
     const input = setup.renderer.currentFocusedEditor
-    const text = "x".repeat(1_000)
-    const start = performance.now()
+    const readPlainText = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(TextareaRenderable.prototype),
+      "plainText",
+    )?.get?.bind(input)
+    if (!readPlainText) throw new Error("Textarea plainText getter is missing")
+    let plainTextReads = 0
+    Object.defineProperty(input, "plainText", {
+      get() {
+        plainTextReads++
+        return readPlainText()
+      },
+    })
+    const text = "x".repeat(999) + "!"
     setup.renderer.stdin.emit("data", Buffer.from(text))
-    while (input.plainText.length < text.length && performance.now() - start < 1_000) {
-      await Bun.sleep(1)
-    }
+    setup.renderer.stdin.emit("data", Buffer.from("\x04"))
+    await Bun.sleep(50)
 
-    expect(input.plainText).toBe(text)
-    expect(performance.now() - start).toBeLessThan(1_000)
+    expect(setup.renderer.isDestroyed).toBe(false)
+    expect(readPlainText()).toBe(text)
+    expect(plainTextReads).toBeLessThanOrEqual(3)
+
+    plainTextReads = 0
+    const dribbled = "y".repeat(100)
+    for (const character of dribbled) {
+      setup.renderer.stdin.emit("data", Buffer.from(character))
+      await Promise.resolve()
+    }
+    await Bun.sleep(50)
+
+    expect(readPlainText()).toBe(text + dribbled)
+    expect(plainTextReads).toBe(1)
+
+    plainTextReads = 0
+    for (const backspace of "\x7f".repeat(dribbled.length)) {
+      setup.renderer.stdin.emit("data", Buffer.from(backspace))
+      await Promise.resolve()
+    }
+    await Bun.sleep(50)
+
+    expect(readPlainText()).toBe(text)
+    expect(plainTextReads).toBe(1)
+
+    input.clear()
+    await Bun.sleep(50)
+    plainTextReads = 0
+    setup.renderer.stdin.emit("data", Buffer.from("az"))
+    await Bun.sleep(50)
+
+    expect(readPlainText()).toBe("")
+    expect(plainTextReads).toBeLessThanOrEqual(2)
 
     setup.renderer.destroy()
     await task
