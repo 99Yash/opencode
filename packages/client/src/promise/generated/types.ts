@@ -2519,6 +2519,7 @@ export type LocationGetOutput = {
   directory: string
   workspaceID?: string
   project: { id: string; directory: string; canonical: string }
+  home: string
 }
 
 export type AgentListInput = {

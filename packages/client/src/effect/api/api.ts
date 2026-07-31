@@ -61,7 +61,7 @@ export interface ServerApi<E = never> {
 export type Endpoint2_0Input = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
 }
-export type Endpoint2_0Output = Location.Info
+export type Endpoint2_0Output = Location.Details
 export type LocationGetOperation<E = never> = (input?: Endpoint2_0Input) => Effect.Effect<Endpoint2_0Output, E>
 
 export interface LocationApi<E = never> {

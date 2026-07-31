@@ -276,7 +276,7 @@ export const loadPathQuery = (
         config: "",
         worktree: location.project.directory,
         directory: location.directory,
-        home: "",
+        home: location.home,
       })),
   })
 

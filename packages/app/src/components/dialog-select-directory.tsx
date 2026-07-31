@@ -68,7 +68,7 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
             config: "",
             worktree: location.project.directory,
             directory: location.directory,
-            home: "",
+            home: location.home,
           }),
         )
         .catch(() => undefined),
