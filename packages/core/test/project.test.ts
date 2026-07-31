@@ -15,8 +15,16 @@ import { testEffect } from "./lib/effect"
 const it = testEffect(Layer.merge(AppNodeBuilder.build(Project.node), AppNodeBuilder.build(Database.node)))
 
 describe("Project.list", () => {
-  it.effect("returns complete projects ordered by recent update", () =>
+  it.live("returns existing projects ordered by recent update", () =>
     Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const older = abs(path.join(tmp.path, "older"))
+      const newer = abs(path.join(tmp.path, "newer"))
+      const deleted = abs(path.join(tmp.path, "deleted"))
+      yield* Effect.promise(() => Promise.all([fs.mkdir(older), fs.mkdir(newer)]))
       const db = (yield* Database.Service).db
       const project = yield* Project.Service
       yield* db
@@ -24,22 +32,29 @@ describe("Project.list", () => {
         .values([
           {
             id: Project.ID.make("older"),
-            worktree: abs("/older"),
+            worktree: older,
             vcs: "git",
             name: "Older",
             icon_color: "#000000",
             commands: { start: "bun dev" },
-            sandboxes: [abs("/older/sandbox")],
+            sandboxes: [abs(path.join(older, "sandbox"))],
             time_created: 1,
             time_updated: 1,
           },
           {
             id: Project.ID.make("newer"),
-            worktree: abs("/newer"),
+            worktree: newer,
             sandboxes: [],
             time_created: 2,
             time_updated: 2,
             time_initialized: 3,
+          },
+          {
+            id: Project.ID.make("deleted"),
+            worktree: deleted,
+            sandboxes: [],
+            time_created: 3,
+            time_updated: 3,
           },
         ])
         .run()
@@ -47,19 +62,19 @@ describe("Project.list", () => {
       expect(yield* project.list()).toEqual([
         {
           id: Project.ID.make("newer"),
-          canonical: abs("/newer"),
+          canonical: newer,
           time: { created: 2, updated: 2, initialized: 3 },
           sandboxes: [],
         },
         {
           id: Project.ID.make("older"),
-          canonical: abs("/older"),
+          canonical: older,
           vcs: "git",
           name: "Older",
           icon: { color: "#000000" },
           commands: { start: "bun dev" },
           time: { created: 1, updated: 1 },
-          sandboxes: [abs("/older/sandbox")],
+          sandboxes: [abs(path.join(older, "sandbox"))],
         },
       ])
     }),

@@ -148,7 +148,7 @@ const layer = Layer.effect(
         .orderBy(desc(ProjectTable.time_updated), asc(ProjectTable.id))
         .all()
         .pipe(Effect.orDie)
-      return rows.map(fromRow)
+      return yield* Effect.filter(rows.map(fromRow), (project) => fs.existsSafe(project.canonical))
     })
 
     const directories = Effect.fn("Project.directories")(function* (input: DirectoriesInput) {
