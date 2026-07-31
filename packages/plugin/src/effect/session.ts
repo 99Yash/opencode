@@ -1,4 +1,4 @@
-import type { SessionApi } from "@opencode-ai/client/effect/api"
+import type { MessageApi, SessionApi } from "@opencode-ai/client/effect/api"
 import type { Message, SystemPart } from "@opencode-ai/ai"
 import type { HttpRequest } from "@opencode-ai/ai/route"
 import type { Agent } from "@opencode-ai/schema/agent"
@@ -29,7 +29,9 @@ export interface SessionHooks {
 
 export type SessionDomain = Pick<
   SessionApi<unknown>,
-  "create" | "get" | "prompt" | "generate" | "command" | "synthetic" | "interrupt" | "rename" | "wait"
+  "create" | "get" | "list" | "prompt" | "generate" | "command" | "synthetic" | "interrupt" | "rename" | "wait"
 > & {
   readonly hook: Hooks<SessionHooks>
+  /** Read a session's projected message history, paginated like the HTTP message list endpoint. */
+  readonly messages: MessageApi<unknown>["list"]
 }
