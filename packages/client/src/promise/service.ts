@@ -37,7 +37,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   let announced = false
   let lastSpawn = 0
   let spawnDelay = 5_000
-  let ownerHeld = false
 
   const announce = (reason: "missing" | "version-mismatch", previousVersion?: string) => {
     if (announced) return
@@ -65,7 +64,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
     const registration = await registered(options.file, true)
 
     if (registration.service !== undefined) {
-      ownerHeld = false
       spawnDelay = 5_000
       const service = registration.service
       const compatible = !service.legacy && (options.version === undefined || service.version === options.version)
@@ -82,7 +80,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
       if (failure !== undefined) throw failure
       const finished = [...contenders].filter(contenderFinished)
       if (finished.some((item) => item.child.exitCode === 0)) {
-        ownerHeld = true
         spawnDelay = Math.min(spawnDelay * 2, 30_000)
       }
       finished.forEach((item) => contenders.delete(item))
