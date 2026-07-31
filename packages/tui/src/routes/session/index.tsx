@@ -510,14 +510,6 @@ export function Session() {
 
   const baseCommands = createMemo(() => [
     {
-      title: "Share session",
-      id: "session.share",
-      suggested: route.type === "session",
-      group: "Session",
-      slash: { name: "share" },
-      run: () => unavailable("Sharing"),
-    },
-    {
       title: "Rename session",
       id: "session.rename",
       group: "Session",
@@ -568,14 +560,6 @@ export function Session() {
         void client.api.session.compact({ sessionID: route.sessionID })
         dialog.clear()
       },
-    },
-    {
-      title: "Unshare session",
-      id: "session.unshare",
-      group: "Session",
-      enabled: false,
-      slash: { name: "unshare" },
-      run: () => unavailable("Unsharing"),
     },
     {
       title: "Undo previous message",
