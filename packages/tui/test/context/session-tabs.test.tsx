@@ -218,6 +218,37 @@ test("user prompt admissions pulse an already-busy background tab", async () => 
   }
 })
 
+test("tracks live inbox recency beyond cached session metadata", async () => {
+  const setup = await renderSessionTabs("background")
+
+  try {
+    expect(setup.tabs.updated("background")).toBe(0)
+    setup.emit({
+      id: "evt_admitted",
+      created: 100,
+      type: "session.input.admitted",
+      durable: { aggregateID: "background", seq: 1, version: 1 },
+      data: {
+        sessionID: "background",
+        inputID: "msg_1",
+        input: { type: "user", data: { text: "work" }, delivery: "steer" },
+      },
+    })
+    await wait(() => setup.tabs.updated("background") === 100)
+
+    setup.emit({
+      id: "evt_succeeded",
+      created: 200,
+      type: "session.execution.succeeded",
+      durable: { aggregateID: "background", seq: 2, version: 1 },
+      data: { sessionID: "background" },
+    })
+    await wait(() => setup.tabs.updated("background") === 200)
+  } finally {
+    setup.destroy()
+  }
+})
+
 test("tracks a temporary new session tab across close and creation", async () => {
   const setup = await renderSessionTabs("first")
 

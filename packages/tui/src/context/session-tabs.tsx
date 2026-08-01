@@ -62,6 +62,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     })
     const fallback = empty()
     const [promptPulses, setPromptPulses] = createSignal<Record<string, number>>({})
+    const [lastActivity, setLastActivity] = createSignal<Record<string, number>>({})
     const [navigationActive, setNavigationActive] = createSignal(false)
     const [navigationSelection, setNavigationSelection] = createSignal<string>()
     const [navigationPendingDone, setNavigationPendingDone] = createSignal<string>()
@@ -83,6 +84,12 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     }
 
     const root = (sessionID: string) => data.session.root(sessionID)
+    const updated = (sessionID: string) =>
+      Math.max(data.session.get(sessionID)?.time.updated ?? 0, lastActivity()[root(sessionID)] ?? 0)
+    const touch = (sessionID: string, created: number) => {
+      const session = root(sessionID)
+      setLastActivity((value) => ({ ...value, [session]: Math.max(value[session] ?? 0, created) }))
+    }
     const title = (sessionID: string, persisted?: string, fallback?: string) => {
       const session = data.session.get(sessionID)
       return session?.title ?? persisted ?? fallback ?? (session ? withTimestampedFallback(session) : undefined)
@@ -121,7 +128,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     const recent = () =>
       orderSessionTabs(state().tabs, (sessionID) => ({
         busy: status(sessionID).busy,
-        updated: data.session.get(sessionID)?.time.updated ?? 0,
+        updated: updated(sessionID),
       }))
 
     function markUnread(sessionID: string, unread: SessionTabUnread) {
@@ -219,13 +226,29 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
       })
     })
 
-    onCleanup(event.on("session.execution.succeeded", (evt) => markUnread(evt.data.sessionID, "activity")))
-    onCleanup(event.on("session.execution.interrupted", (evt) => markUnread(evt.data.sessionID, "activity")))
-    onCleanup(event.on("session.execution.failed", (evt) => markUnread(evt.data.sessionID, "error")))
+    onCleanup(
+      event.on("session.execution.succeeded", (evt) => {
+        touch(evt.data.sessionID, evt.created)
+        markUnread(evt.data.sessionID, "activity")
+      }),
+    )
+    onCleanup(
+      event.on("session.execution.interrupted", (evt) => {
+        touch(evt.data.sessionID, evt.created)
+        markUnread(evt.data.sessionID, "activity")
+      }),
+    )
+    onCleanup(
+      event.on("session.execution.failed", (evt) => {
+        touch(evt.data.sessionID, evt.created)
+        markUnread(evt.data.sessionID, "error")
+      }),
+    )
     onCleanup(
       event.on("session.input.admitted", (evt) => {
         if (!enabled() || evt.data.input.type !== "user") return
         const sessionID = root(evt.data.sessionID)
+        touch(sessionID, evt.created)
         if (current() === sessionID || !state().tabs.some((tab) => tab.sessionID === sessionID)) return
         setPromptPulses((pulses) => ({ ...pulses, [sessionID]: (pulses[sessionID] ?? 0) + 1 }))
       }),
@@ -272,6 +295,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         return state().tabs
       },
       recent,
+      updated,
       newTab() {
         return newTab()
       },

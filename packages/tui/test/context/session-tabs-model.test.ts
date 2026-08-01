@@ -12,6 +12,7 @@ import {
   reopenSessionTab,
   seedSessionTabMotion,
   sessionInboxGroup,
+  sessionInboxWidth,
   sessionTabComplete,
   sessionTabOverflowWidth,
 } from "../../src/context/session-tabs-model"
@@ -40,6 +41,12 @@ describe("session tabs", () => {
     expect(sessionInboxGroup(new Date(2026, 6, 31, 1).getTime(), false, now)).toBe("today")
     expect(sessionInboxGroup(new Date(2026, 6, 30, 1).getTime(), false, now)).toBe("yesterday")
     expect(sessionInboxGroup(new Date(2026, 6, 29, 23).getTime(), false, now)).toBe("earlier")
+  })
+
+  test("sizes the inbox within its minimum and maximum rails", () => {
+    expect(sessionInboxWidth(72)).toBe(28)
+    expect(sessionInboxWidth(120)).toBe(33)
+    expect(sessionInboxWidth(200)).toBe(40)
   })
 
   test("moves a tab to a clamped index and returns the same tabs for no-ops", () => {

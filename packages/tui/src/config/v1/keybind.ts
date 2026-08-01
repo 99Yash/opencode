@@ -85,7 +85,7 @@ export const Definitions = {
   session_export: keybind("<leader>x", "Export session to editor"),
   session_copy: keybind("none", "Copy session transcript"),
   session_move: keybind("none", "Move session"),
-  session_new: keybind("alt+t,ctrl+t,<leader>n", "Create a new session"),
+  session_new: keybind("alt+t,<leader>n", "Create a new session"),
   session_list: keybind("<leader>l", "List all sessions"),
   open_menu: keybind("ctrl+o", "Open recent sessions and projects"),
   session_tab_next: keybind("ctrl+tab,<leader>right,alt+shift+]", "Switch to next open tab"),

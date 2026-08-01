@@ -117,7 +117,7 @@ test("navigates session tabs with leader arrows", () => {
 test("preserves pinned session bindings alongside tab bindings", () => {
   const config = resolve({}, { terminalSuspend: true })
 
-  expect(config.keybinds.get("session.new")).toMatchObject([{ key: "alt+t,ctrl+t,<leader>n" }])
+  expect(config.keybinds.get("session.new")).toMatchObject([{ key: "alt+t,<leader>n" }])
   expect(config.keybinds.has("session.toggle.thinking")).toBe(false)
   expect(config.keybinds.get("session.pin.toggle")).toMatchObject([{ key: "ctrl+f" }])
   expect(config.keybinds.get("session.quick_switch.1")).toMatchObject([{ key: "<leader>1" }])

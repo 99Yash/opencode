@@ -69,6 +69,7 @@ import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogOpen } from "./component/dialog-open"
 import { SessionTabs } from "./component/session-tabs"
 import { SessionInbox } from "./component/session-inbox"
+import { SESSION_INBOX_MIN_TERMINAL_WIDTH } from "./context/session-tabs-model"
 import { ThemeErrorToast } from "./component/theme-error-toast"
 import { ThemeProvider, useTheme, useThemes } from "./context/theme"
 import { Home } from "./routes/home"
@@ -520,7 +521,8 @@ function App(props: { pair?: DialogPairCredentials }) {
   const terminalTitleEnabled = () => config.data.terminal?.title ?? true
   const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
   const pasteSummaryEnabled = () => config.data.prompt?.paste !== "full"
-  const inboxTabsEnabled = () => config.data.tabs?.layout === "inbox" && dimensions().width >= 72
+  const inboxTabsEnabled = () =>
+    config.data.tabs?.layout === "inbox" && dimensions().width >= SESSION_INBOX_MIN_TERMINAL_WIDTH
 
   createEffect(() => {
     renderer.useMouse = config.data.mouse

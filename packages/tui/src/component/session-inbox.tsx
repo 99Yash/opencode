@@ -1,14 +1,14 @@
 import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
 import type { SessionMessageAssistant } from "@opencode-ai/client"
-import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { useConfig } from "../config"
 import { useData } from "../context/data"
 import { Keymap } from "../context/keymap"
 import { usePromptRef } from "../context/prompt"
 import { useRoute } from "../context/route"
 import { useSessionTabs } from "../context/session-tabs"
-import { sessionInboxGroup, type SessionInboxGroup } from "../context/session-tabs-model"
+import { sessionInboxGroup, sessionInboxWidth, type SessionInboxGroup } from "../context/session-tabs-model"
 import { useTheme, useThemes } from "../context/theme"
 import { tint } from "../theme/color"
 import { getScrollAcceleration } from "../util/scroll"
@@ -101,40 +101,42 @@ export function SessionInboxRow(props: {
             >
               {props.row.title}
             </text>
-            <Show when={!props.row.status.busy && (props.row.status.unread || props.row.status.attention)}>
+            <Show when={props.row.status.attention || (!props.row.status.busy && props.row.status.unread)}>
               <text width={2} fg={feedback()} selectable={false}>
                 ●
               </text>
             </Show>
           </box>
           <box height={1}>
-            <Show
-              when={!props.pendingDone && !props.row.status.busy}
+            <Switch
               fallback={
-                <Show
-                  when={props.pendingDone}
-                  fallback={
-                    <Spinner color={accent()}>
-                      <span style={{ fg: accent() }}>{props.verb ?? activityVerb(props.row.sessionID)}</span>
-                    </Spinner>
-                  }
+                <text
+                  height={1}
+                  fg={tint(theme.text.subdued, theme.text.default, props.selected ? 0.25 : 0)}
+                  wrapMode="none"
+                  truncate
+                  selectable={false}
                 >
-                  <text fg={theme.text.feedback.warning.default} wrapMode="none" truncate>
-                    Space again to mark done
-                  </text>
-                </Show>
+                  {props.row.preview}
+                </text>
               }
             >
-              <text
-                height={1}
-                fg={tint(theme.text.subdued, theme.text.default, props.selected ? 0.25 : 0)}
-                wrapMode="none"
-                truncate
-                selectable={false}
-              >
-                {props.row.preview}
-              </text>
-            </Show>
+              <Match when={props.pendingDone}>
+                <text fg={theme.text.feedback.warning.default} wrapMode="none" truncate>
+                  Space again to mark done
+                </text>
+              </Match>
+              <Match when={props.row.status.attention}>
+                <text fg={theme.text.feedback.warning.default} wrapMode="none" truncate>
+                  Action required
+                </text>
+              </Match>
+              <Match when={props.row.status.busy}>
+                <Spinner color={accent()}>
+                  <span style={{ fg: accent() }}>{props.verb ?? activityVerb(props.row.sessionID)}</span>
+                </Spinner>
+              </Match>
+            </Switch>
           </box>
         </box>
       </box>
@@ -158,7 +160,7 @@ export function SessionInbox() {
     clearInterval(verbTimer)
     tabs.navigation.blur()
   })
-  const width = createMemo(() => Math.max(28, Math.min(40, Math.floor(dimensions().width * 0.28))))
+  const width = createMemo(() => sessionInboxWidth(dimensions().width))
   const hueStep = () => (themes.mode() === "light" ? 800 : 200)
   const accent = () => theme.hue.accent[hueStep()]
   const rows = createMemo(() => {
@@ -178,13 +180,14 @@ export function SessionInbox() {
           .filter((part) => part.type === "text")
           .map((part) => part.text)
           .join("\n")
+        const updated = tabs.updated(tab.sessionID)
         return {
           sessionID: tab.sessionID,
           title: session ? withTimestampedFallback(session) : (tab.title ?? "Loading session…"),
-          updated: session?.time.updated ?? 0,
+          updated,
           preview: markdownPreview(preview ?? "") || "No assistant response yet",
           status,
-          group: sessionInboxGroup(session?.time.updated ?? 0, status.busy),
+          group: sessionInboxGroup(updated, status.busy),
         }
       })
       .toSorted((a, b) => b.updated - a.updated)
@@ -204,8 +207,11 @@ export function SessionInbox() {
     if (!row) return
     const top = scroll.scrollTop + row.y - scroll.viewport.y
     const bottom = top + row.height
-    if (top < scroll.scrollTop) scroll.scrollTo(top)
-    else if (bottom > scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(bottom - scroll.viewport.height)
+    if (top < scroll.scrollTop) {
+      scroll.scrollTo(top)
+      return
+    }
+    if (bottom > scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(bottom - scroll.viewport.height)
   })
 
   const leave = () => {

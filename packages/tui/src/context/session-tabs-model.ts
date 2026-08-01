@@ -24,6 +24,12 @@ export const sessionTabOverflowWidth = (count: number) => String(count).length +
 
 export type SessionInboxGroup = "running" | "today" | "yesterday" | "earlier"
 
+export const SESSION_INBOX_MIN_TERMINAL_WIDTH = 72
+
+export function sessionInboxWidth(terminalWidth: number) {
+  return Math.max(28, Math.min(40, Math.floor(terminalWidth * 0.28)))
+}
+
 export function sessionInboxGroup(updated: number, running: boolean, now = Date.now()): SessionInboxGroup {
   if (running) return "running"
   const today = new Date(now)
