@@ -253,8 +253,6 @@ export function SessionInbox() {
       flexShrink={0}
       flexDirection="column"
       backgroundColor={theme.background.default}
-      border={["right"]}
-      borderColor={theme.border.default}
     >
       <box height={3} flexShrink={0} paddingLeft={2} paddingRight={1} flexDirection="row" alignItems="center">
         <text flexGrow={1} fg={theme.text.default} attributes={TextAttributes.BOLD}>
