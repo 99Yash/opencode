@@ -77,6 +77,11 @@
       "bun": "./src/plugin/runtime-plugin-support.bun.ts",
       "node": "./src/plugin/runtime-plugin-support.node.ts",
       "default": "./src/plugin/runtime-plugin-support.node.ts"
+    },
+    "#plugin-loader": {
+      "bun": "./src/plugin/loader.bun.ts",
+      "node": "./src/plugin/loader.node.ts",
+      "default": "./src/plugin/loader.node.ts"
     }
   },
   "dependencies": {

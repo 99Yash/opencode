@@ -7,6 +7,7 @@ import type { Page, Slot, SlotName } from "@opencode-ai/plugin/tui/context"
 import { createStore, produce, reconcile as reconcileStore } from "solid-js/store"
 import { isDeepEqual } from "remeda"
 import "#runtime-plugin-support"
+import { preparePlugin } from "#plugin-loader"
 import { useConfig } from "../config"
 import { useTuiLifecycle } from "../context/runtime"
 import { errorMessage } from "../util/error"
@@ -215,7 +216,7 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver }>
       const memo = local ? undefined : npmFailures.get(target)
       const resolved = memo
         ? { status: "failed" as const, error: memo }
-        : await resolvePlugin(target, local, options, previous, props.packages).catch((error) => ({
+        : await resolvePlugin(target, local, options, previous, props.packages, host.paths.state).catch((error) => ({
             status: "failed" as const,
             error: errorMessage(error),
           }))
@@ -439,6 +440,7 @@ async function resolvePlugin(
   options: Readonly<Record<string, any>> | undefined,
   previous: Registration | undefined,
   packages: PackageResolver,
+  state: string,
 ) {
   // Package entrypoints never change within a session, so a loaded previous
   // version needs no re-resolution (which could otherwise hit npm).
@@ -451,7 +453,7 @@ async function resolvePlugin(
   const version = local ? freshSpecifier(entrypoint, (await stat(new URL(entrypoint))).mtimeMs) : entrypoint
   if (previous && previous.version === version && sameOptions(previous.options, options))
     return { status: "unchanged" as const, plugin: previous.plugin, version }
-  const mod: { readonly default?: unknown } = await import(version)
+  const mod: { readonly default?: unknown } = await import(await preparePlugin(entrypoint, version, state))
   if (!isPlugin(mod.default)) throw new Error(`Invalid V2 TUI plugin module: ${spec}`)
   return { status: "loaded" as const, plugin: mod.default, version }
 }
