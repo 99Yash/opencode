@@ -43,7 +43,6 @@ import { QuestionTool } from "../tool/plugin/question"
 import { ReadToolFileSystem } from "../tool/read-filesystem"
 import { ReadTool } from "../tool/plugin/read"
 import { ShellTool } from "../tool/plugin/shell"
-import { SessionRenameTool } from "../tool/plugin/session-rename"
 import { SkillTool } from "../tool/plugin/skill"
 import { SubagentTool } from "../tool/plugin/subagent"
 import { Tool } from "../tool"
@@ -150,7 +149,6 @@ const pre = [
   QuestionTool.Plugin,
   ReadTool.Plugin,
   ShellTool.Plugin,
-  SessionRenameTool.Plugin,
   SkillTool.Plugin,
   SubagentTool.Plugin,
   WebFetchTool.Plugin,
