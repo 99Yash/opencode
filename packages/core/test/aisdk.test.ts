@@ -51,6 +51,50 @@ const client = LLMClient.layer.pipe(
   ),
 )
 
+it.effect("applies HTTP middleware to AI SDK requests and responses", () =>
+  Effect.gen(function* () {
+    const aisdk = yield* AISDK.Service
+    yield* aisdk.hook.sdk((event) => {
+      const request = event.options.fetch
+      event.sdk = {
+        languageModel: () => ({
+          ...streamModel([]),
+          doStream: async () => {
+            const response = await request("https://provider.test/v1/chat", { method: "POST", body: "before" })
+            const text = await response.text()
+            return {
+              stream: new ReadableStream({
+                start(controller) {
+                  controller.enqueue({ type: "text-start", id: "text" })
+                  controller.enqueue({ type: "text-delta", id: "text", delta: text })
+                  controller.enqueue({ type: "text-end", id: "text" })
+                  controller.enqueue({ type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage })
+                  controller.close()
+                },
+              }),
+            }
+          },
+        }),
+      }
+    })
+
+    const resolved = yield* aisdk.model(
+      model("middleware-test", {
+        fetch: async (request: Request) => new Response(await request.text()),
+      }),
+    )
+    const response = yield* LLMClient.generate(LLM.request({ model: resolved, prompt: "test" }), {
+      http: (request, handler) =>
+        Effect.gen(function* () {
+          const response = yield* handler(new Request(request, { method: request.method, body: "request-hooked" }))
+          return new Response(`${yield* Effect.promise(() => response.text())}-response-hooked`)
+        }),
+    }).pipe(Effect.provide(client))
+
+    expect(response.text).toBe("request-hooked-response-hooked")
+  }),
+)
+
 it.effect("keys language models by package and flattened overlays", () =>
   Effect.gen(function* () {
     const aisdk = yield* AISDK.Service

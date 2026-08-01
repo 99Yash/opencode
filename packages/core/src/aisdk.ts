@@ -1,5 +1,6 @@
 export * as AISDK from "./aisdk"
 
+import { AsyncLocalStorage } from "node:async_hooks"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import type {
   JSONSchema7,
@@ -29,7 +30,7 @@ import {
   type ToolDefinition,
   type UsageInput,
 } from "@opencode-ai/ai"
-import { Auth, Endpoint, type AnyRoute } from "@opencode-ai/ai/route"
+import { Auth, Endpoint, type AnyRoute, type HttpHandler, type HttpMiddleware } from "@opencode-ai/ai/route"
 import { ProviderShared } from "@opencode-ai/ai/protocols/shared"
 import { Cause, Context, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
 import type { ID, Info } from "./model"
@@ -103,7 +104,7 @@ function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   })
 }
 
-function prepareOptions(model: Info, pkg: string) {
+function prepareOptions(model: Info, pkg: string, requests: AsyncLocalStorage<HttpMiddleware>) {
   const projected = mapBodyToProviderOptions(model, pkg)
   const options: Record<string, any> = {
     name: model.providerID,
@@ -150,10 +151,20 @@ function prepareOptions(model: Info, pkg: string) {
       }
     }
 
-    const res = await (typeof customFetch === "function" ? customFetch : fetch)(input, {
-      ...opts,
-      timeout: false,
-    })
+    const requestInit: RequestInit = opts
+    const request =
+      input instanceof Request
+        ? new Request(input, requestInit)
+        : input instanceof URL
+          ? new Request(input.href, requestInit)
+          : new Request(input, requestInit)
+    const handler: HttpHandler = (input) =>
+      Effect.tryPromise({
+        try: () => (typeof customFetch === "function" ? customFetch(input) : fetch(input)),
+        catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+      })
+    const middleware = requests.getStore()
+    const res = await Effect.runPromise(middleware ? middleware(request, handler) : handler(request))
     if (!chunkAbortCtl || typeof chunkTimeout !== "number") return res
     return wrapSSE(res, chunkTimeout, chunkAbortCtl)
   }
@@ -194,6 +205,7 @@ export const locationLayer = Layer.effect(
     let languageHooks: ((event: LanguageEvent) => Effect.Effect<void> | void)[] = []
     const languages = new Map<string, LanguageModelV3>()
     const sdks = new Map<string, SDK>()
+    const requests = new AsyncLocalStorage<HttpMiddleware>()
     const functionIDs = new WeakMap<object, number>()
     let nextFunctionID = 0
     const cacheKey = (input: unknown) =>
@@ -267,7 +279,7 @@ export const locationLayer = Layer.effect(
           })
 
         const packageName = Provider.packageName(model.package)
-        const options = prepareOptions(model, packageName)
+        const options = prepareOptions(model, packageName, requests)
         const sdkKey = cacheKey({
           providerID: model.providerID,
           package: packageName,
@@ -292,14 +304,14 @@ export const locationLayer = Layer.effect(
         return language
       }),
       model: Effect.fn("AISDK.model")(function* (model) {
-        return modelFromLanguage(model, yield* service.language(model))
+        return modelFromLanguage(model, yield* service.language(model), requests)
       }),
     })
     return service
   }),
 )
 
-function modelFromLanguage(info: Info, language: LanguageModelV3) {
+function modelFromLanguage(info: Info, language: LanguageModelV3, requests: AsyncLocalStorage<HttpMiddleware>) {
   const packageName = Provider.packageName(info.package!)
   const projected = mapBodyToProviderOptions(info, packageName)
   const optionKey = providerOptionKey(packageName, info.providerID)
@@ -339,8 +351,11 @@ function modelFromLanguage(info: Info, language: LanguageModelV3) {
     },
     with: () => route,
     model: (input) => Model.make({ ...input, provider: "provider" in input ? input.provider : info.providerID, route }),
-    prepareTransport: (body) => Effect.succeed(body),
-    streamPrepared: (prepared) => streamLanguage(language, prepared as LanguageModelV3CallOptions),
+    prepareTransport: (body, _request, options) => Effect.succeed({ body, middleware: options?.http }),
+    streamPrepared: (prepared) => {
+      const input = prepared as { body: LanguageModelV3CallOptions; middleware?: HttpMiddleware }
+      return streamLanguage(language, input.body, requests, input.middleware)
+    },
   }
   return Model.make({
     id: info.modelID ?? info.id,
@@ -529,13 +544,21 @@ function providerOptions(input: LLMRequest["providerOptions"]): SharedV3Provider
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, jsonObject(value)]))
 }
 
-function streamLanguage(language: LanguageModelV3, options: LanguageModelV3CallOptions) {
+function streamLanguage(
+  language: LanguageModelV3,
+  options: LanguageModelV3CallOptions,
+  requests?: AsyncLocalStorage<HttpMiddleware>,
+  middleware?: HttpMiddleware,
+) {
   const state = { step: 0, toolNames: {} as Record<string, string> }
   return Stream.concat(
     Stream.make(LLMEvent.stepStart({ index: state.step })),
     Stream.unwrap(
       Effect.tryPromise({
-        try: () => language.doStream(options),
+        try: () =>
+          requests && middleware
+            ? requests.run(middleware, () => language.doStream(options))
+            : language.doStream(options),
         catch: (error) => llmError("doStream", error),
       }).pipe(
         Effect.map((result) =>

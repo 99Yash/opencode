@@ -146,12 +146,18 @@ describe("request option precedence", () => {
         prompt: "Say hello.",
       }),
       {
-        transform: (request) =>
-          Effect.sync(() => {
-            expect(request.headers.authorization).toBe("Bearer fresh-key")
-            request.url = "https://proxy.test/v1/chat/completions"
-            request.headers["x-plugin"] = "transformed"
-            request.body = JSON.stringify({ transformed: true })
+        http: (request, handler) =>
+          Effect.gen(function* () {
+            expect(request.headers.get("authorization")).toBe("Bearer fresh-key")
+            const headers = new Headers(request.headers)
+            headers.set("x-plugin", "transformed")
+            return yield* handler(
+              new Request("https://proxy.test/v1/chat/completions", {
+                method: request.method,
+                headers,
+                body: JSON.stringify({ transformed: true }),
+              }),
+            )
           }),
       },
     ).pipe(
@@ -169,6 +175,42 @@ describe("request option precedence", () => {
         ),
       ),
     ),
+  )
+
+  it.effect("transforms the HTTP response before protocol decoding", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(
+        LLM.request({
+          model: OpenAIChat.route
+            .with({ endpoint: { baseURL: "https://api.openai.test/v1/" }, auth: Auth.bearer("test") })
+            .model({ id: "gpt-4o-mini" }),
+          prompt: "Say hello.",
+        }),
+        {
+          http: (request, handler) =>
+            Effect.gen(function* () {
+              const response = yield* handler(request)
+              const body = yield* Effect.promise(() => response.text())
+              return new Response(body.replace("network", "hooked"), {
+                status: response.status,
+                headers: response.headers,
+              })
+            }),
+        },
+      ).pipe(
+        Effect.provide(
+          dynamicResponse((input) =>
+            Effect.succeed(
+              input.respond(sseEvents(deltaChunk({ content: "network" }, "stop")), {
+                headers: { "content-type": "text/event-stream" },
+              }),
+            ),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("hooked")
+    }),
   )
 
   it.effect("applies raw body overlays after protocol lowering", () =>

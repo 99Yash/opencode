@@ -5,7 +5,7 @@ import { Endpoint, type EndpointPatch } from "./endpoint"
 import { RequestExecutor } from "./executor"
 import { Framing } from "./framing"
 import { HttpTransport } from "./transport"
-import type { HttpRequestTransform, Transport, TransportRuntime } from "./transport"
+import type { HttpMiddleware, Transport, TransportRuntime } from "./transport"
 import { WebSocketExecutor } from "./transport"
 import type { Protocol } from "./protocol"
 import { applyCachePolicy } from "../cache-policy"
@@ -96,7 +96,10 @@ export interface RoutePatch<Body, Prepared> extends RouteDefaultsInput {
 
 type RouteMappedModelInput = RouteModelInput | RouteRoutedModelInput
 
-const makeRouteModel = <Options extends ProviderOptions = ProviderOptions>(route: AnyRoute, mapped: RouteMappedModelInput) => {
+const makeRouteModel = <Options extends ProviderOptions = ProviderOptions>(
+  route: AnyRoute,
+  mapped: RouteMappedModelInput,
+) => {
   const provider = route.provider ?? ("provider" in mapped ? mapped.provider : undefined)
   if (!provider) throw new Error(`Route.model(${route.id}) requires a provider`)
   if (!endpointBaseURL(route.endpoint))
@@ -150,7 +153,7 @@ export interface Interface {
 }
 
 export interface StreamOptions {
-  readonly transform?: HttpRequestTransform
+  readonly http?: HttpMiddleware
 }
 
 export interface StreamMethod {
@@ -302,7 +305,7 @@ function makeFromTransport<Body, Prepared, Frame, Event, State>(
           auth: routeInput.auth ?? Auth.none,
           encodeBody,
           headers: routeInput.headers,
-          transform: options?.transform,
+          middleware: options?.http,
         }),
       streamPrepared: (prepared: Prepared, request: LLMRequest, runtime: TransportRuntime) => {
         const route = `${request.model.provider}/${request.model.route.id}`
