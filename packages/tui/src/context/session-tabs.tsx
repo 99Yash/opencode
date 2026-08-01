@@ -16,6 +16,7 @@ import {
   moveSessionTabHistory,
   NEW_SESSION_TAB_TITLE,
   openSessionTab,
+  orderSessionTabs,
   recordClosedSessionTab,
   recordSessionTabHistory,
   reopenSessionTab,
@@ -61,6 +62,9 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     })
     const fallback = empty()
     const [promptPulses, setPromptPulses] = createSignal<Record<string, number>>({})
+    const [navigationActive, setNavigationActive] = createSignal(false)
+    const [navigationSelection, setNavigationSelection] = createSignal<string>()
+    const [navigationPendingDone, setNavigationPendingDone] = createSignal<string>()
     let history: SessionTabHistory = { entries: [], index: -1 }
     // User-closed tabs eligible for reopening; in-memory like history, deleted sessions pruned.
     let closedTabs: ClosedSessionTab[] = []
@@ -114,6 +118,11 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         busy: family.some((id) => data.session.status(id) === "running" || data.session.pending.list(id).length > 0),
       }
     }
+    const recent = () =>
+      orderSessionTabs(state().tabs, (sessionID) => ({
+        busy: status(sessionID).busy,
+        updated: data.session.get(sessionID)?.time.updated ?? 0,
+      }))
 
     function markUnread(sessionID: string, unread: SessionTabUnread) {
       if (!enabled()) return
@@ -144,6 +153,20 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         })
         delete draft.unread[sessionID]
       })
+    })
+
+    createEffect(() => {
+      if (!navigationActive()) return
+      const tabs = state().tabs
+      if (tabs.length === 0) {
+        setNavigationActive(false)
+        setNavigationSelection(undefined)
+        setNavigationPendingDone(undefined)
+        return
+      }
+      if (tabs.some((tab) => tab.sessionID === navigationSelection())) return
+      setNavigationSelection(current() ?? recent()[0]?.sessionID)
+      setNavigationPendingDone(undefined)
     })
 
     createEffect(() => {
@@ -248,6 +271,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
       tabs() {
         return state().tabs
       },
+      recent,
       newTab() {
         return newTab()
       },
@@ -291,24 +315,76 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
           draft.tabs = moveSessionTab(draft.tabs, session, index)
         })
       },
-      cycle(direction: 1 | -1) {
+      cycle(direction: 1 | -1, order: "tabs" | "recent" = "tabs") {
         if (!enabled()) return
-        const tab = cycleSessionTab(state().tabs, current(), direction)
+        const tab = cycleSessionTab(order === "recent" ? recent() : state().tabs, current(), direction)
         if (tab) route.navigate({ type: "session", sessionID: tab.sessionID })
       },
-      cycleUnread(direction: 1 | -1) {
+      cycleUnread(direction: 1 | -1, order: "tabs" | "recent" = "tabs") {
         if (!enabled()) return
         const tab = cycleSessionTab(
-          state().tabs.filter((tab) => state().unread[tab.sessionID] || status(tab.sessionID).attention),
+          (order === "recent" ? recent() : state().tabs).filter(
+            (tab) => state().unread[tab.sessionID] || status(tab.sessionID).attention,
+          ),
           current(),
           direction,
         )
         if (tab) route.navigate({ type: "session", sessionID: tab.sessionID })
       },
-      selectIndex(index: number) {
+      selectIndex(index: number, order: "tabs" | "recent" = "tabs") {
         if (!enabled()) return
-        const tab = state().tabs[index]
+        const tab = (order === "recent" ? recent() : state().tabs)[index]
         if (tab) route.navigate({ type: "session", sessionID: tab.sessionID })
+      },
+      navigation: {
+        active: navigationActive,
+        selected: navigationSelection,
+        pendingDone: navigationPendingDone,
+        focus(order: readonly string[] = recent().map((tab) => tab.sessionID)) {
+          if (!enabled() || state().tabs.length === 0) return false
+          setNavigationSelection(current() ?? order.find((sessionID) => state().tabs.some((tab) => tab.sessionID === sessionID)))
+          setNavigationPendingDone(undefined)
+          setNavigationActive(true)
+          return true
+        },
+        blur() {
+          setNavigationActive(false)
+          setNavigationPendingDone(undefined)
+        },
+        move(direction: 1 | -1, order?: readonly string[]) {
+          const tabs = (order ?? state().tabs.map((tab) => tab.sessionID)).filter((sessionID) =>
+            state().tabs.some((tab) => tab.sessionID === sessionID),
+          )
+          if (!navigationActive() || tabs.length === 0) return
+          const index = tabs.findIndex((sessionID) => sessionID === navigationSelection())
+          const start = index === -1 ? (direction === 1 ? -1 : 0) : index
+          setNavigationSelection(tabs[(start + direction + tabs.length) % tabs.length])
+          setNavigationPendingDone(undefined)
+        },
+        select() {
+          const sessionID = navigationSelection()
+          if (!navigationActive() || !sessionID) return
+          setNavigationActive(false)
+          setNavigationPendingDone(undefined)
+          route.navigate({ type: "session", sessionID })
+        },
+        done(order?: readonly string[]) {
+          const sessionID = navigationSelection()
+          if (!navigationActive() || !sessionID) return
+          if (navigationPendingDone() !== sessionID) {
+            setNavigationPendingDone(sessionID)
+            return
+          }
+          const tabs = (order ?? state().tabs.map((tab) => tab.sessionID)).filter((id) =>
+            state().tabs.some((tab) => tab.sessionID === id),
+          )
+          const index = tabs.indexOf(sessionID)
+          const next = tabs[index + 1] ?? tabs[index - 1]
+          setNavigationPendingDone(undefined)
+          setNavigationSelection(next)
+          remove(sessionID, true)
+          if (!next) setNavigationActive(false)
+        },
       },
     }
   },

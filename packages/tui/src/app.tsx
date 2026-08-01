@@ -68,6 +68,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogOpen } from "./component/dialog-open"
 import { SessionTabs } from "./component/session-tabs"
+import { SessionInbox } from "./component/session-inbox"
 import { ThemeErrorToast } from "./component/theme-error-toast"
 import { ThemeProvider, useTheme, useThemes } from "./context/theme"
 import { Home } from "./routes/home"
@@ -519,6 +520,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   const terminalTitleEnabled = () => config.data.terminal?.title ?? true
   const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
   const pasteSummaryEnabled = () => config.data.prompt?.paste !== "full"
+  const inboxTabsEnabled = () => config.data.tabs?.layout === "inbox" && dimensions().width >= 72
 
   createEffect(() => {
     renderer.useMouse = config.data.mouse
@@ -645,6 +647,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         slash: { name: "new", aliases: ["clear"] },
         run: () => {
+          sessionTabs.navigation.blur()
           route.navigate({
             type: "home",
             location:
@@ -653,6 +656,7 @@ function App(props: { pair?: DialogPairCredentials }) {
                 : undefined,
           })
           dialog.clear()
+          setTimeout(() => promptRef.current?.focus(), 0)
         },
       },
       {
@@ -673,12 +677,34 @@ function App(props: { pair?: DialogPairCredentials }) {
         run: () => local.session.quickSwitch(i + 1),
       })),
       {
+        name: "session.tabs.toggle_layout",
+        title: !sessionTabs.enabled()
+          ? "Enable inbox tabs"
+          : config.data.tabs?.layout === "inbox"
+            ? "Move tabs to top"
+            : "Move tabs to inbox",
+        category: "Session",
+        slash: { name: "tabs", aliases: ["tab-layout"] },
+        run: () => {
+          void config
+            .update((draft) => {
+              draft.tabs = {
+                ...draft.tabs,
+                enabled: true,
+                layout: sessionTabs.enabled() && config.data.tabs?.layout === "inbox" ? "top" : "inbox",
+              }
+            })
+            .catch(toast.error)
+          dialog.clear()
+        },
+      },
+      {
         name: "session.tab.next",
         title: "Next tab",
         category: "Session",
         palette: undefined,
         enabled: sessionTabs.enabled,
-        run: () => sessionTabs.cycle(1),
+        run: () => sessionTabs.cycle(1, inboxTabsEnabled() ? "recent" : "tabs"),
       },
       {
         name: "session.tab.previous",
@@ -686,7 +712,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         palette: undefined,
         enabled: sessionTabs.enabled,
-        run: () => sessionTabs.cycle(-1),
+        run: () => sessionTabs.cycle(-1, inboxTabsEnabled() ? "recent" : "tabs"),
       },
       {
         name: "session.tab.next_unread",
@@ -694,7 +720,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         palette: undefined,
         enabled: sessionTabs.enabled,
-        run: () => sessionTabs.cycleUnread(1),
+        run: () => sessionTabs.cycleUnread(1, inboxTabsEnabled() ? "recent" : "tabs"),
       },
       {
         name: "session.tab.previous_unread",
@@ -702,7 +728,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         palette: undefined,
         enabled: sessionTabs.enabled,
-        run: () => sessionTabs.cycleUnread(-1),
+        run: () => sessionTabs.cycleUnread(-1, inboxTabsEnabled() ? "recent" : "tabs"),
       },
       {
         name: "session.tab.close",
@@ -724,7 +750,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         palette: undefined,
         enabled: sessionTabs.enabled,
-        run: () => sessionTabs.selectIndex(i),
+        run: () => sessionTabs.selectIndex(i, inboxTabsEnabled() ? "recent" : "tabs"),
       })),
       {
         name: "model.list",
@@ -1214,12 +1240,23 @@ function App(props: { pair?: DialogPairCredentials }) {
       onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
     >
       <box flexGrow={1} minHeight={0} flexDirection="row">
+        <Show
+          when={
+            sessionTabs.enabled() &&
+            inboxTabsEnabled() &&
+            (sessionTabs.tabs().length > 0 || sessionTabs.newTab()) &&
+            route.data.type !== "plugin"
+          }
+        >
+          <SessionInbox />
+        </Show>
         <box flexGrow={1} minWidth={0} flexDirection="column">
           <Show when={plugins.ready()}>
             <box flexGrow={1} minHeight={0} flexDirection="column">
               <Show
                 when={
                   sessionTabs.enabled() &&
+                  !inboxTabsEnabled() &&
                   (sessionTabs.tabs().length > 0 || sessionTabs.newTab()) &&
                   route.data.type !== "plugin"
                 }

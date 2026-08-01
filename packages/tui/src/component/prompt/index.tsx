@@ -54,6 +54,7 @@ import { useLocation } from "../../context/location"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { abbreviateHome } from "../../runtime"
 import { PluginSlot } from "../../plugin/render"
+import { useSessionTabs } from "../../context/session-tabs"
 
 registerOpencodeSpinner()
 
@@ -159,6 +160,7 @@ export function Prompt(props: PromptProps) {
   const editor = useEditorContext()
   const route = useRoute()
   const data = useData()
+  const sessionTabs = useSessionTabs()
   const keymapCommands = Keymap.useCommands()
   const currentLocation = useLocation()
   const config = useConfig().data
@@ -589,7 +591,7 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.visible === false || props.disabled || dialog.stack.length > 0) {
+    if (props.visible === false || props.disabled || dialog.stack.length > 0 || sessionTabs.navigation.active()) {
       if (input.focused) input.blur()
       return
     }
@@ -809,6 +811,35 @@ export function Prompt(props: PromptProps) {
       ],
     }
   })
+
+  Keymap.createLayer(() => ({
+    priority: 2,
+    target: inputTarget,
+    enabled:
+      inputTarget() !== undefined &&
+      !props.disabled &&
+      store.mode === "normal" &&
+      !auto()?.visible &&
+      config.tabs?.layout === "inbox" &&
+      dimensions().width >= 72 &&
+      sessionTabs.enabled() &&
+      sessionTabs.tabs().length > 0 &&
+      store.prompt.text === "" &&
+      store.prompt.pasted.length === 0 &&
+      (store.prompt.files?.length ?? 0) === 0 &&
+      (store.prompt.agents?.length ?? 0) === 0,
+    commands: [
+      {
+        bind: "left",
+        title: "Focus session inbox",
+        group: "Session",
+        run: () => {
+          if (!sessionTabs.navigation.focus()) return false
+          input.blur()
+        },
+      },
+    ],
+  }))
 
   Keymap.createLayer(() => {
     return {
@@ -1455,6 +1486,7 @@ export function Prompt(props: PromptProps) {
               }}
               onMouseDown={(r: MouseEvent) => {
                 if (props.disabled || r.button !== 0) return
+                sessionTabs.navigation.blur()
                 r.target?.focus()
                 const extmark = input.extmarks
                   .getAtOffset(input.cursorOffset)

@@ -281,7 +281,6 @@ export function Session() {
         return
       }
       editor.reconnect(info.location.directory)
-      if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
       setSynced(true)
     })().catch((error) => {
       if (route.sessionID !== sessionID) return
@@ -915,8 +914,8 @@ export function Session() {
     bindings: [...baseAndUnfocusedCommands, ...baseCommands()].map((command) => command.id),
   }))
 
-  // snap to bottom when session changes
-  createEffect(on(() => route.sessionID, toBottom))
+  // The keyed Session remount and stickyStart="bottom" establish the initial position before draw.
+  // A deferred scroll here causes a visible second jump whenever tabs switch.
   createEffect(
     on(
       () => route.sessionID,

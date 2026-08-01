@@ -248,3 +248,33 @@ test("tracks a temporary new session tab across close and creation", async () =>
     setup.destroy()
   }
 })
+
+test("navigates the inbox without changing sessions and confirms done twice", async () => {
+  const setup = await renderSessionTabs("first")
+
+  try {
+    await wait(() => setup.tabs.current() === "first")
+    setup.route.navigate({ type: "session", sessionID: "second" })
+    await wait(() => setup.tabs.current() === "second" && setup.tabs.tabs().length === 2)
+    setup.route.navigate({ type: "session", sessionID: "first" })
+    await wait(() => setup.tabs.current() === "first")
+
+    expect(setup.tabs.navigation.focus()).toBe(true)
+    expect(setup.tabs.navigation.selected()).toBe("first")
+    setup.tabs.navigation.move(1)
+    expect(setup.tabs.navigation.selected()).toBe("second")
+    expect(setup.tabs.current()).toBe("first")
+
+    setup.tabs.navigation.done()
+    expect(setup.tabs.navigation.pendingDone()).toBe("second")
+    expect(setup.tabs.tabs().map((tab) => tab.sessionID)).toEqual(["first", "second"])
+    setup.tabs.navigation.done()
+    await wait(() => setup.tabs.tabs().length === 1)
+
+    expect(setup.tabs.tabs().map((tab) => tab.sessionID)).toEqual(["first"])
+    expect(setup.tabs.current()).toBe("first")
+    expect(setup.tabs.navigation.selected()).toBe("first")
+  } finally {
+    setup.destroy()
+  }
+})
