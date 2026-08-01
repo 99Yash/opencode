@@ -14,6 +14,7 @@ import { tint } from "../theme/color"
 import { getScrollAcceleration } from "../util/scroll"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
 import { activityVerb } from "../util/activity-verb"
+import { markdownPreview } from "../util/markdown-preview"
 import { Spinner } from "./spinner"
 import type { SessionTabsStatus } from "./session-tabs"
 
@@ -176,14 +177,12 @@ export function SessionInbox() {
         const preview = assistant?.content
           .filter((part) => part.type === "text")
           .map((part) => part.text)
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim()
+          .join("\n")
         return {
           sessionID: tab.sessionID,
           title: session ? withTimestampedFallback(session) : (tab.title ?? "Loading session…"),
           updated: session?.time.updated ?? 0,
-          preview: preview || "No assistant response yet",
+          preview: markdownPreview(preview ?? "") || "No assistant response yet",
           status,
           group: sessionInboxGroup(session?.time.updated ?? 0, status.busy),
         }
