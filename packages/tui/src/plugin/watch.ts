@@ -8,23 +8,46 @@ import { lstat, realpath, stat } from "fs/promises"
 // directories stay quiet. Symlinked files are additionally watched at their
 // resolved target, since edits there emit nothing at the link's location.
 // Directory targets are watched at their root only: edits to nested helper
-// files do not change the entrypoint mtime and are not detected. Watches are
-// never torn down individually (a stale watch costs one fs handle and a
-// spurious onChange); all die with dispose(). Failed or vanished watches are
-// forgotten so a later add() can re-arm once the path exists.
+// files do not change the entrypoint mtime and are not detected. A missing
+// target temporarily watches its nearest existing parent, filtered to the
+// first missing path segment, until the normal source watch can take over.
+// Established source watches die with dispose(). Failed or vanished watches
+// are forgotten so a later add() can re-arm once the path exists.
 export function createSourceWatcher(onChange: () => void) {
   const watchers = new Map<string, ReturnType<typeof watch>>()
   const watched = new Map<string, Set<string> | null>()
+  const missing = new Map<string, { dir: string; watcher: ReturnType<typeof watch> }>()
   let disposed = false
   const forget = (dir: string) => {
     watchers.get(dir)?.close()
     watchers.delete(dir)
     watched.delete(dir)
   }
+  const forgetMissing = (target: string) => {
+    missing.get(target)?.watcher.close()
+    missing.delete(target)
+  }
+  const armMissing = (target: string) => {
+    if (disposed) return
+    const dir = nearestExistingParent(target)
+    if (!dir) return
+    if (missing.get(target)?.dir === dir) return
+    forgetMissing(target)
+    const name = path.relative(dir, target).split(path.sep)[0]!
+    const watcher = watch(dir, (_event, filename) => {
+      if (filename && filename.toString().split(path.sep)[0] !== name) return
+      forgetMissing(target)
+      arm(target)
+      onChange()
+    })
+    watcher.on("error", () => forgetMissing(target))
+    missing.set(target, { dir, watcher })
+  }
   const arm = (target: string) => {
     stat(target)
       .then((info) => {
         if (disposed) return
+        forgetMissing(target)
         const dir = info.isDirectory() ? target : path.dirname(target)
         // Directories accept every filename (null); files accept their basename.
         const name = info.isDirectory() ? null : path.basename(target)
@@ -55,7 +78,7 @@ export function createSourceWatcher(onChange: () => void) {
         watcher.on("error", () => forget(dir))
         watchers.set(dir, watcher)
       })
-      .catch(() => undefined)
+      .catch(() => armMissing(target))
   }
   const add = (target: string) => {
     arm(target)
@@ -70,6 +93,14 @@ export function createSourceWatcher(onChange: () => void) {
   const dispose = () => {
     disposed = true
     for (const watcher of watchers.values()) watcher.close()
+    for (const item of missing.values()) item.watcher.close()
   }
   return { add, dispose }
+}
+
+function nearestExistingParent(target: string) {
+  const dir = path.dirname(target)
+  if (existsSync(dir)) return dir
+  if (dir === path.dirname(dir)) return
+  return nearestExistingParent(dir)
 }

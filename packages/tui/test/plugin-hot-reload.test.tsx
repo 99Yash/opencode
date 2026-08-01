@@ -53,6 +53,7 @@ async function bootApp(directory: string) {
   )
   return {
     task,
+    renderer: setup,
     async [Symbol.asyncDispose]() {
       process.chdir(cwd)
       if (!setup.renderer.isDestroyed) setup.renderer.destroy()
@@ -76,6 +77,32 @@ test("editing a discovered TUI plugin hot-reloads its fresh module", async () =>
 
   await writeFile(source, lifecycleSource(marker, "test.hot", "v2"))
   expect(await until(read, (value) => value?.includes("v2:setup") ?? false)).toBe("v1:setup\nv1:cleanup\nv2:setup\n")
+
+  process.emit("SIGHUP")
+  await app.task
+})
+
+test("creating the TUI plugin directory after startup discovers its first plugin", async () => {
+  await using tmp = await tmpdir()
+  const directory = path.join(tmp.path, ".opencode", "plugins", "tui")
+  await mkdir(path.dirname(directory), { recursive: true })
+  const marker = path.join(tmp.path, "marker.txt")
+  const placeholders = ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"]
+
+  await using app = await bootApp(tmp.path)
+  const frame = await until(
+    async () => {
+      await app.renderer.renderOnce()
+      return app.renderer.captureCharFrame()
+    },
+    (value) => placeholders.some((text) => value?.includes(text)),
+  )
+  expect(placeholders.some((text) => frame?.includes(text))).toBe(true)
+  await mkdir(directory)
+  await writeFile(path.join(directory, "hot.ts"), lifecycleSource(marker, "test.hot", "v1"))
+
+  const read = () => readFile(marker, "utf8")
+  expect(await until(read, (value) => value === "v1:setup\n")).toBe("v1:setup\n")
 
   process.emit("SIGHUP")
   await app.task
