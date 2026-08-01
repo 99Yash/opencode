@@ -7,6 +7,7 @@ import { Bus } from "../bus"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { Model } from "../model"
 import { SessionEvent } from "./event"
+import type { SessionSchema } from "./schema"
 import { SessionV1 } from "../v1/session"
 import { WorkspaceTable } from "../control-plane/workspace.sql"
 import { SessionMessage } from "./message"
@@ -447,12 +448,33 @@ function run(db: DatabaseService, event: MessageEvent) {
 function runAndTouch(db: DatabaseService, event: MessageEvent) {
   return Effect.gen(function* () {
     yield* run(db, event)
+    yield* touchAncestors(db, event.data.sessionID, DateTime.toEpochMillis(event.created))
+  })
+}
+
+function touchAncestors(
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  updated: number,
+  seen = new Set<string>(),
+): Effect.Effect<void> {
+  if (seen.has(sessionID)) return Effect.void
+  seen.add(sessionID)
+  return Effect.gen(function* () {
+    const session = yield* db
+      .select({ parentID: SessionTable.parent_id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    if (!session) return
     yield* db
       .update(SessionTable)
-      .set({ time_updated: DateTime.toEpochMillis(event.created) })
-      .where(eq(SessionTable.id, event.data.sessionID))
+      .set({ time_updated: updated })
+      .where(and(eq(SessionTable.id, sessionID), lt(SessionTable.time_updated, updated)))
       .run()
       .pipe(Effect.orDie)
+    if (session.parentID) yield* touchAncestors(db, session.parentID, updated, seen)
   })
 }
 

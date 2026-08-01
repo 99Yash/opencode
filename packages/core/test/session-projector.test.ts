@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { DateTime, Effect, Fiber, Option, Schema, Stream } from "effect"
-import { asc, eq, sql } from "drizzle-orm"
+import { asc, eq, inArray, sql } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
 import { Agent } from "@opencode-ai/core/agent"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
@@ -659,7 +659,6 @@ describe("SessionProjector", () => {
           directory: "/project",
           title: "test",
           version: "test",
-          time_updated: -1,
         })
         .run()
         .pipe(Effect.orDie)
@@ -671,20 +670,60 @@ describe("SessionProjector", () => {
           .where(eq(SessionTable.id, sessionID))
           .get()
           .pipe(Effect.orDie)
-      const updated = () =>
-        db
-          .select({ value: SessionTable.time_updated })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, sessionID))
-          .get()
-          .pipe(Effect.orDie)
 
       yield* bus.publish(SessionEvent.Execution.Interrupted, { sessionID, reason: "shutdown" })
       expect((yield* suspended())?.timeSuspended).toBeNull()
-      expect((yield* updated())?.value ?? -1).toBeGreaterThan(-1)
 
       yield* bus.publish(SessionEvent.Execution.Started, { sessionID })
       expect((yield* suspended())?.timeSuspended).toBeNull()
+    }),
+  )
+
+  it.effect("rolls terminal execution activity through every session ancestor", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      const root = Session.ID.make("ses_activity_root")
+      const child = Session.ID.make("ses_activity_child")
+      const grandchild = Session.ID.make("ses_activity_grandchild")
+      yield* db
+        .insert(SessionTable)
+        .values(
+          [
+            { id: root },
+            { id: child, parent_id: root },
+            { id: grandchild, parent_id: child },
+          ].map((session) => ({
+            ...session,
+            project_id: Project.ID.global,
+            slug: session.id,
+            directory: "/project",
+            title: "test",
+            version: "test",
+            time_updated: -1,
+          })),
+        )
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* (yield* Bus.Service).publish(SessionEvent.Execution.Interrupted, {
+        sessionID: grandchild,
+        reason: "shutdown",
+      })
+
+      const rows = yield* db
+        .select({ id: SessionTable.id, updated: SessionTable.time_updated })
+        .from(SessionTable)
+        .where(inArray(SessionTable.id, [root, child, grandchild]))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toHaveLength(3)
+      expect(rows.every((row) => row.updated > -1)).toBe(true)
+      expect(new Set(rows.map((row) => row.updated)).size).toBe(1)
     }),
   )
 
