@@ -444,6 +444,18 @@ function run(db: DatabaseService, event: MessageEvent) {
   })
 }
 
+function runAndTouch(db: DatabaseService, event: MessageEvent) {
+  return Effect.gen(function* () {
+    yield* run(db, event)
+    yield* db
+      .update(SessionTable)
+      .set({ time_updated: DateTime.toEpochMillis(event.created) })
+      .where(eq(SessionTable.id, event.data.sessionID))
+      .run()
+      .pipe(Effect.orDie)
+  })
+}
+
 function insertMessage(db: DatabaseService, event: SessionEvent.DurableEvent, message: SessionMessage.Info) {
   if (event.durable === undefined) return Effect.die(new Error("Durable Session event is missing aggregate sequence"))
   const encoded = encodeMessage(message)
@@ -678,9 +690,9 @@ const layer = Layer.effectDiscard(
         })
       }),
     )
-    yield* bus.project(SessionEvent.Execution.Succeeded, (event) => run(db, event))
-    yield* bus.project(SessionEvent.Execution.Failed, (event) => run(db, event))
-    yield* bus.project(SessionEvent.Execution.Interrupted, (event) => run(db, event))
+    yield* bus.project(SessionEvent.Execution.Succeeded, (event) => runAndTouch(db, event))
+    yield* bus.project(SessionEvent.Execution.Failed, (event) => runAndTouch(db, event))
+    yield* bus.project(SessionEvent.Execution.Interrupted, (event) => runAndTouch(db, event))
     yield* bus.project(SessionEvent.InstructionsUpdated, (event) =>
       InstructionState.apply(db, event.data.sessionID, event.durable.seq, event.data.delta),
     )

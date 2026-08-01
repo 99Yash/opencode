@@ -55,6 +55,7 @@ import { Keymap, type KeymapCommand } from "../../context/keymap"
 import { abbreviateHome } from "../../runtime"
 import { PluginSlot } from "../../plugin/render"
 import { useSessionTabs } from "../../context/session-tabs"
+import { SESSION_INBOX_MIN_TERMINAL_WIDTH } from "../../context/session-tabs-model"
 
 registerOpencodeSpinner()
 
@@ -821,7 +822,7 @@ export function Prompt(props: PromptProps) {
       store.mode === "normal" &&
       !auto()?.visible &&
       config.tabs?.layout === "inbox" &&
-      dimensions().width >= 72 &&
+      dimensions().width >= SESSION_INBOX_MIN_TERMINAL_WIDTH &&
       sessionTabs.enabled() &&
       sessionTabs.tabs().length > 0 &&
       store.prompt.text === "" &&

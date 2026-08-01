@@ -659,6 +659,7 @@ describe("SessionProjector", () => {
           directory: "/project",
           title: "test",
           version: "test",
+          time_updated: -1,
         })
         .run()
         .pipe(Effect.orDie)
@@ -670,9 +671,17 @@ describe("SessionProjector", () => {
           .where(eq(SessionTable.id, sessionID))
           .get()
           .pipe(Effect.orDie)
+      const updated = () =>
+        db
+          .select({ value: SessionTable.time_updated })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
 
       yield* bus.publish(SessionEvent.Execution.Interrupted, { sessionID, reason: "shutdown" })
       expect((yield* suspended())?.timeSuspended).toBeNull()
+      expect((yield* updated())?.value ?? -1).toBeGreaterThan(-1)
 
       yield* bus.publish(SessionEvent.Execution.Started, { sessionID })
       expect((yield* suspended())?.timeSuspended).toBeNull()

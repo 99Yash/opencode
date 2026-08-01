@@ -84,17 +84,29 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     }
 
     const root = (sessionID: string) => data.session.root(sessionID)
-    const updated = (sessionID: string) =>
-      Math.max(data.session.get(sessionID)?.time.updated ?? 0, lastActivity()[root(sessionID)] ?? 0)
-    const touch = (sessionID: string, created: number) => {
+    const updated = (sessionID: string) => {
       const session = root(sessionID)
-      setLastActivity((value) => ({ ...value, [session]: Math.max(value[session] ?? 0, created) }))
+      const members = data.session.family(session)
+      return (members.length > 0 ? members : [session]).reduce(
+        (latest, id) =>
+          Math.max(
+            latest,
+            data.session.get(id)?.time.updated ?? 0,
+            lastActivity()[id] ?? 0,
+          ),
+        0,
+      )
+    }
+    const touch = (sessionID: string, created: number) => {
+      if (!enabled()) return
+      if ((lastActivity()[sessionID] ?? 0) >= created) return
+      setLastActivity((value) => ({ ...value, [sessionID]: Math.max(value[sessionID] ?? 0, created) }))
     }
     const title = (sessionID: string, persisted?: string, fallback?: string) => {
       const session = data.session.get(sessionID)
       return session?.title ?? persisted ?? fallback ?? (session ? withTimestampedFallback(session) : undefined)
     }
-    const normalize = (value: TabsState) => ({
+    const normalize = (value: TabsState): TabsState => ({
       tabs: value.tabs.reduce<SessionTab[]>((tabs, tab) => {
         const sessionID = root(tab.sessionID)
         return openSessionTab(tabs, { sessionID, title: title(sessionID, tab.title) })
@@ -212,7 +224,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         for (const sessionID of sessions) {
           if (stale) return
           await Promise.allSettled([
-            data.session.sync(sessionID),
+            data.session.sync(sessionID, { children: true }),
             data.session.message.sync(sessionID),
             data.session.pending.sync(sessionID),
             data.session.permission.sync(sessionID),
@@ -247,8 +259,8 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
     onCleanup(
       event.on("session.input.admitted", (evt) => {
         if (!enabled() || evt.data.input.type !== "user") return
+        touch(evt.data.sessionID, evt.created)
         const sessionID = root(evt.data.sessionID)
-        touch(sessionID, evt.created)
         if (current() === sessionID || !state().tabs.some((tab) => tab.sessionID === sessionID)) return
         setPromptPulses((pulses) => ({ ...pulses, [sessionID]: (pulses[sessionID] ?? 0) + 1 }))
       }),
@@ -284,6 +296,14 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         if (pulses[target] === undefined) return pulses
         const next = { ...pulses }
         delete next[target]
+        return next
+      })
+      setLastActivity((activity) => {
+        const family = data.session.family(target)
+        const members = family.length > 0 ? family : [target]
+        if (!members.some((id) => activity[id] !== undefined)) return activity
+        const next = { ...activity }
+        for (const id of members) delete next[id]
         return next
       })
       if (selected) route.navigate(next ? { type: "session", sessionID: next } : { type: "home" })
@@ -364,9 +384,9 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         active: navigationActive,
         selected: navigationSelection,
         pendingDone: navigationPendingDone,
-        focus(order: readonly string[] = recent().map((tab) => tab.sessionID)) {
+        focus() {
           if (!enabled() || state().tabs.length === 0) return false
-          setNavigationSelection(current() ?? order.find((sessionID) => state().tabs.some((tab) => tab.sessionID === sessionID)))
+          setNavigationSelection(current() ?? recent()[0]?.sessionID)
           setNavigationPendingDone(undefined)
           setNavigationActive(true)
           return true
@@ -375,10 +395,8 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
           setNavigationActive(false)
           setNavigationPendingDone(undefined)
         },
-        move(direction: 1 | -1, order?: readonly string[]) {
-          const tabs = (order ?? state().tabs.map((tab) => tab.sessionID)).filter((sessionID) =>
-            state().tabs.some((tab) => tab.sessionID === sessionID),
-          )
+        move(direction: 1 | -1) {
+          const tabs = recent().map((tab) => tab.sessionID)
           if (!navigationActive() || tabs.length === 0) return
           const index = tabs.findIndex((sessionID) => sessionID === navigationSelection())
           const start = index === -1 ? (direction === 1 ? -1 : 0) : index
@@ -392,21 +410,20 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
           setNavigationPendingDone(undefined)
           route.navigate({ type: "session", sessionID })
         },
-        done(order?: readonly string[]) {
+        done() {
           const sessionID = navigationSelection()
           if (!navigationActive() || !sessionID) return
           if (navigationPendingDone() !== sessionID) {
             setNavigationPendingDone(sessionID)
             return
           }
-          const tabs = (order ?? state().tabs.map((tab) => tab.sessionID)).filter((id) =>
-            state().tabs.some((tab) => tab.sessionID === id),
-          )
+          const tabs = recent().map((tab) => tab.sessionID)
           const index = tabs.indexOf(sessionID)
           const next = tabs[index + 1] ?? tabs[index - 1]
+          const selected = current() === sessionID
           setNavigationPendingDone(undefined)
-          setNavigationSelection(next)
           remove(sessionID, true)
+          setNavigationSelection(selected ? (current() ?? next) : next)
           if (!next) setNavigationActive(false)
         },
       },

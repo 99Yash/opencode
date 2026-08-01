@@ -6,7 +6,6 @@ import { useConfig } from "../config"
 import { useData } from "../context/data"
 import { Keymap } from "../context/keymap"
 import { usePromptRef } from "../context/prompt"
-import { useRoute } from "../context/route"
 import { useSessionTabs } from "../context/session-tabs"
 import { sessionInboxGroup, sessionInboxWidth, type SessionInboxGroup } from "../context/session-tabs-model"
 import { useTheme, useThemes } from "../context/theme"
@@ -25,7 +24,7 @@ const labels: Record<SessionInboxGroup, string> = {
   earlier: "Earlier",
 }
 
-export type SessionInboxRowInfo = {
+type SessionInboxRowInfo = {
   sessionID: string
   title: string
   updated: number
@@ -34,13 +33,13 @@ export type SessionInboxRowInfo = {
   group: SessionInboxGroup
 }
 
-export function SessionInboxRow(props: {
+function SessionInboxRow(props: {
   row: SessionInboxRowInfo
   selected?: boolean
   focused?: boolean
   pendingDone?: boolean
   number?: number
-  verb?: string
+  verb: string
   onSelect?: () => void
 }) {
   const theme = useTheme("elevated")
@@ -132,8 +131,8 @@ export function SessionInboxRow(props: {
                 </text>
               </Match>
               <Match when={props.row.status.busy}>
-                <Spinner color={accent()}>
-                  <span style={{ fg: accent() }}>{props.verb ?? activityVerb(props.row.sessionID)}</span>
+                  <Spinner color={accent()}>
+                    <span style={{ fg: accent() }}>{props.verb}</span>
                 </Spinner>
               </Match>
             </Switch>
@@ -147,24 +146,26 @@ export function SessionInboxRow(props: {
 export function SessionInbox() {
   const tabs = useSessionTabs()
   const data = useData()
-  const route = useRoute()
   const theme = useTheme("elevated")
   const themes = useThemes()
   const config = useConfig().data
   const prompt = usePromptRef()
+  const keymap = Keymap.use()
   const dimensions = useTerminalDimensions()
   let scroll: ScrollBoxRenderable
   const [verbCycle, setVerbCycle] = createSignal(0)
+  const [groupClock, setGroupClock] = createSignal(Date.now())
   const verbTimer = setInterval(() => setVerbCycle((value) => value + 1), 3_500)
+  const groupTimer = setInterval(() => setGroupClock(Date.now()), 60_000)
   onCleanup(() => {
     clearInterval(verbTimer)
+    clearInterval(groupTimer)
     tabs.navigation.blur()
   })
   const width = createMemo(() => sessionInboxWidth(dimensions().width))
   const hueStep = () => (themes.mode() === "light" ? 800 : 200)
   const accent = () => theme.hue.accent[hueStep()]
   const rows = createMemo(() => {
-    verbCycle()
     return tabs
       .recent()
       .map((tab) => {
@@ -187,17 +188,16 @@ export function SessionInbox() {
           updated,
           preview: markdownPreview(preview ?? "") || "No assistant response yet",
           status,
-          group: sessionInboxGroup(updated, status.busy),
+          group: sessionInboxGroup(updated, status.busy, groupClock()),
         }
       })
-      .toSorted((a, b) => b.updated - a.updated)
   })
   const groups = createMemo(() =>
     (["running", "today", "yesterday", "earlier"] as const)
       .map((group) => ({ group, rows: rows().filter((row) => row.group === group) }))
       .filter((group) => group.rows.length > 0),
   )
-  const order = () => groups().flatMap((group) => group.rows.map((row) => row.sessionID))
+  const numbers = createMemo(() => new Map(rows().map((row, index) => [row.sessionID, index + 1])))
 
   createEffect(() => {
     if (!tabs.navigation.active()) return
@@ -219,12 +219,7 @@ export function SessionInbox() {
     prompt.current?.focus()
   }
   const newSession = () => {
-    tabs.navigation.blur()
-    route.navigate({
-      type: "home",
-      location: route.data.type === "session" ? data.session.get(route.data.sessionID)?.location : undefined,
-    })
-    setTimeout(() => prompt.current?.focus(), 0)
+    keymap.dispatch("session.new")
   }
 
   Keymap.createLayer(() => ({
@@ -236,18 +231,17 @@ export function SessionInbox() {
         bind: "up,shift+tab",
         title: "Previous session",
         group: "Session",
-        run: () => tabs.navigation.move(-1, order()),
+        run: () => tabs.navigation.move(-1),
       },
       {
         bind: "down,tab",
         title: "Next session",
         group: "Session",
-        run: () => tabs.navigation.move(1, order()),
+        run: () => tabs.navigation.move(1),
       },
       { bind: "return", title: "Open session", group: "Session", run: () => tabs.navigation.select() },
-      { bind: "space", title: "Mark session done", group: "Session", run: () => tabs.navigation.done(order()) },
-      { bind: "right", title: "Return to prompt", group: "Session", run: leave },
-      { bind: "escape", title: "Return to prompt", group: "Session", run: leave },
+      { bind: "space", title: "Mark session done", group: "Session", run: () => tabs.navigation.done() },
+      { bind: "right,escape", title: "Return to prompt", group: "Session", run: leave },
     ],
   }))
 
@@ -301,7 +295,7 @@ export function SessionInbox() {
                         selected={tabs.current() === row.sessionID}
                         focused={tabs.navigation.active() && tabs.navigation.selected() === row.sessionID}
                         pendingDone={tabs.navigation.pendingDone() === row.sessionID}
-                        number={order().indexOf(row.sessionID) + 1}
+                        number={numbers().get(row.sessionID)}
                         verb={activityVerb(row.sessionID, verbCycle())}
                         onSelect={() => {
                           tabs.navigation.blur()
