@@ -252,6 +252,7 @@ export function SessionInbox() {
       height="100%"
       flexShrink={0}
       flexDirection="column"
+      paddingRight={1}
       backgroundColor={theme.background.default}
     >
       <box height={3} flexShrink={0} paddingLeft={2} paddingRight={1} flexDirection="row" alignItems="center">
@@ -263,7 +264,7 @@ export function SessionInbox() {
           onMouseUp={newSession}
           selectable={false}
         >
-          + new
+          opt+T
         </text>
       </box>
       <scrollbox
