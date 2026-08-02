@@ -225,7 +225,7 @@ export const OpenAIPlugin = define({
         })
       }
     })
-    yield* ctx.session.hook("request", (evt) =>
+    yield* ctx.session.hook("http", (evt) =>
       Effect.sync(() => {
         if (!chatgpt || evt.model.providerID !== Provider.ID.openai) return
         const url = new URL(evt.url)

@@ -16,7 +16,7 @@ export interface SessionContext {
   tools: Record<string, { description: string; input: JsonSchema.JsonSchema }>
 }
 
-export interface SessionRequest extends HttpRequest {
+export interface SessionHttp extends HttpRequest {
   readonly sessionID: Session.ID
   readonly agent: Agent.ID
   readonly model: Model.Ref
@@ -24,7 +24,7 @@ export interface SessionRequest extends HttpRequest {
 
 export interface SessionHooks {
   readonly context: SessionContext
-  readonly request: SessionRequest
+  readonly http: SessionHttp
 }
 
 export type SessionDomain = Pick<

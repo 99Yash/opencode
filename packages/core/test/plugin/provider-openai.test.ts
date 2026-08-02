@@ -100,7 +100,7 @@ describe("OpenAIPlugin", () => {
       })
       yield* addPlugin()
 
-      const request = yield* (yield* PluginHooks.Service).trigger("session", "request", {
+      const request = yield* (yield* PluginHooks.Service).trigger("session", "http", {
         sessionID: Session.ID.make("ses_test"),
         agent: Agent.ID.make("build"),
         model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
@@ -109,7 +109,7 @@ describe("OpenAIPlugin", () => {
         headers: {},
         body: "{}",
       })
-      const custom = yield* (yield* PluginHooks.Service).trigger("session", "request", {
+      const custom = yield* (yield* PluginHooks.Service).trigger("session", "http", {
         sessionID: Session.ID.make("ses_test"),
         agent: Agent.ID.make("build"),
         model: Model.Ref.make({ providerID: Provider.ID.make("custom-openai"), id: Model.ID.make("gpt-5.5") }),
@@ -118,7 +118,7 @@ describe("OpenAIPlugin", () => {
         headers: {},
         body: "{}",
       })
-      const proxy = yield* (yield* PluginHooks.Service).trigger("session", "request", {
+      const proxy = yield* (yield* PluginHooks.Service).trigger("session", "http", {
         sessionID: Session.ID.make("ses_test"),
         agent: Agent.ID.make("build"),
         model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),
@@ -184,7 +184,7 @@ describe("OpenAIPlugin", () => {
       })
       yield* addPlugin()
 
-      const request = yield* (yield* PluginHooks.Service).trigger("session", "request", {
+      const request = yield* (yield* PluginHooks.Service).trigger("session", "http", {
         sessionID: Session.ID.make("ses_test"),
         agent: Agent.ID.make("build"),
         model: Model.Ref.make({ providerID: Provider.ID.openai, id: Model.ID.make("gpt-5.5") }),

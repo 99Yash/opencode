@@ -222,7 +222,7 @@ export const layer = Layer.effect(
       const options: StreamOptions = {
         transform: (request) =>
           hooks
-            .trigger("session", "request", {
+            .trigger("session", "http", {
               sessionID: session.id,
               agent: agent.id,
               model: resolved.ref,
