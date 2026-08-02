@@ -170,6 +170,31 @@ test("concurrent TUIs do not alternate shared tab titles from divergent session 
   }
 })
 
+test("closing a tab is not undone by another TUI viewing the same session", async () => {
+  const state = stateDir("opencode-session-tabs-shared-close-")
+  const first = await renderSessionTabs("shared", { state })
+  const second = await renderSessionTabs("shared", { state })
+
+  try {
+    await wait(() => first.tabs.tabs().some((tab) => tab.sessionID === "shared"))
+    await wait(() => second.tabs.tabs().some((tab) => tab.sessionID === "shared"))
+    first.tabs.close()
+    await wait(() => first.route.data.type === "home")
+    await wait(() => !second.tabs.tabs().some((tab) => tab.sessionID === "shared"))
+    await Bun.sleep(50)
+
+    expect(first.tabs.tabs().some((tab) => tab.sessionID === "shared")).toBe(false)
+
+    second.route.navigate({ type: "home" })
+    await wait(() => second.route.data.type === "home")
+    second.route.navigate({ type: "session", sessionID: "shared" })
+    await wait(() => first.tabs.tabs().some((tab) => tab.sessionID === "shared"))
+  } finally {
+    first.destroy()
+    second.destroy()
+  }
+})
+
 test("user prompt admissions pulse an already-busy background tab", async () => {
   const setup = await renderSessionTabs("background")
   const admitted = (sessionID: string, inputID: string): OpenCodeEvent => ({
