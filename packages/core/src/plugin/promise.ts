@@ -277,14 +277,15 @@ export function fromPromise(plugin: Plugin) {
                   const request = event.request
                   const output = {
                     ...event,
-                    request: (input: Request) => Effect.runPromiseWith(context)(request(input)),
+                    request: (input: Request) =>
+                      Effect.runPromiseWith(context)(request(input), { signal: input.signal }),
                   }
                   return Effect.promise(() => Promise.resolve(Reflect.apply(callback, undefined, [output]))).pipe(
                     Effect.tap(() =>
                       Effect.sync(() => {
                         event.request = (input) =>
                           Effect.tryPromise({
-                            try: () => output.request(input),
+                            try: (signal) => output.request(new Request(input, { signal })),
                             catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
                           })
                       }),

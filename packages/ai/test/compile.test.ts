@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Effect, Ref, Schema } from "effect"
 import { HttpClientRequest } from "effect/unstable/http"
 import { LLM, mergeProviderOptions } from "../src"
 import { AnthropicMessages, OpenAIChat } from "../src/protocols"
@@ -151,9 +151,10 @@ describe("request option precedence", () => {
             expect(request.headers.get("authorization")).toBe("Bearer fresh-key")
             const headers = new Headers(request.headers)
             headers.set("x-plugin", "transformed")
+            headers.set("content-type", "application/custom+json")
             return yield* handler(
               new Request("https://proxy.test/v1/chat/completions", {
-                method: request.method,
+                method: "PUT",
                 headers,
                 body: JSON.stringify({ transformed: true }),
               }),
@@ -166,7 +167,9 @@ describe("request option precedence", () => {
           Effect.gen(function* () {
             const web = yield* HttpClientRequest.toWeb(input.request).pipe(Effect.orDie)
             expect(web.url).toBe("https://proxy.test/v1/chat/completions")
+            expect(web.method).toBe("PUT")
             expect(web.headers.get("x-plugin")).toBe("transformed")
+            expect(web.headers.get("content-type")).toBe("application/custom+json")
             expect(decodeJson(input.text)).toEqual({ transformed: true })
             return input.respond(sseEvents(deltaChunk({}, "stop")), {
               headers: { "content-type": "text/event-stream" },
@@ -210,6 +213,47 @@ describe("request option precedence", () => {
       )
 
       expect(response.text).toBe("hooked")
+    }),
+  )
+
+  it.effect("can inspect an error response and retry the native request", () =>
+    Effect.gen(function* () {
+      const attempts = yield* Ref.make(0)
+      const response = yield* LLMClient.generate(
+        LLM.request({
+          model: OpenAIChat.route
+            .with({ endpoint: { baseURL: "https://api.openai.test/v1/" }, auth: Auth.bearer("stale") })
+            .model({ id: "gpt-4o-mini" }),
+          prompt: "Say hello.",
+        }),
+        {
+          http: (request, handler) =>
+            Effect.gen(function* () {
+              const retry = request.clone()
+              const response = yield* handler(request)
+              expect(response.status).toBe(401)
+              const headers = new Headers(retry.headers)
+              headers.set("authorization", "Bearer refreshed")
+              return yield* handler(new Request(retry, { headers }))
+            }),
+        },
+      ).pipe(
+        Effect.provide(
+          dynamicResponse((input) =>
+            Effect.gen(function* () {
+              yield* Ref.update(attempts, (value) => value + 1)
+              if (input.request.headers.authorization !== "Bearer refreshed")
+                return input.respond("unauthorized", { status: 401 })
+              return input.respond(sseEvents(deltaChunk({ content: "retried" }, "stop")), {
+                headers: { "content-type": "text/event-stream" },
+              })
+            }),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("retried")
+      expect(yield* Ref.get(attempts)).toBe(2)
     }),
   )
 

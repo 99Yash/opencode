@@ -1,4 +1,4 @@
-import { Cause, Context, Effect, Layer } from "effect"
+import { Cause, Context, Effect, Layer, Stream } from "effect"
 import {
   FetchHttpClient,
   Headers,
@@ -20,8 +20,12 @@ import { classifyProviderFailure } from "../provider-error"
 export interface Interface {
   readonly execute: (
     request: HttpClientRequest.HttpClientRequest,
+    middleware?: HttpMiddleware,
   ) => Effect.Effect<HttpClientResponse.HttpClientResponse, LLMError>
 }
+
+export type HttpHandler = (request: Request) => Effect.Effect<Response, Error>
+export type HttpMiddleware = (request: Request, handler: HttpHandler) => Effect.Effect<Response, Error>
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/LLM/RequestExecutor") {}
 
@@ -282,12 +286,41 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient> = Layer.e
   Service,
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const executeOnce = (request: HttpClientRequest.HttpClientRequest) =>
+    const executeOnce = (request: HttpClientRequest.HttpClientRequest, middleware?: HttpMiddleware) =>
       Effect.gen(function* () {
         const redactedNames = yield* Headers.CurrentRedactedNames
-        return yield* http
-          .execute(request)
-          .pipe(Effect.mapError(toHttpError(redactedNames)), Effect.flatMap(statusError(request, redactedNames)))
+        if (!middleware)
+          return yield* http
+            .execute(request)
+            .pipe(Effect.mapError(toHttpError(redactedNames)), Effect.flatMap(statusError(request, redactedNames)))
+
+        let sent = request
+        const origins = new WeakMap<Response, HttpClientRequest.HttpClientRequest>()
+        const response = yield* HttpClientRequest.toWeb(request).pipe(
+          Effect.flatMap((web) =>
+            middleware(web, (input) =>
+              Effect.gen(function* () {
+                sent = HttpClientRequest.fromWeb(input)
+                if (input.body)
+                  sent = HttpClientRequest.bodyUint8Array(
+                    sent,
+                    new Uint8Array(yield* Effect.promise(() => input.arrayBuffer())),
+                    input.headers.get("content-type") ?? undefined,
+                  )
+                const response = yield* http
+                  .execute(sent)
+                  .pipe(Effect.mapError((cause) => (cause instanceof Error ? cause : new Error(String(cause)))))
+                const body = yield* Stream.toReadableStreamEffect(response.stream)
+                const web = new Response(body, { status: response.status, headers: response.headers })
+                origins.set(web, sent)
+                return web
+              }),
+            ),
+          ),
+          Effect.mapError(toHttpError(redactedNames)),
+        )
+        const origin = origins.get(response) ?? sent
+        return yield* statusError(origin, redactedNames)(HttpClientResponse.fromWeb(origin, response))
       })
     return Service.of({
       execute: executeOnce,
