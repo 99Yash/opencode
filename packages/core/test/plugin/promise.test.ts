@@ -221,6 +221,39 @@ describe("fromPromise", () => {
     }),
   )
 
+  it.effect("adapts promise session HTTP hooks", () =>
+    Effect.gen(function* () {
+      const plugin = yield* Plugin.Service
+      const hooks = yield* PluginHooks.Service
+      const host = yield* PluginHost.make(plugin)
+      yield* PluginPromise.fromPromise(
+        define({
+          id: "promise-session-http",
+          setup: async (ctx) => {
+            await ctx.session.hook("http", (event) => {
+              const request = event.request
+              event.request = async (input) => {
+                const response = await request(new Request(input, { headers: { "x-hook": "promise" } }))
+                return new Response(`${await response.text()}-response`)
+              }
+            })
+          },
+        }),
+      ).effect(host)
+      const event: SessionHooks["http"] = {
+        sessionID: Session.ID.make("ses_promise_session_http"),
+        agent: Agent.ID.make("build"),
+        model: Model.Ref.make({ providerID: Provider.ID.make("test"), id: Model.ID.make("model") }),
+        request: (input) => Effect.succeed(new Response(input.headers.get("x-hook") ?? "missing")),
+      }
+
+      yield* hooks.trigger("session", "http", event)
+      const response = yield* event.request(new Request("https://provider.test"))
+
+      expect(yield* Effect.promise(() => response.text())).toBe("promise-response")
+    }),
+  )
+
   it.effect("disposes a hook registration on request", () =>
     Effect.gen(function* () {
       const agents = yield* Agent.Service

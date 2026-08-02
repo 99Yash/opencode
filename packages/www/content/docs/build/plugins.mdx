@@ -247,7 +247,7 @@ mutable fields:
 | `ctx.aisdk.hook("sdk", callback)`           | `sdk`, after inspecting `model`, `package`, and `options`                      |
 | `ctx.aisdk.hook("language", callback)`      | `language`, after inspecting `model`, `sdk`, and `options`                     |
 | `ctx.session.hook("context", callback)`     | `system`, `messages`, and the `tools` record immediately before model dispatch |
-| `ctx.session.hook("http", callback)`        | `url`, `headers`, and `body` before the model request is sent                   |
+| `ctx.session.hook("http", callback)`        | `request`, wrapping the model's HTTP request and response                       |
 | `ctx.tool.hook("execute.before", callback)` | `input`, before the selected tool executes                                     |
 | `ctx.tool.hook("execute.after", callback)`  | Terminal `result` on success or `error` on failure                            |
 
