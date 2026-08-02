@@ -194,9 +194,7 @@ export function fromPromise(plugin: Plugin) {
                               ),
                             ),
                           refresh:
-                            refresh === undefined
-                              ? undefined
-                              : (credential) => Effect.promise(() => refresh(credential)),
+                            refresh === undefined ? undefined : (credential) => Effect.promise(() => refresh(credential)),
                         })
                       },
                       remove: draft.method.remove,
@@ -265,34 +263,8 @@ export function fromPromise(plugin: Plugin) {
               ),
           },
           session: {
-            hook: (name, callback) => {
-              if (name !== "http")
-                return register(
-                  host.session.hook(name, (event) =>
-                    Effect.promise(() => Promise.resolve(Reflect.apply(callback, undefined, [event]))),
-                  ),
-                )
-              return register(
-                host.session.hook("http", (event) => {
-                  const request = event.request
-                  const output = {
-                    ...event,
-                    request: (input: Request) => Effect.runPromiseWith(context)(request(input)),
-                  }
-                  return Effect.promise(() => Promise.resolve(Reflect.apply(callback, undefined, [output]))).pipe(
-                    Effect.tap(() =>
-                      Effect.sync(() => {
-                        event.request = (input) =>
-                          Effect.tryPromise({
-                            try: () => output.request(input),
-                            catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-                          })
-                      }),
-                    ),
-                  )
-                }),
-              )
-            },
+            hook: (name, callback) =>
+              register(host.session.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))))),
             create: (input) =>
               run(
                 host.session.create(

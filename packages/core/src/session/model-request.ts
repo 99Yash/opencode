@@ -220,15 +220,24 @@ export const layer = Layer.effect(
         toolChoice: stepLimitReached ? "none" : undefined,
       })
       const options: StreamOptions = {
-        http: (request, handler) =>
+        transform: (request) =>
           hooks
-            .trigger("session", "http", {
+            .trigger("session", "request", {
               sessionID: session.id,
               agent: agent.id,
               model: resolved.ref,
-              request: handler,
+              ...request,
             })
-            .pipe(Effect.flatMap((event) => event.request(request))),
+            .pipe(
+              Effect.tap((event) =>
+                Effect.sync(() => {
+                  request.url = event.url
+                  request.headers = event.headers
+                  request.body = event.body
+                }),
+              ),
+              Effect.asVoid,
+            ),
       }
       if (promptCacheSnapshots) {
         const current = PromptCacheDiagnostics.snapshot(request)

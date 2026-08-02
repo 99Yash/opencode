@@ -225,25 +225,15 @@ export const OpenAIPlugin = define({
         })
       }
     })
-    yield* ctx.session.hook("http", (evt) =>
+    yield* ctx.session.hook("request", (evt) =>
       Effect.sync(() => {
         if (!chatgpt || evt.model.providerID !== Provider.ID.openai) return
-        const request = evt.request
-        evt.request = (input) => {
-          const url = new URL(input.url)
-          const headers = new Headers(input.headers)
-          headers.set("originator", "opencode")
-          headers.set("session-id", evt.sessionID)
-          if (url.origin !== "https://api.openai.com") return request(new Request(input, { headers }))
-          return request(
-            new Request(`${codexBaseURL}${url.pathname.replace(/^\/v1/, "")}${url.search}`, {
-              method: input.method,
-              headers,
-              body: input.body,
-              signal: input.signal,
-            }),
-          )
+        const url = new URL(evt.url)
+        if (url.origin === "https://api.openai.com") {
+          evt.url = `${codexBaseURL}${url.pathname.replace(/^\/v1/, "")}${url.search}`
         }
+        evt.headers.originator = "opencode"
+        evt.headers["session-id"] = evt.sessionID
       }),
     )
 

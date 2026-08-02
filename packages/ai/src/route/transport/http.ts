@@ -1,11 +1,11 @@
 import { Effect, Stream } from "effect"
-import { Headers, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { Headers, HttpClientRequest } from "effect/unstable/http"
 import { Auth } from "../auth"
 import { render as renderEndpoint } from "../endpoint"
 import { Framing } from "../framing"
-import type { HttpMiddleware, Transport, TransportPrepareInput } from "./index"
+import type { Transport, TransportPrepareInput } from "./index"
 import * as ProviderShared from "../../protocols/shared"
-import { LLMError, mergeJsonRecords, type LLMRequest } from "../../schema"
+import { mergeJsonRecords, type LLMRequest } from "../../schema"
 
 export type JsonRequestInput<Body> = TransportPrepareInput<Body>
 
@@ -18,9 +18,7 @@ export interface JsonRequestParts<Body = unknown> {
 
 export interface HttpPrepared<Frame> {
   readonly request: HttpClientRequest.HttpClientRequest
-  readonly web: Request
   readonly framing: Framing.Definition<Frame>
-  readonly middleware?: HttpMiddleware
 }
 
 const applyQuery = (url: string, query: Record<string, string> | undefined) => {
@@ -76,62 +74,21 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
   prepare: (prepareInput) =>
     Effect.gen(function* () {
       const parts = yield* jsonRequestParts({ ...prepareInput })
-      const request = ProviderShared.jsonPost({
-        url: parts.url,
-        body: parts.bodyText,
-        headers: parts.headers,
-      })
+      const request = { url: parts.url, method: "POST", headers: { ...parts.headers }, body: parts.bodyText }
+      yield* (prepareInput.transform?.(request) ?? Effect.void)
       return {
-        request,
-        web: new Request(parts.url, { method: "POST", headers: parts.headers, body: parts.bodyText }),
+        request: ProviderShared.jsonPost({
+          url: request.url,
+          body: request.body ?? "",
+          headers: Headers.fromInput(request.headers),
+        }),
         framing: input.framing,
-        middleware: prepareInput.middleware,
       }
     }),
   frames: (prepared, request, runtime) =>
     Stream.unwrap(
-      Effect.gen(function* () {
-        const request = prepared.web
-        const execute = (input: Request) =>
-          Effect.tryPromise({
-            try: () => input.text(),
-            catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
-          }).pipe(
-            Effect.flatMap((body) =>
-              runtime.http.execute(
-                ProviderShared.jsonPost({
-                  url: input.url,
-                  body,
-                  headers: Headers.fromInput(input.headers),
-                }),
-              ),
-            ),
-            Effect.flatMap((response) =>
-              Stream.toReadableStreamEffect(response.stream).pipe(
-                Effect.map(
-                  (body) =>
-                    new Response(body, {
-                      status: response.status,
-                      headers: response.headers,
-                    }),
-                ),
-              ),
-            ),
-          )
-        return yield* prepared.middleware ? prepared.middleware(request, execute) : execute(request)
-      })
-        .pipe(
-          Effect.mapError((error) =>
-            error instanceof LLMError
-              ? error
-              : ProviderShared.eventError(
-                  `${request.model.provider}/${request.model.route.id}`,
-                  `Failed to execute ${request.model.provider}/${request.model.route.id} request`,
-                  ProviderShared.errorText(error),
-                ),
-          ),
-          Effect.map((response) => HttpClientResponse.fromWeb(prepared.request, response)),
-        )
+      runtime.http
+        .execute(prepared.request)
         .pipe(
           Effect.map((response) =>
             prepared.framing.frame(
