@@ -1270,11 +1270,6 @@ export function options(input: {
     result["gateway"] = { caching: "auto" }
   }
 
-  if (input.model.api.npm === "@ai-sdk/azure" && input.model.api.id.includes("gpt-5.5")) {
-    result["reasoningSummary"] = "auto"
-    return result
-  }
-
   if (input.model.api.id.includes("gpt-5") && !input.model.api.id.includes("gpt-5-chat")) {
     if (!input.model.api.id.includes("gpt-5-pro")) {
       result["reasoningEffort"] = "medium"

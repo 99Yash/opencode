@@ -93,6 +93,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     input.model.api.npm === "@ai-sdk/azure" &&
     (input.provider.options.useCompletionUrls || input.model.options.useCompletionUrls || options.useCompletionUrls)
   ) {
+    delete options.reasoningEffort
     delete options.reasoningSummary
     delete options.include
   }

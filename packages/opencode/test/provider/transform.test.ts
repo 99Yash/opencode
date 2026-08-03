@@ -252,7 +252,7 @@ describe("ProviderTransform.options - setCacheKey", () => {
     expect(result.promptCacheKey).toBeUndefined()
   })
 
-  test("should keep the Azure cache key for gpt-5.5 early return", () => {
+  test("should keep the Azure cache key for gpt-5.5 Responses defaults", () => {
     const result = ProviderTransform.options({
       model: {
         ...mockModel,
@@ -525,7 +525,7 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
     expect(result.include).toBeUndefined()
   })
 
-  test("azure chat completions omit Responses-only reasoning options after variants merge", async () => {
+  test("azure chat completions omit unsupported reasoning options after variants merge", async () => {
     const model = {
       ...createGpt5Model("gpt-5.4"),
       id: "azure/gpt-5.4",
@@ -580,7 +580,7 @@ describe("ProviderTransform.options - gpt-5 textVerbosity", () => {
         isWorkflow: false,
       }),
     )
-    expect(result.params.options.reasoningEffort).toBe("high")
+    expect(result.params.options.reasoningEffort).toBeUndefined()
     expect(result.params.options.reasoningSummary).toBeUndefined()
     expect(result.params.options.include).toBeUndefined()
     expect(result.tools.lookup.strict).toBe(false)
@@ -681,14 +681,15 @@ describe("ProviderTransform.options - gpt-5 reasoningEffort", () => {
     expect(result.reasoningEffort).toBeUndefined()
   })
 
-  test("gpt-5.5 should NOT set reasoningEffort", () => {
+  test("gpt-5.5 should set Responses reasoning options", () => {
     const result = ProviderTransform.options({
       model: createModel("gpt-5.5"),
       sessionID,
       providerOptions: {},
     })
 
-    expect(result.reasoningEffort).toBeUndefined()
+    expect(result.reasoningEffort).toBe("medium")
+    expect(result.reasoningSummary).toBe("auto")
   })
 })
 
