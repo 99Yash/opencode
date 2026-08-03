@@ -7,6 +7,7 @@ import {
   renderOAuthError,
   type IdTokenClaims,
 } from "../../src/plugin/openai/codex"
+import { OAUTH_DUMMY_KEY } from "../../src/auth"
 
 function createTestJwt(payload: object): string {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")
@@ -174,10 +175,41 @@ describe("plugin.codex", () => {
     auth = undefined
 
     const response = await loaded.fetch!(server.url, {
-      headers: { authorization: "Bearer current" },
+      headers: { authorization: `Bearer ${OAUTH_DUMMY_KEY}` },
     })
 
-    expect(await response.json()).toEqual({ authorization: "Bearer current" })
+    expect(await response.json()).toEqual({ authorization: `Bearer ${OAUTH_DUMMY_KEY}` })
+  })
+
+  test("uses current API key when OAuth auth is replaced after loading", async () => {
+    let auth:
+      | {
+          type: "oauth"
+          refresh: string
+          access: string
+          expires: number
+        }
+      | { type: "api"; key: string } = {
+      type: "oauth",
+      refresh: "refresh",
+      access: "access",
+      expires: Date.now() + 60_000,
+    }
+    using server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        return Response.json({ authorization: request.headers.get("authorization") })
+      },
+    })
+    const hooks = await CodexAuthPlugin({} as never)
+    const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
+    auth = { type: "api", key: "sk-current" }
+
+    const response = await loaded.fetch!(server.url, {
+      headers: { authorization: `Bearer ${OAUTH_DUMMY_KEY}` },
+    })
+
+    expect(await response.json()).toEqual({ authorization: "Bearer sk-current" })
   })
 
   test("filters unsupported modes and uses Codex context limits for OAuth GPT models", async () => {

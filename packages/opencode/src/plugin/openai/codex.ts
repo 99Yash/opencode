@@ -341,6 +341,12 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
             const currentAuth = await getAuth()
+            if (currentAuth?.type === "api") {
+              const headers = new Headers(init?.headers)
+              headers.set("authorization", `Bearer ${currentAuth.key}`)
+              const requestInit = { ...init, headers }
+              return websocketFetch ? websocketFetch(requestInput, requestInit) : fetch(requestInput, requestInit)
+            }
             if (currentAuth?.type !== "oauth")
               return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
 
