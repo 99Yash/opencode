@@ -57,6 +57,21 @@ When several credential sources exist, OpenCode uses the stored credential first
 
 <Callout type="warning">Do not commit API keys or authorization headers to your repository.</Callout>
 
+## OpenCode Console
+
+OpenCode Console uses browser device authorization for a named user account:
+
+```bash
+opencode console login
+```
+
+After authorization, OpenCode loads the Console-managed model configuration into the `opencode` provider. An explicit
+Console server URL may be passed for a custom deployment; the default is `https://opencode.ai/console`.
+
+[OpenCode Go](/go) subscriptions use this named-user flow and the `opencode` provider. Do not copy an API key. API-key
+and service-account connections remain available for ordinary managed inference, but they are not eligible for Go
+subscription access.
+
 ## Configure
 
 The `providers` object is keyed by provider ID. Each provider accepts these fields:

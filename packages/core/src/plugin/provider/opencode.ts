@@ -14,7 +14,7 @@ import { Money } from "@opencode-ai/schema/money"
 import { ConfigProviderOptionsV1 } from "../../v1/config/provider-options"
 import { ConfigV1 } from "../../v1/config/config"
 
-const defaultServer = "https://console.opencode.ai"
+const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
 const RemoteResponse = Schema.Struct({ config: ConfigV1.Info })
@@ -111,7 +111,10 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
         integration.name = "OpenCode"
       })
       draft.method.update(oauth(http))
-      draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
+      draft.method.update({
+        integrationID: "opencode",
+        method: { type: "key", label: "API key (managed inference service account; not Go)" },
+      })
     })
 
     yield* load()
@@ -214,6 +217,12 @@ function fetchProviders(http: HttpClient.HttpClient, value: CredentialValue) {
     .pipe(
       Effect.flatMap((response) => {
         if (response.status === 404) return Effect.succeed(undefined)
+        if (response.status === 403) {
+          return Effect.fail(new Error("OpenCode Console access is forbidden for the selected organization"))
+        }
+        if (response.status < 200 || response.status >= 300) {
+          return Effect.fail(new Error(`OpenCode Console provider config failed with HTTP ${response.status}`))
+        }
         return HttpClientResponse.filterStatusOk(response).pipe(
           Effect.flatMap(HttpClientResponse.schemaBodyJson(RemoteResponse)),
           Effect.map((remote) => remote.config.provider),
@@ -296,8 +305,22 @@ function credential(http: HttpClient.HttpClient, server: string, token: typeof T
       ],
       { concurrency: 2 },
     )
-    const org = orgs.toSorted((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))[0]
-    return Credential.OAuth.make({
+    if (orgs.length === 0) {
+      return yield* Effect.fail(
+        new Error(
+          "Your OpenCode Console account does not belong to an organization. Create or join one at https://opencode.ai/console, then try again.",
+        ),
+      )
+    }
+    if (orgs.length > 1) {
+      return yield* Effect.fail(
+        new Error(
+          "Your OpenCode Console account belongs to multiple organizations. Organization selection is not supported yet; use an account with one organization, then try again.",
+        ),
+      )
+    }
+    const org = orgs[0]
+    const value = Credential.OAuth.make({
       type: "oauth" as const,
       methodID,
       access: token.access_token,
@@ -307,10 +330,17 @@ function credential(http: HttpClient.HttpClient, server: string, token: typeof T
         server,
         accountID: user.id,
         email: user.email,
-        orgID: org?.id,
-        orgName: org?.name,
+        orgID: org.id,
+        orgName: org.name,
       },
     })
+    const providers = yield* fetchProviders(http, value)
+    if (!providers) {
+      return yield* Effect.fail(
+        new Error("OpenCode Console did not return provider config for the selected organization"),
+      )
+    }
+    return value
   })
 }
 

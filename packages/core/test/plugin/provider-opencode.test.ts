@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
 import { Effect } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Bus } from "@opencode-ai/core/bus"
@@ -87,8 +88,47 @@ describe("OpencodePlugin", () => {
           type: "oauth",
           label: "OpenCode Console account",
         },
-        { type: "key", label: "API key (service account)" },
+        { type: "key", label: "API key (managed inference service account; not Go)" },
       ])
+    }),
+  )
+
+  it.effect("uses the canonical OpenCode Console server by default", () =>
+    Effect.gen(function* () {
+      const requests: string[] = []
+      const http = HttpClient.make((request) => {
+        requests.push(request.url)
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            Response.json({
+              device_code: "device",
+              user_code: "user",
+              verification_uri_complete: "/verify",
+              expires_in: 60,
+              interval: 60,
+            }),
+          ),
+        )
+      })
+      const plugin = yield* Plugin.Service
+      const host = yield* PluginHost.make(plugin)
+      const bus = yield* Bus.Service
+      const integration = yield* Integration.Service
+      yield* OpencodePlugin.effect(host).pipe(
+        Effect.provideService(Bus.Service, bus),
+        Effect.provideService(Integration.Service, integration),
+        Effect.provideService(HttpClient.HttpClient, http),
+      )
+      const attempt = yield* integration.oauth.connect({
+        integrationID: Integration.ID.make("opencode"),
+        methodID: Integration.MethodID.make("device"),
+        inputs: {},
+      })
+      yield* integration.oauth.cancel({ integrationID: Integration.ID.make("opencode"), attemptID: attempt.attemptID })
+
+      expect(requests).toEqual(["https://opencode.ai/console/auth/device/code"])
+      expect(attempt.url).toBe("https://opencode.ai/console/verify")
     }),
   )
 
@@ -115,6 +155,9 @@ describe("OpencodePlugin", () => {
             }
             if (url.pathname.endsWith("/api/user")) return Response.json({ id: "user", email: "user@example.com" })
             if (url.pathname.endsWith("/api/orgs")) return Response.json([{ id: "org", name: "Org" }])
+            if (url.pathname.endsWith("/api/config")) {
+              return Response.json({ config: { enterprise: { url: url.origin }, provider: {} } })
+            }
             return new Response("Not found", { status: 404 })
           },
         })
@@ -140,11 +183,162 @@ describe("OpencodePlugin", () => {
           expect(requests).toContain("POST /console/auth/device/token")
           expect(requests).toContain("GET /console/api/user")
           expect(requests).toContain("GET /console/api/orgs")
+          expect(requests).toContain("GET /console/api/config")
           expect((yield* (yield* Credential.Service).list(Integration.ID.make("opencode")))[0]?.value).toMatchObject({
-            metadata: { server: `${server.url.origin}/console` },
+            metadata: { server: `${server.url.origin}/console`, orgID: "org", orgName: "Org" },
           })
         }),
       ({ server }) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("rejects device login without an organization", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            const url = new URL(request.url)
+            if (url.pathname === "/auth/device/code") {
+              return Response.json({
+                device_code: "device",
+                user_code: "user",
+                verification_uri_complete: `${url.origin}/verify`,
+                expires_in: 60,
+                interval: 0,
+              })
+            }
+            if (url.pathname === "/auth/device/token") {
+              return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 600 })
+            }
+            if (url.pathname === "/api/user") return Response.json({ id: "user", email: "user@example.com" })
+            if (url.pathname === "/api/orgs") return Response.json([])
+            return new Response("Not found", { status: 404 })
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          yield* addPlugin()
+          const integrations = yield* Integration.Service
+          const integrationID = Integration.ID.make("opencode")
+          const attempt = yield* integrations.oauth.connect({
+            integrationID,
+            methodID: Integration.MethodID.make("device"),
+            inputs: { server: server.url.origin },
+          })
+          const status = yield* eventually(
+            integrations.oauth.status({ integrationID, attemptID: attempt.attemptID }),
+            (value) => value.status !== "pending",
+          )
+
+          expect(status).toMatchObject({ status: "failed" })
+          if (status.status === "failed") expect(status.message).toContain("does not belong to an organization")
+          expect(yield* (yield* Credential.Service).list(integrationID)).toEqual([])
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("rejects device login with multiple organizations", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            const url = new URL(request.url)
+            if (url.pathname === "/auth/device/code") {
+              return Response.json({
+                device_code: "device",
+                user_code: "user",
+                verification_uri_complete: `${url.origin}/verify`,
+                expires_in: 60,
+                interval: 0,
+              })
+            }
+            if (url.pathname === "/auth/device/token") {
+              return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 600 })
+            }
+            if (url.pathname === "/api/user") return Response.json({ id: "user", email: "user@example.com" })
+            if (url.pathname === "/api/orgs") {
+              return Response.json([
+                { id: "org-b", name: "Beta" },
+                { id: "org-a", name: "Alpha" },
+              ])
+            }
+            return new Response("Not found", { status: 404 })
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          yield* addPlugin()
+          const integrations = yield* Integration.Service
+          const integrationID = Integration.ID.make("opencode")
+          const attempt = yield* integrations.oauth.connect({
+            integrationID,
+            methodID: Integration.MethodID.make("device"),
+            inputs: { server: server.url.origin },
+          })
+          const status = yield* eventually(
+            integrations.oauth.status({ integrationID, attemptID: attempt.attemptID }),
+            (value) => value.status !== "pending",
+          )
+
+          expect(status).toMatchObject({ status: "failed" })
+          if (status.status === "failed") expect(status.message).toContain("multiple organizations")
+          expect(yield* (yield* Credential.Service).list(integrationID)).toEqual([])
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
+    ),
+  )
+
+  it.live("does not complete device login before provider config loads", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: (request) => {
+            const url = new URL(request.url)
+            if (url.pathname === "/auth/device/code") {
+              return Response.json({
+                device_code: "device",
+                user_code: "user",
+                verification_uri_complete: `${url.origin}/verify`,
+                expires_in: 60,
+                interval: 0,
+              })
+            }
+            if (url.pathname === "/auth/device/token") {
+              return Response.json({ access_token: "access", refresh_token: "refresh", expires_in: 600 })
+            }
+            if (url.pathname === "/api/user") return Response.json({ id: "user", email: "user@example.com" })
+            if (url.pathname === "/api/orgs") return Response.json([{ id: "org", name: "Org" }])
+            if (url.pathname === "/api/config") return new Response("Forbidden", { status: 403 })
+            return new Response("Not found", { status: 404 })
+          },
+        }),
+      ),
+      (server) =>
+        Effect.gen(function* () {
+          yield* addPlugin()
+          const integrations = yield* Integration.Service
+          const integrationID = Integration.ID.make("opencode")
+          const attempt = yield* integrations.oauth.connect({
+            integrationID,
+            methodID: Integration.MethodID.make("device"),
+            inputs: { server: server.url.origin },
+          })
+          const status = yield* eventually(
+            integrations.oauth.status({ integrationID, attemptID: attempt.attemptID }),
+            (value) => value.status !== "pending",
+          )
+
+          expect(status).toMatchObject({ status: "failed" })
+          if (status.status === "failed") expect(status.message).toContain("forbidden for the selected organization")
+          expect(yield* (yield* Credential.Service).list(integrationID)).toEqual([])
+        }),
+      (server) => Effect.promise(() => server.stop(true)),
     ),
   )
 

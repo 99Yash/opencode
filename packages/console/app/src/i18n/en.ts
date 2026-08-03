@@ -265,7 +265,8 @@ export const dict = {
   "go.cta.text": "Subscribe to Go",
   "go.cta.price": "$10/month",
   "go.cta.promo": "$5 first month",
-  "go.pricing.body": "Use with any agent. $5 first month, then $10/month. Top up credit if needed. Cancel any time.",
+  "go.pricing.body":
+    "For a named OpenCode subscriber. $5 first month, then $10/month. Service accounts are not eligible. Cancel any time.",
   "go.graph.free": "Free",
   "go.graph.freePill": "Big Pickle and free models",
   "go.graph.go": "Go",
@@ -304,15 +305,15 @@ export const dict = {
   "go.problem.item4":
     "Includes Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash, and Hy3",
   "go.how.title": "How Go works",
-  "go.how.body": "Go starts at $5 for your first month, then $10/month. You can use it with OpenCode or any agent.",
-  "go.how.step1.title": "Create an account",
-  "go.how.step1.beforeLink": "follow the",
-  "go.how.step1.link": "setup instructions",
-  "go.how.step2.title": "Subscribe to Go",
-  "go.how.step2.link": "$5 first month",
-  "go.how.step2.afterLink": "then $10/month with generous limits",
+  "go.how.body": "Go is available to a named subscriber using OpenCode. No API key needs to be copied.",
+  "go.how.step1.title": "Subscribe to Go",
+  "go.how.step1.beforeLink": "in",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Connect OpenCode",
+  "go.how.step2.link": "run opencode console login",
+  "go.how.step2.afterLink": "and authorize the device in your browser",
   "go.how.step3.title": "Start coding",
-  "go.how.step3.body": "with reliable access to open-source models",
+  "go.how.step3.body": "with the opencode provider",
   "go.privacy.title": "Your privacy is important to us",
   "go.privacy.body":
     "The plan is designed primarily for international users, with models hosted in the US, EU, and Singapore for stable global access.",
@@ -346,8 +347,9 @@ export const dict = {
   "go.faq.a6": "If you need more usage, you can top up credit in your account.",
   "go.faq.q7": "Can I cancel?",
   "go.faq.a7": "Yes, you can cancel any time.",
-  "go.faq.q8": "Can I use Go with other coding agents?",
-  "go.faq.a8": "Yes, you can use Go with any agent. Follow the setup instructions in your preferred coding agent.",
+  "go.faq.q8": "Who can use Go?",
+  "go.faq.a8":
+    "Go is available to the named subscriber through OpenCode. Other coding agents and service accounts are not eligible.",
 
   "go.faq.q9": "What is the difference between free models and Go?",
   "go.faq.a9":

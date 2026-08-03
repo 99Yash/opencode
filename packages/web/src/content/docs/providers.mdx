@@ -125,30 +125,18 @@ It works like any other provider in OpenCode and is completely optional to use.
 OpenCode Go is a low cost subscription plan that provides reliable access to popular open coding models provided by the OpenCode team that have been
 tested and verified to work well with OpenCode.
 
-1. Run the `/connect` command in the TUI, select `OpenCode Go`, and head to [opencode.ai/auth](https://opencode.ai/zen).
+1. [Subscribe to Go in OpenCode Console](https://opencode.ai/console/go).
 
-   ```txt
-   /connect
+2. Run the Console device login and authorize it in your browser.
+
+   ```bash
+   opencode console login
    ```
 
-2. Sign in, add your billing details, and copy your API key.
+3. Choose a model from the `opencode` provider.
 
-3. Paste your API key.
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. Run `/models` in the TUI to see the list of models we recommend.
-
-   ```txt
-   /models
-   ```
-
-It works like any other provider in OpenCode and is completely optional to use.
+Go belongs to the named subscriber and works only through OpenCode's `opencode` provider. Do not copy an API key.
+Service accounts can use ordinary managed inference, but they are not eligible for Go.
 
 ---
 

@@ -1,0 +1,36 @@
+---
+title: "OpenCode Go"
+description: "Connect a named OpenCode Go subscription to OpenCode."
+---
+
+OpenCode Go is a low-cost subscription for popular open coding models. Go access belongs to the named person who
+subscribes and is available through OpenCode's `opencode` provider.
+
+<Callout type="note">
+  OpenCode Go does not use a copied API key. Service accounts and other coding agents are not eligible.
+</Callout>
+
+## Subscribe
+
+Subscribe in [OpenCode Console](https://opencode.ai/console/go). The subscription is attached to your Console account.
+
+## Connect OpenCode
+
+Run the Console device login:
+
+```bash
+opencode console login
+```
+
+OpenCode opens a browser authorization page. Approve the device for your Console account. The CLI then loads the
+`opencode` provider configuration for your organization.
+
+For the initial launch, an account with exactly one organization connects automatically. If your account has no
+organization or belongs to multiple organizations, login stops with instructions instead of choosing one implicitly.
+
+## Use Go models
+
+Choose a model from the `opencode` provider in OpenCode. No separate Go provider or endpoint configuration is required.
+
+API keys and service-account credentials can still connect ordinary OpenCode managed inference. They do not grant
+OpenCode Go subscription access.
