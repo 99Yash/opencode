@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Ref, Schema } from "effect"
-import { HttpClientRequest } from "effect/unstable/http"
+import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { LLM, mergeProviderOptions } from "../src"
 import { AnthropicMessages, OpenAIChat } from "../src/protocols"
 import { Auth, LLMClient } from "../src/route"
@@ -148,16 +148,13 @@ describe("request option precedence", () => {
       {
         http: (request, handler) =>
           Effect.gen(function* () {
-            expect(request.headers.get("authorization")).toBe("Bearer fresh-key")
-            const headers = new Headers(request.headers)
-            headers.set("x-plugin", "transformed")
-            headers.set("content-type", "application/custom+json")
             return yield* handler(
-              new Request("https://proxy.test/v1/chat/completions", {
-                method: "PUT",
-                headers,
-                body: JSON.stringify({ transformed: true }),
-              }),
+              request.pipe(
+                HttpClientRequest.setUrl("https://proxy.test/v1/chat/completions"),
+                HttpClientRequest.setMethod("PUT"),
+                HttpClientRequest.setHeader("x-plugin", "transformed"),
+                HttpClientRequest.bodyText(JSON.stringify({ transformed: true }), "application/custom+json"),
+              ),
             )
           }),
       },
@@ -193,11 +190,13 @@ describe("request option precedence", () => {
           http: (request, handler) =>
             Effect.gen(function* () {
               const response = yield* handler(request)
-              const body = yield* Effect.promise(() => response.text())
-              return new Response(body.replace("network", "hooked"), {
-                status: response.status,
-                headers: response.headers,
-              })
+              return HttpClientResponse.fromWeb(
+                response.request,
+                new Response((yield* response.text).replace("network", "hooked"), {
+                  status: response.status,
+                  headers: response.headers,
+                }),
+              )
             }),
         },
       ).pipe(
@@ -229,12 +228,9 @@ describe("request option precedence", () => {
         {
           http: (request, handler) =>
             Effect.gen(function* () {
-              const retry = request.clone()
               const response = yield* handler(request)
               expect(response.status).toBe(401)
-              const headers = new Headers(retry.headers)
-              headers.set("authorization", "Bearer refreshed")
-              return yield* handler(new Request(retry, { headers }))
+              return yield* handler(HttpClientRequest.setHeader(request, "authorization", "Bearer refreshed"))
             }),
         },
       ).pipe(
