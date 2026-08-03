@@ -53,7 +53,7 @@ const textEvents = (value: string, id: string) => [
   LLMEvent.textEnd({ id }),
 ]
 
-export const text = (value: string, id: string) => stop(...textEvents(value, id))
+export const text = (value: string, id = "text-0") => stop(...textEvents(value, id))
 
 export const textWithUsage = (value: string, id: string, inputTokens: number) =>
   complete(
@@ -146,6 +146,10 @@ export const clientLayer = Layer.effect(
   LLMClient.Service,
   Effect.map(Service, (service) => service.client),
 )
+
+export const layerWithClient = (options: LayerOptions = {}) => clientLayer.pipe(Layer.provideMerge(layer(options)))
+
+export const requests = Service.use((service) => Effect.succeed(service.requests))
 
 export const push = (...responses: readonly Response[]) => Service.use((service) => service.push(...responses))
 

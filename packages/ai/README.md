@@ -214,22 +214,20 @@ the requests sent by code under test:
 import { Effect } from "effect"
 import { TestLLM } from "@opencode-ai/ai/testing"
 
-const testLLM = TestLLM.layer({
-  fallback: TestLLM.text("Hello from the test model", "text-1"),
+const testLLM = TestLLM.layerWithClient({
+  fallback: TestLLM.text("Hello from the test model"),
 })
 
-// TestLLM.clientLayer provides LLMClient.Service and consumes TestLLM.Service.
 const programWithTestClient = Effect.gen(function* () {
   const result = yield* program
-  const test = yield* TestLLM.Service
-  console.log(test.requests)
+  console.log(yield* TestLLM.requests)
   return result
-}).pipe(Effect.provide(TestLLM.clientLayer), Effect.provide(testLLM))
+}).pipe(Effect.provide(testLLM))
 ```
 
 `TestLLM.push(...)` scripts one-shot responses, `TestLLM.always(...)` changes the fallback, and
 `TestLLM.wait(...)` lets concurrent tests wait until a request has arrived. Every received canonical request is
-available on the yielded `TestLLM.Service`.
+available from `TestLLM.requests`.
 
 ## Caching
 
