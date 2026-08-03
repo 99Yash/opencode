@@ -340,6 +340,10 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
         return {
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
+            const currentAuth = await getAuth()
+            if (currentAuth?.type !== "oauth")
+              return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
+
             if (init?.headers) {
               if (init.headers instanceof Headers) {
                 init.headers.delete("authorization")
@@ -351,10 +355,6 @@ export async function CodexAuthPlugin(input: PluginInput, options: CodexAuthPlug
                 delete init.headers["Authorization"]
               }
             }
-
-            const currentAuth = await getAuth()
-            if (currentAuth.type !== "oauth")
-              return websocketFetch ? websocketFetch(requestInput, init) : fetch(requestInput, init)
 
             const authWithAccount = currentAuth as typeof currentAuth & { accountId?: string }
 

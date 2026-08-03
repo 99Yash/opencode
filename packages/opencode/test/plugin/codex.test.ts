@@ -149,6 +149,37 @@ describe("plugin.codex", () => {
     await enabled.dispose?.()
   })
 
+  test("passes requests through when OAuth auth is removed after loading", async () => {
+    let auth:
+      | {
+          type: "oauth"
+          refresh: string
+          access: string
+          expires: number
+        }
+      | undefined = {
+      type: "oauth",
+      refresh: "refresh",
+      access: "access",
+      expires: Date.now() + 60_000,
+    }
+    using server = Bun.serve({
+      port: 0,
+      fetch(request) {
+        return Response.json({ authorization: request.headers.get("authorization") })
+      },
+    })
+    const hooks = await CodexAuthPlugin({} as never)
+    const loaded = await hooks.auth!.loader!(async () => auth as never, {} as never)
+    auth = undefined
+
+    const response = await loaded.fetch!(server.url, {
+      headers: { authorization: "Bearer current" },
+    })
+
+    expect(await response.json()).toEqual({ authorization: "Bearer current" })
+  })
+
   test("filters unsupported modes and uses Codex context limits for OAuth GPT models", async () => {
     const hooks = await CodexAuthPlugin({} as never)
     const limit = { context: 1_050_000, input: 922_000, output: 128_000 }
