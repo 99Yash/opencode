@@ -270,8 +270,7 @@ export const dict = {
   "go.cta.text": "S'abonner à Go",
   "go.cta.price": "10 $/mois",
   "go.cta.promo": "$5 le premier mois",
-  "go.pricing.body":
-    "Utilisez-le avec n'importe quel agent. $5 le premier mois, puis 10 $/mois. Rechargez du crédit si nécessaire. Annulez à tout moment.",
+  "go.pricing.body": "Go commence à $5 pour le premier mois, puis 10 $/mois.",
   "go.graph.free": "Gratuit",
   "go.graph.freePill": "Big Pickle et modèles gratuits",
   "go.graph.go": "Go",
@@ -310,16 +309,15 @@ export const dict = {
   "go.problem.item4":
     "Inclut Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash et Hy3",
   "go.how.title": "Comment fonctionne Go",
-  "go.how.body":
-    "Go commence à $5 pour le premier mois, puis 10 $/mois. Vous pouvez l'utiliser avec OpenCode ou n'importe quel agent.",
-  "go.how.step1.title": "Créez un compte",
-  "go.how.step1.beforeLink": "suivez les",
-  "go.how.step1.link": "instructions de configuration",
-  "go.how.step2.title": "Abonnez-vous à Go",
-  "go.how.step2.link": "$5 le premier mois",
-  "go.how.step2.afterLink": "puis 10 $/mois avec des limites généreuses",
+  "go.how.body": "Go commence à $5 pour le premier mois, puis 10 $/mois.",
+  "go.how.step1.title": "Abonnez-vous à Go",
+  "go.how.step1.beforeLink": "dans",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Connecter OpenCode",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "et autorisez l’appareil dans votre navigateur",
   "go.how.step3.title": "Commencez à coder",
-  "go.how.step3.body": "avec un accès fiable aux modèles open source",
+  "go.how.step3.body": "avec le fournisseur opencode",
   "go.privacy.title": "Votre vie privée est importante pour nous",
   "go.privacy.body":
     "Le plan est conçu principalement pour les utilisateurs internationaux, avec des modèles hébergés aux États-Unis, dans l'UE et à Singapour pour un accès mondial stable.",
@@ -352,9 +350,8 @@ export const dict = {
   "go.faq.a6": "Si vous avez besoin de plus d'utilisation, vous pouvez recharger du crédit dans votre compte.",
   "go.faq.q7": "Puis-je annuler ?",
   "go.faq.a7": "Oui, vous pouvez annuler à tout moment.",
-  "go.faq.q8": "Puis-je utiliser Go avec d'autres agents de code ?",
-  "go.faq.a8":
-    "Oui, vous pouvez utiliser Go avec n'importe quel agent. Suivez les instructions de configuration dans votre agent de code préféré.",
+  "go.faq.q8": "Quel accès est reporté ?",
+  "go.faq.a8": "La prise en charge des agents externes et des comptes de service est reportée.",
   "go.faq.q9": "Quelle est la différence entre les modèles gratuits et Go ?",
   "go.faq.a9":
     "Les modèles gratuits incluent Big Pickle ainsi que des modèles promotionnels disponibles à ce moment-là, avec un quota de 200 requêtes/jour. Go inclut Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash et Hy3 avec des quotas de requêtes plus élevés appliqués sur des fenêtres glissantes (5 heures, hebdomadaire et mensuelle), à peu près équivalent à 12 $ par 5 heures, 30 $ par semaine et 60 $ par mois (le nombre réel de requêtes varie selon le modèle et l'utilisation).",
@@ -666,8 +663,7 @@ export const dict = {
   "workspace.lite.subscription.resetsIn": "Réinitialisation dans",
   "workspace.lite.subscription.useBalance":
     "Utilisez votre solde disponible après avoir atteint les limites d'utilisation",
-  "workspace.lite.subscription.selectProvider":
-    'Sélectionnez "OpenCode Go" comme fournisseur dans votre configuration opencode pour utiliser les modèles Go.',
+  "workspace.lite.subscription.selectProvider": "Sélectionnez le fournisseur opencode pour utiliser les modèles Go.",
   "workspace.lite.providers.title": "Fournisseurs",
   "workspace.lite.providers.description": "Contrôlez les fournisseurs utilisés pour le routage.",
   "workspace.lite.providers.useChina": "Activer les modèles hébergés en Chine",

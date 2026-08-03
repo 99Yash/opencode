@@ -265,8 +265,7 @@ export const dict = {
   "go.cta.text": "Goを購読する",
   "go.cta.price": "$10/月",
   "go.cta.promo": "初月 $5",
-  "go.pricing.body":
-    "どのエージェントでも使えます。最初の月$5、その後$10/月。必要に応じてクレジットを追加。いつでもキャンセルできます。",
+  "go.pricing.body": "Goは最初の月$5、その後$10/月で始まります。",
   "go.graph.free": "無料",
   "go.graph.freePill": "Big Pickleと無料モデル",
   "go.graph.go": "Go",
@@ -306,15 +305,15 @@ export const dict = {
   "go.problem.item4":
     "Grok 4.5、GLM-5.2、GLM-5.1、Kimi K3、Kimi K2.7 Code、Kimi K2.6、MiMo-V2.5-Pro、MiMo-V2.5、Qwen3.7 Max、Qwen3.7 Plus、Qwen3.6 Plus、MiniMax M2.7、MiniMax M3、DeepSeek V4 Pro、DeepSeek V4 Flash、Hy3を含む",
   "go.how.title": "Goの仕組み",
-  "go.how.body": "Goは最初の月$5、その後$10/月で始まります。OpenCodeまたは任意のエージェントで使えます。",
-  "go.how.step1.title": "アカウントを作成",
-  "go.how.step1.beforeLink": "",
-  "go.how.step1.link": "セットアップ手順はこちら",
-  "go.how.step2.title": "Goを購読する",
-  "go.how.step2.link": "最初の月$5",
-  "go.how.step2.afterLink": "その後$10/月、ゆとりある上限付き",
+  "go.how.body": "Goは最初の月$5、その後$10/月で始まります。",
+  "go.how.step1.title": "Goを購読する",
+  "go.how.step1.beforeLink": "で",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "OpenCodeを接続",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "ブラウザでデバイスを承認します",
   "go.how.step3.title": "コーディングを開始",
-  "go.how.step3.body": "オープンソースモデルへの安定したアクセスで",
+  "go.how.step3.body": "opencodeプロバイダーで",
   "go.privacy.title": "あなたのプライバシーは私たちにとって重要です",
   "go.privacy.body":
     "このプランは主に海外ユーザー向けに設計されており、米国、EU、シンガポールでホストされたモデルにより安定したグローバルアクセスを提供します。",
@@ -347,9 +346,8 @@ export const dict = {
   "go.faq.a6": "利用枠を追加したい場合は、アカウントでクレジットをチャージできます。",
   "go.faq.q7": "キャンセルできますか？",
   "go.faq.a7": "はい、いつでもキャンセル可能です。",
-  "go.faq.q8": "他のコーディングエージェントでGoを使えますか？",
-  "go.faq.a8":
-    "はい、Goは任意のエージェントで使用できます。お使いのコーディングエージェントのセットアップ手順に従ってください。",
+  "go.faq.q8": "どのアクセスが延期されていますか？",
+  "go.faq.a8": "外部エージェントとサービスアカウントのサポートは延期されています。",
 
   "go.faq.q9": "無料モデルとGoの違いは何ですか？",
   "go.faq.a9":
@@ -658,8 +656,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "月間利用量",
   "workspace.lite.subscription.resetsIn": "リセットまで",
   "workspace.lite.subscription.useBalance": "利用限度額に達したら利用可能な残高を使用する",
-  "workspace.lite.subscription.selectProvider":
-    "Go モデルを使用するには、opencode の設定で「OpenCode Go」をプロバイダーとして選択してください。",
+  "workspace.lite.subscription.selectProvider": "Goモデルを使用するにはopencodeプロバイダーを選択してください。",
   "workspace.lite.providers.title": "プロバイダー",
   "workspace.lite.providers.description": "ルーティングに使用するプロバイダーを管理します。",
   "workspace.lite.providers.useChina": "中国でホストされているモデルを有効にする",

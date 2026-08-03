@@ -85,32 +85,18 @@ OpenCode Zen هي قائمة نماذج يوفّرها فريق OpenCode وقد 
 
 ## OpenCode Go
 
-OpenCode Go هي خطة اشتراك منخفضة التكلفة توفّر وصولا موثوقا إلى نماذج البرمجة المفتوحة الشهيرة المقدّمة من فريق OpenCode، والتي تم اختبارها والتحقق من أنها تعمل بشكل جيد مع OpenCode.
+OpenCode Go belongs to the named subscriber and is available through OpenCode’s `opencode` provider.
 
-1. شغّل الأمر `/connect` في TUI، واختر `OpenCode Go`، ثم انتقل إلى [opencode.ai/auth](https://opencode.ai/zen).
+1. [Subscribe in OpenCode Console](https://opencode.ai/console/go).
+2. Run the Console device login and approve it in your browser.
 
-   ```txt
-   /connect
+   ```bash
+   opencode2 console login
    ```
 
-2. سجّل الدخول، وأضف تفاصيل الفوترة، ثم انسخ مفتاح API الخاص بك.
+3. Choose a model from the `opencode` provider.
 
-3. الصق مفتاح API.
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. شغّل `/models` في TUI لعرض قائمة النماذج التي نوصي بها.
-
-   ```txt
-   /models
-   ```
-
-يعمل مثل أي مزوّد آخر في OpenCode واستخدامه اختياري بالكامل.
+External-agent and service-account support is deferred. No separate Go provider or credential copy is required.
 
 ---
 

@@ -86,32 +86,18 @@ OpenCode で適切に動作することがテストおよび検証されてい�
 
 ## OpenCode Go
 
-OpenCode Go は、OpenCode チームによって提供される、人気のあるオープンコーディングモデルへの信頼性の高いアクセスを提供する低コストのサブスクリプションプランです。これらは OpenCode でうまく機能することがテストおよび検証されています。
+OpenCode Go belongs to the named subscriber and is available through OpenCode’s `opencode` provider.
 
-1. TUI で `/connect` コマンドを実行し、`OpenCode Go` を選択して、[opencode.ai/zen](https://opencode.ai/zen) にアクセスします。
+1. [Subscribe in OpenCode Console](https://opencode.ai/console/go).
+2. Run the Console device login and approve it in your browser.
 
-   ```txt
-   /connect
+   ```bash
+   opencode2 console login
    ```
 
-2. サインインし、お支払いの詳細を追加し、API キーをコピーします。
+3. Choose a model from the `opencode` provider.
 
-3. API キーを貼り付けます。
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. TUI で `/models` を実行すると、推奨されるモデルのリストが表示されます。
-
-   ```txt
-   /models
-   ```
-
-これは OpenCode の他のプロバイダーと同様に機能し、使用は完全にオプションです。
+External-agent and service-account support is deferred. No separate Go provider or credential copy is required.
 
 ---
 

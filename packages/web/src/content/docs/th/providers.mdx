@@ -86,32 +86,18 @@ OpenCode Zen คือรายชื่อโมเดลที่จัดท�
 
 ## OpenCode Go
 
-OpenCode Go คือแผนการสมัครสมาชิกราคาประหยัดที่ให้การเข้าถึงโมเดลการเขียนโค้ดแบบเปิดยอดนิยมที่เชื่อถือได้ ซึ่งจัดเตรียมโดยทีมงาน OpenCode ที่ได้รับการทดสอบและตรวจสอบแล้วว่าทำงานได้ดีกับ OpenCode
+OpenCode Go belongs to the named subscriber and is available through OpenCode’s `opencode` provider.
 
-1. เรียกใช้คำสั่ง `/connect` ใน TUI เลือก `OpenCode Go` และไปที่ [opencode.ai/auth](https://opencode.ai/zen)
+1. [Subscribe in OpenCode Console](https://opencode.ai/console/go).
+2. Run the Console device login and approve it in your browser.
 
-   ```txt
-   /connect
+   ```bash
+   opencode2 console login
    ```
 
-2. ลงชื่อเข้าใช้ เพิ่มรายละเอียดการเรียกเก็บเงินของคุณ และคัดลอกรหัส API ของคุณ
+3. Choose a model from the `opencode` provider.
 
-3. วางคีย์ API ของคุณ
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. เรียกใช้ `/models` ใน TUI เพื่อดูรายการรุ่นที่เราแนะนำ
-
-   ```txt
-   /models
-   ```
-
-มันทำงานเหมือนกับผู้ให้บริการรายอื่นใน OpenCode และเป็นทางเลือกในการใช้งานโดยสมบูรณ์
+External-agent and service-account support is deferred. No separate Go provider or credential copy is required.
 
 ---
 

@@ -268,8 +268,7 @@ export const dict = {
   "go.cta.text": "Go'ya abone ol",
   "go.cta.price": "Ayda 10$",
   "go.cta.promo": "İlk ay $5",
-  "go.pricing.body":
-    "Herhangi bir ajanla kullanın. İlk ay $5, sonrasında ayda 10$. Gerekirse kredi yükleyin. İstediğiniz zaman iptal edin.",
+  "go.pricing.body": "Go ilk ay $5, sonrasında ayda 10$ fiyatıyla başlar.",
   "go.graph.free": "Ücretsiz",
   "go.graph.freePill": "Big Pickle ve ücretsiz modeller",
   "go.graph.go": "Go",
@@ -309,16 +308,15 @@ export const dict = {
   "go.problem.item4":
     "Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash ve Hy3 içerir",
   "go.how.title": "Go nasıl çalışır?",
-  "go.how.body":
-    "Go ilk ay $5, sonrasında ayda 10$ fiyatıyla başlar. OpenCode veya herhangi bir ajanla kullanabilirsiniz.",
-  "go.how.step1.title": "Bir hesap oluşturun",
-  "go.how.step1.beforeLink": "takip edin",
-  "go.how.step1.link": "kurulum talimatları",
-  "go.how.step2.title": "Go'ya abone olun",
-  "go.how.step2.link": "İlk ay $5",
-  "go.how.step2.afterLink": "sonrasında cömert limitlerle ayda 10$",
+  "go.how.body": "Go ilk ay $5, sonrasında ayda 10$ fiyatıyla başlar.",
+  "go.how.step1.title": "Go'ya abone olun",
+  "go.how.step1.beforeLink": "içinde",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "OpenCode’u bağlayın",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "ve cihazı tarayıcınızda onaylayın",
   "go.how.step3.title": "Kodlamaya başlayın",
-  "go.how.step3.body": "açık kaynaklı modellere güvenilir erişimle",
+  "go.how.step3.body": "opencode sağlayıcısıyla",
   "go.privacy.title": "Gizliliğiniz bizim için önemlidir",
   "go.privacy.body":
     "Bu plan öncelikle uluslararası kullanıcılar için tasarlanmış olup, istikrarlı küresel erişim için modeller ABD, AB ve Singapur'da barındırılmaktadır.",
@@ -351,9 +349,8 @@ export const dict = {
   "go.faq.a6": "Daha fazla kullanıma ihtiyacınız varsa, hesabınıza kredi yükleyebilirsiniz.",
   "go.faq.q7": "İptal edebilir miyim?",
   "go.faq.a7": "Evet, istediğiniz zaman iptal edebilirsiniz.",
-  "go.faq.q8": "Go'yu diğer kodlama ajanlarıyla kullanabilir miyim?",
-  "go.faq.a8":
-    "Evet, Go'yu herhangi bir ajanla kullanabilirsiniz. Tercih ettiğiniz kodlama ajanındaki kurulum talimatlarını izleyin.",
+  "go.faq.q8": "Hangi erişim ertelendi?",
+  "go.faq.a8": "Harici ajan ve hizmet hesabı desteği ertelendi.",
 
   "go.faq.q9": "Ücretsiz modeller ve Go arasındaki fark nedir?",
   "go.faq.a9":
@@ -660,8 +657,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Aylık Kullanım",
   "workspace.lite.subscription.resetsIn": "Sıfırlama süresi",
   "workspace.lite.subscription.useBalance": "Kullanım limitlerine ulaştıktan sonra mevcut bakiyenizi kullanın",
-  "workspace.lite.subscription.selectProvider":
-    'Go modellerini kullanmak için opencode yapılandırmanızda "OpenCode Go"\'yu sağlayıcı olarak seçin.',
+  "workspace.lite.subscription.selectProvider": "Go modellerini kullanmak için opencode sağlayıcısını seçin.",
   "workspace.lite.providers.title": "Sağlayıcılar",
   "workspace.lite.providers.description": "Yönlendirme için hangi sağlayıcıların kullanılacağını kontrol edin.",
   "workspace.lite.providers.useChina": "Çin'de barındırılan modelleri etkinleştir",

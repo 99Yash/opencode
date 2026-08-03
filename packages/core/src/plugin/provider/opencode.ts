@@ -1,4 +1,4 @@
-import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
+import { Duration, Effect, Option, Schema, Semaphore } from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { define } from "@opencode-ai/plugin/effect/plugin"
@@ -47,15 +47,13 @@ function oauth(http: HttpClient.HttpClient) {
       Effect.gen(function* () {
         const server = yield* normalizeServer(inputs.server ?? defaultServer)
         const device = yield* post(http, `${server}/auth/device/code`, { client_id: clientID }, Device)
-        const verification = URL.canParse(device.verification_uri_complete)
-          ? new URL(device.verification_uri_complete)
-          : undefined
-        if (verification && verification.protocol !== "http:" && verification.protocol !== "https:") {
+        const verification = new URL(device.verification_uri_complete, new URL(server).origin)
+        if (verification.protocol !== "http:" && verification.protocol !== "https:") {
           return yield* Effect.fail(new Error("Invalid device verification URL: expected HTTP(S)"))
         }
         return {
           mode: "auto" as const,
-          url: verification?.href ?? `${server}/${device.verification_uri_complete.replace(/^\/+/, "")}`,
+          url: verification.href,
           instructions: `Enter code: ${device.user_code}`,
           callback: poll(http, server, device.device_code, Duration.seconds(device.interval)),
         }
@@ -97,13 +95,14 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
         ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
       connected = connection !== undefined
-      providers = credential
-        ? yield* fetchProviders(http, credential).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(Effect.as(undefined)),
-            ),
-          )
-        : undefined
+      const managed = credential && typeof credential.metadata?.server === "string"
+      const loaded = managed ? yield* fetchProviders(http, credential) : undefined
+      if (managed && !loaded) {
+        return yield* Effect.fail(
+          new Error("OpenCode Console did not return provider config for the selected organization"),
+        )
+      }
+      providers = loaded
     })
 
     yield* ctx.integration.transform((draft) => {
@@ -117,7 +116,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
       })
     })
 
-    yield* load()
+    yield* load().pipe(Effect.orDie)
     yield* ctx.catalog.transform((catalog) => {
       for (const [providerID, item] of Object.entries(providers ?? {})) {
         catalog.provider.update(providerID, (provider) => {
@@ -192,12 +191,19 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
       }
     })
 
-    const refresh = () => loading.withPermit(load().pipe(Effect.andThen(ctx.catalog.reload())))
-    yield* bus.subscribe(Integration.Event.ConnectionUpdated).pipe(
-      Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
-      Stream.runForEach(refresh),
-      Effect.forkScoped({ startImmediately: true }),
-    )
+    const unsubscribe = yield* bus.listen((event) => {
+      if (event.type !== Integration.Event.ConnectionUpdated.type) return Effect.void
+      const data = Schema.decodeUnknownOption(Integration.Event.ConnectionUpdated.data)(event.data)
+      if (Option.isNone(data) || data.value.integrationID !== Integration.ID.make("opencode")) return Effect.void
+      return loading.withPermit(load().pipe(Effect.andThen(ctx.catalog.reload()))).pipe(
+        Effect.timeoutOrElse({
+          duration: "30 seconds",
+          orElse: () => Effect.fail(new Error("Timed out loading OpenCode Console provider config")),
+        }),
+        Effect.orDie,
+      )
+    })
+    yield* Effect.addFinalizer(() => unsubscribe)
   }),
 })
 
@@ -334,12 +340,6 @@ function credential(http: HttpClient.HttpClient, server: string, token: typeof T
         orgName: org.name,
       },
     })
-    const providers = yield* fetchProviders(http, value)
-    if (!providers) {
-      return yield* Effect.fail(
-        new Error("OpenCode Console did not return provider config for the selected organization"),
-      )
-    }
     return value
   })
 }

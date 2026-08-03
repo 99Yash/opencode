@@ -270,8 +270,7 @@ export const dict = {
   "go.cta.text": "Подписаться на Go",
   "go.cta.price": "$10/месяц",
   "go.cta.promo": "$5 первый месяц",
-  "go.pricing.body":
-    "Используйте с любым агентом. $5 за первый месяц, затем $10/месяц. Пополняйте баланс при необходимости. Отменить можно в любое время.",
+  "go.pricing.body": "Go начинается с $5 за первый месяц, затем $10/месяц.",
   "go.graph.free": "Бесплатно",
   "go.graph.freePill": "Big Pickle и бесплатные модели",
   "go.graph.go": "Go",
@@ -311,16 +310,15 @@ export const dict = {
   "go.problem.item4":
     "Включает Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash и Hy3",
   "go.how.title": "Как работает Go",
-  "go.how.body":
-    "Go начинается с $5 за первый месяц, затем $10/месяц. Вы можете использовать его с OpenCode или любым агентом.",
-  "go.how.step1.title": "Создайте аккаунт",
-  "go.how.step1.beforeLink": "следуйте",
-  "go.how.step1.link": "инструкциям по настройке",
-  "go.how.step2.title": "Подпишитесь на Go",
-  "go.how.step2.link": "$5 за первый месяц",
-  "go.how.step2.afterLink": "затем $10/месяц с щедрыми лимитами",
+  "go.how.body": "Go начинается с $5 за первый месяц, затем $10/месяц.",
+  "go.how.step1.title": "Подпишитесь на Go",
+  "go.how.step1.beforeLink": "в",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Подключить OpenCode",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "и подтвердите устройство в браузере",
   "go.how.step3.title": "Начните кодить",
-  "go.how.step3.body": "с надежным доступом к open-source моделям",
+  "go.how.step3.body": "с провайдером opencode",
   "go.privacy.title": "Ваша приватность важна для нас",
   "go.privacy.body":
     "План разработан в первую очередь для международных пользователей, с моделями, размещенными в США, ЕС и Сингапуре для стабильного глобального доступа.",
@@ -353,9 +351,8 @@ export const dict = {
   "go.faq.a6": "Если вам нужно больше использования, вы можете пополнить баланс в своем аккаунте.",
   "go.faq.q7": "Могу ли я отменить подписку?",
   "go.faq.a7": "Да, вы можете отменить подписку в любое время.",
-  "go.faq.q8": "Могу ли я использовать Go с другими кодинг-агентами?",
-  "go.faq.a8":
-    "Да, вы можете использовать Go с любым агентом. Следуйте инструкциям по настройке в вашем предпочитаемом агенте.",
+  "go.faq.q8": "Какая поддержка отложена?",
+  "go.faq.a8": "Поддержка внешних агентов и сервисных аккаунтов отложена.",
 
   "go.faq.q9": "В чем разница между бесплатными моделями и Go?",
   "go.faq.a9":
@@ -664,8 +661,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Ежемесячное использование",
   "workspace.lite.subscription.resetsIn": "Сброс через",
   "workspace.lite.subscription.useBalance": "Использовать доступный баланс после достижения лимитов",
-  "workspace.lite.subscription.selectProvider":
-    'Выберите "OpenCode Go" в качестве провайдера в настройках opencode для использования моделей Go.',
+  "workspace.lite.subscription.selectProvider": "Выберите провайдер opencode для использования моделей Go.",
   "workspace.lite.providers.title": "Провайдеры",
   "workspace.lite.providers.description": "Управляйте провайдерами, используемыми для маршрутизации.",
   "workspace.lite.providers.useChina": "Включить модели, размещенные в Китае",

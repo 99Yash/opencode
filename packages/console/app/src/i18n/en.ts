@@ -310,7 +310,7 @@ export const dict = {
   "go.how.step1.beforeLink": "in",
   "go.how.step1.link": "OpenCode Console",
   "go.how.step2.title": "Connect OpenCode",
-  "go.how.step2.link": "run opencode console login",
+  "go.how.step2.link": "run opencode2 console login",
   "go.how.step2.afterLink": "and authorize the device in your browser",
   "go.how.step3.title": "Start coding",
   "go.how.step3.body": "with the opencode provider",
@@ -656,8 +656,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Monthly Usage",
   "workspace.lite.subscription.resetsIn": "Resets in",
   "workspace.lite.subscription.useBalance": "Use your available balance after reaching the usage limits",
-  "workspace.lite.subscription.selectProvider":
-    'Select "OpenCode Go" as the provider in your opencode configuration to use Go models.',
+  "workspace.lite.subscription.selectProvider": 'Select the "opencode" provider to use Go models.',
   "workspace.lite.providers.title": "Providers",
   "workspace.lite.providers.description": "Control which providers are used for routing.",
   "workspace.lite.providers.useChina": "Enable models hosted in China",

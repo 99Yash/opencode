@@ -266,8 +266,7 @@ export const dict = {
   "go.cta.text": "Abonner på Go",
   "go.cta.price": "$10/måned",
   "go.cta.promo": "$5 første måned",
-  "go.pricing.body":
-    "Bruk med hvilken som helst agent. $5 første måned, deretter $10/måned. Fyll på kreditt ved behov. Avslutt når som helst.",
+  "go.pricing.body": "Go starter på $5 for den første måneden, deretter $10/måned.",
   "go.graph.free": "Gratis",
   "go.graph.freePill": "Big Pickle og gratis modeller",
   "go.graph.go": "Go",
@@ -306,16 +305,15 @@ export const dict = {
   "go.problem.item4":
     "Inkluderer Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash og Hy3",
   "go.how.title": "Hvordan Go fungerer",
-  "go.how.body":
-    "Go starter på $5 for den første måneden, deretter $10/måned. Du kan bruke det med OpenCode eller hvilken som helst agent.",
-  "go.how.step1.title": "Opprett en konto",
-  "go.how.step1.beforeLink": "følg",
-  "go.how.step1.link": "oppsettsinstruksjonene",
-  "go.how.step2.title": "Abonner på Go",
-  "go.how.step2.link": "$5 første måned",
-  "go.how.step2.afterLink": "deretter $10/måned med sjenerøse grenser",
+  "go.how.body": "Go starter på $5 for den første måneden, deretter $10/måned.",
+  "go.how.step1.title": "Abonner på Go",
+  "go.how.step1.beforeLink": "i",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Koble til OpenCode",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "og godkjenn enheten i nettleseren",
   "go.how.step3.title": "Begynn å kode",
-  "go.how.step3.body": "med pålitelig tilgang til åpen kildekode-modeller",
+  "go.how.step3.body": "med opencode-leverandøren",
   "go.privacy.title": "Personvernet ditt er viktig for oss",
   "go.privacy.body":
     "Planen er primært designet for internasjonale brukere, med modeller driftet i USA, EU og Singapore for stabil global tilgang.",
@@ -348,9 +346,8 @@ export const dict = {
   "go.faq.a6": "Hvis du trenger mer bruk, kan du fylle på kreditt i kontoen din.",
   "go.faq.q7": "Kan jeg avslutte?",
   "go.faq.a7": "Ja, du kan avslutte når som helst.",
-  "go.faq.q8": "Kan jeg bruke Go med andre kodeagenter?",
-  "go.faq.a8":
-    "Ja, du kan bruke Go med hvilken som helst agent. Følg oppsettinstruksjonene i din foretrukne kodeagent.",
+  "go.faq.q8": "Hvilken tilgang er utsatt?",
+  "go.faq.a8": "Støtte for eksterne agenter og tjenestekontoer er utsatt.",
 
   "go.faq.q9": "Hva er forskjellen mellom gratis modeller og Go?",
   "go.faq.a9":
@@ -657,8 +654,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Månedlig bruk",
   "workspace.lite.subscription.resetsIn": "Nullstilles om",
   "workspace.lite.subscription.useBalance": "Bruk din tilgjengelige saldo etter å ha nådd bruksgrensene",
-  "workspace.lite.subscription.selectProvider":
-    'Velg "OpenCode Go" som leverandør i opencode-konfigurasjonen din for å bruke Go-modeller.',
+  "workspace.lite.subscription.selectProvider": "Velg opencode-leverandøren for å bruke Go-modeller.",
   "workspace.lite.providers.title": "Leverandører",
   "workspace.lite.providers.description": "Kontroller hvilke leverandører som brukes til ruting.",
   "workspace.lite.providers.useChina": "Aktiver modeller hostet i Kina",

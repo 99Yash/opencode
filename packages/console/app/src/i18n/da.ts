@@ -266,8 +266,7 @@ export const dict = {
   "go.cta.text": "Abonner på Go",
   "go.cta.price": "$10/måned",
   "go.cta.promo": "$5 første måned",
-  "go.pricing.body":
-    "Brug med enhver agent. $5 første måned, derefter $10/måned. Tank op med kredit efter behov. Afmeld når som helst.",
+  "go.pricing.body": "Go starter ved $5 for den første måned, derefter $10/måned.",
   "go.graph.free": "Gratis",
   "go.graph.freePill": "Big Pickle og gratis modeller",
   "go.graph.go": "Go",
@@ -306,16 +305,15 @@ export const dict = {
   "go.problem.item4":
     "Inkluderer Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash og Hy3",
   "go.how.title": "Hvordan Go virker",
-  "go.how.body":
-    "Go starter ved $5 for den første måned, derefter $10/måned. Du kan bruge det med OpenCode eller enhver agent.",
-  "go.how.step1.title": "Opret en konto",
-  "go.how.step1.beforeLink": "følg",
-  "go.how.step1.link": "opsætningsinstruktionerne",
-  "go.how.step2.title": "Abonner på Go",
-  "go.how.step2.link": "$5 første måned",
-  "go.how.step2.afterLink": "derefter $10/måned med generøse grænser",
+  "go.how.body": "Go starter ved $5 for den første måned, derefter $10/måned.",
+  "go.how.step1.title": "Abonner på Go",
+  "go.how.step1.beforeLink": "i",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Forbind OpenCode",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "og godkend enheden i din browser",
   "go.how.step3.title": "Start kodning",
-  "go.how.step3.body": "med pålidelig adgang til open source-modeller",
+  "go.how.step3.body": "med opencode-udbyderen",
   "go.privacy.title": "Dit privatliv er vigtigt for os",
   "go.privacy.body":
     "Planen er primært designet til internationale brugere, med modeller hostet i USA, EU og Singapore for stabil global adgang.",
@@ -348,8 +346,8 @@ export const dict = {
   "go.faq.a6": "Hvis du har brug for mere forbrug, kan du tanke kredit op på din konto.",
   "go.faq.q7": "Kan jeg annullere?",
   "go.faq.a7": "Ja, du kan annullere til enhver tid.",
-  "go.faq.q8": "Kan jeg bruge Go med andre kodningsagenter?",
-  "go.faq.a8": "Ja, du kan bruge Go med enhver agent. Følg opsætningsinstruktionerne i din foretrukne kodningsagent.",
+  "go.faq.q8": "Hvilken adgang er udskudt?",
+  "go.faq.a8": "Understøttelse af eksterne agenter og tjenestekonti er udskudt.",
 
   "go.faq.q9": "Hvad er forskellen på gratis modeller og Go?",
   "go.faq.a9":
@@ -656,8 +654,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Månedligt forbrug",
   "workspace.lite.subscription.resetsIn": "Nulstiller i",
   "workspace.lite.subscription.useBalance": "Brug din tilgængelige saldo, når du har nået forbrugsgrænserne",
-  "workspace.lite.subscription.selectProvider":
-    'Vælg "OpenCode Go" som udbyder i din opencode-konfiguration for at bruge Go-modeller.',
+  "workspace.lite.subscription.selectProvider": "Vælg opencode-udbyderen for at bruge Go-modeller.",
   "workspace.lite.providers.title": "Udbydere",
   "workspace.lite.providers.description": "Styr, hvilke udbydere der bruges til routing.",
   "workspace.lite.providers.useChina": "Aktivér modeller hostet i Kina",

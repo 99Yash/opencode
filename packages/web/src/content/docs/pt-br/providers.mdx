@@ -83,33 +83,18 @@ Funciona como qualquer outro provedor no opencode e é completamente opcional.
 
 ## OpenCode Go
 
-OpenCode Go é um plano de assinatura de baixo custo que fornece acesso confiável a modelos de codificação abertos populares fornecidos pela equipe do opencode que foram
-testados e verificados para funcionar bem com o opencode.
+OpenCode Go belongs to the named subscriber and is available through OpenCode’s `opencode` provider.
 
-1. Execute o comando `/connect` no TUI, selecione `OpenCode Go` e acesse [opencode.ai/zen](https://opencode.ai/zen).
+1. [Subscribe in OpenCode Console](https://opencode.ai/console/go).
+2. Run the Console device login and approve it in your browser.
 
-   ```txt
-   /connect
+   ```bash
+   opencode2 console login
    ```
 
-2. Faça login, adicione seus dados de cobrança e copie sua chave da API.
+3. Choose a model from the `opencode` provider.
 
-3. Cole sua chave da API.
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. Execute `/models` no TUI para ver a lista de modelos que recomendamos.
-
-   ```txt
-   /models
-   ```
-
-Funciona como qualquer outro provedor no opencode e é completamente opcional.
+External-agent and service-account support is deferred. No separate Go provider or credential copy is required.
 
 ---
 

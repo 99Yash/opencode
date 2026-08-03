@@ -23,42 +23,23 @@ export type Dict = Record<Key, string>
 
 const base = en satisfies Dict
 
-const goFallback = {
-  "go.pricing.body": base["go.pricing.body"],
-  "go.how.body": base["go.how.body"],
-  "go.how.step1.title": base["go.how.step1.title"],
-  "go.how.step1.beforeLink": base["go.how.step1.beforeLink"],
-  "go.how.step1.link": base["go.how.step1.link"],
-  "go.how.step2.title": base["go.how.step2.title"],
-  "go.how.step2.link": base["go.how.step2.link"],
-  "go.how.step2.afterLink": base["go.how.step2.afterLink"],
-  "go.how.step3.title": base["go.how.step3.title"],
-  "go.how.step3.body": base["go.how.step3.body"],
-  "go.faq.q8": base["go.faq.q8"],
-  "go.faq.a8": base["go.faq.a8"],
-}
-
-function withGoFallback(dict: Dict): Dict {
-  return { ...dict, ...goFallback }
-}
-
 export function i18n(locale: Locale): Dict {
   if (locale === "en") return base
-  if (locale === "zh") return withGoFallback({ ...base, ...zh })
-  if (locale === "zht") return withGoFallback({ ...base, ...zht })
-  if (locale === "ko") return withGoFallback({ ...base, ...ko })
-  if (locale === "de") return withGoFallback({ ...base, ...de })
-  if (locale === "es") return withGoFallback({ ...base, ...es })
-  if (locale === "fr") return withGoFallback({ ...base, ...fr })
-  if (locale === "it") return withGoFallback({ ...base, ...it })
-  if (locale === "da") return withGoFallback({ ...base, ...da })
-  if (locale === "ja") return withGoFallback({ ...base, ...ja })
-  if (locale === "pl") return withGoFallback({ ...base, ...pl })
-  if (locale === "ru") return withGoFallback({ ...base, ...ru })
-  if (locale === "uk") return withGoFallback({ ...base, ...uk })
-  if (locale === "ar") return withGoFallback({ ...base, ...ar })
-  if (locale === "no") return withGoFallback({ ...base, ...no })
-  if (locale === "br") return withGoFallback({ ...base, ...br })
-  if (locale === "th") return withGoFallback({ ...base, ...th })
-  return withGoFallback({ ...base, ...tr })
+  if (locale === "zh") return { ...base, ...zh }
+  if (locale === "zht") return { ...base, ...zht }
+  if (locale === "ko") return { ...base, ...ko }
+  if (locale === "de") return { ...base, ...de }
+  if (locale === "es") return { ...base, ...es }
+  if (locale === "fr") return { ...base, ...fr }
+  if (locale === "it") return { ...base, ...it }
+  if (locale === "da") return { ...base, ...da }
+  if (locale === "ja") return { ...base, ...ja }
+  if (locale === "pl") return { ...base, ...pl }
+  if (locale === "ru") return { ...base, ...ru }
+  if (locale === "uk") return { ...base, ...uk }
+  if (locale === "ar") return { ...base, ...ar }
+  if (locale === "no") return { ...base, ...no }
+  if (locale === "br") return { ...base, ...br }
+  if (locale === "th") return { ...base, ...th }
+  return { ...base, ...tr }
 }

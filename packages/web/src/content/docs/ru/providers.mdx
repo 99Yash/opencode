@@ -86,33 +86,18 @@ OpenCode Zen — это список моделей, предоставленн�
 
 ## OpenCode Go
 
-OpenCode Go — это недорогой план подписки, обеспечивающий надежный доступ к популярным открытым моделям кодирования, предоставляемым командой opencode, которые были
-протестированы и проверены на хорошую работу с opencode.
+OpenCode Go belongs to the named subscriber and is available through OpenCode’s `opencode` provider.
 
-1. Запустите команду `/connect` в TUI, выберите `OpenCode Go` и перейдите по адресу [opencode.ai/auth](https://opencode.ai/zen).
+1. [Subscribe in OpenCode Console](https://opencode.ai/console/go).
+2. Run the Console device login and approve it in your browser.
 
-   ```txt
-   /connect
+   ```bash
+   opencode2 console login
    ```
 
-2. Войдите в систему, добавьте свои платежные данные и скопируйте ключ API.
+3. Choose a model from the `opencode` provider.
 
-3. Вставьте свой ключ API.
-
-   ```txt
-   ┌ API key
-   │
-   │
-   └ enter
-   ```
-
-4. Запустите `/models` в TUI, чтобы просмотреть список рекомендуемых нами моделей.
-
-   ```txt
-   /models
-   ```
-
-Он работает как любой другой поставщик в opencode и его использование совершенно необязательно.
+External-agent and service-account support is deferred. No separate Go provider or credential copy is required.
 
 ---
 

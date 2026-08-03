@@ -104,7 +104,7 @@ describe("OpencodePlugin", () => {
             Response.json({
               device_code: "device",
               user_code: "user",
-              verification_uri_complete: "/verify",
+              verification_uri_complete: "/console/verify",
               expires_in: 60,
               interval: 60,
             }),
@@ -132,20 +132,58 @@ describe("OpencodePlugin", () => {
     }),
   )
 
+  it.effect("keeps an absolute verification URL", () =>
+    Effect.gen(function* () {
+      const http = HttpClient.make((request) =>
+        Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            Response.json({
+              device_code: "device",
+              user_code: "user",
+              verification_uri_complete: "https://login.example.com/device/verify",
+              expires_in: 60,
+              interval: 60,
+            }),
+          ),
+        ),
+      )
+      const plugin = yield* Plugin.Service
+      const host = yield* PluginHost.make(plugin)
+      const bus = yield* Bus.Service
+      const integration = yield* Integration.Service
+      yield* OpencodePlugin.effect(host).pipe(
+        Effect.provideService(Bus.Service, bus),
+        Effect.provideService(Integration.Service, integration),
+        Effect.provideService(HttpClient.HttpClient, http),
+      )
+      const attempt = yield* integration.oauth.connect({
+        integrationID: Integration.ID.make("opencode"),
+        methodID: Integration.MethodID.make("device"),
+        inputs: {},
+      })
+      yield* integration.oauth.cancel({ integrationID: Integration.ID.make("opencode"), attemptID: attempt.attemptID })
+
+      expect(attempt.url).toBe("https://login.example.com/device/verify")
+    }),
+  )
+
   it.live("uses a canonical custom server throughout device authorization", () =>
     Effect.acquireUseRelease(
       Effect.sync(() => {
         const requests: string[] = []
+        const requested = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
         const server = Bun.serve({
           port: 0,
-          fetch: (request) => {
+          fetch: async (request) => {
             const url = new URL(request.url)
             requests.push(`${request.method} ${url.pathname}`)
             if (url.pathname.endsWith("/auth/device/code")) {
               return Response.json({
                 device_code: "device",
                 user_code: "user",
-                verification_uri_complete: `${url.origin}/verify`,
+                verification_uri_complete: "/console/verify",
                 expires_in: 60,
                 interval: 0,
               })
@@ -156,14 +194,16 @@ describe("OpencodePlugin", () => {
             if (url.pathname.endsWith("/api/user")) return Response.json({ id: "user", email: "user@example.com" })
             if (url.pathname.endsWith("/api/orgs")) return Response.json([{ id: "org", name: "Org" }])
             if (url.pathname.endsWith("/api/config")) {
+              requested.resolve()
+              await release.promise
               return Response.json({ config: { enterprise: { url: url.origin }, provider: {} } })
             }
             return new Response("Not found", { status: 404 })
           },
         })
-        return { requests, server }
+        return { release, requested, requests, server }
       }),
-      ({ requests, server }) =>
+      ({ release, requested, requests, server }) =>
         Effect.gen(function* () {
           yield* addPlugin()
           const integrations = yield* Integration.Service
@@ -173,7 +213,12 @@ describe("OpencodePlugin", () => {
             methodID: Integration.MethodID.make("device"),
             inputs: { server: `${server.url.origin}/console///?ignored=true#ignored` },
           })
-          expect(attempt.url).toBe(`${server.url.origin}/verify`)
+          expect(attempt.url).toBe(`${server.url.origin}/console/verify`)
+          yield* Effect.promise(() => requested.promise)
+          expect(yield* integrations.oauth.status({ integrationID, attemptID: attempt.attemptID })).toMatchObject({
+            status: "pending",
+          })
+          release.resolve()
           yield* eventually(
             integrations.oauth.status({ integrationID, attemptID: attempt.attemptID }),
             (status) => status.status === "complete",
@@ -188,7 +233,11 @@ describe("OpencodePlugin", () => {
             metadata: { server: `${server.url.origin}/console`, orgID: "org", orgName: "Org" },
           })
         }),
-      ({ server }) => Effect.promise(() => server.stop(true)),
+      ({ release, server }) =>
+        Effect.promise(() => {
+          release.resolve()
+          return server.stop(true)
+        }),
     ),
   )
 

@@ -404,6 +404,7 @@ const layer = Layer.effect(
               .get()
               .integrations.get(attempt.integrationID)
               ?.implementations.get(attempt.methodID)
+            const previous = (yield* credentials.list(attempt.integrationID)).at(-1)
             const persistence = yield* Effect.sync(() => attempt.label ?? implementation?.label?.(exit.value)).pipe(
               Effect.flatMap((label) =>
                 credentials.create({
@@ -412,11 +413,26 @@ const layer = Layer.effect(
                   value: exit.value,
                 }),
               ),
-              Effect.asVoid,
               Effect.exit,
             )
+            const settled = Exit.isSuccess(persistence)
+              ? yield* Effect.gen(function* () {
+                  yield* bus.publish(Integration.Event.ConnectionUpdated, { integrationID: attempt.integrationID })
+                  yield* bus.publish(Integration.Event.Updated, {})
+                }).pipe(Effect.exit)
+              : persistence
+            if (Exit.isFailure(settled) && Exit.isSuccess(persistence)) {
+              yield* credentials.remove(persistence.value.id)
+              if (previous) {
+                yield* credentials.create({
+                  integrationID: previous.integrationID,
+                  label: previous.label,
+                  value: previous.value,
+                })
+              }
+            }
             const settledAt = yield* Clock.currentTimeMillis
-            const terminal: TerminalAttempt = Exit.isSuccess(persistence)
+            const terminal: TerminalAttempt = Exit.isSuccess(settled)
               ? {
                   status: "complete",
                   integrationID: attempt.integrationID,
@@ -426,15 +442,13 @@ const layer = Layer.effect(
               : {
                   status: "failed",
                   integrationID: attempt.integrationID,
-                  message: message(persistence.cause),
+                  message: message(settled.cause),
                   time: attempt.time,
                   removeAt: settledAt + terminalRetention,
                 }
             // Persisting attempts cannot be cancelled, expired, or claimed again.
             yield* SynchronizedRef.update(attempts, (current) => new Map(current).set(attemptID, terminal))
-            if (Exit.isFailure(persistence)) yield* Effect.failCause(persistence.cause)
-            yield* bus.publish(Integration.Event.ConnectionUpdated, { integrationID: attempt.integrationID })
-            yield* bus.publish(Integration.Event.Updated, {})
+            if (Exit.isFailure(settled)) yield* Effect.failCause(settled.cause)
           }).pipe(Effect.ensuring(close(attempt.scope)))
         }),
       )

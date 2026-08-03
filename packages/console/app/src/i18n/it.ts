@@ -266,8 +266,7 @@ export const dict = {
   "go.cta.text": "Abbonati a Go",
   "go.cta.price": "$10/mese",
   "go.cta.promo": "$5 il primo mese",
-  "go.pricing.body":
-    "Usalo con qualsiasi agente. $5 il primo mese, poi $10/mese. Ricarica il credito se necessario. Annulla in qualsiasi momento.",
+  "go.pricing.body": "Go inizia a $5 per il primo mese, poi $10/mese.",
   "go.graph.free": "Gratis",
   "go.graph.freePill": "Big Pickle e modelli gratuiti",
   "go.graph.go": "Go",
@@ -306,15 +305,15 @@ export const dict = {
   "go.problem.item4":
     "Include Grok 4.5, GLM-5.2, GLM-5.1, Kimi K3, Kimi K2.7 Code, Kimi K2.6, MiMo-V2.5-Pro, MiMo-V2.5, Qwen3.7 Max, Qwen3.7 Plus, Qwen3.6 Plus, MiniMax M2.7, MiniMax M3, DeepSeek V4 Pro, DeepSeek V4 Flash e Hy3",
   "go.how.title": "Come funziona Go",
-  "go.how.body": "Go inizia a $5 per il primo mese, poi $10/mese. Puoi usarlo con OpenCode o qualsiasi agente.",
-  "go.how.step1.title": "Crea un account",
-  "go.how.step1.beforeLink": "segui le",
-  "go.how.step1.link": "istruzioni di configurazione",
-  "go.how.step2.title": "Abbonati a Go",
-  "go.how.step2.link": "$5 il primo mese",
-  "go.how.step2.afterLink": "poi $10/mese con limiti generosi",
+  "go.how.body": "Go inizia a $5 per il primo mese, poi $10/mese.",
+  "go.how.step1.title": "Abbonati a Go",
+  "go.how.step1.beforeLink": "in",
+  "go.how.step1.link": "OpenCode Console",
+  "go.how.step2.title": "Connetti OpenCode",
+  "go.how.step2.link": "opencode2 console login",
+  "go.how.step2.afterLink": "e autorizza il dispositivo nel browser",
   "go.how.step3.title": "Inizia a programmare",
-  "go.how.step3.body": "con accesso affidabile ai modelli open source",
+  "go.how.step3.body": "con il provider opencode",
   "go.privacy.title": "La tua privacy è importante per noi",
   "go.privacy.body":
     "Il piano è progettato principalmente per gli utenti internazionali, con modelli ospitati negli Stati Uniti, UE e Singapore per un accesso globale stabile.",
@@ -347,9 +346,8 @@ export const dict = {
   "go.faq.a6": "Se hai bisogno di più utilizzo, puoi ricaricare il credito nel tuo account.",
   "go.faq.q7": "Posso annullare?",
   "go.faq.a7": "Sì, puoi annullare in qualsiasi momento.",
-  "go.faq.q8": "Posso usare Go con altri agenti di coding?",
-  "go.faq.a8":
-    "Sì, puoi usare Go con qualsiasi agente. Segui le istruzioni di configurazione nel tuo agente di coding preferito.",
+  "go.faq.q8": "Quale accesso è rinviato?",
+  "go.faq.a8": "Il supporto per agenti esterni e account di servizio è rinviato.",
 
   "go.faq.q9": "Qual è la differenza tra i modelli gratuiti e Go?",
   "go.faq.a9":
@@ -658,8 +656,7 @@ export const dict = {
   "workspace.lite.subscription.monthlyUsage": "Utilizzo Mensile",
   "workspace.lite.subscription.resetsIn": "Si resetta tra",
   "workspace.lite.subscription.useBalance": "Usa il tuo saldo disponibile dopo aver raggiunto i limiti di utilizzo",
-  "workspace.lite.subscription.selectProvider":
-    'Seleziona "OpenCode Go" come provider nella tua configurazione opencode per utilizzare i modelli Go.',
+  "workspace.lite.subscription.selectProvider": "Seleziona il provider opencode per usare i modelli Go.",
   "workspace.lite.providers.title": "Provider",
   "workspace.lite.providers.description": "Controlla quali provider vengono usati per il routing.",
   "workspace.lite.providers.useChina": "Abilita modelli ospitati in Cina",
