@@ -75,10 +75,12 @@ export const httpJson = <Body, Frame>(input: HttpJsonInput<Body, Frame>): HttpJs
   prepare: (prepareInput) =>
     Effect.gen(function* () {
       const parts = yield* jsonRequestParts({ ...prepareInput })
+      const transformed = { url: parts.url, method: "POST", headers: { ...parts.headers }, body: parts.bodyText }
+      yield* prepareInput.transform?.(transformed) ?? Effect.void
       const request = ProviderShared.jsonPost({
-        url: parts.url,
-        body: parts.bodyText,
-        headers: parts.headers,
+        url: transformed.url,
+        body: transformed.body ?? "",
+        headers: Headers.fromInput(transformed.headers),
       })
       return {
         request,
