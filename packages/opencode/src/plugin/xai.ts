@@ -552,6 +552,32 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
           label: "xAI Grok OAuth (SuperGrok Subscription)",
           type: "oauth",
           authorize: async () => {
+            const device = await requestDeviceCode(options)
+            const browserUrl = device.verification_uri_complete ?? device.verification_uri
+            return {
+              url: browserUrl,
+              instructions: `Open ${device.verification_uri} on any device and enter code: ${device.user_code}`,
+              method: "auto" as const,
+              callback: async () => {
+                try {
+                  const tokens = await pollDeviceCodeToken(device, options)
+                  return {
+                    type: "success" as const,
+                    refresh: tokens.refresh_token,
+                    access: tokens.access_token,
+                    expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                  }
+                } catch (err) {
+                  return { type: "failed" as const }
+                }
+              },
+            }
+          },
+        },
+        {
+          label: "xAI Grok OAuth (Local Callback)",
+          type: "oauth",
+          authorize: async () => {
             await startOAuthServer()
             const pkce = await generatePKCE()
             const state = generateState()
@@ -577,40 +603,6 @@ export async function XaiAuthPlugin(input: PluginInput, options: XaiAuthPluginOp
                   return { type: "failed" as const }
                 } finally {
                   stopOAuthServer()
-                }
-              },
-            }
-          },
-        },
-        {
-          // RFC 8628 device-code flow. The CLI prints a verification URL
-          // and a short user_code that the user enters in a browser on
-          // any device. No loopback callback server runs on the CLI host,
-          // so this works on VPS / SSH / Docker / CI / WSL / any
-          // environment where 127.0.0.1:56121 isn't reachable from the
-          // user's browser. Defends the only attack surface (the polling
-          // loop) with the standard authorization_pending / slow_down
-          // backoff and a hard deadline from xAI's `expires_in`.
-          label: "xAI Grok OAuth (Headless / Remote / VPS)",
-          type: "oauth",
-          authorize: async () => {
-            const device = await requestDeviceCode(options)
-            const browserUrl = device.verification_uri_complete ?? device.verification_uri
-            return {
-              url: browserUrl,
-              instructions: `Open ${device.verification_uri} on any device and enter code: ${device.user_code}`,
-              method: "auto" as const,
-              callback: async () => {
-                try {
-                  const tokens = await pollDeviceCodeToken(device, options)
-                  return {
-                    type: "success" as const,
-                    refresh: tokens.refresh_token,
-                    access: tokens.access_token,
-                    expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
-                  }
-                } catch (err) {
-                  return { type: "failed" as const }
                 }
               },
             }
