@@ -28,7 +28,7 @@ function Status(props: { enabled: boolean; loading: boolean }) {
   return <span style={{ fg: theme.text.subdued }}>○ Disabled</span>
 }
 
-export function DialogMcp() {
+export function DialogMcp(props: { server?: string }) {
   const data = useData()
   const dialog = useDialog()
   const client = useClient()
@@ -37,6 +37,7 @@ export function DialogMcp() {
   const [focused, setFocused] = createSignal<string>()
   const [detail, setDetail] = createSignal<McpServer>()
   const [loading, setLoading] = createSignal<string | null>(null)
+  const [initial, setInitial] = createSignal(props.server)
 
   const servers = createMemo(() =>
     pipe(
@@ -44,6 +45,16 @@ export function DialogMcp() {
       sortBy((server) => server.name),
     ),
   )
+
+  createEffect(() => {
+    const name = initial()
+    if (!name) return
+    const server = servers().find((entry) => entry.name === name)
+    if (!server) return
+    setInitial()
+    setFocused(name)
+    if (statusError(server.status)) setDetail(server)
+  })
 
   createEffect(() => {
     if (focused()) return
