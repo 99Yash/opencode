@@ -66,7 +66,124 @@ export interface Interface {
 - **One path to a live environment.** Fresh-create and process-restart-reconnect both flow through `connect`; the prior tracers found their bugs exactly where these paths diverged.
 - **`connect` is scoped.** The environment lives as long as the scope that acquired it, which slots directly into the existing cached Location-graph lifetime in `location-services.ts`. Closing the scope drops the connection; it never stops or deletes the provider resource. There is no `close` verb to misuse.
 - **Errors are values** (`Schema.TaggedErrorClass`). A `connect` failure against a stopped provider resource is a typed, recoverable condition.
-- **Registry keyed by provider string.** Built-in drivers first (registered from Server composition so provider SDKs never load on the local-only path); plugin-registered drivers later become "add to the registry" with no interface change.
+- **Registry keyed by provider string.** Built-in drivers first, registered from Server composition; plugin-registered drivers later become "add to the registry" with no interface change.
+
+## Defining And Registering A Driver
+
+Core owns the seam and the registry key and never imports a provider SDK:
+
+```ts
+// packages/core/src/workspace/driver.ts (continued)
+export const Binding = Schema.Record(Schema.String, Schema.Json)
+export type Binding = typeof Binding.Type
+
+export class ProviderNotFoundError extends Schema.TaggedErrorClass<ProviderNotFoundError>()(
+  "WorkspaceDriver.ProviderNotFoundError",
+  { provider: Schema.String },
+) {}
+
+export interface Registry {
+  readonly get: (provider: string) => Effect.Effect<Interface, ProviderNotFoundError>
+}
+
+export class RegistryService extends Context.Service<RegistryService, Registry>()("@opencode/WorkspaceDriverRegistry") {}
+```
+
+A driver is a plain value built by an Effect in `packages/server`. Its binding schema is driver-private — this is where "opaque JSON" becomes typed again, decoded at the boundary:
+
+```ts
+// packages/server/src/workspace/modal.ts
+export * as ModalDriver from "./modal"
+
+const ModalBinding = Schema.Struct({ sandboxId: Schema.String })
+
+const ROOT = "/workspace"
+
+export const make = Effect.gen(function* () {
+  const app = yield* Effect.promise(() => App.lookup("opencode-workspaces", { createIfMissing: true }))
+  // git, bash, rg provisioned in the image — never discovered opportunistically
+  const image = Image.fromRegistry("ghcr.io/anomalyco/opencode-workspace:1")
+
+  const decode = (binding: WorkspaceDriver.Binding) =>
+    Schema.decodeUnknownEffect(ModalBinding)(binding).pipe(
+      Effect.mapError((cause) => new WorkspaceDriver.ConnectError({ provider: "modal", cause })),
+    )
+
+  return WorkspaceDriver.make({
+    create: ({ workspaceID }) =>
+      Effect.promise(() => Sandbox.create(app, { image, name: workspaceID })).pipe(
+        Effect.map((sandbox) => ({ binding: { sandboxId: sandbox.sandboxId }, root: ROOT })),
+      ),
+
+    connect: Effect.fnUntraced(function* (binding) {
+      const decoded = yield* decode(binding)
+      const sandbox = yield* Effect.promise(() => Sandbox.fromId(decoded.sandboxId))
+      return WorkspaceEnvironment.make({
+        platform: "linux",
+        directory: ROOT,
+        files: modalFiles(sandbox), // Files over the sandbox filesystem API
+        process: modalSpawner(sandbox), // ChildProcessSpawner over sandbox.exec
+        shell: WorkspaceEnvironment.linuxShell,
+      })
+    }),
+
+    destroy: (binding) =>
+      decode(binding).pipe(
+        Effect.flatMap((decoded) =>
+          Effect.promise(async () => {
+            const sandbox = await Sandbox.fromId(decoded.sandboxId)
+            await sandbox.terminate()
+          }),
+        ),
+      ),
+  })
+})
+```
+
+Registration is ordinary Server composition — the same `makeGlobalNode` shape as every other server-provided service. The registry is an immutable map fixed at boot:
+
+```ts
+// packages/server/src/workspace/drivers.ts
+export * as ServerWorkspaceDrivers from "./drivers"
+
+export const layer = Layer.effect(
+  WorkspaceDriver.RegistryService,
+  Effect.gen(function* () {
+    const drivers = {
+      modal: yield* ModalDriver.make,
+      vercel: yield* VercelDriver.make,
+    }
+    return WorkspaceDriver.RegistryService.of({
+      get: (provider) =>
+        drivers[provider]
+          ? Effect.succeed(drivers[provider])
+          : Effect.fail(new WorkspaceDriver.ProviderNotFoundError({ provider })),
+    })
+  }),
+)
+
+export const node = makeGlobalNode({ service: WorkspaceDriver.RegistryService, layer, deps: [] })
+```
+
+Core consumes the registry blindly:
+
+```ts
+// workspaces.create
+const provider = input.provider ?? config.workspace?.provider
+if (!provider) return yield* new NoWorkspaceProviderError()
+const driver = yield* registry.get(provider)
+const created = yield* driver.create({ workspaceID: id })
+yield* store.insert({ id, provider, binding: created.binding, root: created.root })
+
+// hosted Location graph construction (inside the existing scoped cache)
+const workspace = yield* store.get(location.workspaceID)
+const driver = yield* registry.get(workspace.provider)
+const env = yield* driver.connect(workspace.binding)
+```
+
+- **Dependency direction holds.** Core defines the key and consumes; Server defines drivers and provides the layer; `sdk-next` composes. Core never sees a provider SDK.
+- **Immutable map over `register()` verbs.** The prior branch's registry had runtime register/unregister with duplicate errors and scoped cleanup — machinery for a driver set that is actually fixed at boot. The registry *is* the map.
+- **Drivers ship in-tree for now.** Eventually a sandbox provider can live outside opencode as a plugin; that changes only how the registry map is built (read plugin contributions during layer construction). `Registry.get` and every consumer are untouched.
 
 ## Environment
 
@@ -82,14 +199,13 @@ export interface Interface {
   readonly files: Files // read / resolve / list / write / writeIfUnchanged / remove ...
   readonly process: ChildProcessSpawner["Service"]
   readonly shell: Shell // executable + args lowering for the bash tool
-  readonly ripgrep: Effect.Effect<string, Error> // path to rg INSIDE this environment
 }
 ```
 
 - Naming follows the core convention: consumers reference `WorkspaceEnvironment.Service` (tag) and `WorkspaceEnvironment.Interface` (shape). `Files` (the branch called it `FileBackend`) and `Shell` nest in the same namespace since they exist only as environment fields. `ChildProcessSpawner["Service"]` is indexed access because effect's key holds its shape as a phantom member — there is no `.Service` type on it.
 - `files` earns its place next to `process`: Modal and Vercel both expose direct filesystem APIs that are dramatically faster than round-tripping `cat` through a shell, and read/write/edit are the hottest operations.
-- `ripgrep` exists because glob/grep shell out to an rg binary. Locally `RipgrepBinary.Service` downloads a pinned rg into managed host storage; that path is meaningless inside a sandbox, so the environment answers "where is rg in here" — lazily locating or installing on first use if needed.
-- `shell` and `ripgrep` stay required at the seam but core exports Linux defaults (bash lowering; rg baked into the image and found on PATH), so a minimal driver satisfies them in one line each and is otherwise `create`/`connect`/`destroy` + files + spawn.
+- The branch's environment carried a `ripgrep` field (glob/grep shell out to an rg binary, and the host's managed rg download is meaningless inside a sandbox). That was seam pollution — a tool implementation detail leaking into the environment contract. Instead, the sandbox **image contract** mandates `git`, `bash`, and `rg`, and the hosted Location graph provides the existing `RipgrepBinary.Service` with `filepath: Effect.succeed("rg")`. Binary resolution stays a Location-graph concern; the environment stays capabilities-only.
+- `shell` remains at the seam (lowering genuinely varies by image) but core exports a Linux default so a minimal driver satisfies it in one line and is otherwise `create`/`connect`/`destroy` + files + spawn.
 - Core builds tools (bash, read, edit, glob, grep) *on top of* the environment. Drivers never know what a tool is.
 
 ## Persistence
