@@ -96,8 +96,10 @@ import { findMessageBoundary, messageNavigationSlack } from "./message-navigatio
 import { stringWidth } from "../../util/string-width"
 import { useArgs } from "../../context/args"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
+import { installSyntaxHighlightCache } from "../../util/syntax-highlight-cache"
 
 addDefaultParsers(parsers.parsers)
+installSyntaxHighlightCache()
 
 // Exclude temporary bottom space when measuring the real transcript height.
 const NAVIGATION_SLACK_ID = "session-navigation-slack"
