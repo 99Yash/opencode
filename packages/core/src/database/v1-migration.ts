@@ -487,17 +487,14 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
           VALUES (${Project.ID.global}, ${path.parse(Global.Path.data).root}, ${now}, ${now}, '[]')
         `)
         if (state === undefined)
-          yield* Effect.sleep("10 seconds").pipe(
-            Effect.andThen(
-              db.transaction((tx) =>
-                Effect.gen(function* () {
-                  yield* tx.delete(EventTable).run()
-                  yield* tx.insert(KVTable).values({ key: MIGRATION_STATE_KEY, value: { phase: "sessions" } }).run()
-                }),
-              ),
-            ),
-            Effect.orDie,
-          )
+          yield* db
+            .transaction((tx) =>
+              Effect.gen(function* () {
+                yield* tx.delete(EventTable).run()
+                yield* tx.insert(KVTable).values({ key: MIGRATION_STATE_KEY, value: { phase: "sessions" } }).run()
+              }),
+            )
+            .pipe(Effect.orDie)
         const sourceTotal = yield* countNextSessions(nextPath(options))
         const legacyTotal = (yield* db.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM session`))?.value ?? 0
         const cursor = state?.phase === "sessions" ? state.cursor : undefined
