@@ -21,8 +21,15 @@ const session = await sessions.create({
 })
 ```
 
+Consumers persist the Workspace ID as their durable handle and re-derive everything else:
+
+```typescript
+const workspace = await workspaces.get(id) // { id, provider, root } — table read, never contacts a provider
+```
+
 - `provider` is required for now. A config default (`workspace.provider`) can be added later without breaking anything; skipping it keeps config untouched.
 - `root` is an absolute POSIX path in the provider filesystem.
+- `get` fails with typed `WorkspaceNotFound` — also the existence check. No `getOrCreate`: the consumer owns its "which Workspace is mine" mapping, and provider-level get-or-create can silently replace resources (Vercel tracer finding).
 
 ## Domain Model
 
