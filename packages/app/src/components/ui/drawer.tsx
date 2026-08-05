@@ -3,14 +3,12 @@
  * Only used in one place hence not a v2 component yet... can be promoted to ui/v2 later
  */
 
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js"
+import type { JSX, ValidComponent } from "solid-js"
 import { splitProps } from "solid-js"
-import type { ContentProps, DescriptionProps, DynamicProps, LabelProps, OverlayProps } from "@corvu/drawer"
+import type { ContentProps, DynamicProps, OverlayProps } from "@corvu/drawer"
 import DrawerPrimitive from "@corvu/drawer"
 
 const Drawer = DrawerPrimitive
-
-const DrawerTrigger = DrawerPrimitive.Trigger
 
 const DrawerPortal = DrawerPrimitive.Portal
 
@@ -65,55 +63,10 @@ const DrawerContent = <T extends ValidComponent = "div">(props: DynamicProps<T, 
   )
 }
 
-const DrawerHeader: Component<ComponentProps<"div">> = (props) => {
-  const [, rest] = splitProps(props, ["class"])
-  return <div class={props.class} classList={{ "grid gap-1.5 p-4 text-center sm:text-left": true }} {...rest} />
-}
-
-const DrawerFooter: Component<ComponentProps<"div">> = (props) => {
-  const [, rest] = splitProps(props, ["class"])
-  return <div class={props.class} classList={{ "mt-auto flex flex-col gap-2 p-4": true }} {...rest} />
-}
-
-type DrawerTitleProps<T extends ValidComponent = "div"> = LabelProps<T> & { class?: string }
-
-const DrawerTitle = <T extends ValidComponent = "div">(props: DynamicProps<T, DrawerTitleProps<T>>) => {
-  const [, rest] = splitProps(props as DrawerTitleProps, ["class"])
-  return (
-    <DrawerPrimitive.Label
-      class={props.class}
-      classList={{ "text-base font-[530] leading-none tracking-[-0.04px] text-v2-text-text-base": true }}
-      {...rest}
-    />
-  )
-}
-
-type DrawerDescriptionProps<T extends ValidComponent = "div"> = DescriptionProps<T> & {
-  class?: string
-}
-
-const DrawerDescription = <T extends ValidComponent = "div">(props: DynamicProps<T, DrawerDescriptionProps<T>>) => {
-  const [, rest] = splitProps(props as DrawerDescriptionProps, ["class"])
-  return (
-    <DrawerPrimitive.Description
-      class={props.class}
-      classList={{
-        "text-[13px] font-[440] leading-[140%] tracking-[-0.04px] text-v2-text-text-muted": true,
-      }}
-      {...rest}
-    />
-  )
-}
-
 export {
   Drawer,
   DrawerPortal,
   DrawerOverlay,
-  DrawerTrigger,
   DrawerClose,
   DrawerContent,
-  DrawerHeader,
-  DrawerFooter,
-  DrawerTitle,
-  DrawerDescription,
 }
