@@ -114,7 +114,7 @@ test("compaction describes tool media without embedding base64", () => {
   expect(serialized).not.toContain(base64)
 })
 
-test("compaction estimates image context without counting base64", () => {
+test("compaction estimates media context without counting base64", () => {
   const image = FileAttachment.make({
     data: Base64.make("a".repeat(10_000)),
     mime: "image/png",
@@ -125,11 +125,11 @@ test("compaction estimates image context without counting base64", () => {
     id: SessionMessage.ID.create(),
     type: "user",
     text: "Compare these images.",
-    files: [image, image],
+    files: [image, image, FileAttachment.make({ ...image, mime: "application/pdf" })],
     time: { created: DateTime.makeUnsafe(0) },
   })
 
-  expect(SessionCompaction.estimateImageTokens(message)).toBe(4_000)
+  expect(SessionCompaction.estimateMediaTokens(message)).toBe(4_500)
 })
 
 test("compaction prompt requires the checkpoint headings in order", () => {
@@ -197,7 +197,7 @@ it.effect("auto compaction reserves a buffer below the prompt ceiling", () =>
   }),
 )
 
-it.effect("manual compaction summarizes short context instead of no-op", () =>
+it.effect("manual compaction preserves ordered media in the retained tail", () =>
   Effect.gen(function* () {
     requests = []
     const db = (yield* Database.Service).db
@@ -209,7 +209,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     const userMessage = {
       id: SessionMessage.ID.create(),
       type: "user" as const,
-      text: "Manual compaction should include this short conversation.",
+      text: `Manual compaction should include this older conversation. ${"older context ".repeat(4_500)}`,
       time: { created: DateTime.makeUnsafe(0) },
     }
     const recentMessage = SessionMessage.User.make({
@@ -223,8 +223,20 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
           source: { type: "inline" },
           name: "prompt.pdf",
         }),
+        FileAttachment.make({
+          data: Base64.make("aW1hZ2U="),
+          mime: "image/png",
+          source: { type: "inline" },
+          name: "prompt.png",
+        }),
       ],
       time: { created: DateTime.makeUnsafe(1) },
+    })
+    const latestMessage = SessionMessage.User.make({
+      id: SessionMessage.ID.create(),
+      type: "user",
+      text: "Newest text after the retained media.",
+      time: { created: DateTime.makeUnsafe(2) },
     })
     yield* db
       .insert(ProjectTable)
@@ -261,7 +273,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     expect(
       yield* compaction.compactManual({
         session,
-        messages: [userMessage, recentMessage],
+        messages: [userMessage, recentMessage, latestMessage],
         inputID: SessionMessage.ID.make("msg_manual_compaction"),
       }),
     ).toEqual({ status: "completed" })
@@ -278,19 +290,27 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
       "x-opencode-client": "opencode",
     })
     expect(requests[0]?.generation).toBeUndefined()
-    expect(JSON.stringify(requests[0]?.messages)).toContain("Manual compaction should include this short conversation.")
+    expect(JSON.stringify(requests[0]?.messages)).toContain("Manual compaction should include this older conversation.")
     expect(yield* store.context(sessionID)).toMatchObject([
       {
         type: "compaction",
         reason: "manual",
         summary: "manual summary",
-        recent: expect.stringContaining("[Attached application/pdf: prompt.pdf]"),
+        recent: expect.stringMatching(
+          /\[User\]: Compare the retained media\.\n\[Attached application\/pdf: prompt\.pdf\]\n\[Attached image\/png: prompt\.png\]\n\n\[User\]: Newest text after the retained media\./,
+        ),
         media: [
           {
             type: "file",
             uri: "data:application/pdf;base64,aW1hZ2U=",
             mime: "application/pdf",
             name: "prompt.pdf",
+          },
+          {
+            type: "file",
+            uri: "data:image/png;base64,aW1hZ2U=",
+            mime: "image/png",
+            name: "prompt.png",
           },
         ],
       },
