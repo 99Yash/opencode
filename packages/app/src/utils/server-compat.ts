@@ -606,7 +606,13 @@ function createV1Api(input: CompatibleInput): CompatibleApi {
       request: {
         ...input.current.question.request,
         async list(value?: Parameters<ServerApi["question"]["request"]["list"]>[0]) {
-          return located((await legacy(value?.location).question.list()).data ?? [], value?.location)
+          return located(
+            ((await legacy(value?.location).question.list()).data ?? []).map((request) => ({
+              ...request,
+              tool: request.tool && { messageID: request.tool.messageID, id: request.tool.callID },
+            })),
+            value?.location,
+          )
         },
       },
       async reply(value: Parameters<ServerApi["question"]["reply"]>[0]) {
