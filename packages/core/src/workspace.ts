@@ -15,11 +15,12 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Wor
   id: ID,
 }) {}
 
-export class Info extends Schema.Class<Info>("Workspace.Info")({
+export interface Info extends Schema.Schema.Type<typeof Info> {}
+export const Info = Schema.Struct({
   id: ID,
   provider: Schema.String,
   root: Schema.String,
-}) {}
+}).annotate({ identifier: "Workspace.Info" })
 
 export interface Interface {
   /** Allocate through the named driver and persist. Resolves when the Workspace is usable. */
@@ -58,11 +59,11 @@ const layer = Layer.effect(
           .insert(WorkspaceTable)
           .values({ id, provider: input.provider, binding: created.binding, root: created.root })
           .pipe(Effect.orDie)
-        return new Info({ id, provider: input.provider, root: created.root })
+        return Info.make({ id, provider: input.provider, root: created.root })
       }),
       get: Effect.fn("Workspace.get")(function* (id) {
         const row = yield* require(id)
-        return new Info({ id: row.id, provider: row.provider, root: row.root })
+        return Info.make({ id: row.id, provider: row.provider, root: row.root })
       }),
       binding: Effect.fn("Workspace.binding")(function* (id) {
         const row = yield* require(id)
