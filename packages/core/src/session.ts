@@ -27,7 +27,8 @@ import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
-import { ForkEmptyError, MessageDecodeError, NotFoundError } from "./session/error"
+import { ForkEmptyError, MessageDecodeError, NotFoundError, WorkspaceDirectoryError } from "./session/error"
+import { Workspace } from "./workspace"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { LocationServiceMap } from "./location-service-map"
 import { SessionEvent } from "./session/event"
@@ -150,7 +151,9 @@ export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<{
     readonly data: SessionSchema.Info[]
   }>
-  readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly create: (
+    input: CreateInput,
+  ) => Effect.Effect<SessionSchema.Info, NotFoundError | Workspace.NotFoundError | WorkspaceDirectoryError>
   readonly fork: (
     input: ForkInput,
   ) => Effect.Effect<SessionSchema.Info, NotFoundError | MessageNotFoundError | ForkEmptyError>
@@ -282,6 +285,7 @@ const layer = Layer.effect(
     const db = database.db
     const bus = yield* Bus.Service
     const projects = yield* Project.Service
+    const workspaces = yield* Workspace.Service
     const global = yield* Global.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
@@ -293,6 +297,24 @@ const layer = Layer.effect(
     const shellLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Info)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
+    // Hosted Sessions reuse the global Project until a repository is discovered
+    // inside the Workspace. Canonical "/" matches the local non-VCS fallback so
+    // the global row is never repointed at a provider path. Host Project
+    // discovery must not run against provider directories.
+    const hostedProject = Effect.fn("Session.hostedProject")(function* (
+      workspaceID: Workspace.ID,
+      directory: AbsolutePath,
+    ) {
+      const workspace = yield* workspaces.get(workspaceID)
+      const relative = path.posix.relative(workspace.root, directory)
+      if (path.posix.isAbsolute(relative) || relative === ".." || relative.startsWith("../"))
+        return yield* new WorkspaceDirectoryError({ workspaceID, directory, root: workspace.root })
+      return {
+        id: Project.ID.global,
+        directory: AbsolutePath.make(workspace.root),
+        canonical: AbsolutePath.make("/"),
+      } satisfies Project.Resolved
+    })
     const persistProject = (project: Project.Resolved) => {
       const vcs = project.vcs?.type
       return db
@@ -330,7 +352,9 @@ const layer = Layer.effect(
         const location = parent?.location ?? input.location
         if (location === undefined)
           return yield* Effect.die(new Error("Session.create requires either location or an existing parentID"))
-        const project = yield* projects.resolve(location.directory)
+        const project = location.workspaceID
+          ? yield* hostedProject(location.workspaceID, location.directory)
+          : yield* projects.resolve(location.directory)
         yield* persistProject(project)
         const now = Date.now()
         const info = SessionV1.SessionInfo.make({
@@ -338,9 +362,12 @@ const layer = Layer.effect(
           slug: Slug.create(),
           version: app.version,
           projectID: project.id,
+          workspaceID: location.workspaceID,
           parentID: input.parentID,
           directory: location.directory,
-          path: path.relative(project.directory, location.directory).replaceAll("\\", "/"),
+          path: location.workspaceID
+            ? path.posix.relative(project.directory, location.directory)
+            : path.relative(project.directory, location.directory).replaceAll("\\", "/"),
           title: input.title,
           agent: input.agent,
           model: input.model
@@ -1017,6 +1044,7 @@ export const node = makeGlobalNode({
     Database.node,
     Bus.node,
     Project.node,
+    Workspace.node,
     SessionExecution.node,
     SessionStore.node,
     LocationServiceMap.node,
