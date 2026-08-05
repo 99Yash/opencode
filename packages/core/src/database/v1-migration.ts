@@ -476,6 +476,23 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
+                yield* tx
+                  .insert(KVTable)
+                  .values({ key: cursorKey, value: nextID.id })
+                  .onConflictDoUpdate({ target: KVTable.key, set: { value: nextID.id, time_updated: Date.now() } })
+                  .run()
+                const source = yield* tx.get<{ project_id: string }>(
+                  sql`SELECT project_id FROM session WHERE id = ${nextID.id}`,
+                )
+                if (!source) return yield* Effect.die(new Error(`Missing V1 session ${nextID.id}`))
+                const project = yield* tx.get<{ id: string }>(sql`SELECT id FROM project WHERE id = ${source.project_id}`)
+                if (!project) {
+                  yield* Effect.logWarning("Skipped V1 session with missing project", {
+                    sessionID: nextID.id,
+                    projectID: source.project_id,
+                  })
+                  return
+                }
                 yield* tx.run(sql`
                   INSERT OR IGNORE INTO session_v2 (
                     id, project_id, workspace_id, parent_id, slug, directory, path, title, version, share_url,
@@ -527,11 +544,6 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
                     target: EventSequenceTable.aggregate_id,
                     set: { seq: transformed.watermark, owner_id: null },
                   })
-                  .run()
-                yield* tx
-                  .insert(KVTable)
-                  .values({ key: cursorKey, value: next.id })
-                  .onConflictDoUpdate({ target: KVTable.key, set: { value: next.id, time_updated: Date.now() } })
                   .run()
               }),
             )

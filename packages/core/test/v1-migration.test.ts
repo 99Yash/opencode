@@ -932,6 +932,23 @@ describe("V1Migration database workflow", () => {
     )
   })
 
+  test("skips V1 sessions whose projects are missing", async () => {
+    await database(
+      Effect.gen(function* () {
+        const { db } = yield* Database.Service
+        yield* db.run(
+          sql`INSERT INTO session (id, project_id, slug, directory, title, version, time_created, time_updated) VALUES ('ses_orphan', 'missing-project', 'orphan', '/tmp/orphan', 'Orphan', '1', 1, 2)`,
+        )
+
+        expect(yield* V1Migration.run()).toEqual({ status: "completed" })
+        expect(yield* db.get(sql`SELECT id FROM session_v2 WHERE id = 'ses_orphan'`)).toBeUndefined()
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toEqual({
+          value: "true",
+        })
+      }),
+    )
+  })
+
   test("replaces projections, updates sessions, preserves V1 rows, and checkpoints completion", async () => {
     await database(
       Effect.gen(function* () {

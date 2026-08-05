@@ -290,7 +290,8 @@ rolls back and the next endpoint call retries the same session. If it committed,
 cursor. Mark the migration complete after the final session and return immediately on later calls.
 
 Process every `session` row, including archived, root, child, and empty sessions, as well as sessions whose messages are
-all skipped or internal. Each successfully committed session advances the cursor.
+all skipped or internal. Skip and warn for V1 Sessions whose referenced project row is missing. Each successfully
+committed or skipped session advances the cursor.
 
 ## Testing
 
