@@ -149,14 +149,7 @@ export function retryable(error: Err, provider: string) {
 
 function isRetryableMessage(input: unknown) {
   if (typeof input !== "string") return false
-  const json = parseJSON(input)
-  const messages =
-    json && typeof json === "object"
-      ? [json.message, json.code, json.error?.message, json.error?.code, json.error?.type]
-      : [input]
-  return messages.some(
-    (message) => typeof message === "string" && RETRYABLE_MESSAGE.some((pattern) => pattern.test(message)),
-  )
+  return RETRYABLE_MESSAGE.some((pattern) => pattern.test(input))
 }
 
 function str(value: unknown) {

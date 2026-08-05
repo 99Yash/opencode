@@ -196,9 +196,9 @@ describe("session.retry.retryable", () => {
     },
   )
 
-  test("does not match unrelated json fields", () => {
-    const msg = JSON.stringify({ error: { message: "Invalid request" }, metadata: "server_error" })
-    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toBeUndefined()
+  test("retries transient messages in arbitrary json fields", () => {
+    const msg = JSON.stringify({ detail: "rate limit exceeded" })
+    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toEqual({ message: msg })
   })
 
   test("retries transport timeout errors", () => {
