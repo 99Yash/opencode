@@ -102,10 +102,9 @@ describe("toLLMMessages", () => {
           status: "completed",
           reason: "auto",
           summary: "Earlier work",
-          recent: "Recent work\n[Retained image 1 (image/png): retained.png]",
-          images: [
+          recent: "Recent work\n[Retained media 1 (image/png): retained.png]",
+          media: [
             {
-              label: "Retained image 1",
               uri: "data:image/png;base64,aGVsbG8=",
               mime: "image/png",
               name: "retained.png",
@@ -150,12 +149,10 @@ Earlier work
 
 <recent-context>
 Recent work
-[Retained image 1 (image/png): retained.png]
+[Retained media 1 (image/png): retained.png]
 </recent-context>
 </conversation-checkpoint>`,
         },
-        { type: "text", text: "The retained images referenced by label in <recent-context> follow." },
-        { type: "text", text: "Retained image 1: retained.png" },
         {
           type: "media",
           mediaType: "image/png",

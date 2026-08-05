@@ -480,7 +480,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
               reason: event.data.reason,
               summary: event.data.text,
               recent: event.data.recent,
-              images: event.data.images,
+              media: event.data.media,
             })
             return
           }
@@ -493,7 +493,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
               reason: event.data.reason,
               summary: event.data.text,
               recent: event.data.recent,
-              images: event.data.images,
+              media: event.data.media,
               time: { created: event.created },
             }),
           )

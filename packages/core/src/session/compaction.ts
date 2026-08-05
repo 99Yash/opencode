@@ -90,7 +90,7 @@ type Plan = {
   readonly reason: SessionMessage.Compaction["reason"]
   readonly prompt: string
   readonly recent: string
-  readonly images: readonly SessionMessage.CompactionImage[]
+  readonly media: readonly SessionMessage.CompactionMedia[]
   readonly inputID?: SessionMessage.ID
 }
 
@@ -109,35 +109,43 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
-type Image = Omit<SessionMessage.CompactionImage, "label">
+type Media = SessionMessage.CompactionMedia
 
-const isImage = (mime: string) => mime.toLowerCase().startsWith("image/")
-const imageMarker = (image: Image) =>
-  `[Attached ${image.mime}${image.name === undefined ? "" : `: ${image.name}`}]`
+const isMedia = (mime: string) => {
+  const value = mime.toLowerCase()
+  return (
+    value.startsWith("image/") ||
+    value.startsWith("audio/") ||
+    value.startsWith("video/") ||
+    value === "application/pdf"
+  )
+}
+const mediaMarker = (media: Media) =>
+  `[Attached ${media.mime}${media.name === undefined ? "" : `: ${media.name}`}]`
 
 export const serializeToolContent = (
   content: SessionMessage.ToolStateCompleted["content"],
-  retain?: (image: Image) => string,
+  retain?: (media: Media) => string,
 ) =>
   content
     .map((item) =>
       item.type === "text"
         ? item.text
-        : retain && isImage(item.mime)
+        : retain && isMedia(item.mime)
           ? retain({ uri: item.uri, mime: item.mime, name: item.name })
-          : imageMarker(item),
+          : mediaMarker(item),
     )
     .join("\n")
 
 const serializeToolResult = (
   content: SessionMessage.ToolStateCompleted["content"],
-  retain?: (image: Image) => string,
+  retain?: (media: Media) => string,
 ) => {
   if (!retain) return truncate(serializeToolContent(content))
   const markers: string[] = []
   const result = truncate(
-    serializeToolContent(content, (image) => {
-      const marker = retain(image)
+    serializeToolContent(content, (media) => {
+      const marker = retain(media)
       markers.push(marker)
       return marker
     }),
@@ -145,14 +153,14 @@ const serializeToolResult = (
   return [result, ...markers.filter((marker) => !result.includes(marker))].join("\n")
 }
 
-const serialize = (message: SessionMessage.Info, retain?: (image: Image) => string) => {
+const serialize = (message: SessionMessage.Info, retain?: (media: Media) => string) => {
   if (message.type === "user") {
     const files =
       message.files?.map((file) => {
         const name = file.name ?? (file.source.type === "uri" ? file.source.uri : "inline attachment")
-        if (retain && isImage(file.mime))
+        if (retain && isMedia(file.mime))
           return retain({ uri: `data:${file.mime};base64,${file.data}`, mime: file.mime, name })
-        return imageMarker({ uri: "", mime: file.mime, name })
+        return mediaMarker({ uri: "", mime: file.mime, name })
       }) ?? []
     return [`[User]: ${message.text}`, ...files].join("\n")
   }
@@ -201,7 +209,7 @@ const select = (
 ): {
   readonly head: string
   readonly recent: string
-  readonly images: readonly SessionMessage.CompactionImage[]
+  readonly media: readonly SessionMessage.CompactionMedia[]
 } | undefined => {
   const conversation = messages
     .filter((message) => message.type !== "compaction" && message.type !== "system")
@@ -223,11 +231,11 @@ const select = (
     const latestUser = conversation.findLastIndex((item) => item.message.type === "user")
     if (latestUser > 0) split = latestUser
   }
-  const images: SessionMessage.CompactionImage[] = []
-  const retain = (image: Image) => {
-    const label = `Retained image ${images.length + 1}`
-    images.push({ label, ...image })
-    return `[${label} (${image.mime})${image.name === undefined ? "" : `: ${image.name}`}]`
+  const media: SessionMessage.CompactionMedia[] = []
+  const retain = (item: Media) => {
+    const label = `Retained media ${media.length + 1}`
+    media.push(item)
+    return `[${label} (${item.mime})${item.name === undefined ? "" : `: ${item.name}`}]`
   }
   return {
     head: conversation
@@ -238,7 +246,7 @@ const select = (
       .slice(split)
       .map((item) => serialize(item.message, retain))
       .join("\n\n"),
-    images,
+    media,
   }
 }
 
@@ -266,7 +274,7 @@ const planContent = (messages: readonly SessionMessage.Info[], tokens: number) =
       context: summarizeRecent ? [selected.recent] : [previousRecent, selected.head].filter(Boolean),
     }),
     recent: summarizeRecent ? "" : selected.recent,
-    images: summarizeRecent ? [] : selected.images,
+    media: summarizeRecent ? [] : selected.media,
   }
 }
 
@@ -366,7 +374,7 @@ const make = (dependencies: Dependencies) => {
       reason: plan.reason,
       text: summary,
       recent: plan.recent,
-      images: plan.images,
+      media: plan.media,
     })
     return { status: "completed" as const }
   })

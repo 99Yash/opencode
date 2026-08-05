@@ -515,7 +515,7 @@ export namespace Compaction {
       reason: Started.data.fields.reason,
       text: Schema.String,
       recent: Schema.String,
-      images: Schema.Array(SessionMessage.CompactionImage).pipe(optional),
+      media: Schema.Array(SessionMessage.CompactionMedia).pipe(optional),
     },
   })
   export type Ended = typeof Ended.Type

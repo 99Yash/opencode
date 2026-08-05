@@ -199,13 +199,13 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     const recentMessage = SessionMessage.User.make({
       id: SessionMessage.ID.create(),
       type: "user",
-      text: "Compare the retained images.",
+      text: "Compare the retained media.",
       files: [
         FileAttachment.make({
           data: Base64.make("aW1hZ2U="),
-          mime: "image/png",
+          mime: "application/pdf",
           source: { type: "inline" },
-          name: "prompt.png",
+          name: "prompt.pdf",
         }),
       ],
       time: { created: DateTime.makeUnsafe(1) },
@@ -297,17 +297,15 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
         reason: "manual",
         summary: "manual summary",
         recent: expect.stringMatching(
-          /\[Retained image 1 \(image\/png\): prompt\.png\].*\[Retained image 2 \(image\/png\): tool\.png\]/s,
+          /\[Retained media 1 \(application\/pdf\): prompt\.pdf\].*\[Retained media 2 \(image\/png\): tool\.png\]/s,
         ),
-        images: [
+        media: [
           {
-            label: "Retained image 1",
-            uri: "data:image/png;base64,aW1hZ2U=",
-            mime: "image/png",
-            name: "prompt.png",
+            uri: "data:application/pdf;base64,aW1hZ2U=",
+            mime: "application/pdf",
+            name: "prompt.pdf",
           },
           {
-            label: "Retained image 2",
             uri: "data:image/png;base64,dG9vbC1pbWFnZQ==",
             mime: "image/png",
             name: "tool.png",

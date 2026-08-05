@@ -234,20 +234,12 @@ ${message.summary}
 ${message.recent}
 </recent-context>
 </conversation-checkpoint>`),
-            ...(message.images?.length
-              ? [
-                  Message.text("The retained images referenced by label in <recent-context> follow."),
-                  ...message.images.flatMap((image) => [
-                    Message.text(`${image.label}${image.name === undefined ? "" : `: ${image.name}`}`),
-                    {
-                      type: "media" as const,
-                      mediaType: image.mime,
-                      data: image.uri,
-                      filename: image.name,
-                    },
-                  ]),
-                ]
-              : []),
+            ...(message.media ?? []).map((media) => ({
+              type: "media" as const,
+              mediaType: media.mime,
+              data: media.uri,
+              filename: media.name,
+            })),
           ],
           metadata: message.metadata,
         }),

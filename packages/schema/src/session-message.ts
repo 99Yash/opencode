@@ -206,13 +206,12 @@ export const Assistant = Schema.Struct({
 
 const CompactionBase = { type: Schema.tag("compaction"), ...Base }
 
-export interface CompactionImage extends Schema.Schema.Type<typeof CompactionImage> {}
-export const CompactionImage = Schema.Struct({
-  label: Schema.String,
+export interface CompactionMedia extends Schema.Schema.Type<typeof CompactionMedia> {}
+export const CompactionMedia = Schema.Struct({
   uri: Schema.String,
   mime: Schema.String,
   name: Schema.String.pipe(optional),
-}).annotate({ identifier: "Session.Message.Compaction.Image" })
+}).annotate({ identifier: "Session.Message.Compaction.Media" })
 
 export interface CompactionRunning extends Schema.Schema.Type<typeof CompactionRunning> {}
 export const CompactionRunning = Schema.Struct({
@@ -230,7 +229,7 @@ export const CompactionCompleted = Schema.Struct({
   reason: Schema.Literals(["auto", "manual"]),
   summary: Schema.String,
   recent: Schema.String,
-  images: Schema.Array(CompactionImage).pipe(optional),
+  media: Schema.Array(CompactionMedia).pipe(optional),
 }).annotate({ identifier: "Session.Message.Compaction.Completed" })
 
 export interface CompactionFailed extends Schema.Schema.Type<typeof CompactionFailed> {}

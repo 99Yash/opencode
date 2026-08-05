@@ -764,7 +764,7 @@ export type Endpoint5_26Output =
             readonly reason: "auto" | "manual"
             readonly text: string
             readonly recent: string
-            readonly images?: ReadonlyArray<SessionMessage.CompactionImage> | undefined
+            readonly media?: ReadonlyArray<SessionMessage.CompactionMedia> | undefined
           }
         }
       | {

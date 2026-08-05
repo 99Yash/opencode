@@ -110,8 +110,8 @@ and relevant files.
 
 The newest serialized context up to `keep.tokens` is retained separately. This
 is not a byte-for-byte transcript: tool output is limited to 2000 characters,
-and non-image attachments become textual descriptors. Images in the retained
-context are labeled in the serialized history and attached to the checkpoint
+and non-media attachments become textual descriptors. Media in the retained
+context is labeled in the serialized history and attached to the checkpoint
 under matching labels. On later compactions, V2 updates the previous summary
 and carries forward its retained recent context before selecting a new tail.
 

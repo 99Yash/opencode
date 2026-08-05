@@ -121,7 +121,7 @@ export type SessionMessageCompactionRunning = {
   recent: string
 }
 
-export type SessionMessageCompactionImage = { label: string; uri: string; mime: string; name?: string }
+export type SessionMessageCompactionMedia = { uri: string; mime: string; name?: string }
 
 export type InstructionEntryKey = string
 
@@ -1277,7 +1277,7 @@ export type SessionMessageCompactionCompleted = {
   reason: "auto" | "manual"
   summary: string
   recent: string
-  images?: Array<SessionMessageCompactionImage>
+  media?: Array<SessionMessageCompactionMedia>
 }
 
 export type SessionCompactionEnded = {
@@ -1292,7 +1292,7 @@ export type SessionCompactionEnded = {
     reason: "auto" | "manual"
     text: string
     recent: string
-    images?: Array<SessionMessageCompactionImage>
+    media?: Array<SessionMessageCompactionMedia>
   }
 }
 
