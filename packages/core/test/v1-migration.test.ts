@@ -825,10 +825,12 @@ describe("V1Migration database workflow", () => {
       ) VALUES
         ('ses_next', 'next-project', 'next', 'C:/Users/sewer', 'Imported', '2', 'build',
           '{"id":"model","providerID":"provider"}', 10, 20),
-        ('ses_existing', 'next-project', 'source-existing', '/tmp/next', 'Source existing', '2', NULL, NULL, 11, 21);
+        ('ses_existing', 'next-project', 'source-existing', '/tmp/next', 'Source existing', '2', NULL, NULL, 11, 21),
+        ('ses_orphan', 'missing-project', 'orphan', '/tmp/orphan', 'Orphan', '2', NULL, NULL, 12, 22);
       INSERT INTO session_message VALUES
         ('msg_next', 'ses_next', 'user', 4, 12, 13, '{"text":"from next","time":{"created":12}}'),
-        ('msg_source_existing', 'ses_existing', 'user', 2, 12, 13, '{"text":"source","time":{"created":12}}');
+        ('msg_source_existing', 'ses_existing', 'user', 2, 12, 13, '{"text":"source","time":{"created":12}}'),
+        ('msg_orphan', 'ses_orphan', 'user', 0, 12, 13, '{"text":"orphan","time":{"created":12}}');
     `)
     source.close()
 
@@ -851,13 +853,13 @@ describe("V1Migration database workflow", () => {
         expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
           status: "required",
           completed: 0,
-          total: 2,
+          total: 3,
         })
         expect(yield* V1Migration.run({ nextDatabasePath: filename })).toEqual({ status: "completed" })
         expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
           status: "completed",
-          completed: 2,
-          total: 2,
+          completed: 3,
+          total: 3,
         })
         expect(yield* db.get(sql`SELECT title, agent, model FROM session_v2 WHERE id = 'ses_next'`)).toEqual({
           title: "Imported",
@@ -888,6 +890,7 @@ describe("V1Migration database workflow", () => {
         expect(yield* db.all(sql`SELECT id FROM session_message WHERE session_id = 'ses_existing'`)).toEqual([
           { id: "msg_current_existing" },
         ])
+        expect(yield* db.get(sql`SELECT id FROM session_v2 WHERE id = 'ses_orphan'`)).toBeUndefined()
         expect(yield* db.get(sql`SELECT name, worktree FROM project WHERE id = 'next-project'`)).toEqual({
           name: "Current project",
           worktree: "/tmp/current",

@@ -618,10 +618,15 @@ function importNextDatabase(
       nextCompleted = 0
       for (const session of sessions) {
         const project = projects.get(session.project_id)
-        if (!project)
-          return yield* Effect.die(
-            new Error(`Previous V2 session ${session.id} references missing project ${session.project_id}`),
-          )
+        if (!project) {
+          yield* Effect.logWarning("Skipped previous V2 session with missing project", {
+            sessionID: session.id,
+            projectID: session.project_id,
+          })
+          nextCompleted++
+          yield* Effect.yieldNow
+          continue
+        }
         const messages = source
           .query<NextMessage, [string]>(
             "SELECT id, session_id, type, seq, time_created, time_updated, data FROM session_message WHERE session_id = ? ORDER BY seq",

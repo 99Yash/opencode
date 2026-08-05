@@ -269,7 +269,8 @@ Before transforming V1 rows, look for `opencode-next.db` in the data directory. 
 builds. Open it read-only with Bun SQLite and copy its `project`, `session`, and `session_message` rows directly into the
 current `project`, `session_v2`, and `session_message` tables. Existing current projects and Sessions win ID collisions.
 Do not copy its durable events or runtime caches; initialize each imported Session's `event_sequence` watermark from its
-maximum message sequence. Commit each imported Session independently and leave the source database untouched.
+maximum message sequence. Commit each imported Session independently and leave the source database untouched. Skip and
+warn for beta Sessions whose referenced project row is missing rather than blocking the remaining migration.
 
 The previous V2 import is part of this migration and uses the same completion marker. It needs no source-specific cursor:
 the destination Session row is the per-Session idempotency boundary, so a retry skips transactions that already committed.
