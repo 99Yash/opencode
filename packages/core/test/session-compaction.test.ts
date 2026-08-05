@@ -114,6 +114,24 @@ test("compaction describes tool media without embedding base64", () => {
   expect(serialized).not.toContain(base64)
 })
 
+test("compaction estimates image context without counting base64", () => {
+  const image = FileAttachment.make({
+    data: Base64.make("a".repeat(10_000)),
+    mime: "image/png",
+    source: { type: "inline" },
+    name: "image.png",
+  })
+  const message = SessionMessage.User.make({
+    id: SessionMessage.ID.create(),
+    type: "user",
+    text: "Compare these images.",
+    files: [image, image],
+    time: { created: DateTime.makeUnsafe(0) },
+  })
+
+  expect(SessionCompaction.estimateImageTokens(message)).toBe(4_000)
+})
+
 test("compaction prompt requires the checkpoint headings in order", () => {
   const prompt = SessionCompaction.buildPrompt({ context: ["Conversation history"] })
   expect(prompt.match(/^#{2,3} .+$/gm)).toEqual([

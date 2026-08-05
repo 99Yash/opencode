@@ -23,6 +23,7 @@ const DEFAULT_BUFFER = 20_000
 const DEFAULT_KEEP_TOKENS = 15_000
 const OUTPUT_TOKEN_MAX = 32_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
+const IMAGE_TOKEN_ESTIMATE = 2_000
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
 <template>
 ## Objective
@@ -126,6 +127,22 @@ export const serializeToolContent = (content: SessionMessage.ToolStateCompleted[
     )
     .join("\n")
 
+export const estimateImageTokens = (message: SessionMessage.Info) => {
+  if (message.type === "user")
+    return (message.files?.filter((file) => file.mime.toLowerCase().startsWith("image/")).length ?? 0) * IMAGE_TOKEN_ESTIMATE
+  if (message.type !== "assistant") return 0
+  return (
+    message.content
+      .flatMap((part) =>
+        part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")
+          ? (part.state.content ?? [])
+          : [],
+      )
+      .filter((content) => content.type === "file" && content.mime.toLowerCase().startsWith("image/")).length *
+    IMAGE_TOKEN_ESTIMATE
+  )
+}
+
 const serialize = (message: SessionMessage.Info) => {
   if (message.type === "user") {
     const files =
@@ -188,7 +205,7 @@ const select = (
   let total = 0
   let split = conversation.length
   for (let index = conversation.length - 1; index >= 0; index--) {
-    const next = total + Token.estimate(conversation[index].text)
+    const next = total + Token.estimate(conversation[index].text) + estimateImageTokens(conversation[index].message)
     if (split < conversation.length && next > tokens) break
     total = next
     split = index

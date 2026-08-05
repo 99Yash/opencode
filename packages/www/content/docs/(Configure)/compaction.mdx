@@ -111,7 +111,9 @@ and relevant files.
 The newest serialized context up to `keep.tokens` is retained separately. This
 is not a byte-for-byte transcript: tool output is limited to 2000 characters,
 and non-media attachments become textual descriptors. Media in the retained
-context is attached to the checkpoint in the same order as its descriptors. On
+context is attached to the checkpoint in the same order as its descriptors.
+Tail selection budgets 2000 additional tokens per image as a provider-neutral
+planning estimate; it does not count base64 request bytes as text tokens. On
 later compactions, V2 updates the previous summary and carries forward its
 retained recent context before selecting a new tail.
 
