@@ -21,7 +21,10 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { App } from "@opencode-ai/core/app"
 import { Agent } from "@opencode-ai/core/agent"
 import { Location } from "@opencode-ai/core/location"
+import { Model } from "@opencode-ai/core/model"
+import { Provider } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Base64, FileAttachment } from "@opencode-ai/schema/prompt"
 import { Money } from "@opencode-ai/schema/money"
 import { DateTime, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { asc, eq } from "drizzle-orm"
@@ -193,6 +196,48 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
       text: "Manual compaction should include this short conversation.",
       time: { created: DateTime.makeUnsafe(0) },
     }
+    const recentMessage = SessionMessage.User.make({
+      id: SessionMessage.ID.create(),
+      type: "user",
+      text: "Compare the retained images.",
+      files: [
+        FileAttachment.make({
+          data: Base64.make("aW1hZ2U="),
+          mime: "image/png",
+          source: { type: "inline" },
+          name: "prompt.png",
+        }),
+      ],
+      time: { created: DateTime.makeUnsafe(1) },
+    })
+    const assistantMessage = SessionMessage.Assistant.make({
+      id: SessionMessage.ID.create(),
+      type: "assistant",
+      agent: Agent.defaultID,
+      model: { id: Model.ID.make("summary-model"), providerID: Provider.ID.make("test") },
+      content: [
+        SessionMessage.AssistantTool.make({
+          type: "tool",
+          id: "tool_image",
+          name: "read",
+          state: SessionMessage.ToolStateCompleted.make({
+            status: "completed",
+            input: {},
+            content: [
+              { type: "text", text: "x".repeat(2_100) },
+              {
+                type: "file",
+                uri: "data:image/png;base64,dG9vbC1pbWFnZQ==",
+                mime: "image/png",
+                name: "tool.png",
+              },
+            ],
+          }),
+          time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(2) },
+        }),
+      ],
+      time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(2) },
+    })
     yield* db
       .insert(ProjectTable)
       .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
@@ -228,7 +273,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     expect(
       yield* compaction.compactManual({
         session,
-        messages: [userMessage],
+        messages: [userMessage, recentMessage, assistantMessage],
         inputID: SessionMessage.ID.make("msg_manual_compaction"),
       }),
     ).toEqual({ status: "completed" })
@@ -247,7 +292,28 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     expect(requests[0]?.generation).toBeUndefined()
     expect(JSON.stringify(requests[0]?.messages)).toContain("Manual compaction should include this short conversation.")
     expect(yield* store.context(sessionID)).toMatchObject([
-      { type: "compaction", reason: "manual", summary: "manual summary", recent: "" },
+      {
+        type: "compaction",
+        reason: "manual",
+        summary: "manual summary",
+        recent: expect.stringMatching(
+          /\[Retained image 1 \(image\/png\): prompt\.png\].*\[Retained image 2 \(image\/png\): tool\.png\]/s,
+        ),
+        images: [
+          {
+            label: "Retained image 1",
+            uri: "data:image/png;base64,aW1hZ2U=",
+            mime: "image/png",
+            name: "prompt.png",
+          },
+          {
+            label: "Retained image 2",
+            uri: "data:image/png;base64,dG9vbC1pbWFnZQ==",
+            mime: "image/png",
+            name: "tool.png",
+          },
+        ],
+      },
     ])
     expect(yield* store.get(sessionID)).toMatchObject({
       cost: 0.0000233,

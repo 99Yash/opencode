@@ -121,16 +121,7 @@ export type SessionMessageCompactionRunning = {
   recent: string
 }
 
-export type SessionMessageCompactionCompleted = {
-  type: "compaction"
-  id: string
-  metadata?: { [x: string]: JsonValue }
-  time: { created: number }
-  status: "completed"
-  reason: "auto" | "manual"
-  summary: string
-  recent: string
-}
+export type SessionMessageCompactionImage = { label: string; uri: string; mime: string; name?: string }
 
 export type InstructionEntryKey = string
 
@@ -777,16 +768,6 @@ export type SessionCompactionStarted = {
   data: { sessionID: string; reason: "auto" | "manual"; recent: string; inputID?: string }
 }
 
-export type SessionCompactionEnded = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.compaction.ended"
-  durable: { aggregateID: string; seq: number; version: 1 }
-  location?: LocationRef
-  data: { sessionID: string; reason: "auto" | "manual"; text: string; recent: string }
-}
-
 export type SessionRevertCleared = {
   id: string
   created: number
@@ -1285,6 +1266,34 @@ export type SessionCompactionFailed = {
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: { sessionID: string; reason: "auto" | "manual"; error: SessionStructuredError; inputID?: string }
+}
+
+export type SessionMessageCompactionCompleted = {
+  type: "compaction"
+  id: string
+  metadata?: { [x: string]: JsonValue }
+  time: { created: number }
+  status: "completed"
+  reason: "auto" | "manual"
+  summary: string
+  recent: string
+  images?: Array<SessionMessageCompactionImage>
+}
+
+export type SessionCompactionEnded = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.compaction.ended"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    reason: "auto" | "manual"
+    text: string
+    recent: string
+    images?: Array<SessionMessageCompactionImage>
+  }
 }
 
 export type InstructionEntryInfo = { key: InstructionEntryKey; value: JsonValue }

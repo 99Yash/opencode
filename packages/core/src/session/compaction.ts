@@ -19,7 +19,7 @@ import type { Info } from "../model"
 import { SessionUsage } from "./usage"
 
 const DEFAULT_BUFFER = 20_000
-const DEFAULT_KEEP_TOKENS = 8_000
+const DEFAULT_KEEP_TOKENS = 15_000
 const OUTPUT_TOKEN_MAX = 32_000
 const TOOL_OUTPUT_MAX_CHARS = 2_000
 const SUMMARY_TEMPLATE = `Output exactly the Markdown structure shown inside <template> and keep the section order unchanged. Do not include the <template> tags in your response.
@@ -90,6 +90,7 @@ type Plan = {
   readonly reason: SessionMessage.Compaction["reason"]
   readonly prompt: string
   readonly recent: string
+  readonly images: readonly SessionMessage.CompactionImage[]
   readonly inputID?: SessionMessage.ID
 }
 
@@ -108,20 +109,51 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
-export const serializeToolContent = (content: SessionMessage.ToolStateCompleted["content"]) =>
+type Image = Omit<SessionMessage.CompactionImage, "label">
+
+const isImage = (mime: string) => mime.toLowerCase().startsWith("image/")
+const imageMarker = (image: Image) =>
+  `[Attached ${image.mime}${image.name === undefined ? "" : `: ${image.name}`}]`
+
+export const serializeToolContent = (
+  content: SessionMessage.ToolStateCompleted["content"],
+  retain?: (image: Image) => string,
+) =>
   content
     .map((item) =>
-      item.type === "text" ? item.text : `[Attached ${item.mime}${item.name === undefined ? "" : `: ${item.name}`}]`,
+      item.type === "text"
+        ? item.text
+        : retain && isImage(item.mime)
+          ? retain({ uri: item.uri, mime: item.mime, name: item.name })
+          : imageMarker(item),
     )
     .join("\n")
 
-const serialize = (message: SessionMessage.Info) => {
+const serializeToolResult = (
+  content: SessionMessage.ToolStateCompleted["content"],
+  retain?: (image: Image) => string,
+) => {
+  if (!retain) return truncate(serializeToolContent(content))
+  const markers: string[] = []
+  const result = truncate(
+    serializeToolContent(content, (image) => {
+      const marker = retain(image)
+      markers.push(marker)
+      return marker
+    }),
+  )
+  return [result, ...markers.filter((marker) => !result.includes(marker))].join("\n")
+}
+
+const serialize = (message: SessionMessage.Info, retain?: (image: Image) => string) => {
   if (message.type === "user") {
     const files =
-      message.files?.map(
-        (file) =>
-          `[Attached ${file.mime}: ${file.name ?? (file.source.type === "uri" ? file.source.uri : "inline attachment")}]`,
-      ) ?? []
+      message.files?.map((file) => {
+        const name = file.name ?? (file.source.type === "uri" ? file.source.uri : "inline attachment")
+        if (retain && isImage(file.mime))
+          return retain({ uri: `data:${file.mime};base64,${file.data}`, mime: file.mime, name })
+        return imageMarker({ uri: "", mime: file.mime, name })
+      }) ?? []
     return [`[User]: ${message.text}`, ...files].join("\n")
   }
   if (message.type === "assistant") {
@@ -133,10 +165,14 @@ const serialize = (message: SessionMessage.Info) => {
         if (part.state.status === "completed")
           return [
             `[Assistant tool call]: ${part.name}(${input})`,
-            `[Tool result]: ${truncate(serializeToolContent(part.state.content))}`,
+            `[Tool result]: ${serializeToolResult(part.state.content, retain)}`,
           ]
         if (part.state.status === "error")
-          return [`[Assistant tool call]: ${part.name}(${input})`, `[Tool error]: ${part.state.error.message}`]
+          return [
+            `[Assistant tool call]: ${part.name}(${input})`,
+            `[Tool error]: ${part.state.error.message}`,
+            ...(part.state.content ? [`[Tool result]: ${serializeToolResult(part.state.content, retain)}`] : []),
+          ]
         return [`[Assistant tool call]: ${part.name}(${input})`]
       })
       .join("\n")
@@ -162,7 +198,11 @@ const settings = (documents: readonly Config.Entry[]) => {
 const select = (
   messages: readonly SessionMessage.Info[],
   tokens: number,
-): { readonly head: string; readonly recent: string } | undefined => {
+): {
+  readonly head: string
+  readonly recent: string
+  readonly images: readonly SessionMessage.CompactionImage[]
+} | undefined => {
   const conversation = messages
     .filter((message) => message.type !== "compaction" && message.type !== "system")
     .flatMap((message) => {
@@ -183,6 +223,12 @@ const select = (
     const latestUser = conversation.findLastIndex((item) => item.message.type === "user")
     if (latestUser > 0) split = latestUser
   }
+  const images: SessionMessage.CompactionImage[] = []
+  const retain = (image: Image) => {
+    const label = `Retained image ${images.length + 1}`
+    images.push({ label, ...image })
+    return `[${label} (${image.mime})${image.name === undefined ? "" : `: ${image.name}`}]`
+  }
   return {
     head: conversation
       .slice(0, split)
@@ -190,8 +236,9 @@ const select = (
       .join("\n\n"),
     recent: conversation
       .slice(split)
-      .map((item) => item.text)
+      .map((item) => serialize(item.message, retain))
       .join("\n\n"),
+    images,
   }
 }
 
@@ -219,6 +266,7 @@ const planContent = (messages: readonly SessionMessage.Info[], tokens: number) =
       context: summarizeRecent ? [selected.recent] : [previousRecent, selected.head].filter(Boolean),
     }),
     recent: summarizeRecent ? "" : selected.recent,
+    images: summarizeRecent ? [] : selected.images,
   }
 }
 
@@ -318,6 +366,7 @@ const make = (dependencies: Dependencies) => {
       reason: plan.reason,
       text: summary,
       recent: plan.recent,
+      images: plan.images,
     })
     return { status: "completed" as const }
   })
