@@ -303,6 +303,7 @@ type AnthropicEvent = Schema.Schema.Type<typeof AnthropicEvent>
 
 interface ParserState {
   readonly tools: ToolStream.State<number>
+  readonly hasLocalToolCalls: boolean
   readonly reasoningSignatures: Readonly<Record<number, string>>
   readonly usage?: Usage
   readonly pendingFinish?: {
@@ -668,7 +669,12 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
 // =============================================================================
 // Stream Parsing
 // =============================================================================
-const mapFinishReason = (reason: string | null | undefined): FinishReason => {
+const mapFinishReason = (reason: string | null | undefined, hasLocalToolCalls: boolean): FinishReason => {
+  if (
+    hasLocalToolCalls &&
+    (reason === undefined || reason === null || reason === "end_turn" || reason === "stop_sequence")
+  )
+    return "tool-calls"
   if (reason === "end_turn" || reason === "stop_sequence" || reason === "pause_turn") return "stop"
   if (reason === "max_tokens" || reason === "model_context_window_exceeded") return "length"
   if (reason === "tool_use") return "tool-calls"
@@ -931,7 +937,17 @@ const onContentBlockStop = Effect.fn("AnthropicMessages.onContentBlockStop")(fun
   events.push(...resultEvents)
   const reasoningSignatures = { ...state.reasoningSignatures }
   delete reasoningSignatures[event.index]
-  return [{ ...state, lifecycle, tools: result.tools, reasoningSignatures }, events] satisfies StepResult
+  return [
+    {
+      ...state,
+      hasLocalToolCalls:
+        state.hasLocalToolCalls || resultEvents.some((item) => item.type === "tool-call" && !item.providerExecuted),
+      lifecycle,
+      tools: result.tools,
+      reasoningSignatures,
+    },
+    events,
+  ] satisfies StepResult
 })
 
 const onMessageDelta = (state: ParserState, event: AnthropicEvent): StepResult => {
@@ -942,7 +958,7 @@ const onMessageDelta = (state: ParserState, event: AnthropicEvent): StepResult =
       usage,
       pendingFinish: {
         reason: {
-          normalized: mapFinishReason(event.delta?.stop_reason),
+          normalized: mapFinishReason(event.delta?.stop_reason, state.hasLocalToolCalls),
           raw: event.delta?.stop_reason ?? undefined,
         },
         providerMetadata:
@@ -1013,6 +1029,7 @@ export const protocol = Protocol.make({
     event: Protocol.jsonEvent(AnthropicEvent),
     initial: () => ({
       tools: ToolStream.empty<number>(),
+      hasLocalToolCalls: false,
       reasoningSignatures: {},
       lifecycle: Lifecycle.initial(),
     }),
