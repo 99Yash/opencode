@@ -21,8 +21,6 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { App } from "@opencode-ai/core/app"
 import { Agent } from "@opencode-ai/core/agent"
 import { Location } from "@opencode-ai/core/location"
-import { Model } from "@opencode-ai/core/model"
-import { Provider } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Base64, FileAttachment } from "@opencode-ai/schema/prompt"
 import { Money } from "@opencode-ai/schema/money"
@@ -210,34 +208,6 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
       ],
       time: { created: DateTime.makeUnsafe(1) },
     })
-    const assistantMessage = SessionMessage.Assistant.make({
-      id: SessionMessage.ID.create(),
-      type: "assistant",
-      agent: Agent.defaultID,
-      model: { id: Model.ID.make("summary-model"), providerID: Provider.ID.make("test") },
-      content: [
-        SessionMessage.AssistantTool.make({
-          type: "tool",
-          id: "tool_image",
-          name: "read",
-          state: SessionMessage.ToolStateCompleted.make({
-            status: "completed",
-            input: {},
-            content: [
-              { type: "text", text: "x".repeat(2_100) },
-              {
-                type: "file",
-                uri: "data:image/png;base64,dG9vbC1pbWFnZQ==",
-                mime: "image/png",
-                name: "tool.png",
-              },
-            ],
-          }),
-          time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(2) },
-        }),
-      ],
-      time: { created: DateTime.makeUnsafe(2), completed: DateTime.makeUnsafe(2) },
-    })
     yield* db
       .insert(ProjectTable)
       .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
@@ -273,7 +243,7 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
     expect(
       yield* compaction.compactManual({
         session,
-        messages: [userMessage, recentMessage, assistantMessage],
+        messages: [userMessage, recentMessage],
         inputID: SessionMessage.ID.make("msg_manual_compaction"),
       }),
     ).toEqual({ status: "completed" })
@@ -296,19 +266,13 @@ it.effect("manual compaction summarizes short context instead of no-op", () =>
         type: "compaction",
         reason: "manual",
         summary: "manual summary",
-        recent: expect.stringMatching(
-          /\[Retained media 1 \(application\/pdf\): prompt\.pdf\].*\[Retained media 2 \(image\/png\): tool\.png\]/s,
-        ),
+        recent: expect.stringContaining("[Attached application/pdf: prompt.pdf]"),
         media: [
           {
+            type: "file",
             uri: "data:application/pdf;base64,aW1hZ2U=",
             mime: "application/pdf",
             name: "prompt.pdf",
-          },
-          {
-            uri: "data:image/png;base64,dG9vbC1pbWFnZQ==",
-            mime: "image/png",
-            name: "tool.png",
           },
         ],
       },

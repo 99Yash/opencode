@@ -121,8 +121,6 @@ export type SessionMessageCompactionRunning = {
   recent: string
 }
 
-export type SessionMessageCompactionMedia = { uri: string; mime: string; name?: string }
-
 export type InstructionEntryKey = string
 
 export type SessionGenerateResponse = { data: { text: string } }
@@ -1208,6 +1206,18 @@ export type SessionMessageAssistantReasoning = {
 
 export type ToolContent = ToolTextContent | ToolFileContent
 
+export type SessionMessageCompactionCompleted = {
+  type: "compaction"
+  id: string
+  metadata?: { [x: string]: JsonValue }
+  time: { created: number }
+  status: "completed"
+  reason: "auto" | "manual"
+  summary: string
+  recent: string
+  media?: Array<ToolFileContent>
+}
+
 export type SessionMessageAssistantRetry = { attempt: number; at: number; error: SessionStructuredError }
 
 export type SessionMessageCompactionFailed = {
@@ -1266,34 +1276,6 @@ export type SessionCompactionFailed = {
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: { sessionID: string; reason: "auto" | "manual"; error: SessionStructuredError; inputID?: string }
-}
-
-export type SessionMessageCompactionCompleted = {
-  type: "compaction"
-  id: string
-  metadata?: { [x: string]: JsonValue }
-  time: { created: number }
-  status: "completed"
-  reason: "auto" | "manual"
-  summary: string
-  recent: string
-  media?: Array<SessionMessageCompactionMedia>
-}
-
-export type SessionCompactionEnded = {
-  id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "session.compaction.ended"
-  durable: { aggregateID: string; seq: number; version: 1 }
-  location?: LocationRef
-  data: {
-    sessionID: string
-    reason: "auto" | "manual"
-    text: string
-    recent: string
-    media?: Array<SessionMessageCompactionMedia>
-  }
 }
 
 export type InstructionEntryInfo = { key: InstructionEntryKey; value: JsonValue }
@@ -1397,6 +1379,16 @@ export type SessionToolCalled = {
 }
 
 export type ToolContent1 = ToolTextContent | ToolFileContent1
+
+export type SessionCompactionEnded = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.compaction.ended"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string; reason: "auto" | "manual"; text: string; recent: string; media?: Array<ToolFileContent1> }
+}
 
 export type ModelCompatibility = { reasoningField?: ModelReasoningField }
 

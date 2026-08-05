@@ -2,6 +2,7 @@ export * as SessionCompaction from "./compaction"
 
 import { LLM, LLMClient, AIError, LLMEvent, Message, type LLMRequest, type LanguageModel } from "@opencode-ai/ai"
 import { SessionError } from "@opencode-ai/schema/session-error"
+import { Tool } from "@opencode-ai/schema/tool"
 import { Context, Effect, Layer, Stream } from "effect"
 import { Config } from "../config"
 import { Bus } from "../bus"
@@ -90,7 +91,7 @@ type Plan = {
   readonly reason: SessionMessage.Compaction["reason"]
   readonly prompt: string
   readonly recent: string
-  readonly media: readonly SessionMessage.CompactionMedia[]
+  readonly media: readonly Tool.FileContent[]
   readonly inputID?: SessionMessage.ID
 }
 
@@ -109,8 +110,6 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 const truncate = (value: string) =>
   value.length <= TOOL_OUTPUT_MAX_CHARS ? value : `${value.slice(0, TOOL_OUTPUT_MAX_CHARS)}\n[truncated]`
 
-type Media = SessionMessage.CompactionMedia
-
 const isMedia = (mime: string) => {
   const value = mime.toLowerCase()
   return (
@@ -120,48 +119,20 @@ const isMedia = (mime: string) => {
     value === "application/pdf"
   )
 }
-const mediaMarker = (media: Media) =>
-  `[Attached ${media.mime}${media.name === undefined ? "" : `: ${media.name}`}]`
-
-export const serializeToolContent = (
-  content: SessionMessage.ToolStateCompleted["content"],
-  retain?: (media: Media) => string,
-) =>
+export const serializeToolContent = (content: SessionMessage.ToolStateCompleted["content"]) =>
   content
     .map((item) =>
-      item.type === "text"
-        ? item.text
-        : retain && isMedia(item.mime)
-          ? retain({ uri: item.uri, mime: item.mime, name: item.name })
-          : mediaMarker(item),
+      item.type === "text" ? item.text : `[Attached ${item.mime}${item.name === undefined ? "" : `: ${item.name}`}]`,
     )
     .join("\n")
 
-const serializeToolResult = (
-  content: SessionMessage.ToolStateCompleted["content"],
-  retain?: (media: Media) => string,
-) => {
-  if (!retain) return truncate(serializeToolContent(content))
-  const markers: string[] = []
-  const result = truncate(
-    serializeToolContent(content, (media) => {
-      const marker = retain(media)
-      markers.push(marker)
-      return marker
-    }),
-  )
-  return [result, ...markers.filter((marker) => !result.includes(marker))].join("\n")
-}
-
-const serialize = (message: SessionMessage.Info, retain?: (media: Media) => string) => {
+const serialize = (message: SessionMessage.Info) => {
   if (message.type === "user") {
     const files =
-      message.files?.map((file) => {
-        const name = file.name ?? (file.source.type === "uri" ? file.source.uri : "inline attachment")
-        if (retain && isMedia(file.mime))
-          return retain({ uri: `data:${file.mime};base64,${file.data}`, mime: file.mime, name })
-        return mediaMarker({ uri: "", mime: file.mime, name })
-      }) ?? []
+      message.files?.map(
+        (file) =>
+          `[Attached ${file.mime}: ${file.name ?? (file.source.type === "uri" ? file.source.uri : "inline attachment")}]`,
+      ) ?? []
     return [`[User]: ${message.text}`, ...files].join("\n")
   }
   if (message.type === "assistant") {
@@ -173,14 +144,10 @@ const serialize = (message: SessionMessage.Info, retain?: (media: Media) => stri
         if (part.state.status === "completed")
           return [
             `[Assistant tool call]: ${part.name}(${input})`,
-            `[Tool result]: ${serializeToolResult(part.state.content, retain)}`,
+            `[Tool result]: ${truncate(serializeToolContent(part.state.content))}`,
           ]
         if (part.state.status === "error")
-          return [
-            `[Assistant tool call]: ${part.name}(${input})`,
-            `[Tool error]: ${part.state.error.message}`,
-            ...(part.state.content ? [`[Tool result]: ${serializeToolResult(part.state.content, retain)}`] : []),
-          ]
+          return [`[Assistant tool call]: ${part.name}(${input})`, `[Tool error]: ${part.state.error.message}`]
         return [`[Assistant tool call]: ${part.name}(${input})`]
       })
       .join("\n")
@@ -209,7 +176,7 @@ const select = (
 ): {
   readonly head: string
   readonly recent: string
-  readonly media: readonly SessionMessage.CompactionMedia[]
+  readonly media: readonly Tool.FileContent[]
 } | undefined => {
   const conversation = messages
     .filter((message) => message.type !== "compaction" && message.type !== "system")
@@ -231,22 +198,33 @@ const select = (
     const latestUser = conversation.findLastIndex((item) => item.message.type === "user")
     if (latestUser > 0) split = latestUser
   }
-  const media: SessionMessage.CompactionMedia[] = []
-  const retain = (item: Media) => {
-    const label = `Retained media ${media.length + 1}`
-    media.push(item)
-    return `[${label} (${item.mime})${item.name === undefined ? "" : `: ${item.name}`}]`
-  }
+  const tail = conversation.slice(split)
   return {
     head: conversation
       .slice(0, split)
       .map((item) => item.text)
       .join("\n\n"),
-    recent: conversation
-      .slice(split)
-      .map((item) => serialize(item.message, retain))
-      .join("\n\n"),
-    media,
+    recent: tail.map((item) => item.text).join("\n\n"),
+    media: tail.flatMap((item) => {
+      if (item.message.type === "user")
+        return (
+          item.message.files
+            ?.filter((file) => isMedia(file.mime))
+            .map((file) => ({
+              type: "file" as const,
+              uri: `data:${file.mime};base64,${file.data}`,
+              mime: file.mime,
+              name: file.name,
+            })) ?? []
+        )
+      if (item.message.type !== "assistant") return []
+      return item.message.content.flatMap((part) => {
+        if (part.type !== "tool" || (part.state.status !== "completed" && part.state.status !== "error")) return []
+        return (part.state.content ?? []).flatMap((content) =>
+          content.type === "file" && isMedia(content.mime) ? [content] : [],
+        )
+      })
+    }),
   }
 }
 

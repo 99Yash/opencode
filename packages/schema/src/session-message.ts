@@ -2,7 +2,7 @@ export * as SessionMessage from "./session-message.js"
 
 import { Schema } from "effect"
 import { optional } from "./schema.js"
-import { Content } from "./tool.js"
+import { Content, FileContent } from "./tool.js"
 import { Model } from "./model.js"
 import { Prompt } from "./prompt.js"
 import { DateTimeUtcFromMillis, PositiveInt, RelativePath, statics } from "./schema.js"
@@ -206,13 +206,6 @@ export const Assistant = Schema.Struct({
 
 const CompactionBase = { type: Schema.tag("compaction"), ...Base }
 
-export interface CompactionMedia extends Schema.Schema.Type<typeof CompactionMedia> {}
-export const CompactionMedia = Schema.Struct({
-  uri: Schema.String,
-  mime: Schema.String,
-  name: Schema.String.pipe(optional),
-}).annotate({ identifier: "Session.Message.Compaction.Media" })
-
 export interface CompactionRunning extends Schema.Schema.Type<typeof CompactionRunning> {}
 export const CompactionRunning = Schema.Struct({
   ...CompactionBase,
@@ -229,7 +222,7 @@ export const CompactionCompleted = Schema.Struct({
   reason: Schema.Literals(["auto", "manual"]),
   summary: Schema.String,
   recent: Schema.String,
-  media: Schema.Array(CompactionMedia).pipe(optional),
+  media: Schema.Array(FileContent).pipe(optional),
 }).annotate({ identifier: "Session.Message.Compaction.Completed" })
 
 export interface CompactionFailed extends Schema.Schema.Type<typeof CompactionFailed> {}

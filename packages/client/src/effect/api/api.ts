@@ -764,7 +764,14 @@ export type Endpoint5_26Output =
             readonly reason: "auto" | "manual"
             readonly text: string
             readonly recent: string
-            readonly media?: ReadonlyArray<SessionMessage.CompactionMedia> | undefined
+            readonly media?:
+              | ReadonlyArray<{
+                  readonly type: "file"
+                  readonly uri: string
+                  readonly mime: string
+                  readonly name?: string | undefined
+                }>
+              | undefined
           }
         }
       | {
