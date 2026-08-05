@@ -128,13 +128,13 @@ export function retryable(error: Err, provider: string) {
   if (
     lower.includes("rate increased too quickly") ||
     lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
     lower.includes("too many requests")
   ) {
     return { message }
   }
   if (lower.includes("too_many_requests")) return { message: "Too Many Requests" }
   if (lower.includes("exhausted") || lower.includes("unavailable")) return { message: "Provider is overloaded" }
-  if (lower.includes("rate_limit")) return { message: "Rate Limited" }
   return undefined
 }
 

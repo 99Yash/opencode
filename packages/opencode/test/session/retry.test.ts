@@ -128,6 +128,11 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Provider is overloaded" })
   })
 
+  test("retries serialized rate_limit messages", () => {
+    const message = JSON.stringify({ type: "error", error: { code: "rate_limit_exceeded" } })
+    expect(SessionRetry.retryable(wrap(message), retryProvider)).toEqual({ message })
+  })
+
   test("does not retry unknown json messages", () => {
     const error = wrap(JSON.stringify({ error: { message: "no_kv_space" } }))
     expect(SessionRetry.retryable(error, retryProvider)).toBeUndefined()
