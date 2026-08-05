@@ -1,6 +1,6 @@
 export * as V1Migration from "./v1-migration"
 
-import { Effect, Option, Schema, Semaphore } from "effect"
+import { Cause, Effect, Option, Schema, Semaphore } from "effect"
 import { Database } from "./database"
 import { SessionMessageTable, SessionTable } from "../session/sql"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
@@ -73,19 +73,37 @@ export type TransformResult = {
   readonly warnings: ReadonlyArray<Warning>
 }
 
-export type Status = {
-  readonly status: "required" | "running" | "completed"
-  readonly completed: number
-  readonly total: number
+type Progress = {
+  readonly label: string
+  readonly numerator?: number
+  readonly denominator?: number
 }
 
+export type Status =
+  | { readonly status: "required" | "completed" }
+  | { readonly status: "running"; readonly progress: Progress }
+  | { readonly status: "error"; readonly error: string }
+
 export type Result = {
+  readonly status: "running"
+}
+
+type RunResult = {
   readonly status: "completed"
 }
 
 type Options = {
   readonly nextDatabasePath?: string
 }
+
+type MigrationState =
+  | { readonly phase: "sessions"; readonly cursor?: string }
+  | { readonly phase: "completed" }
+
+type RuntimeState =
+  | { readonly status: "idle" }
+  | { readonly status: "running"; readonly progress: Progress }
+  | { readonly status: "error"; readonly error: string }
 
 type NextProject = {
   readonly id: string
@@ -148,13 +166,11 @@ type NextMessage = {
 }
 
 const lock = Semaphore.makeUnsafe(1)
-const cursorKey = "migration.v1-v2.session.cursor"
-const completedKey = "migration.v1-v2.completed"
+const MIGRATION_STATE_KEY = "migration.v1-v2"
 const decodeJson = Schema.decodeUnknownOption(Schema.UnknownFromJsonString)
 const decodeMessage = Schema.decodeUnknownOption(SessionV1.Info)
 const decodePart = Schema.decodeUnknownOption(SessionV1.Part)
-let running = false
-let nextCompleted = 0
+let runtimeState: RuntimeState = { status: "idle" }
 
 export function transformSession(input: TransformInput): TransformResult {
   const warnings: Warning[] = []
@@ -419,61 +435,87 @@ export function transformSession(input: TransformInput): TransformResult {
 export function status(options: Options = {}): Effect.Effect<Status, never, Database.Service> {
   return Effect.gen(function* () {
     const { db } = yield* Database.Service
-    if (!(yield* hasLegacySessions(db))) return { status: "completed" as const, completed: 0, total: 0 }
-    const completed =
-      (yield* db
-        .select({ value: KVTable.value })
-        .from(KVTable)
-        .where(eq(KVTable.key, completedKey))
-        .get()
-        .pipe(Effect.orDie)) !== undefined
-    const cursor = yield* db
-      .select({ value: KVTable.value })
-      .from(KVTable)
-      .where(eq(KVTable.key, cursorKey))
-      .get()
-      .pipe(Effect.orDie)
-    const legacyTotal = (yield* db.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM session`))?.value ?? 0
-    const sourceTotal = yield* countNextSessions(nextPath(options))
-    const total = legacyTotal + sourceTotal
-    const cursorValue = typeof cursor?.value === "string" ? cursor.value : undefined
-    const migratedLegacy =
-      cursorValue !== undefined
-        ? ((yield* db.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM session WHERE id >= ${cursorValue}`))
-            ?.value ?? 0)
-        : 0
-    const migrated = migratedLegacy + (completed ? sourceTotal : running ? nextCompleted : 0)
-    return {
-      status: completed ? ("completed" as const) : running ? ("running" as const) : ("required" as const),
-      completed: completed ? total : migrated,
-      total,
-    }
+    if (!(yield* hasLegacySessions(db))) return { status: "completed" as const }
+    const state = yield* readState(db)
+    if (runtimeState.status === "running") return runtimeState
+    if (runtimeState.status === "error") return runtimeState
+    if (state?.phase === "completed") return { status: "completed" as const }
+    return { status: "required" as const }
   }).pipe(Effect.orDie)
 }
 
-export function run(options: Options = {}): Effect.Effect<Result, never, Database.Service> {
+export const start = Effect.fn("V1Migration.start")(function* (options: Options = {}) {
+  if (runtimeState.status === "running") return { status: "running" as const }
+  runtimeState = { status: "running", progress: { label: "Clearing old events" } }
+  yield* run(options).pipe(
+    Effect.matchCauseEffect({
+      onFailure: (cause) =>
+        Effect.sync(() => {
+          runtimeState = { status: "error", error: errorText(Cause.squash(cause)) }
+        }).pipe(Effect.andThen(Effect.logError("V1 migration failed", { cause }))),
+      onSuccess: () =>
+        Effect.sync(() => {
+          runtimeState = { status: "idle" }
+        }),
+    }),
+    Effect.forkDetach({ startImmediately: true }),
+  )
+  return { status: "running" as const }
+})
+
+function errorText(input: unknown): string {
+  if (!(input instanceof Error)) return String(input)
+  const cause = input.cause
+  return cause === undefined ? input.message : `${input.message}\nCaused by: ${errorText(cause)}`
+}
+
+function updateProgress(progress: Progress) {
+  if (runtimeState.status === "running") runtimeState = { status: "running", progress }
+}
+
+export function run(options: Options = {}): Effect.Effect<RunResult, never, Database.Service> {
   return lock.withPermit(
     Effect.gen(function* () {
       const { db } = yield* Database.Service
-      if (yield* hasKey(db, completedKey)) return { status: "completed" as const }
+      const state = yield* readState(db)
+      if (state?.phase === "completed") return { status: "completed" as const }
       if (!(yield* hasLegacySessions(db))) return { status: "completed" as const }
-      running = true
       const migrate = Effect.gen(function* () {
         const now = Date.now()
         yield* db.run(sql`
           INSERT OR IGNORE INTO project (id, worktree, time_created, time_updated, sandboxes)
           VALUES (${Project.ID.global}, ${path.parse(Global.Path.data).root}, ${now}, ${now}, '[]')
         `)
-        yield* importNextDatabase(db, nextPath(options))
+        if (state === undefined)
+          yield* Effect.sleep("10 seconds").pipe(
+            Effect.andThen(
+              db.transaction((tx) =>
+                Effect.gen(function* () {
+                  yield* tx.delete(EventTable).run()
+                  yield* tx.insert(KVTable).values({ key: MIGRATION_STATE_KEY, value: { phase: "sessions" } }).run()
+                }),
+              ),
+            ),
+            Effect.orDie,
+          )
+        const sourceTotal = yield* countNextSessions(nextPath(options))
+        const legacyTotal = (yield* db.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM session`))?.value ?? 0
+        const cursor = state?.phase === "sessions" ? state.cursor : undefined
+        const migrated =
+          cursor !== undefined
+            ? ((yield* db.get<{ value: number }>(sql`SELECT COUNT(*) AS value FROM session WHERE id >= ${cursor}`))
+                ?.value ?? 0)
+            : 0
+        const denominator = sourceTotal + legacyTotal
+        updateProgress({ label: "Migrating sessions", numerator: migrated, denominator })
+        yield* importNextDatabase(db, nextPath(options), (completed) => {
+          updateProgress({ label: "Migrating sessions", numerator: migrated + completed, denominator })
+        })
+        updateProgress({ label: "Migrating sessions", numerator: migrated + sourceTotal, denominator })
         const projects = new Set((yield* db.all<{ id: string }>(sql`SELECT id FROM project`)).map((project) => project.id))
         while (true) {
-          const cursor = yield* db
-            .select({ value: KVTable.value })
-            .from(KVTable)
-            .where(eq(KVTable.key, cursorKey))
-            .get()
-            .pipe(Effect.orDie)
-          const cursorValue = typeof cursor?.value === "string" ? cursor.value : undefined
+          const state = yield* readState(db)
+          const cursorValue = state?.phase === "sessions" ? state.cursor : undefined
           const nextID = yield* db.get<{ id: string; project_id: string }>(
             cursorValue === undefined
               ? sql`SELECT id, project_id FROM session ORDER BY id DESC LIMIT 1`
@@ -485,8 +527,11 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
               Effect.gen(function* () {
                 yield* tx
                   .insert(KVTable)
-                  .values({ key: cursorKey, value: nextID.id })
-                  .onConflictDoUpdate({ target: KVTable.key, set: { value: nextID.id, time_updated: Date.now() } })
+                  .values({ key: MIGRATION_STATE_KEY, value: { phase: "sessions", cursor: nextID.id } })
+                  .onConflictDoUpdate({
+                    target: KVTable.key,
+                    set: { value: { phase: "sessions", cursor: nextID.id }, time_updated: Date.now() },
+                  })
                   .run()
                 const projectID = projects.has(nextID.project_id) ? nextID.project_id : Project.ID.global
                 if (projectID !== nextID.project_id)
@@ -525,7 +570,6 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
                 yield* Effect.forEach(transformed.warnings, (warning) =>
                   Effect.logWarning("Skipped V1 migration row", warning),
                 )
-                yield* tx.delete(EventTable).where(eq(EventTable.aggregate_id, next.id)).run()
                 yield* tx.delete(SessionMessageTable).where(eq(SessionMessageTable.session_id, next.id)).run()
                 yield* Effect.forEach(transformed.messages, (message) =>
                   tx.run(sql`
@@ -549,29 +593,36 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
               }),
             )
             .pipe(Effect.orDie)
+          if (runtimeState.status === "running")
+            runtimeState = {
+              status: "running",
+              progress: {
+                label: "Migrating sessions",
+                numerator: (runtimeState.progress.numerator ?? 0) + 1,
+                denominator,
+              },
+          }
           yield* Effect.yieldNow
         }
+        updateProgress({ label: "Optimizing database" })
+        yield* db.run("VACUUM").pipe(Effect.orDie)
         yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
               yield* tx
                 .insert(KVTable)
-                .values({ key: completedKey, value: true })
-                .onConflictDoUpdate({ target: KVTable.key, set: { value: true, time_updated: Date.now() } })
+                .values({ key: MIGRATION_STATE_KEY, value: { phase: "completed" } })
+                .onConflictDoUpdate({
+                  target: KVTable.key,
+                  set: { value: { phase: "completed" }, time_updated: Date.now() },
+                })
                 .run()
-              yield* tx.delete(KVTable).where(eq(KVTable.key, cursorKey)).run()
             }),
           )
           .pipe(Effect.orDie)
         return { status: "completed" as const }
       })
-      return yield* migrate.pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            running = false
-          }),
-        ),
-      )
+      return yield* migrate
     }).pipe(Effect.orDie),
   )
 }
@@ -606,6 +657,7 @@ function countNextSessions(sourcePath: string | undefined) {
 function importNextDatabase(
   db: Database.Interface["db"],
   sourcePath: string | undefined,
+  onProgress: (completed: number) => void,
 ): Effect.Effect<void, unknown> {
   if (!sourcePath || !existsSync(sourcePath)) return Effect.void
   return Effect.scoped(
@@ -628,8 +680,7 @@ function importNextDatabase(
           .map((project) => [project.id, project]),
       )
       const sessions = source.query<NextSession, []>("SELECT * FROM session ORDER BY id DESC").all()
-      nextCompleted = 0
-      for (const session of sessions) {
+      for (const [index, session] of sessions.entries()) {
         const project = projects.get(session.project_id)
         const projectID = project ? session.project_id : Project.ID.global
         if (!project) {
@@ -702,7 +753,7 @@ function importNextDatabase(
             }),
           )
           .pipe(Effect.orDie)
-        nextCompleted++
+        onProgress(index + 1)
         yield* Effect.yieldNow
       }
       source.run("COMMIT")
@@ -900,16 +951,24 @@ function serializeRecent(
     .join("\n\n")
 }
 
-function hasKey(db: Database.Interface["db"], key: string) {
+function readState(db: Database.Interface["db"]): Effect.Effect<MigrationState | undefined> {
   return db
-    .select({ key: KVTable.key })
+    .select({ value: KVTable.value })
     .from(KVTable)
-    .where(eq(KVTable.key, key))
+    .where(eq(KVTable.key, MIGRATION_STATE_KEY))
     .get()
     .pipe(
-      Effect.map((row) => row !== undefined),
+      Effect.map((row) => parseState(row?.value)),
       Effect.orDie,
     )
+}
+
+function parseState(input: unknown): MigrationState | undefined {
+  if (!input || typeof input !== "object" || !("phase" in input)) return
+  if (input.phase === "completed") return { phase: "completed" }
+  if (input.phase !== "sessions") return
+  if (!("cursor" in input) || input.cursor === undefined) return { phase: "sessions" }
+  if (typeof input.cursor === "string") return { phase: "sessions", cursor: input.cursor }
 }
 
 function hasLegacySessions(db: Database.Interface["db"]) {

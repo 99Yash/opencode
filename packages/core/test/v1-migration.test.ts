@@ -11,7 +11,7 @@ import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/util/global"
-import { Effect, Logger, Schema } from "effect"
+import { Effect, Logger, Schedule, Schema } from "effect"
 import { eq, sql } from "drizzle-orm"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import { tmpdir } from "./fixture/tmpdir"
@@ -785,9 +785,9 @@ describe("V1Migration database workflow", () => {
   test("reports required and completed status and completes an empty database idempotently", async () => {
     await database(
       Effect.gen(function* () {
-        expect(yield* V1Migration.status()).toEqual({ status: "required", completed: 0, total: 0 })
+        expect(yield* V1Migration.status()).toEqual({ status: "required" })
         expect(yield* V1Migration.run()).toEqual({ status: "completed" })
-        expect(yield* V1Migration.status()).toEqual({ status: "completed", completed: 0, total: 0 })
+        expect(yield* V1Migration.status()).toEqual({ status: "completed" })
         expect(yield* V1Migration.run()).toEqual({ status: "completed" })
       }),
     )
@@ -853,14 +853,10 @@ describe("V1Migration database workflow", () => {
 
         expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
           status: "required",
-          completed: 0,
-          total: 3,
         })
         expect(yield* V1Migration.run({ nextDatabasePath: filename })).toEqual({ status: "completed" })
         expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
           status: "completed",
-          completed: 3,
-          total: 3,
         })
         expect(yield* db.get(sql`SELECT title, agent, model FROM session_v2 WHERE id = 'ses_next'`)).toEqual({
           title: "Imported",
@@ -908,14 +904,14 @@ describe("V1Migration database workflow", () => {
         ).toEqual({
           worktree: AbsolutePath.make(process.platform === "win32" ? "C:\\Users\\sewer" : "C:/Users/sewer"),
         })
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toEqual({
-          value: "true",
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
+          value: '{"phase":"completed"}',
         })
       }),
     )
   })
 
-  test("derives required progress from the durable cursor", async () => {
+  test("derives required status from the durable cursor", async () => {
     await database(
       Effect.gen(function* () {
         const { db } = yield* Database.Service
@@ -928,9 +924,9 @@ describe("V1Migration database workflow", () => {
           ),
         )
         yield* db.run(
-          sql`INSERT INTO kv (key, value, time_created, time_updated) VALUES ('migration.v1-v2.session.cursor', '"ses_b"', 1, 1)`,
+          sql`INSERT INTO kv (key, value, time_created, time_updated) VALUES ('migration.v1-v2', '{"phase":"sessions","cursor":"ses_b"}', 1, 1)`,
         )
-        expect(yield* V1Migration.status()).toEqual({ status: "required", completed: 2, total: 3 })
+        expect(yield* V1Migration.status()).toEqual({ status: "required" })
       }),
     )
   })
@@ -950,8 +946,8 @@ describe("V1Migration database workflow", () => {
         expect(yield* db.get(sql`SELECT worktree FROM project WHERE id = 'global'`)).toEqual({
           worktree: path.parse(Global.Path.data).root,
         })
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toEqual({
-          value: "true",
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
+          value: '{"phase":"completed"}',
         })
       }),
     )
@@ -1030,10 +1026,9 @@ describe("V1Migration database workflow", () => {
           revert: "{}",
           time_compacting: 3,
         })
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toEqual({
-          value: "true",
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
+          value: '{"phase":"completed"}',
         })
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.session.cursor'`)).toBeUndefined()
       }),
     )
   })
@@ -1060,9 +1055,15 @@ describe("V1Migration database workflow", () => {
         yield* db.run(
           sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_stale_b', 'ses_b', 7, 1, 'session.renamed.1', '{}')`,
         )
-        expect((yield* Effect.exit(V1Migration.run()))._tag).toBe("Failure")
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.session.cursor'`)).toEqual({
-          value: '"ses_c"',
+        expect(yield* V1Migration.start()).toEqual({ status: "running" })
+        const failed = yield* V1Migration.status().pipe(
+          Effect.filterOrFail((status) => status.status === "error"),
+          Effect.retry(Schedule.spaced("10 millis")),
+        )
+        expect(failed.status).toBe("error")
+        if (failed.status === "error") expect(failed.error).toContain("stop")
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
+          value: '{"phase":"sessions","cursor":"ses_c"}',
         })
         expect(yield* db.get(sql`SELECT cost FROM session_v2 WHERE id = 'ses_c'`)).toEqual({ cost: 0 })
         expect(yield* db.get(sql`SELECT cost FROM session_v2 WHERE id = 'ses_b'`)).toBeUndefined()
@@ -1084,17 +1085,26 @@ describe("V1Migration database workflow", () => {
           seq: 7,
           owner_id: "owner",
         })
-        expect(yield* db.all(sql`SELECT id FROM event WHERE aggregate_id = 'ses_b'`)).toEqual([{ id: "event_stale_b" }])
-        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toBeUndefined()
+        expect(yield* db.all(sql`SELECT id FROM event WHERE aggregate_id = 'ses_b'`)).toEqual([])
+        expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
+          value: '{"phase":"sessions","cursor":"ses_c"}',
+        })
+        yield* db.run(
+          sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_after_clear', 'ses_c', 0, 2, 'session.renamed.1', '{}')`,
+        )
         yield* db.run(sql`DROP TRIGGER fail_b`)
-        expect(yield* V1Migration.run()).toEqual({ status: "completed" })
+        expect(yield* V1Migration.start()).toEqual({ status: "running" })
+        yield* V1Migration.status().pipe(
+          Effect.filterOrFail((status) => status.status === "completed"),
+          Effect.retry(Schedule.spaced("10 millis")),
+        )
         expect(yield* db.get(sql`SELECT cost FROM session_v2 WHERE id = 'ses_b'`)).toEqual({ cost: 0 })
         expect(yield* db.all(sql`SELECT id FROM session_message WHERE session_id = 'ses_b'`)).toEqual([])
         expect(yield* db.get(sql`SELECT seq, owner_id FROM event_sequence WHERE aggregate_id = 'ses_b'`)).toEqual({
           seq: -1,
           owner_id: null,
         })
-        expect(yield* db.all(sql`SELECT id FROM event WHERE aggregate_id = 'ses_b'`)).toEqual([])
+        expect(yield* db.all(sql`SELECT id FROM event`)).toEqual([{ id: "event_after_clear" }])
       }),
     )
   })
@@ -1150,7 +1160,7 @@ describe("V1Migration database workflow", () => {
           { aggregate_id: "ses_subtask", seq: -1 },
         ])
         expect(yield* db.all(sql`SELECT id FROM session_message`)).toEqual([])
-        expect(yield* V1Migration.status()).toEqual({ status: "completed", completed: 7, total: 7 })
+        expect(yield* V1Migration.status()).toEqual({ status: "completed" })
         expect(output.map((entry) => entry.message)).toContainEqual([
           "Skipped V1 migration row",
           {

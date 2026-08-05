@@ -1,13 +1,19 @@
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 
-export const V1MigrationStatus = Schema.Struct({
-  status: Schema.Literals(["required", "running", "completed"]),
-  completed: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+const V1MigrationProgress = Schema.Struct({
+  label: Schema.String,
+  numerator: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  denominator: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
 
-export const V1MigrationResult = Schema.Struct({ status: Schema.Literal("completed") })
+export const V1MigrationStatus = Schema.Union([
+  Schema.Struct({ status: Schema.Literals(["required", "completed"]) }),
+  Schema.Struct({ status: Schema.Literal("running"), progress: V1MigrationProgress }),
+  Schema.Struct({ status: Schema.Literal("error"), error: Schema.String }),
+])
+
+export const V1MigrationResult = Schema.Struct({ status: Schema.Literal("running") })
 
 export const MigrationGroup = HttpApiGroup.make("server.migration")
   .add(
@@ -28,7 +34,7 @@ export const MigrationGroup = HttpApiGroup.make("server.migration")
       OpenApi.annotations({
         identifier: "v2.experimental.migration.v1.run",
         summary: "Run V1 migration",
-        description: "Run or resume the V1 to V2 session history migration and wait for completion.",
+        description: "Start or resume the V1 to V2 session history migration in the background.",
       }),
     ),
   )

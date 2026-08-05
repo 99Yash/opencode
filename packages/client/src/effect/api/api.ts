@@ -1559,14 +1559,20 @@ export interface DebugApi<E = never> {
   readonly location: { readonly list: DebugLocationListOperation<E>; readonly evict: DebugLocationEvictOperation<E> }
 }
 
-export type Endpoint27_0Output = {
-  readonly status: "required" | "running" | "completed"
-  readonly completed: number
-  readonly total: number
-}
+export type Endpoint27_0Output =
+  | { readonly status: "required" | "completed" }
+  | {
+      readonly status: "running"
+      readonly progress: {
+        readonly label: string
+        readonly numerator?: number | undefined
+        readonly denominator?: number | undefined
+      }
+    }
+  | { readonly status: "error"; readonly error: string }
 export type MigrationV1StatusOperation<E = never> = () => Effect.Effect<Endpoint27_0Output, E>
 
-export type Endpoint27_1Output = { readonly status: "completed" }
+export type Endpoint27_1Output = { readonly status: "running" }
 export type MigrationV1RunOperation<E = never> = () => Effect.Effect<Endpoint27_1Output, E>
 
 export interface MigrationApi<E = never> {

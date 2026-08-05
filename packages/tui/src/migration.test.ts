@@ -6,8 +6,8 @@ test("skips a completed migration", async () => {
   const client = {
     migration: {
       v1: {
-        status: async () => ({ status: "completed" as const, completed: 2, total: 2 }),
-        run: async () => ({ status: "completed" as const }),
+        status: async () => ({ status: "completed" as const }),
+        run: async () => ({ status: "running" as const }),
       },
     },
   }
@@ -16,31 +16,49 @@ test("skips a completed migration", async () => {
   expect(updates).toEqual([])
 })
 
-test("polls committed session progress while migration runs", async () => {
+test("polls committed session progress after starting migration", async () => {
   const updates: Migration.Status[] = []
   let completed = 0
-  let finish: (() => void) | undefined
   const client = {
     migration: {
       v1: {
-        status: async () => ({
-          status: completed === 2 ? ("completed" as const) : ("running" as const),
-          completed,
-          total: 2,
-        }),
-        run: () =>
-          new Promise<{ status: "completed" }>((resolve) => {
-            finish = () => resolve({ status: "completed" })
-          }),
+        status: async () =>
+          completed === 2
+            ? { status: "completed" as const }
+            : {
+                status: "running" as const,
+                progress: { label: "Migrating sessions", numerator: completed, denominator: 2 },
+              },
+        run: async () => ({ status: "running" as const }),
       },
     },
   }
 
   const running = Migration.run(client, (status) => updates.push(status))
-  await Bun.sleep(1_050)
+  await Bun.sleep(50)
   completed = 2
-  finish?.()
   expect(await running).toBe(true)
-  expect(updates).toContainEqual({ status: "running", completed: 0, total: 2 })
-  expect(updates).toContainEqual({ status: "completed", completed: 2, total: 2 })
+  expect(updates).toContainEqual({
+    status: "running",
+    progress: { label: "Migrating sessions", numerator: 0, denominator: 2 },
+  })
+  expect(updates).toContainEqual({
+    status: "completed",
+  })
+})
+
+test("surfaces a failed background migration", async () => {
+  const client = {
+    migration: {
+      v1: {
+        status: async () => ({
+          status: "error" as const,
+          error: "broken row",
+        }),
+        run: async () => ({ status: "running" as const }),
+      },
+    },
+  }
+
+  await expect(Migration.run(client, () => {})).rejects.toThrow("broken row")
 })

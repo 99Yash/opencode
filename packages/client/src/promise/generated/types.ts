@@ -4565,9 +4565,12 @@ export type DebugLocationEvictInput = {
 
 export type DebugLocationEvictOutput = void
 
-export type MigrationV1StatusOutput = { status: "required" | "running" | "completed"; completed: number; total: number }
+export type MigrationV1StatusOutput =
+  | { status: "required" | "completed" }
+  | { status: "running"; progress: { label: string; numerator?: number | undefined; denominator?: number | undefined } }
+  | { status: "error"; error: string }
 
-export type MigrationV1RunOutput = { status: "completed" }
+export type MigrationV1RunOutput = { status: "running" }
 
 export type WebsearchProvidersInput = {
   readonly location?: {

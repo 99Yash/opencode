@@ -458,19 +458,17 @@ function App(props: { pair?: DialogPairCredentials }) {
   const promptRef = usePromptRef()
   const plugins = usePlugin()
   const clipboard = useClipboard()
-  const [migration, setMigration] = createStore({ active: false, completed: 0, total: 0 })
+  const [migration, setMigration] = createStore({ active: false, progress: { label: "Preparing migration" } })
   const migrationAbort = new AbortController()
 
   onMount(async () => {
     await Bun.sleep(1_000)
     void Migration.run(
       client.api,
-      (status) =>
-        setMigration({
-          active: status.status !== "completed",
-          completed: status.completed,
-          total: status.total,
-        }),
+      (status) => {
+        setMigration("active", status.status === "running")
+        if (status.status === "running") setMigration("progress", status.progress)
+      },
       migrationAbort.signal,
     ).catch((error) => {
       if (migrationAbort.signal.aborted) return
@@ -1275,7 +1273,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         <Reconnecting />
       </Show>
       <Show when={migration.active}>
-        <MigrationOverlay completed={migration.completed} total={migration.total} />
+        <MigrationOverlay progress={migration.progress} />
       </Show>
       <Toast />
     </box>

@@ -2,8 +2,15 @@ import { useTheme } from "../context/theme"
 import { SplitBorder } from "../ui/border"
 import { Spinner } from "./spinner"
 
-export function MigrationOverlay(props: { completed: number; total: number }) {
+export function MigrationOverlay(props: {
+  progress: { label: string; numerator?: number; denominator?: number }
+}) {
   const theme = useTheme("overlay")
+  const count = () => {
+    if (props.progress.numerator === undefined) return ""
+    if (props.progress.denominator === undefined) return ` ${props.progress.numerator}`
+    return ` ${props.progress.numerator}/${props.progress.denominator}`
+  }
 
   return (
     <box
@@ -22,7 +29,8 @@ export function MigrationOverlay(props: { completed: number; total: number }) {
       paddingBottom={1}
     >
       <Spinner color={theme.text.feedback.info.default}>
-        Migrating sessions {props.completed}/{props.total}
+        {props.progress.label}
+        {count()}
       </Spinner>
     </box>
   )

@@ -14,7 +14,7 @@ export const MigrationHandler = HttpApiBuilder.group(Api, "server.migration", (h
     .handle(
       "migration.v1.run",
       Effect.fn(function* () {
-        return yield* V1Migration.run()
+        return yield* V1Migration.start()
       }),
     ),
 )
