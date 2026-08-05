@@ -55,14 +55,21 @@ export interface Interface {
   // allocate; resolve only when ready to use
   readonly create: (input: {
     readonly workspaceID: Workspace.ID
-  }) => Effect.Effect<{ binding: Binding; root: string }, CreateError>
+  }) => Effect.Effect<{ binding: Binding; root: string }, Error>
 
   // binding -> live capabilities; the ONLY way to obtain an environment
-  readonly connect: (binding: Binding) => Effect.Effect<WorkspaceEnvironment.Interface, ConnectError, Scope.Scope>
+  readonly connect: (binding: Binding) => Effect.Effect<WorkspaceEnvironment.Interface, Error, Scope.Scope>
 
   // permanently release provider resources
-  readonly destroy: (binding: Binding) => Effect.Effect<void, DestroyError>
+  readonly destroy: (binding: Binding) => Effect.Effect<void, Error>
 }
+
+// one error shape for all three verbs; ProviderNotFoundError stays separate
+export class Error extends Schema.TaggedErrorClass<Error>()("WorkspaceDriver.Error", {
+  provider: Schema.String,
+  message: Schema.optional(Schema.String),
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
 export class ProviderNotFoundError extends Schema.TaggedErrorClass<ProviderNotFoundError>()(
   "WorkspaceDriver.ProviderNotFoundError",
@@ -98,7 +105,7 @@ export const make = Effect.gen(function* () {
 
   const decode = (binding: WorkspaceDriver.Binding) =>
     Schema.decodeUnknownEffect(ModalBinding)(binding).pipe(
-      Effect.mapError((cause) => new WorkspaceDriver.ConnectError({ provider: "modal", cause })),
+      Effect.mapError((cause) => new WorkspaceDriver.Error({ provider: "modal", cause })),
     )
 
   return WorkspaceDriver.make({

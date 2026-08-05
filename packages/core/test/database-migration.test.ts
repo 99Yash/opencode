@@ -991,6 +991,9 @@ describe("DatabaseMigration", () => {
         // must drop before the historical rename dance and recreate after.
         yield* db.run(sql`DROP INDEX session_pending_session_compaction_idx`)
         yield* db.run(sql`ALTER TABLE session_pending RENAME TO session_input`)
+        // The V2 workspace table now occupies the name; recreate the legacy
+        // shape this historical migration ran against.
+        yield* db.run(sql`DROP TABLE workspace`)
         yield* db.run(sql`CREATE TABLE workspace (id text PRIMARY KEY)`)
         yield* db.run(sql`DELETE FROM migration WHERE id = ${simplifySessionPendingMigration.id}`)
         yield* DatabaseMigration.applyOnly(db, [simplifySessionPendingMigration])
