@@ -43,9 +43,27 @@ describe("syntax highlight cache", () => {
     })
 
     await highlight("const", "typescript")
-    await Promise.resolve()
     await highlight("const", "typescript")
 
     expect(calls).toBe(2)
+  })
+
+  test("an evicted failure does not delete its replacement", async () => {
+    const pending = Promise.withResolvers<{ highlights: [] }>()
+    let calls = 0
+    const highlight = cacheHighlights(() => {
+      calls++
+      if (calls === 1) return pending.promise
+      return Promise.resolve({ highlights: [] })
+    }, 1)
+
+    const stale = highlight("one", "text")
+    await highlight("two", "text")
+    const current = highlight("one", "text")
+    pending.reject(new Error("parser unavailable"))
+
+    await expect(stale).rejects.toThrow("parser unavailable")
+    expect(highlight("one", "text")).toBe(current)
+    expect(calls).toBe(3)
   })
 })

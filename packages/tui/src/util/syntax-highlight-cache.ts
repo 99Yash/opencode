@@ -1,9 +1,12 @@
 import { getTreeSitterClient, type TreeSitterClient } from "@opentui/core"
 
 const CACHE_SIZE = 500
+const installed = new WeakSet<TreeSitterClient>()
 
 export function installSyntaxHighlightCache() {
   const client = getTreeSitterClient()
+  if (installed.has(client)) return
+  installed.add(client)
   client.highlightOnce = cacheHighlights(client.highlightOnce.bind(client))
 }
 
@@ -25,9 +28,11 @@ export function cacheHighlights(highlight: TreeSitterClient["highlightOnce"], ca
 
     void result
       .then((value) => {
-        if (value.error) cache.delete(key)
+        if (value.error && cache.get(key) === result) cache.delete(key)
       })
-      .catch(() => cache.delete(key))
+      .catch(() => {
+        if (cache.get(key) === result) cache.delete(key)
+      })
     return result
   }
 }
