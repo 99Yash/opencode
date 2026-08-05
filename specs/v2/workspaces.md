@@ -9,23 +9,19 @@ A **Workspace** is a durable place a Session executes: a filesystem root plus pr
 - **Workspace is the noun; sandbox is a kind.** `Location.workspaceID` names a Workspace; omitted still means implicit local, unchanged.
 - **A Workspace is an empty environment.** No repository, project, or name at creation. Cloning happens later, inside a Session. *A Workspace may contain a Project; a Workspace is not a Project.*
 - **Creation is eager.** `create` resolves when the environment is usable. No pending states, no lazy attachment, no detached Sessions.
-- **Providers are pluggable drivers** behind a three-verb seam, selected by config-defaulted string — mirroring model resolution.
+- **Providers are pluggable drivers** behind a three-verb seam, selected by provider string.
 
 ## Public API
 
 ```typescript
-// ordinary path: config decides (workspace.provider = "modal" in opencode.json)
-const workspace = await workspaces.create()
-
-// explicit override
-const workspace = await workspaces.create({ provider: "vercel" })
+const workspace = await workspaces.create({ provider: "modal" })
 
 const session = await sessions.create({
   location: { workspaceID: workspace.id, directory: workspace.root },
 })
 ```
 
-- No configured default and no explicit provider → typed error. Never silently pick a vendor.
+- `provider` is required for now. A config default (`workspace.provider`) can be added later without breaking anything; skipping it keeps config untouched.
 - `root` is an absolute POSIX path in the provider filesystem.
 
 ## Domain Model
@@ -159,11 +155,9 @@ Core consumes it blindly:
 
 ```typescript
 // workspaces.create
-const provider = input.provider ?? config.workspace?.provider
-if (!provider) return yield* new NoWorkspaceProviderError()
-const driver = yield* registry.get(provider)
+const driver = yield* registry.get(input.provider)
 const created = yield* driver.create({ workspaceID: id })
-yield* store.insert({ id, provider, binding: created.binding, root: created.root })
+yield* store.insert({ id, provider: input.provider, binding: created.binding, root: created.root })
 
 // hosted Location graph construction (inside the existing scoped cache)
 const workspace = yield* store.get(location.workspaceID)
