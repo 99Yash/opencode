@@ -1572,11 +1572,8 @@ export type Endpoint27_0Output =
   | { readonly status: "error"; readonly error: string }
 export type MigrationV1StatusOperation<E = never> = () => Effect.Effect<Endpoint27_0Output, E>
 
-export type Endpoint27_1Output = { readonly status: "running" }
-export type MigrationV1RunOperation<E = never> = () => Effect.Effect<Endpoint27_1Output, E>
-
 export interface MigrationApi<E = never> {
-  readonly v1: { readonly status: MigrationV1StatusOperation<E>; readonly run: MigrationV1RunOperation<E> }
+  readonly v1: { readonly status: MigrationV1StatusOperation<E> }
 }
 
 export type Endpoint28_0Input = {

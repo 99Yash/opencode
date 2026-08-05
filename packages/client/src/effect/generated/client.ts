@@ -216,7 +216,6 @@ import type {
   Endpoint26_1Input,
   Endpoint26_1Output,
   Endpoint27_0Output,
-  Endpoint27_1Output,
   Endpoint28_0Input,
   Endpoint28_0Output,
   Endpoint28_1Input,
@@ -1222,12 +1221,7 @@ const adaptGroup26 = (raw: RawClient["server.debug"]) => ({
 const Endpoint27_0 = (raw: RawClient["server.migration"]) => () =>
   preserveEffect<Endpoint27_0Output>()(raw["migration.v1.status"]({}).pipe(Effect.mapError(mapClientError)))
 
-const Endpoint27_1 = (raw: RawClient["server.migration"]) => () =>
-  preserveEffect<Endpoint27_1Output>()(raw["migration.v1.run"]({}).pipe(Effect.mapError(mapClientError)))
-
-const adaptGroup27 = (raw: RawClient["server.migration"]) => ({
-  v1: { status: Endpoint27_0(raw), run: Endpoint27_1(raw) },
-})
+const adaptGroup27 = (raw: RawClient["server.migration"]) => ({ v1: { status: Endpoint27_0(raw) } })
 
 const Endpoint28_0 = (raw: RawClient["server.websearch"]) => (input?: Endpoint28_0Input) =>
   preserveEffect<Endpoint28_0Output>()(

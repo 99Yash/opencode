@@ -1,4 +1,5 @@
 import { Database } from "@opencode-ai/core/database/database"
+import { V1Migration } from "@opencode-ai/core/database/v1-migration"
 import { App } from "@opencode-ai/core/app"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
@@ -138,7 +139,7 @@ function makeRoutes<AuthError, AuthServices>(
         ),
         ServerInfo.layer(serviceURLs, options.app),
       )
-      return HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
+      const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
         Layer.provide(handlers.pipe(Layer.provide(services))),
         Layer.provide(formLocationLayer),
         Layer.provide(sessionLocationLayer),
@@ -150,6 +151,7 @@ function makeRoutes<AuthError, AuthServices>(
         Layer.provideMerge(services),
         Layer.provideMerge(HttpRouter.layer),
       )
+      return Layer.merge(api, V1Migration.layer.pipe(Layer.provide(services)))
     }),
     Layer.provide(observability),
   )

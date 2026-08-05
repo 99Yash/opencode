@@ -97,7 +97,6 @@ import { destroyRenderer } from "./util/renderer"
 import { cliErrorMessage, errorFormat } from "./util/error"
 import { AttentionProvider } from "./context/attention"
 import { StorageProvider } from "./context/storage"
-import { Migration } from "./migration"
 
 registerOpencodeSpinner()
 
@@ -458,31 +457,6 @@ function App(props: { pair?: DialogPairCredentials }) {
   const promptRef = usePromptRef()
   const plugins = usePlugin()
   const clipboard = useClipboard()
-  const [migration, setMigration] = createStore({ active: false, progress: { label: "Preparing migration" } })
-  const migrationAbort = new AbortController()
-
-  onMount(async () => {
-    await Bun.sleep(1_000)
-    void Migration.run(
-      client.api,
-      (status) => {
-        setMigration("active", status.status === "running")
-        if (status.status === "running") setMigration("progress", status.progress)
-      },
-      migrationAbort.signal,
-    ).catch((error) => {
-      if (migrationAbort.signal.aborted) return
-      setMigration("active", false)
-      toast.show({
-        variant: "error",
-        title: "Data migration failed",
-        message: error instanceof Error ? error.message : String(error),
-        duration: 10_000,
-      })
-    })
-  })
-  onCleanup(() => migrationAbort.abort())
-
   // Toast once when an MCP server enters a failed or needs-auth state so the user knows to act,
   // without having to open the status panel. Tracking the last alerted status avoids re-toasting
   // the same problem on every refresh while still re-alerting if the state changes.
@@ -1272,9 +1246,7 @@ function App(props: { pair?: DialogPairCredentials }) {
       <Show when={showReconnecting()}>
         <Reconnecting />
       </Show>
-      <Show when={migration.active}>
-        <MigrationOverlay progress={migration.progress} />
-      </Show>
+      <MigrationOverlay />
       <Toast />
     </box>
   )

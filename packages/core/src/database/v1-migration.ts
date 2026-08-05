@@ -1,6 +1,6 @@
 export * as V1Migration from "./v1-migration"
 
-import { Cause, Effect, Option, Schema, Semaphore } from "effect"
+import { Cause, Effect, Layer, Option, Schema, Semaphore } from "effect"
 import { Database } from "./database"
 import { SessionMessageTable, SessionTable } from "../session/sql"
 import { SessionV1 } from "@opencode-ai/schema/session-v1"
@@ -83,10 +83,6 @@ export type Status =
   | { readonly status: "required" | "completed" }
   | { readonly status: "running"; readonly progress: Progress }
   | { readonly status: "error"; readonly error: string }
-
-export type Result = {
-  readonly status: "running"
-}
 
 type RunResult = {
   readonly status: "completed"
@@ -432,7 +428,7 @@ export function transformSession(input: TransformInput): TransformResult {
   }
 }
 
-export function status(options: Options = {}): Effect.Effect<Status, never, Database.Service> {
+export function status(): Effect.Effect<Status, never, Database.Service> {
   return Effect.gen(function* () {
     const { db } = yield* Database.Service
     if (!(yield* hasLegacySessions(db))) return { status: "completed" as const }
@@ -444,24 +440,24 @@ export function status(options: Options = {}): Effect.Effect<Status, never, Data
   }).pipe(Effect.orDie)
 }
 
-export const start = Effect.fn("V1Migration.start")(function* (options: Options = {}) {
-  if (runtimeState.status === "running") return { status: "running" as const }
-  runtimeState = { status: "running", progress: { label: "Clearing old events" } }
-  yield* run(options).pipe(
-    Effect.matchCauseEffect({
-      onFailure: (cause) =>
-        Effect.sync(() => {
-          runtimeState = { status: "error", error: errorText(Cause.squash(cause)) }
-        }).pipe(Effect.andThen(Effect.logError("V1 migration failed", { cause }))),
-      onSuccess: () =>
-        Effect.sync(() => {
-          runtimeState = { status: "idle" }
-        }),
-    }),
-    Effect.forkDetach({ startImmediately: true }),
-  )
-  return { status: "running" as const }
-})
+export const layer = Layer.effectDiscard(
+  Effect.gen(function* () {
+    runtimeState = { status: "running", progress: { label: "Clearing old events" } }
+    yield* run().pipe(
+      Effect.matchCauseEffect({
+        onFailure: (cause) =>
+          Effect.sync(() => {
+            runtimeState = { status: "error", error: errorText(Cause.squash(cause)) }
+          }).pipe(Effect.andThen(Effect.logError("V1 migration failed", { cause }))),
+        onSuccess: () =>
+          Effect.sync(() => {
+            runtimeState = { status: "idle" }
+          }),
+      }),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+  }),
+)
 
 function errorText(input: unknown): string {
   if (!(input instanceof Error)) return String(input)

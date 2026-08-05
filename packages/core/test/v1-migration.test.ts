@@ -11,16 +11,16 @@ import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Global } from "@opencode-ai/util/global"
-import { Effect, Logger, Schedule, Schema } from "effect"
+import { Effect, Layer, Logger, Schedule, Schema, Scope } from "effect"
 import { eq, sql } from "drizzle-orm"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
 import { tmpdir } from "./fixture/tmpdir"
 import path from "path"
 
 const makeDb = EffectDrizzleSqlite.makeWithDefaults()
-const run = <A, E>(effect: Effect.Effect<A, E, SqlClient>) =>
+const run = <A, E>(effect: Effect.Effect<A, E, SqlClient | Scope.Scope>) =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })), Effect.scoped),
+    Effect.scoped(effect.pipe(Effect.provide(SqliteClient.layer({ filename: ":memory:", disableWAL: true })))),
   )
 
 const session = (
@@ -772,7 +772,7 @@ describe("V1Migration database workflow", () => {
     `)
   })
 
-  const database = <A, E>(effect: Effect.Effect<A, E, Database.Service>) =>
+  const database = <A, E>(effect: Effect.Effect<A, E, Database.Service | Scope.Scope>) =>
     run(
       Effect.gen(function* () {
         const db = yield* makeDb
@@ -851,11 +851,11 @@ describe("V1Migration database workflow", () => {
           VALUES ('msg_current_existing', 'ses_existing', 'user', 0, 1, 2, '{"text":"current","time":{"created":1}}')
         `)
 
-        expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
+        expect(yield* V1Migration.status()).toEqual({
           status: "required",
         })
         expect(yield* V1Migration.run({ nextDatabasePath: filename })).toEqual({ status: "completed" })
-        expect(yield* V1Migration.status({ nextDatabasePath: filename })).toEqual({
+        expect(yield* V1Migration.status()).toEqual({
           status: "completed",
         })
         expect(yield* db.get(sql`SELECT title, agent, model FROM session_v2 WHERE id = 'ses_next'`)).toEqual({
@@ -1055,7 +1055,7 @@ describe("V1Migration database workflow", () => {
         yield* db.run(
           sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_stale_b', 'ses_b', 7, 1, 'session.renamed.1', '{}')`,
         )
-        expect(yield* V1Migration.start()).toEqual({ status: "running" })
+        yield* Layer.launch(V1Migration.layer).pipe(Effect.forkScoped)
         const failed = yield* V1Migration.status().pipe(
           Effect.filterOrFail((status) => status.status === "error"),
           Effect.retry(Schedule.spaced("10 millis")),
@@ -1093,7 +1093,7 @@ describe("V1Migration database workflow", () => {
           sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_after_clear', 'ses_c', 0, 2, 'session.renamed.1', '{}')`,
         )
         yield* db.run(sql`DROP TRIGGER fail_b`)
-        expect(yield* V1Migration.start()).toEqual({ status: "running" })
+        yield* Layer.launch(V1Migration.layer).pipe(Effect.forkScoped)
         yield* V1Migration.status().pipe(
           Effect.filterOrFail((status) => status.status === "completed"),
           Effect.retry(Schedule.spaced("10 millis")),
