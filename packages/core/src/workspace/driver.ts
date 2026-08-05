@@ -2,6 +2,8 @@ export * as WorkspaceDriver from "./driver"
 
 import { Context, Effect, Schema, Scope } from "effect"
 import { Workspace } from "@opencode-ai/schema/workspace"
+import { tags } from "@opencode-ai/util/effect/app-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import type { WorkspaceEnvironment } from "./environment"
 
 /**
@@ -48,6 +50,9 @@ export interface Registry {
 }
 
 export class RegistryService extends Context.Service<RegistryService, Registry>()("@opencode/WorkspaceDriverRegistry") {}
+
+/** Bound by Server composition (or tests); core never constructs drivers. */
+export const registryNode = LayerNode.unbound(RegistryService, tags.values.global)
 
 /** Immutable registry fixed at composition time. */
 export const registry = (drivers: Readonly<Record<string, Interface>>): Registry => ({
