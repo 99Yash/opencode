@@ -1,5 +1,4 @@
 import { describe, expect } from "bun:test"
-import { Money } from "@opencode-ai/schema/money"
 import { Effect, Fiber, Layer, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { Catalog } from "@opencode-ai/core/catalog"
@@ -290,48 +289,6 @@ describe("Catalog", () => {
         providerID: enabledProvider,
         id: fallbackModel,
       })
-    }),
-  )
-
-  it.effect("small model prefers small keyword candidates before cost scoring", () =>
-    Effect.gen(function* () {
-      const catalog = yield* Catalog.Service
-      const providerID = Provider.ID.make("test")
-      yield* catalog.transform((catalog) => {
-        catalog.provider.update(providerID, () => {})
-        catalog.model.update(providerID, Model.ID.make("cheap-large"), (model) => {
-          model.capabilities.input = ["text"]
-          model.capabilities.output = ["text"]
-          model.cost = [
-            {
-              input: Money.USDPerMillionTokens.make(1),
-              output: Money.USDPerMillionTokens.make(1),
-              cache: {
-                read: Money.USDPerMillionTokens.zero,
-                write: Money.USDPerMillionTokens.zero,
-              },
-            },
-          ]
-          model.time.released = Date.now()
-        })
-        catalog.model.update(providerID, Model.ID.make("expensive-mini"), (model) => {
-          model.capabilities.input = ["text"]
-          model.capabilities.output = ["text"]
-          model.cost = [
-            {
-              input: Money.USDPerMillionTokens.make(10),
-              output: Money.USDPerMillionTokens.make(10),
-              cache: {
-                read: Money.USDPerMillionTokens.zero,
-                write: Money.USDPerMillionTokens.zero,
-              },
-            },
-          ]
-          model.time.released = Date.now()
-        })
-      })
-
-      expect((yield* catalog.model.small(providerID))?.id).toMatch("expensive-mini")
     }),
   )
 })

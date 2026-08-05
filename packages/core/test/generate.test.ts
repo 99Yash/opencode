@@ -30,7 +30,6 @@ const catalog = Layer.mock(Catalog.Service, {
     all: () => Effect.die("unused"),
     available: () => Effect.die("unused"),
     default: () => Effect.die("unused"),
-    small: () => Effect.die("unused"),
   },
 })
 const integrations = Layer.mock(Integration.Service, {

@@ -102,7 +102,6 @@ const promptCatalog = Layer.mock(Catalog.Service, {
     all: () => Effect.succeed([]),
     available: () => Effect.succeed([]),
     default: () => Effect.succeed(undefined),
-    small: () => Effect.succeed(undefined),
   },
 })
 const runnerLayer = (llmClient: Layer.Layer<typeof LLMClient.Service>) =>
