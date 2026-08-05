@@ -28,6 +28,12 @@ export const RETRY_BACKOFF_FACTOR = 2
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
 export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
 
+const RETRYABLE_MESSAGE = [
+  /server[_\s-]?error|internal[_\s-]?error|service[_\s-]?unavailable|overloaded|provider returned error|too many requests|rate increased too quickly|rate[_\s-]?limit/i,
+  /fetch failed|network error|upstream connect|connection (?:error|refused|lost)|socket connection was closed|socket hang up|reset before headers|getaddrinfo|ENOTFOUND|EAI_AGAIN|timeout|timed? out|terminated/i,
+  /resource[_\s-]?exhausted|please retry your request|you can retry your request|try your request again/i,
+]
+
 function cap(ms: number) {
   return Math.min(ms, RETRY_MAX_DELAY)
 }
@@ -122,32 +128,21 @@ export function retryable(error: Err, provider: string) {
     return { message: error.data.message.includes("Overloaded") ? "Provider is overloaded" : error.data.message }
   }
 
-  // Check for rate limit patterns in plain text error messages
   const msg = isRecord(error.data) ? error.data.message : undefined
-  if (typeof msg === "string") {
-    const lower = msg.toLowerCase()
-    if (
-      lower.includes("rate increased too quickly") ||
-      lower.includes("rate limit") ||
-      lower.includes("too many requests")
-    ) {
-      return { message: msg }
+  const json = parseJSON(msg)
+  if (json && typeof json === "object") {
+    const code = typeof json.code === "string" ? json.code : ""
+    if (json.type === "error" && json.error?.type === "too_many_requests") {
+      return { message: "Too Many Requests" }
+    }
+    if (code.includes("exhausted") || code.includes("unavailable")) {
+      return { message: "Provider is overloaded" }
+    }
+    if (json.type === "error" && typeof json.error?.code === "string" && json.error.code.includes("rate_limit")) {
+      return { message: "Rate Limited" }
     }
   }
-
-  const json = parseJSON(msg)
-  if (!json || typeof json !== "object") return undefined
-  const code = typeof json.code === "string" ? json.code : ""
-
-  if (json.type === "error" && json.error?.type === "too_many_requests") {
-    return { message: "Too Many Requests" }
-  }
-  if (code.includes("exhausted") || code.includes("unavailable")) {
-    return { message: "Provider is overloaded" }
-  }
-  if (json.type === "error" && typeof json.error?.code === "string" && json.error.code.includes("rate_limit")) {
-    return { message: "Rate Limited" }
-  }
+  if (typeof msg === "string" && RETRYABLE_MESSAGE.some((pattern) => pattern.test(msg))) return { message: msg }
   return undefined
 }
 

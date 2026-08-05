@@ -163,6 +163,22 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: msg })
   })
 
+  test.each([
+    "server_error",
+    "Internal server error",
+    "Service Unavailable",
+    "Provider is overloaded",
+    "Provider returned error",
+    "fetch failed",
+    "connection timed out",
+    "socket hang up",
+    "getaddrinfo ENOTFOUND api.example.com",
+    "ResourceExhausted",
+    "You can retry your request",
+  ])("retries transient plain text errors: %s", (msg) => {
+    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toEqual({ message: msg })
+  })
+
   test("retries transport timeout errors", () => {
     const request = MessageV2.fromError(new ProviderError.HeaderTimeoutError(10000), { providerID })
     expect(SessionV1.APIError.isInstance(request)).toBe(true)
