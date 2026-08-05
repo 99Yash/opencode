@@ -29,9 +29,9 @@ export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
 export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
 
 const RETRYABLE_MESSAGE = [
-  /server[_\s-]?error|internal[_\s-]?error|service[_\s-]?unavailable|overloaded|provider returned error|too many requests|rate increased too quickly|rate[_\s-]?limit/i,
-  /fetch failed|network error|upstream connect|connection (?:error|refused|lost)|socket connection was closed|socket hang up|reset before headers|getaddrinfo|ENOTFOUND|EAI_AGAIN|timeout|timed? out|terminated/i,
-  /resource[_\s-]?exhausted|please retry your request|you can retry your request|try your request again/i,
+  /\b(?:server[_\s-]?error|internal[_\s-]?error|service[_\s-]?unavailable|overloaded|too many requests|rate increased too quickly|rate[_\s-]?limit)\b|\bprovider returned error\b/i,
+  /\b(?:fetch failed|network error|upstream connect|connection (?:error|refused|lost)|socket connection was closed|socket hang up|reset before headers|getaddrinfo|ENOTFOUND|EAI_AGAIN)\b|^timeout$|\b(?:request|response|connection|network|stream|read) (?:timeout|timed? out)\b/i,
+  /\b(?:resource[_\s-]?exhausted|please retry your request|you can retry your request|try your request again)\b/i,
 ]
 
 function cap(ms: number) {
@@ -74,11 +74,13 @@ export function delay(attempt: number, error?: SessionV1.APIError) {
 export function retryable(error: Err, provider: string) {
   // context overflow errors should not be retried
   if (SessionV1.ContextOverflowError.isInstance(error)) return undefined
+  const msg = isRecord(error.data) ? error.data.message : undefined
+  const retryableMessage = isRetryableMessage(msg)
   if (SessionV1.APIError.isInstance(error)) {
     const status = error.data.statusCode
     // 5xx errors are transient server failures and should always be retried,
     // even when the provider SDK doesn't explicitly mark them as retryable.
-    if (!error.data.isRetryable && !(status !== undefined && status >= 500)) return undefined
+    if (!error.data.isRetryable && !(status !== undefined && status >= 500) && !retryableMessage) return undefined
     if (error.data.responseBody?.includes("FreeUsageLimitError")) {
       return {
         message: GO_UPSELL_MESSAGE,
@@ -128,7 +130,6 @@ export function retryable(error: Err, provider: string) {
     return { message: error.data.message.includes("Overloaded") ? "Provider is overloaded" : error.data.message }
   }
 
-  const msg = isRecord(error.data) ? error.data.message : undefined
   const json = parseJSON(msg)
   if (json && typeof json === "object") {
     const code = typeof json.code === "string" ? json.code : ""
@@ -142,8 +143,20 @@ export function retryable(error: Err, provider: string) {
       return { message: "Rate Limited" }
     }
   }
-  if (typeof msg === "string" && RETRYABLE_MESSAGE.some((pattern) => pattern.test(msg))) return { message: msg }
+  if (retryableMessage && typeof msg === "string") return { message: msg }
   return undefined
+}
+
+function isRetryableMessage(input: unknown) {
+  if (typeof input !== "string") return false
+  const json = parseJSON(input)
+  const messages =
+    json && typeof json === "object"
+      ? [json.message, json.code, json.error?.message, json.error?.code, json.error?.type]
+      : [input]
+  return messages.some(
+    (message) => typeof message === "string" && RETRYABLE_MESSAGE.some((pattern) => pattern.test(message)),
+  )
 }
 
 function str(value: unknown) {

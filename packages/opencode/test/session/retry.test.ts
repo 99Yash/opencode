@@ -179,6 +179,28 @@ describe("session.retry.retryable", () => {
     expect(SessionRetry.retryable(wrap(msg), retryProvider)).toEqual({ message: msg })
   })
 
+  test("retries transient messages nested in json", () => {
+    const msg = JSON.stringify({ type: "error", error: { code: "server_error", message: "xxx" } })
+    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toEqual({ message: msg })
+  })
+
+  test("retries transient API errors even when the SDK does not", () => {
+    const error = new SessionV1.APIError({ message: "server_error", isRetryable: false }).toObject()
+    expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "server_error" })
+  })
+
+  test.each(["Observer error", "Unterminated string in JSON", "Invalid timeout option"])(
+    "does not retry near-miss errors: %s",
+    (msg) => {
+      expect(SessionRetry.retryable(wrap(msg), retryProvider)).toBeUndefined()
+    },
+  )
+
+  test("does not match unrelated json fields", () => {
+    const msg = JSON.stringify({ error: { message: "Invalid request" }, metadata: "server_error" })
+    expect(SessionRetry.retryable(wrap(msg), retryProvider)).toBeUndefined()
+  })
+
   test("retries transport timeout errors", () => {
     const request = MessageV2.fromError(new ProviderError.HeaderTimeoutError(10000), { providerID })
     expect(SessionV1.APIError.isInstance(request)).toBe(true)
