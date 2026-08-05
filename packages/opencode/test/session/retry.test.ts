@@ -118,12 +118,12 @@ describe("session.retry.delay", () => {
 })
 
 describe("session.retry.retryable", () => {
-  test("maps too_many_requests json messages", () => {
+  test("retries serialized too_many_requests messages", () => {
     const error = wrap(JSON.stringify({ type: "error", error: { type: "too_many_requests" } }))
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Too Many Requests" })
   })
 
-  test("maps overloaded provider codes", () => {
+  test("retries serialized overloaded provider codes", () => {
     const error = wrap(JSON.stringify({ code: "resource_exhausted" }))
     expect(SessionRetry.retryable(error, retryProvider)).toEqual({ message: "Provider is overloaded" })
   })
