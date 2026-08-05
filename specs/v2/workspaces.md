@@ -73,18 +73,23 @@ export interface Interface {
 Reuses the interface proven on `origin/remote-workspaces-plan` (`fd92aeac66`) nearly verbatim — a local implementation already exists there and the Location graph already composes over it:
 
 ```ts
+// packages/core/src/workspace/environment.ts
+export * as WorkspaceEnvironment from "./environment"
+
 export interface Interface {
   readonly platform: NodeJS.Platform
   readonly directory: string // the Workspace root, absolute in the provider filesystem
-  readonly files: FileBackend // read / resolve / list / write / writeIfUnchanged / remove ...
+  readonly files: Files // read / resolve / list / write / writeIfUnchanged / remove ...
   readonly process: ChildProcessSpawner["Service"]
-  readonly shell: Shell
-  readonly ripgrep: Effect.Effect<string, Error>
+  readonly shell: Shell // executable + args lowering for the bash tool
+  readonly ripgrep: Effect.Effect<string, Error> // path to rg INSIDE this environment
 }
 ```
 
+- Naming follows the core convention: consumers reference `WorkspaceEnvironment.Service` (tag) and `WorkspaceEnvironment.Interface` (shape). `Files` (the branch called it `FileBackend`) and `Shell` nest in the same namespace since they exist only as environment fields. `ChildProcessSpawner["Service"]` is indexed access because effect's key holds its shape as a phantom member — there is no `.Service` type on it.
 - `files` earns its place next to `process`: Modal and Vercel both expose direct filesystem APIs that are dramatically faster than round-tripping `cat` through a shell, and read/write/edit are the hottest operations.
-- `shell` and `ripgrep` stay required at the seam but core exports Linux defaults, so a minimal driver satisfies them in one line each and is otherwise `create`/`connect`/`destroy` + files + spawn.
+- `ripgrep` exists because glob/grep shell out to an rg binary. Locally `RipgrepBinary.Service` downloads a pinned rg into managed host storage; that path is meaningless inside a sandbox, so the environment answers "where is rg in here" — lazily locating or installing on first use if needed.
+- `shell` and `ripgrep` stay required at the seam but core exports Linux defaults (bash lowering; rg baked into the image and found on PATH), so a minimal driver satisfies them in one line each and is otherwise `create`/`connect`/`destroy` + files + spawn.
 - Core builds tools (bash, read, edit, glob, grep) *on top of* the environment. Drivers never know what a tool is.
 
 ## Persistence
