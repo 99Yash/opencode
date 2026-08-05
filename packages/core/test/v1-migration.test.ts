@@ -10,6 +10,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Global } from "@opencode-ai/util/global"
 import { Effect, Logger, Schema } from "effect"
 import { eq, sql } from "drizzle-orm"
 import type { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -890,7 +891,9 @@ describe("V1Migration database workflow", () => {
         expect(yield* db.all(sql`SELECT id FROM session_message WHERE session_id = 'ses_existing'`)).toEqual([
           { id: "msg_current_existing" },
         ])
-        expect(yield* db.get(sql`SELECT id FROM session_v2 WHERE id = 'ses_orphan'`)).toBeUndefined()
+        expect(yield* db.get(sql`SELECT project_id FROM session_v2 WHERE id = 'ses_orphan'`)).toEqual({
+          project_id: "global",
+        })
         expect(yield* db.get(sql`SELECT name, worktree FROM project WHERE id = 'next-project'`)).toEqual({
           name: "Current project",
           worktree: "/tmp/current",
@@ -932,7 +935,7 @@ describe("V1Migration database workflow", () => {
     )
   })
 
-  test("skips V1 sessions whose projects are missing", async () => {
+  test("reassigns V1 sessions whose projects are missing to the global project", async () => {
     await database(
       Effect.gen(function* () {
         const { db } = yield* Database.Service
@@ -941,7 +944,12 @@ describe("V1Migration database workflow", () => {
         )
 
         expect(yield* V1Migration.run()).toEqual({ status: "completed" })
-        expect(yield* db.get(sql`SELECT id FROM session_v2 WHERE id = 'ses_orphan'`)).toBeUndefined()
+        expect(yield* db.get(sql`SELECT project_id FROM session_v2 WHERE id = 'ses_orphan'`)).toEqual({
+          project_id: "global",
+        })
+        expect(yield* db.get(sql`SELECT worktree FROM project WHERE id = 'global'`)).toEqual({
+          worktree: path.parse(Global.Path.data).root,
+        })
         expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2.completed'`)).toEqual({
           value: "true",
         })

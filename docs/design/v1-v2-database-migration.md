@@ -269,8 +269,7 @@ Before transforming V1 rows, look for `opencode-next.db` in the data directory. 
 builds. Open it read-only with Bun SQLite and copy its `project`, `session`, and `session_message` rows directly into the
 current `project`, `session_v2`, and `session_message` tables. Existing current projects and Sessions win ID collisions.
 Do not copy its durable events or runtime caches; initialize each imported Session's `event_sequence` watermark from its
-maximum message sequence. Commit each imported Session independently and leave the source database untouched. Skip and
-warn for beta Sessions whose referenced project row is missing rather than blocking the remaining migration.
+maximum message sequence. Commit each imported Session independently and leave the source database untouched.
 
 The previous V2 import is part of this migration and uses the same completion marker. It needs no source-specific cursor:
 the destination Session row is the per-Session idempotency boundary, so a retry skips transactions that already committed.
@@ -289,9 +288,10 @@ session-level backfills, `event_sequence` watermark, and cursor update. If inter
 rolls back and the next endpoint call retries the same session. If it committed, the next call continues after the stored
 cursor. Mark the migration complete after the final session and return immediately on later calls.
 
-Process every `session` row, including archived, root, child, and empty sessions, as well as sessions whose messages are
-all skipped or internal. Skip and warn for V1 Sessions whose referenced project row is missing. Each successfully
-committed or skipped session advances the cursor.
+Ensure the global project exists using the current platform's filesystem root as its worktree. Process every `session`
+row, including archived, root, child, and empty sessions, as well as sessions whose messages are all skipped or internal.
+Reassign beta and V1 Sessions whose referenced project row is missing to the global project and log a warning. Each
+successfully committed session advances the cursor.
 
 ## Testing
 

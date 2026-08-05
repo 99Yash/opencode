@@ -13,6 +13,7 @@ import { Global } from "@opencode-ai/util/global"
 import { existsSync } from "node:fs"
 import path from "node:path"
 import type { Database as SQLiteDatabase } from "bun:sqlite"
+import { Project } from "@opencode-ai/schema/project"
 
 export type SourceMessage = {
   readonly id: string
@@ -458,7 +459,13 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
       if (!(yield* hasLegacySessions(db))) return { status: "completed" as const }
       running = true
       const migrate = Effect.gen(function* () {
+        const now = Date.now()
+        yield* db.run(sql`
+          INSERT OR IGNORE INTO project (id, worktree, time_created, time_updated, sandboxes)
+          VALUES (${Project.ID.global}, ${path.parse(Global.Path.data).root}, ${now}, ${now}, '[]')
+        `)
         yield* importNextDatabase(db, nextPath(options))
+        const projects = new Set((yield* db.all<{ id: string }>(sql`SELECT id FROM project`)).map((project) => project.id))
         while (true) {
           const cursor = yield* db
             .select({ value: KVTable.value })
@@ -467,10 +474,10 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
             .get()
             .pipe(Effect.orDie)
           const cursorValue = typeof cursor?.value === "string" ? cursor.value : undefined
-          const nextID = yield* db.get<{ id: string }>(
+          const nextID = yield* db.get<{ id: string; project_id: string }>(
             cursorValue === undefined
-              ? sql`SELECT id FROM session ORDER BY id DESC LIMIT 1`
-              : sql`SELECT id FROM session WHERE id < ${cursorValue} ORDER BY id DESC LIMIT 1`,
+              ? sql`SELECT id, project_id FROM session ORDER BY id DESC LIMIT 1`
+              : sql`SELECT id, project_id FROM session WHERE id < ${cursorValue} ORDER BY id DESC LIMIT 1`,
           )
           if (!nextID) break
           yield* db
@@ -481,18 +488,12 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
                   .values({ key: cursorKey, value: nextID.id })
                   .onConflictDoUpdate({ target: KVTable.key, set: { value: nextID.id, time_updated: Date.now() } })
                   .run()
-                const source = yield* tx.get<{ project_id: string }>(
-                  sql`SELECT project_id FROM session WHERE id = ${nextID.id}`,
-                )
-                if (!source) return yield* Effect.die(new Error(`Missing V1 session ${nextID.id}`))
-                const project = yield* tx.get<{ id: string }>(sql`SELECT id FROM project WHERE id = ${source.project_id}`)
-                if (!project) {
-                  yield* Effect.logWarning("Skipped V1 session with missing project", {
+                const projectID = projects.has(nextID.project_id) ? nextID.project_id : Project.ID.global
+                if (projectID !== nextID.project_id)
+                  yield* Effect.logWarning("Reassigned V1 session with missing project", {
                     sessionID: nextID.id,
-                    projectID: source.project_id,
+                    projectID: nextID.project_id,
                   })
-                  return
-                }
                 yield* tx.run(sql`
                   INSERT OR IGNORE INTO session_v2 (
                     id, project_id, workspace_id, parent_id, slug, directory, path, title, version, share_url,
@@ -501,7 +502,7 @@ export function run(options: Options = {}): Effect.Effect<Result, never, Databas
                     revert, permission, agent, model, time_created, time_updated, time_compacting, time_archived
                   )
                   SELECT
-                    id, project_id, workspace_id, parent_id, slug, directory, path, title, version, share_url,
+                    id, ${projectID}, workspace_id, parent_id, slug, directory, path, title, version, share_url,
                     summary_additions, summary_deletions, summary_files, summary_diffs, metadata, cost,
                     tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write,
                     revert, permission, agent, model, time_created, time_updated, time_compacting, time_archived
@@ -630,14 +631,12 @@ function importNextDatabase(
       nextCompleted = 0
       for (const session of sessions) {
         const project = projects.get(session.project_id)
+        const projectID = project ? session.project_id : Project.ID.global
         if (!project) {
-          yield* Effect.logWarning("Skipped previous V2 session with missing project", {
+          yield* Effect.logWarning("Reassigned previous V2 session with missing project", {
             sessionID: session.id,
             projectID: session.project_id,
           })
-          nextCompleted++
-          yield* Effect.yieldNow
-          continue
         }
         const messages = source
           .query<NextMessage, [string]>(
@@ -647,16 +646,17 @@ function importNextDatabase(
         yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
-              yield* tx.run(sql`
-                INSERT OR IGNORE INTO project (
-                  id, worktree, vcs, name, icon_url, icon_url_override, icon_color,
-                  time_created, time_updated, time_initialized, sandboxes, commands
-                ) VALUES (
-                  ${project.id}, ${project.worktree}, ${project.vcs}, ${project.name}, ${project.icon_url},
-                  ${project.icon_url_override}, ${project.icon_color}, ${project.time_created}, ${project.time_updated},
-                  ${project.time_initialized}, ${project.sandboxes}, ${project.commands}
-                )
-              `)
+              if (project)
+                yield* tx.run(sql`
+                  INSERT OR IGNORE INTO project (
+                    id, worktree, vcs, name, icon_url, icon_url_override, icon_color,
+                    time_created, time_updated, time_initialized, sandboxes, commands
+                  ) VALUES (
+                    ${project.id}, ${project.worktree}, ${project.vcs}, ${project.name}, ${project.icon_url},
+                    ${project.icon_url_override}, ${project.icon_color}, ${project.time_created}, ${project.time_updated},
+                    ${project.time_initialized}, ${project.sandboxes}, ${project.commands}
+                  )
+                `)
               const existing = yield* tx
                 .select({ id: SessionTable.id })
                 .from(SessionTable)
@@ -671,7 +671,7 @@ function importNextDatabase(
                   tokens_cache_write, revert, permission, agent, model, time_created, time_updated, time_compacting,
                   time_archived, time_suspended
                 ) VALUES (
-                  ${session.id}, ${session.project_id}, ${session.workspace_id}, ${session.parent_id},
+                  ${session.id}, ${projectID}, ${session.workspace_id}, ${session.parent_id},
                   ${session.fork_session_id}, ${session.fork_boundary}, ${session.slug}, ${session.directory},
                   ${session.path}, ${session.title}, ${session.version}, ${session.share_url},
                   ${session.summary_additions}, ${session.summary_deletions}, ${session.summary_files},
