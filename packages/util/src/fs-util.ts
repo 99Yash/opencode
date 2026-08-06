@@ -270,13 +270,20 @@ export namespace FSUtil {
   }
 
   export function contains(parent: string, child: string) {
-    const result = relative(parent, child)
-    return result === "" || (!isAbsolute(result) && result !== ".." && !result.startsWith(`..${sep}`))
+    return containsUsing({ relative, isAbsolute, sep }, parent, child)
   }
 
   /** `contains` with posix rules regardless of host platform, for provider paths. */
   export function containsPosix(parent: string, child: string) {
-    const result = path.posix.relative(parent, child)
-    return result === "" || (!path.posix.isAbsolute(result) && result !== ".." && !result.startsWith("../"))
+    return containsUsing(path.posix, parent, child)
+  }
+
+  function containsUsing(
+    paths: Pick<typeof path.posix, "relative" | "isAbsolute" | "sep">,
+    parent: string,
+    child: string,
+  ) {
+    const result = paths.relative(parent, child)
+    return result === "" || (!paths.isAbsolute(result) && result !== ".." && !result.startsWith(`..${paths.sep}`))
   }
 }
