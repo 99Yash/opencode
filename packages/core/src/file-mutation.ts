@@ -218,20 +218,19 @@ const hostedLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const env = yield* WorkspaceEnvironment.Service
-    const mapFileSystemError = (method: string) => (error: WorkspaceEnvironment.Error) =>
-      new FSUtil.FileSystemError({ method, cause: error })
     return make({
       readOptional: (path) =>
         env.files.read(path).pipe(
           Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
-          Effect.mapError(mapFileSystemError("read")),
+          Effect.mapError(WorkspaceEnvironment.toFileSystemError("read")),
         ),
       isDirectory: (path) =>
         env.files.stat(path).pipe(
           Effect.map((info) => info.type === "Directory"),
           Effect.catch(() => Effect.succeed(false)),
         ),
-      write: (path, content) => env.files.write(path, content).pipe(Effect.mapError(mapFileSystemError("write"))),
+      write: (path, content) =>
+        env.files.write(path, content).pipe(Effect.mapError(WorkspaceEnvironment.toFileSystemError("write"))),
       remove: (path) =>
         env.files
           .remove(path)
@@ -239,7 +238,7 @@ const hostedLayer = Layer.effect(
             Effect.mapError((error) =>
               error._tag === "WorkspaceEnvironment.NotFoundError"
                 ? new NotFoundError({ path })
-                : mapFileSystemError("remove")(error),
+                : WorkspaceEnvironment.toFileSystemError("remove")(error),
             ),
           ),
     })

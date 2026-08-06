@@ -41,36 +41,30 @@ const allowed: Record<string, string> = {
 
 describe("hosted location graph", () => {
   test("location-scoped services do not use host primitives without justification", () => {
-    const ref = Location.Ref.make({
-      directory: AbsolutePath.make("/workspace"),
-      workspaceID: Workspace.ID.make("wrk_graphguard000000000000000"),
-    })
+    const workspaceID = Workspace.ID.make("wrk_graphguard000000000000000")
+    const ref = Location.Ref.make({ directory: AbsolutePath.make("/workspace"), workspaceID })
     // Replacement targets may be bare layers in general; every hosted
     // replacement is a node today, and bare-layer targets have no walkable
     // dependencies anyway.
-    const replaced = new Map<LayerNode.Node<unknown, unknown, any>, LayerNode.Node<unknown, unknown, any>>(
-      hostedReplacements(ref, ref.workspaceID!).flatMap(([from, to]) =>
-        "dependencies" in to ? [[from, to] as const] : [],
-      ),
+    const replaced = new Map<LayerNode.AnyNode, LayerNode.AnyNode>(
+      hostedReplacements(ref, workspaceID).flatMap(([from, to]) => (LayerNode.isNode(to) ? [[from, to] as const] : [])),
     )
-    const resolve = (node: LayerNode.Node<unknown, unknown, any>) => replaced.get(node) ?? node
+    const resolve = (node: LayerNode.AnyNode) => replaced.get(node) ?? node
 
-    const hostPrimitives = new Set<LayerNode.Node<unknown, unknown, any>>([FSUtil.node, AppProcess.node])
-    const visited = new Set<LayerNode.Node<unknown, unknown, any>>()
+    const hostPrimitives = new Set<LayerNode.AnyNode>([FSUtil.node, AppProcess.node])
     const offenders = new Map<string, string[]>()
-    const queue: LayerNode.Node<unknown, unknown, any>[] = [locationServices]
-    while (queue.length > 0) {
-      const node = resolve(queue.pop()!)
-      if (visited.has(node)) continue
-      visited.add(node)
-      for (const dependency of node.dependencies) {
-        const target = resolve(dependency)
-        if (hostPrimitives.has(target) && node.tag === Node.tags.values.location) {
-          offenders.set(node.name, [...(offenders.get(node.name) ?? []), target.name])
+    LayerNode.walk<void>(
+      locationServices,
+      (node, context) => {
+        for (const dependency of node.dependencies) {
+          if (hostPrimitives.has(resolve(dependency)) && node.tag === Node.tags.values.location) {
+            offenders.set(node.name, [...(offenders.get(node.name) ?? []), resolve(dependency).name])
+          }
+          context.visit(dependency)
         }
-        queue.push(target)
-      }
-    }
+      },
+      { resolve },
+    )
 
     const unjustified = [...offenders.entries()]
       .filter(([name]) => !(name in allowed))

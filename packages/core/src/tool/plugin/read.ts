@@ -88,10 +88,9 @@ export const Plugin = {
               // is discovered); for a file it starts at the file's dirname. External reads are
               // skipped, and discovery failures never fail the read.
               yield* Effect.gen(function* () {
-                if (target.externalDirectory !== undefined) return
-                // Discovery walks the host filesystem; hosted instruction
-                // discovery needs an environment-backed walk first.
-                if (location.workspaceID !== undefined) return
+                // External reads skip discovery, and so do hosted Locations:
+                // the walk reads the host filesystem.
+                if (external !== undefined || location.workspaceID !== undefined) return
                 const resolved = yield* fs.resolve(target.canonical)
                 const root = yield* fs.resolve(location.directory)
                 // up() searches its stop directory, so the Location-root AGENTS.md (already

@@ -1,6 +1,7 @@
 export * as WorkspaceEnvironment from "./environment"
 
 import { Context, Effect, FileSystem, Layer, Schema } from "effect"
+import { FSUtil } from "@opencode-ai/util/fs-util"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { makeLocationNode, tags } from "@opencode-ai/util/effect/app-node"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
@@ -17,6 +18,12 @@ export class Error extends Schema.TaggedErrorClass<Error>()("WorkspaceEnvironmen
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("WorkspaceEnvironment.NotFoundError", {
   path: Schema.String,
 }) {}
+
+/** Translate environment failures into the host filesystem error vocabulary. */
+export const toFileSystemError =
+  (method: string) =>
+  (cause: Error | NotFoundError): FSUtil.Error =>
+    new FSUtil.FileSystemError({ method, cause })
 
 /**
  * Wrap one driver promise, translating the driver's not-found signal into the

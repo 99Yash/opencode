@@ -82,12 +82,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                 location: ctx.payload.location ?? { directory: AbsolutePath.make(process.cwd()) },
               })
               .pipe(
-                Effect.catchTag("Workspace.NotFoundError", (error) =>
-                  Effect.fail(new InvalidRequestError({ message: `Workspace not found: ${error.id}` })),
-                ),
-                Effect.catchTag("Session.WorkspaceDirectoryError", (error) =>
-                  Effect.fail(new InvalidRequestError({ message: error.message })),
-                ),
+                Effect.catchTags({
+                  "Workspace.NotFoundError": (error) =>
+                    Effect.fail(new InvalidRequestError({ message: `Workspace not found: ${error.id}` })),
+                  "Session.WorkspaceDirectoryError": (error) =>
+                    Effect.fail(new InvalidRequestError({ message: error.message })),
+                }),
                 Effect.orDie,
               ),
           }

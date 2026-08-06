@@ -111,6 +111,10 @@ const mapGrepError = (error: unknown) =>
 
 export const Event = FileSystem.Event
 
+/** Directories first, then lexicographic; shared by every entry listing. */
+export const compareEntries = (a: Entry, b: Entry) =>
+  a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1
+
 export interface Interface {
   readonly read: (input: ReadInput) => Effect.Effect<{ readonly content: Uint8Array; readonly mime: string }>
   readonly list: (input?: ListInput) => Effect.Effect<Entry[]>
@@ -224,7 +228,7 @@ const makeEntries = (location: Location.Interface, root: string, backend: EntryB
             }),
           ]
         })
-        .sort((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1))
+        .sort(compareEntries)
     }),
   }
 }
