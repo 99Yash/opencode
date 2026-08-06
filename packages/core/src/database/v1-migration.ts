@@ -597,10 +597,6 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
           }
           yield* Effect.yieldNow
         }
-        updateProgress({ label: "Optimizing database" })
-        // VACUUM blocks the event loop, so let status pollers observe this phase first.
-        yield* Effect.sleep("2 seconds")
-        yield* db.run("VACUUM").pipe(Effect.orDie)
         yield* db
           .transaction((tx) =>
             Effect.gen(function* () {
