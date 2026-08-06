@@ -228,6 +228,13 @@ const table = sqliteTable("workspace", {
 | Available | read/write/edit, bash, glob/grep, global config/agents/instructions, models, integrations |
 | Needs a Project | git status/diffs, snapshots/revert, project instructions/config/skills/plugins, repo-scoped permissions |
 
+### Project Identity For Hosted Sessions
+
+- Admission consults **stored facts only** — never live discovery, never a driver. A stopped sandbox must not block `sessions.create`.
+- An empty Workspace has no repository, so hosted Sessions reuse `Project.ID.global` — the same degenerate Project local non-VCS directories already get. This is "not discovered yet," not a new concept.
+- Project identity is machine-independent by design (`Hash.fast("git-remote:" + origin)`, root-commit fallback). Once the rediscover slice runs discovery *inside* the Workspace, a hosted clone of a repo joins the same Project as local checkouts automatically.
+- The rediscover slice adds nullable `workspace.project_id`, stamped when discovery finds a repo; admission then reads `workspace.project_id ?? global`. Not added now — nothing writes it in this slice.
+
 ## First Milestone
 
 1. **Fake driver, real runner.** `create()` → Session at root → write file → run command → evict + rebuild Location graph → reconnect → file still there. Local paths byte-identical throughout.
