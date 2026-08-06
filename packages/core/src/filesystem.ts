@@ -8,6 +8,7 @@ import { Location } from "./location"
 import { PositiveInt, RelativePath } from "./schema"
 import { FileSystemSearch } from "./filesystem/search"
 import { Entry, FileSystem, FindInput } from "@opencode-ai/schema/filesystem"
+import { WorkspaceEnvironment } from "./workspace/environment"
 export { Entry, Match, Submatch } from "@opencode-ai/schema/filesystem"
 
 export const ReadInput = Schema.Struct({
@@ -114,4 +115,69 @@ export const node = makeLocationNode({
   service: Service,
   layer: baseLayer,
   deps: [FSUtil.node, Location.node, FileSystemSearch.node],
+})
+
+const containsPosix = (parent: string, child: string) => {
+  const relative = path.posix.relative(parent, child)
+  return relative === "" || (!relative.startsWith("..") && !path.posix.isAbsolute(relative))
+}
+
+// Mirrors baseLayer over WorkspaceEnvironment.Files with posix path rules.
+// Host filesystem services never see provider paths.
+const hostedLayer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const env = yield* WorkspaceEnvironment.Service
+    const location = yield* Location.Service
+    const root = yield* env.files.realPath(location.directory).pipe(Effect.orDie)
+    const resolve = Effect.fnUntraced(function* (input?: RelativePath) {
+      const absolute = path.posix.resolve(location.directory, input ?? ".")
+      if (!containsPosix(location.directory, absolute))
+        return yield* Effect.die(new Error("Path escapes the location"))
+      const real = yield* env.files.realPath(absolute).pipe(Effect.orDie)
+      if (!containsPosix(root, real)) return yield* Effect.die(new Error("Path escapes the location"))
+      return { absolute, real, directory: location.directory, root }
+    })
+    return Service.of({
+      find: () => Effect.die(new Error("find is not supported for hosted locations yet")),
+      read: Effect.fn("FileSystem.read")(function* (input) {
+        const target = yield* resolve(input.path)
+        const info = yield* env.files.stat(target.real).pipe(Effect.orDie)
+        if (info.type !== "File") return yield* Effect.die(new Error("Path is not a file"))
+        return {
+          content: yield* env.files.read(target.real).pipe(Effect.orDie),
+          mime: FSUtil.mimeType(target.real),
+        }
+      }),
+      list: Effect.fn("FileSystem.list")(function* (input = {}) {
+        const target = yield* resolve(input.path)
+        const info = yield* env.files.stat(target.real).pipe(Effect.orDie)
+        if (info.type !== "Directory") return yield* Effect.die(new Error("Path is not a directory"))
+        return yield* env.files.list(target.real).pipe(
+          Effect.orDie,
+          Effect.map((items) =>
+            items
+              .flatMap((item) => {
+                if (item.type !== "file" && item.type !== "directory") return []
+                const absolute = path.posix.join(target.absolute, item.name)
+                const relative = path.posix.relative(target.directory, absolute)
+                return [
+                  Entry.make({
+                    path: RelativePath.make(relative + (item.type === "directory" ? "/" : "")),
+                    type: item.type,
+                  }),
+                ]
+              })
+              .sort((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === "directory" ? -1 : 1)),
+          ),
+        )
+      }),
+    })
+  }),
+)
+
+export const hostedNode = makeLocationNode({
+  service: Service,
+  layer: hostedLayer,
+  deps: [WorkspaceEnvironment.node, Location.node],
 })
