@@ -119,7 +119,8 @@ const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
       wrap("realPath", path, async () => {
         // Both streams piped: the SDK's "ignore" path needs ReadableStream.from,
         // which Bun does not implement.
-        const process = await sandbox.exec(["realpath", "--", path], { stdout: "pipe", stderr: "pipe" })
+        // -e: every component must exist, matching node fs.realpath semantics.
+        const process = await sandbox.exec(["realpath", "-e", "--", path], { stdout: "pipe", stderr: "pipe" })
         const [output, code] = await Promise.all([process.stdout.readText(), process.wait()])
         if (code !== 0) throw new SandboxFilesystemNotFoundError(`realpath exited ${code}`)
         return output.trim()
@@ -148,14 +149,16 @@ const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
   }
 }
 
+const spawnError = (method: string, options?: { description?: string; cause?: unknown }) =>
+  systemError({ _tag: "Unknown", module: "ModalDriver", method, ...options })
+
 const spawn = (sandbox: Sandbox) => {
   let pids = 0
-  return (command: Command) => {
+  return Effect.fnUntraced(function* (command: Command) {
     if (command._tag === "PipedCommand")
-      return Effect.fail(
-        systemError({ _tag: "Unknown", module: "ModalDriver", method: "spawn", description: "piped commands unsupported" }),
-      )
-    return Effect.tryPromise({
+      return yield* Effect.fail(spawnError("spawn", { description: "piped commands unsupported" }))
+
+    const process = yield* Effect.tryPromise({
       try: () =>
         sandbox.exec([command.command, ...command.args], {
           mode: "binary",
@@ -165,41 +168,37 @@ const spawn = (sandbox: Sandbox) => {
           env: compact(command.options.env),
           timeoutMs: EXEC_TIMEOUT_MS,
         }),
-      catch: (cause) =>
-        systemError({ _tag: "Unknown", module: "ModalDriver", method: "spawn", cause }),
-    }).pipe(
-      Effect.map((process) => {
-        let exited = false
-        let waited: Promise<number> | undefined
-        const wait = () =>
-          (waited ??= process.wait().then((code) => {
-            exited = true
-            return code
-          }))
-        const onError = (cause: unknown) =>
-          systemError({ _tag: "Unknown", module: "ModalDriver", method: "process", cause })
-        return makeHandle({
-          pid: ProcessId(++pids),
-          exitCode: Effect.tryPromise({ try: wait, catch: onError }).pipe(Effect.map(ExitCode)),
-          isRunning: Effect.sync(() => !exited),
-          // Modal has no per-process termination; EXEC_TIMEOUT_MS reaps orphans.
-          kill: () => Effect.logWarning("modal cannot kill sandbox commands; relying on exec timeout"),
-          stdin: Sink.forEach((chunk: Uint8Array) =>
-            Effect.tryPromise({ try: () => process.stdin.writeBytes(chunk), catch: onError }),
-          ),
-          stdout: Stream.fromReadableStream({ evaluate: () => process.stdout, onError }),
-          stderr: Stream.fromReadableStream({ evaluate: () => process.stderr, onError }),
-          all: Stream.merge(
-            Stream.fromReadableStream({ evaluate: () => process.stdout, onError }),
-            Stream.fromReadableStream({ evaluate: () => process.stderr, onError }),
-          ),
-          getInputFd: () => Sink.fail(systemError({ _tag: "Unknown", module: "ModalDriver", method: "getInputFd", description: "unsupported" })),
-          getOutputFd: () => Stream.fail(systemError({ _tag: "Unknown", module: "ModalDriver", method: "getOutputFd", description: "unsupported" })),
-          unref: Effect.succeed(Effect.void),
-        })
-      }),
-    )
-  }
+      catch: (cause) => spawnError("spawn", { cause }),
+    })
+
+    let exited = false
+    let waited: Promise<number> | undefined
+    const wait = () =>
+      (waited ??= process.wait().then((code) => {
+        exited = true
+        return code
+      }))
+    const onError = (cause: unknown) => spawnError("process", { cause })
+    return makeHandle({
+      pid: ProcessId(++pids),
+      exitCode: Effect.tryPromise({ try: wait, catch: onError }).pipe(Effect.map(ExitCode)),
+      isRunning: Effect.sync(() => !exited),
+      // Modal has no per-process termination; EXEC_TIMEOUT_MS reaps orphans.
+      kill: () => Effect.logWarning("modal cannot kill sandbox commands; relying on exec timeout"),
+      stdin: Sink.forEach((chunk: Uint8Array) =>
+        Effect.tryPromise({ try: () => process.stdin.writeBytes(chunk), catch: onError }),
+      ),
+      stdout: Stream.fromReadableStream({ evaluate: () => process.stdout, onError }),
+      stderr: Stream.fromReadableStream({ evaluate: () => process.stderr, onError }),
+      all: Stream.merge(
+        Stream.fromReadableStream({ evaluate: () => process.stdout, onError }),
+        Stream.fromReadableStream({ evaluate: () => process.stderr, onError }),
+      ),
+      getInputFd: () => Sink.fail(spawnError("getInputFd", { description: "unsupported" })),
+      getOutputFd: () => Stream.fail(spawnError("getOutputFd", { description: "unsupported" })),
+      unref: Effect.succeed(Effect.void),
+    })
+  })
 }
 
 const compact = (env: Record<string, string | undefined> | undefined) => {
