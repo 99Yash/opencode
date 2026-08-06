@@ -198,8 +198,8 @@ export const Plugin = {
                 source,
               })
 
-              // writeTextPreservingBom formats where the files live and
-              // reports the final text, so the diff output reflects disk.
+              // FileMutation.write formats where the files live and reports
+              // the final text, so the diff output reflects disk.
               const formatted = new Map<string, string>()
               yield* Effect.forEach(
                 prepared,
@@ -207,7 +207,7 @@ export const Plugin = {
                   Effect.gen(function* () {
                     if (change.type === "add") {
                       const result = yield* files
-                        .writeTextPreservingBom({
+                        .write({
                           target: change.target,
                           content:
                             change.contents.endsWith("\n") || change.contents === ""
@@ -237,20 +237,18 @@ export const Plugin = {
                     if (change.moveTarget) {
                       const moveTarget = change.moveTarget
                       const result = yield* files
-                        .writeTextPreservingBom({
-                          target: moveTarget,
-                          content: change.content,
-                          bomSource: change.target,
-                        })
-                        .pipe(Effect.mapError((error) => fail(`Failed to write ${moveTarget.resource}`, error)))
-                      formatted.set(moveTarget.canonical, result.content)
-                      yield* files
-                        .remove(change.target)
+                        .move({ from: change.target, to: moveTarget, content: change.content })
                         .pipe(
                           Effect.mapError((error) =>
-                            fail(`Wrote ${moveTarget.resource} but failed to remove ${change.target.resource}`, error),
+                            error instanceof FileMutation.MoveIncompleteError
+                              ? fail(
+                                  `Wrote ${moveTarget.resource} but failed to remove ${change.target.resource}`,
+                                  error.cause,
+                                )
+                              : fail(`Failed to write ${moveTarget.resource}`, error),
                           ),
                         )
+                      formatted.set(moveTarget.canonical, result.content)
                       applied.push({
                         type: change.type,
                         resource: change.moveTarget.resource,
@@ -259,7 +257,7 @@ export const Plugin = {
                       return
                     }
                     const result = yield* files
-                      .writeTextPreservingBom({ target: change.target, content: change.content })
+                      .write({ target: change.target, content: change.content })
                       .pipe(Effect.mapError((error) => fail(`Failed to write ${change.target.resource}`, error)))
                     formatted.set(change.target.canonical, result.content)
                     applied.push({

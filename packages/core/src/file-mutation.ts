@@ -25,16 +25,26 @@ export class NotAFileError extends Schema.TaggedErrorClass<NotAFileError>()("Fil
   path: Schema.String,
 }) {}
 
+/** A move wrote its destination but failed to remove the source. */
+export class MoveIncompleteError extends Schema.TaggedErrorClass<MoveIncompleteError>()(
+  "FileMutation.MoveIncompleteError",
+  {
+    from: Schema.String,
+    to: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
 export interface WriteInput {
   readonly target: Target
-  readonly content: string | Uint8Array
+  readonly content: string
 }
 
-export interface TextWriteInput {
-  readonly target: Target
+export interface MoveInput {
+  readonly from: Target
+  readonly to: Target
+  /** Text for the destination; may differ from the source content. */
   readonly content: string
-  /** Existing source whose BOM should transfer when writing a new target. */
-  readonly bomSource?: Target
 }
 
 export interface WriteResult {
@@ -42,9 +52,6 @@ export interface WriteResult {
   readonly target: string
   readonly resource: string
   readonly existed: boolean
-}
-
-export interface TextWriteResult extends WriteResult {
   /** Final text on disk after BOM handling and formatting. */
   readonly content: string
 }
@@ -52,13 +59,17 @@ export interface TextWriteResult extends WriteResult {
 export interface Interface {
   /** Read a text file with the BOM stripped. BOM handling stays inside the seam. */
   readonly read: (target: Target) => Effect.Effect<string, NotFoundError | NotAFileError | FSUtil.Error>
+  /**
+   * Write logical text while retaining an existing UTF-8 BOM and emitting at
+   * most one BOM. Runs configured formatters where the files live and reports
+   * the final text.
+   */
   readonly write: (input: WriteInput) => Effect.Effect<WriteResult, FSUtil.Error>
   /**
-   * Write text while retaining an existing UTF-8 BOM and emitting at most one
-   * BOM. Runs configured formatters where the files live and reports the
-   * final text.
+   * Write `content` to `to` with write semantics, then remove `from`. The
+   * destination inherits the source's BOM when it has none of its own.
    */
-  readonly writeTextPreservingBom: (input: TextWriteInput) => Effect.Effect<TextWriteResult, FSUtil.Error>
+  readonly move: (input: MoveInput) => Effect.Effect<WriteResult, MoveIncompleteError | FSUtil.Error>
   readonly remove: (target: Target) => Effect.Effect<void, NotFoundError | FSUtil.Error>
 }
 
@@ -67,12 +78,21 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Fi
 /** Normalize model-provided text to the BOM-free representation tools consume. */
 export const normalizeText = (content: string) => Bom.split(content).text
 
-const writeResult = (target: Target, existed: boolean): WriteResult => ({
+const writeResult = (target: Target, existed: boolean, content: string): WriteResult => ({
   operation: "write",
   target: target.canonical,
   resource: target.resource,
   existed,
+  content,
 })
+
+/** Acquire per-target locks in sorted canonical order so multi-target operations cannot deadlock. */
+const lockTargets =
+  (locks: KeyedMutex.KeyedMutex<string>, targets: readonly Target[]) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    [...new Set(targets.map((target) => target.canonical))]
+      .sort()
+      .reduceRight((locked, key) => locks.withLock(key)(locked), Effect.uninterruptible(effect))
 
 /**
  * Serialize file changes by canonical target. Conditional writes compare and
@@ -85,10 +105,10 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const formatter = yield* Formatter.Service
     const locks = KeyedMutex.makeUnsafe<string>()
-    const withTargetLock =
-      (target: Target) =>
+    const withTargetLocks =
+      (...targets: readonly Target[]) =>
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        locks.withLock(target.canonical)(Effect.uninterruptible(effect))
+        lockTargets(locks, targets)(effect)
 
     // Happy-path reads are one operation; only the failure path stats to
     // classify a directory target.
@@ -110,50 +130,57 @@ const layer = Layer.effect(
       ),
     )
 
+    const readOptional = (path: string) =>
+      fs.readFile(path).pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+
+    const writeText = (target: Target, content: string, inheritedBom: boolean) =>
+      Effect.gen(function* () {
+        const next = Bom.split(content)
+        const current = yield* readOptional(target.canonical)
+        const bom = Boolean(current && Bom.has(current)) || inheritedBom || next.bom
+        yield* fs.writeWithDirs(target.canonical, Bom.join(next.text, bom))
+        // Formatters may rewrite the file, so re-sync the BOM and report the
+        // final text.
+        const text = (yield* formatter.file(target.canonical))
+          ? yield* Bom.syncFile(fs, target.canonical, bom)
+          : next.text
+        return writeResult(target, current !== undefined, text)
+      })
+
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
-      withTargetLock(input.target)(
-        Effect.gen(function* () {
-          const existed = yield* fs.exists(input.target.canonical)
-          yield* fs.writeWithDirs(input.target.canonical, input.content)
-          return writeResult(input.target, existed)
-        }),
-      ),
+      withTargetLocks(input.target)(writeText(input.target, input.content, false)),
     )
 
-    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")((input: TextWriteInput) =>
-      withTargetLock(input.target)(
+    const move = Effect.fn("FileMutation.move")((input: MoveInput) =>
+      withTargetLocks(
+        input.from,
+        input.to,
+      )(
         Effect.gen(function* () {
-          const next = Bom.split(input.content)
-          const current = yield* fs
-            .readFile(input.target.canonical)
-            .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
-          const source = input.bomSource
-            ? yield* fs
-                .readFile(input.bomSource.canonical)
-                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
-            : undefined
-          const bom = Boolean((current && Bom.has(current)) || (source && Bom.has(source))) || next.bom
-          yield* fs.writeWithDirs(input.target.canonical, Bom.join(next.text, bom))
-          // Formatters may rewrite the file, so re-sync the BOM and report the
-          // final text.
-          const content = (yield* formatter.file(input.target.canonical))
-            ? yield* Bom.syncFile(fs, input.target.canonical, bom)
-            : next.text
-          return { ...writeResult(input.target, current !== undefined), content }
+          const source = yield* readOptional(input.from.canonical)
+          const result = yield* writeText(input.to, input.content, Boolean(source && Bom.has(source)))
+          yield* fs
+            .remove(input.from.absolute)
+            .pipe(
+              Effect.mapError(
+                (cause) => new MoveIncompleteError({ from: input.from.canonical, to: input.to.canonical, cause }),
+              ),
+            )
+          return result
         }),
       ),
     )
 
     // Removing a symlink unlinks the link itself, never its referent.
     const remove = Effect.fn("FileMutation.remove")((target: Target) =>
-      withTargetLock(target)(
+      withTargetLocks(target)(
         fs
           .remove(target.absolute)
           .pipe(Effect.catchReason("PlatformError", "NotFound", () => new NotFoundError({ path: target.canonical }))),
       ),
     )
 
-    return Service.of({ read, write, writeTextPreservingBom, remove })
+    return Service.of({ read, write, move, remove })
   }),
 )
 
@@ -169,12 +196,10 @@ const hostedLayer = Layer.effect(
     const env = yield* WorkspaceEnvironment.Service
     const encoder = new TextEncoder()
     const locks = KeyedMutex.makeUnsafe<string>()
-    const withTargetLock =
-      (target: Target) =>
+    const withTargetLocks =
+      (...targets: readonly Target[]) =>
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        locks.withLock(target.canonical)(Effect.uninterruptible(effect))
-
-    const bytes = (content: string | Uint8Array) => (typeof content === "string" ? encoder.encode(content) : content)
+        lockTargets(locks, targets)(effect)
 
     // Absence stays typed; other environment failures surface as filesystem
     // errors so tool-level messages stay uniform across backends.
@@ -206,44 +231,58 @@ const hostedLayer = Layer.effect(
       ),
     )
 
+    const readOptional = (target: Target) =>
+      env.files.read(target.canonical).pipe(
+        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+        Effect.mapError(mapFileSystemError("read")),
+      )
+
+    const writeText = (target: Target, content: string, inheritedBom: boolean) =>
+      Effect.gen(function* () {
+        const next = Bom.split(content)
+        const current = yield* readOptional(target)
+        const bom = Boolean(current && Bom.has(current)) || inheritedBom || next.bom
+        const result = yield* env.files
+          .write(target.canonical, encoder.encode(Bom.join(next.text, bom)))
+          .pipe(Effect.mapError(mapFileSystemError("write")))
+        return writeResult(target, result.existed, next.text)
+      })
+
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
-      withTargetLock(input.target)(
-        env.files.write(input.target.canonical, bytes(input.content)).pipe(
-          Effect.mapError(mapFileSystemError("write")),
-          Effect.map((result) => writeResult(input.target, result.existed)),
-        ),
-      ),
+      withTargetLocks(input.target)(writeText(input.target, input.content, false)),
     )
 
-    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")((input: TextWriteInput) =>
-      withTargetLock(input.target)(
+    const move = Effect.fn("FileMutation.move")((input: MoveInput) =>
+      withTargetLocks(
+        input.from,
+        input.to,
+      )(
         Effect.gen(function* () {
-          const next = Bom.split(input.content)
-          const optionalRead = (target: Target) =>
-            env.files.read(target.canonical).pipe(
-              Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
-              Effect.mapError(mapFileSystemError("read")),
-            )
-          const current = yield* optionalRead(input.target)
-          const source = input.bomSource ? yield* optionalRead(input.bomSource) : undefined
-          const text = Bom.join(
-            next.text,
-            Boolean((current && Bom.has(current)) || (source && Bom.has(source))) || next.bom,
+          const source = yield* readOptional(input.from)
+          const result = yield* writeText(input.to, input.content, Boolean(source && Bom.has(source)))
+          // Keep the seam error vocabulary in the cause so tool-level messages
+          // stay uniform across backends.
+          yield* env.files.remove(input.from.absolute).pipe(
+            Effect.mapError(
+              (error) =>
+                new MoveIncompleteError({
+                  from: input.from.canonical,
+                  to: input.to.canonical,
+                  cause: mapError("remove")(error),
+                }),
+            ),
           )
-          const result = yield* env.files
-            .write(input.target.canonical, bytes(text))
-            .pipe(Effect.mapError(mapFileSystemError("write")))
-          return { ...writeResult(input.target, result.existed), content: next.text }
+          return result
         }),
       ),
     )
 
     // Removing a symlink unlinks the link itself, never its referent.
     const remove = Effect.fn("FileMutation.remove")((target: Target) =>
-      withTargetLock(target)(env.files.remove(target.absolute).pipe(Effect.mapError(mapError("remove")))),
+      withTargetLocks(target)(env.files.remove(target.absolute).pipe(Effect.mapError(mapError("remove")))),
     )
 
-    return Service.of({ read, write, writeTextPreservingBom, remove })
+    return Service.of({ read, write, move, remove })
   }),
 )
 

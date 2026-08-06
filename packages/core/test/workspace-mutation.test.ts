@@ -59,7 +59,7 @@ describe("hosted mutation", () => {
       expect(first.existed).toBe(false)
       expect(memory.contents("/workspace/notes/todo.md")).toBe("- ship it\n")
 
-      const second = yield* files.writeTextPreservingBom({ target: created, content: "- shipped\n" })
+      const second = yield* files.write({ target: created, content: "- shipped\n" })
       expect(second.existed).toBe(true)
       expect(memory.contents("/workspace/notes/todo.md")).toBe("- shipped\n")
     }),
