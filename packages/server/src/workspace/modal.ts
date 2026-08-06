@@ -134,16 +134,10 @@ const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
                 : ("symlink" as const),
         }))
       }),
+    // Parent directories are created by the SDK, matching the Files contract.
     write: (path, content) =>
       Effect.tryPromise({
-        try: async () => {
-          const existed = await sandbox.filesystem.stat(path).then(
-            (info) => info.type === "file",
-            () => false,
-          )
-          await sandbox.filesystem.writeBytes(content, path)
-          return { existed }
-        },
+        try: () => sandbox.filesystem.writeBytes(content, path),
         catch: (cause) => new WorkspaceEnvironment.Error({ operation: "write", path, cause }),
       }),
     remove: (path) => wrap("remove", path, () => sandbox.filesystem.remove(path)),

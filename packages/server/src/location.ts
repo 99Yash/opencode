@@ -17,6 +17,7 @@ export function response<A, E, R>(data: Effect.Effect<A, E, R>) {
     return {
       location: new Location.Info({
         directory: location.directory,
+        workspaceID: location.workspaceID,
         project: location.project,
       }),
       data: yield* data,

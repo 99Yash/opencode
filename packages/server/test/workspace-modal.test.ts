@@ -27,11 +27,15 @@ describe.skipIf(!hasCredentials)("modal driver (live)", () => {
         const env = yield* driver.connect(created.binding)
         expect(env.directory).toBe("/workspace")
 
-        // files: write reports creation, read round-trips, stat sees a file
-        const first = yield* env.files.write("/workspace/hello.txt", new TextEncoder().encode("hello modal\n"))
-        expect(first.existed).toBe(false)
-        const second = yield* env.files.write("/workspace/hello.txt", new TextEncoder().encode("hello again\n"))
-        expect(second.existed).toBe(true)
+        // files: writes create parents and overwrite, read round-trips, stat sees a file
+        yield* env.files.write("/workspace/hello.txt", new TextEncoder().encode("hello modal\n"))
+        yield* env.files.write("/workspace/hello.txt", new TextEncoder().encode("hello again\n"))
+        yield* env.files.write("/workspace/nested/deep/hello.txt", new TextEncoder().encode("nested\n"))
+        expect(
+          yield* env.files
+            .read("/workspace/nested/deep/hello.txt")
+            .pipe(Effect.map((b) => new TextDecoder().decode(b))),
+        ).toBe("nested\n")
         const bytes = yield* env.files.read("/workspace/hello.txt")
         expect(new TextDecoder().decode(bytes)).toBe("hello again\n")
         expect((yield* env.files.stat("/workspace/hello.txt")).type).toBe("File")
@@ -45,15 +49,16 @@ describe.skipIf(!hasCredentials)("modal driver (live)", () => {
 
         // exec: bash sees the file, git and rg are provisioned
         const handle = yield* env.process.spawn(
-          ChildProcess.make(env.shell.executable, [...env.shell.args("cat hello.txt && git --version && rg --version | head -1")], {
-            cwd: env.directory,
-            stdin: "ignore",
-          }),
+          ChildProcess.make(
+            env.shell.executable,
+            [...env.shell.args("cat hello.txt && git --version && rg --version | head -1")],
+            {
+              cwd: env.directory,
+              stdin: "ignore",
+            },
+          ),
         )
-        const [output, code] = yield* Effect.all([
-          Stream.mkString(Stream.decodeText(handle.stdout)),
-          handle.exitCode,
-        ])
+        const [output, code] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode])
         expect(Number(code)).toBe(0)
         expect(output).toContain("hello again")
         expect(output).toContain("git version")

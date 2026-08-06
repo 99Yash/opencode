@@ -78,211 +78,171 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Fi
 /** Normalize model-provided text to the BOM-free representation tools consume. */
 export const normalizeText = (content: string) => Bom.split(content).text
 
-const writeResult = (target: Target, existed: boolean, content: string): WriteResult => ({
-  operation: "write",
-  target: target.canonical,
-  resource: target.resource,
-  existed,
-  content,
-})
+/**
+ * Backend primitives the shared seam orchestrates. Errors arrive already in
+ * the seam vocabulary so tool-level messages stay uniform across backends.
+ */
+interface Backend {
+  /** Full file bytes, or undefined when the path does not exist. */
+  readonly readOptional: (path: string) => Effect.Effect<Uint8Array | undefined, FSUtil.Error>
+  /** Classifies read failures; absence and errors report false. */
+  readonly isDirectory: (path: string) => Effect.Effect<boolean>
+  /** Creates parent directories, matching FSUtil.writeWithDirs. */
+  readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, FSUtil.Error>
+  /** Unlink the lexical path; a symlink is removed, never its referent. */
+  readonly remove: (path: string) => Effect.Effect<void, NotFoundError | FSUtil.Error>
+  /** Format after write and report the final text, or undefined when no formatter applies. */
+  readonly format?: (path: string, bom: boolean) => Effect.Effect<string | undefined, FSUtil.Error>
+}
 
-/** Acquire per-target locks in sorted canonical order so multi-target operations cannot deadlock. */
-const lockTargets =
-  (locks: KeyedMutex.KeyedMutex<string>, targets: readonly Target[]) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-    [...new Set(targets.map((target) => target.canonical))]
-      .sort()
-      .reduceRight((locked, key) => locks.withLock(key)(locked), Effect.uninterruptible(effect))
+const encoder = new TextEncoder()
 
 /**
  * Serialize file changes by canonical target. Conditional writes compare and
  * write under the same process-local lock so cooperating OpenCode mutations do
  * not overwrite changes made from the same stale content.
  */
+const make = (backend: Backend): Interface => {
+  const locks = KeyedMutex.makeUnsafe<string>()
+  // Locks are acquired in sorted canonical order so multi-target operations
+  // cannot deadlock.
+  const withTargetLocks =
+    (...targets: readonly Target[]) =>
+    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      [...new Set(targets.map((target) => target.canonical))]
+        .sort()
+        .reduceRight((locked, key) => locks.withLock(key)(locked), Effect.uninterruptible(effect))
+
+  // Happy-path reads are one operation; only the failure path checks whether
+  // the target is a directory.
+  const read = Effect.fn("FileMutation.read")((target: Target) =>
+    Effect.gen(function* () {
+      const content = yield* backend
+        .readOptional(target.canonical)
+        .pipe(
+          Effect.catch((error) =>
+            backend
+              .isDirectory(target.canonical)
+              .pipe(
+                Effect.flatMap((directory) =>
+                  Effect.fail(directory ? new NotAFileError({ path: target.canonical }) : error),
+                ),
+              ),
+          ),
+        )
+      if (content === undefined) return yield* new NotFoundError({ path: target.canonical })
+      return Bom.fromBytes(content).text
+    }),
+  )
+
+  const writeText = (target: Target, content: string, inheritedBom: boolean) =>
+    Effect.gen(function* () {
+      const next = Bom.split(content)
+      const current = yield* backend.readOptional(target.canonical)
+      const bom = Boolean(current && Bom.has(current)) || inheritedBom || next.bom
+      yield* backend.write(target.canonical, encoder.encode(Bom.join(next.text, bom)))
+      // Formatters may rewrite the file, so the backend re-syncs the BOM and
+      // reports the final text.
+      const formatted = backend.format ? yield* backend.format(target.canonical, bom) : undefined
+      return {
+        operation: "write" as const,
+        target: target.canonical,
+        resource: target.resource,
+        existed: current !== undefined,
+        content: formatted ?? next.text,
+      }
+    })
+
+  const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
+    withTargetLocks(input.target)(writeText(input.target, input.content, false)),
+  )
+
+  const move = Effect.fn("FileMutation.move")((input: MoveInput) =>
+    withTargetLocks(
+      input.from,
+      input.to,
+    )(
+      Effect.gen(function* () {
+        const source = yield* backend.readOptional(input.from.canonical)
+        const result = yield* writeText(input.to, input.content, Boolean(source && Bom.has(source)))
+        yield* backend
+          .remove(input.from.absolute)
+          .pipe(
+            Effect.mapError(
+              (cause) => new MoveIncompleteError({ from: input.from.canonical, to: input.to.canonical, cause }),
+            ),
+          )
+        return result
+      }),
+    ),
+  )
+
+  const remove = Effect.fn("FileMutation.remove")((target: Target) =>
+    withTargetLocks(target)(backend.remove(target.absolute)),
+  )
+
+  return Service.of({ read, write, move, remove })
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const formatter = yield* Formatter.Service
-    const locks = KeyedMutex.makeUnsafe<string>()
-    const withTargetLocks =
-      (...targets: readonly Target[]) =>
-      <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        lockTargets(locks, targets)(effect)
-
-    // Happy-path reads are one operation; only the failure path stats to
-    // classify a directory target.
-    const read = Effect.fn("FileMutation.read")((target: Target) =>
-      Bom.readFile(fs, target.canonical).pipe(
-        Effect.map((content) => content.text),
-        Effect.catchTag(
-          "PlatformError",
-          (error): Effect.Effect<never, NotFoundError | NotAFileError | FSUtil.Error> =>
-            error.reason._tag === "NotFound"
-              ? Effect.fail(new NotFoundError({ path: target.canonical }))
-              : fs.stat(target.canonical).pipe(
-                  Effect.catchTag("PlatformError", () => Effect.succeed(undefined)),
-                  Effect.flatMap((info) =>
-                    Effect.fail(info?.type === "Directory" ? new NotAFileError({ path: target.canonical }) : error),
-                  ),
-                ),
+    return make({
+      readOptional: (path) =>
+        fs.readFile(path).pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined))),
+      isDirectory: (path) =>
+        fs.stat(path).pipe(
+          Effect.map((info) => info.type === "Directory"),
+          Effect.catch(() => Effect.succeed(false)),
         ),
-      ),
-    )
-
-    const readOptional = (path: string) =>
-      fs.readFile(path).pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
-
-    const writeText = (target: Target, content: string, inheritedBom: boolean) =>
-      Effect.gen(function* () {
-        const next = Bom.split(content)
-        const current = yield* readOptional(target.canonical)
-        const bom = Boolean(current && Bom.has(current)) || inheritedBom || next.bom
-        yield* fs.writeWithDirs(target.canonical, Bom.join(next.text, bom))
-        // Formatters may rewrite the file, so re-sync the BOM and report the
-        // final text.
-        const text = (yield* formatter.file(target.canonical))
-          ? yield* Bom.syncFile(fs, target.canonical, bom)
-          : next.text
-        return writeResult(target, current !== undefined, text)
-      })
-
-    const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
-      withTargetLocks(input.target)(writeText(input.target, input.content, false)),
-    )
-
-    const move = Effect.fn("FileMutation.move")((input: MoveInput) =>
-      withTargetLocks(
-        input.from,
-        input.to,
-      )(
-        Effect.gen(function* () {
-          const source = yield* readOptional(input.from.canonical)
-          const result = yield* writeText(input.to, input.content, Boolean(source && Bom.has(source)))
-          yield* fs
-            .remove(input.from.absolute)
-            .pipe(
-              Effect.mapError(
-                (cause) => new MoveIncompleteError({ from: input.from.canonical, to: input.to.canonical, cause }),
-              ),
-            )
-          return result
-        }),
-      ),
-    )
-
-    // Removing a symlink unlinks the link itself, never its referent.
-    const remove = Effect.fn("FileMutation.remove")((target: Target) =>
-      withTargetLocks(target)(
-        fs
-          .remove(target.absolute)
-          .pipe(Effect.catchReason("PlatformError", "NotFound", () => new NotFoundError({ path: target.canonical }))),
-      ),
-    )
-
-    return Service.of({ read, write, move, remove })
+      write: (path, content) => fs.writeWithDirs(path, content),
+      remove: (path) =>
+        fs.remove(path).pipe(Effect.catchReason("PlatformError", "NotFound", () => new NotFoundError({ path }))),
+      format: (path, bom) =>
+        formatter
+          .file(path)
+          .pipe(Effect.flatMap((formatted) => (formatted ? Bom.syncFile(fs, path, bom) : Effect.succeed(undefined)))),
+    })
   }),
 )
 
 export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node, Formatter.node] })
 
-// Same cooperative locking, verbs through WorkspaceEnvironment.Files. The
-// environment write reports prior existence, so no stat pre-check round trip.
-// No formatting: formatters are host binaries and cannot run against provider
-// paths until an environment formatter runtime exists.
+// Same seam through WorkspaceEnvironment.Files. Absence stays typed; other
+// environment failures surface as filesystem errors. No formatting: formatters
+// are host binaries and cannot run against provider paths until an environment
+// formatter runtime exists.
 const hostedLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const env = yield* WorkspaceEnvironment.Service
-    const encoder = new TextEncoder()
-    const locks = KeyedMutex.makeUnsafe<string>()
-    const withTargetLocks =
-      (...targets: readonly Target[]) =>
-      <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-        lockTargets(locks, targets)(effect)
-
-    // Absence stays typed; other environment failures surface as filesystem
-    // errors so tool-level messages stay uniform across backends.
-    const mapError = (method: string) => (error: WorkspaceEnvironment.Error | WorkspaceEnvironment.NotFoundError) =>
-      error._tag === "WorkspaceEnvironment.NotFoundError"
-        ? new NotFoundError({ path: error.path })
-        : new FSUtil.FileSystemError({ method, cause: error })
     const mapFileSystemError = (method: string) => (error: WorkspaceEnvironment.Error) =>
       new FSUtil.FileSystemError({ method, cause: error })
-
-    const read = Effect.fn("FileMutation.read")((target: Target) =>
-      env.files.read(target.canonical).pipe(
-        Effect.map((content) => Bom.fromBytes(content).text),
-        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () =>
-          Effect.fail(new NotFoundError({ path: target.canonical })),
+    return make({
+      readOptional: (path) =>
+        env.files.read(path).pipe(
+          Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+          Effect.mapError(mapFileSystemError("read")),
         ),
-        Effect.catchTag("WorkspaceEnvironment.Error", (error) =>
-          env.files.stat(target.canonical).pipe(
-            Effect.catch(() => Effect.succeed(undefined)),
-            Effect.flatMap((info) =>
-              Effect.fail(
-                info?.type === "Directory"
-                  ? new NotAFileError({ path: target.canonical })
-                  : new FSUtil.FileSystemError({ method: "read", cause: error }),
-              ),
+      isDirectory: (path) =>
+        env.files.stat(path).pipe(
+          Effect.map((info) => info.type === "Directory"),
+          Effect.catch(() => Effect.succeed(false)),
+        ),
+      write: (path, content) => env.files.write(path, content).pipe(Effect.mapError(mapFileSystemError("write"))),
+      remove: (path) =>
+        env.files
+          .remove(path)
+          .pipe(
+            Effect.mapError((error) =>
+              error._tag === "WorkspaceEnvironment.NotFoundError"
+                ? new NotFoundError({ path })
+                : mapFileSystemError("remove")(error),
             ),
           ),
-        ),
-      ),
-    )
-
-    const readOptional = (target: Target) =>
-      env.files.read(target.canonical).pipe(
-        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
-        Effect.mapError(mapFileSystemError("read")),
-      )
-
-    const writeText = (target: Target, content: string, inheritedBom: boolean) =>
-      Effect.gen(function* () {
-        const next = Bom.split(content)
-        const current = yield* readOptional(target)
-        const bom = Boolean(current && Bom.has(current)) || inheritedBom || next.bom
-        const result = yield* env.files
-          .write(target.canonical, encoder.encode(Bom.join(next.text, bom)))
-          .pipe(Effect.mapError(mapFileSystemError("write")))
-        return writeResult(target, result.existed, next.text)
-      })
-
-    const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
-      withTargetLocks(input.target)(writeText(input.target, input.content, false)),
-    )
-
-    const move = Effect.fn("FileMutation.move")((input: MoveInput) =>
-      withTargetLocks(
-        input.from,
-        input.to,
-      )(
-        Effect.gen(function* () {
-          const source = yield* readOptional(input.from)
-          const result = yield* writeText(input.to, input.content, Boolean(source && Bom.has(source)))
-          // Keep the seam error vocabulary in the cause so tool-level messages
-          // stay uniform across backends.
-          yield* env.files.remove(input.from.absolute).pipe(
-            Effect.mapError(
-              (error) =>
-                new MoveIncompleteError({
-                  from: input.from.canonical,
-                  to: input.to.canonical,
-                  cause: mapError("remove")(error),
-                }),
-            ),
-          )
-          return result
-        }),
-      ),
-    )
-
-    // Removing a symlink unlinks the link itself, never its referent.
-    const remove = Effect.fn("FileMutation.remove")((target: Target) =>
-      withTargetLocks(target)(env.files.remove(target.absolute).pipe(Effect.mapError(mapError("remove")))),
-    )
-
-    return Service.of({ read, write, move, remove })
+    })
   }),
 )
 

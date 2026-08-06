@@ -40,8 +40,8 @@ export interface Files {
   readonly realPath: (path: string) => Effect.Effect<string, Error | NotFoundError>
   readonly read: (path: string) => Effect.Effect<Uint8Array, Error | NotFoundError>
   readonly list: (path: string) => Effect.Effect<readonly DirectoryEntry[], Error | NotFoundError>
-  /** Creates parent directories, matching FSUtil.writeWithDirs. Reports whether the file already existed. */
-  readonly write: (path: string, content: Uint8Array) => Effect.Effect<{ readonly existed: boolean }, Error>
+  /** Creates parent directories, matching FSUtil.writeWithDirs. */
+  readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, Error>
   /** Removes one file. Removing a missing path fails with NotFoundError. */
   readonly remove: (path: string) => Effect.Effect<void, Error | NotFoundError>
 }

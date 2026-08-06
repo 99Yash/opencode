@@ -79,13 +79,8 @@ export const directoryEnvironment = (
       write: (path, content) =>
         Effect.tryPromise({
           try: async () => {
-            const existed = await stat(path).then(
-              (info) => info.isFile(),
-              () => false,
-            )
             await mkdir(nodePath.dirname(path), { recursive: true })
             await writeFile(path, content)
-            return { existed }
           },
           catch: (cause) => new WorkspaceEnvironment.Error({ operation: "write", path, cause }),
         }),
@@ -147,9 +142,7 @@ export const memoryEnvironment = (files: Record<string, string>): MemoryEnvironm
       },
       write: (path, content) =>
         Effect.sync(() => {
-          const existed = store.has(path)
           store.set(path, Uint8Array.from(content))
-          return { existed }
         }),
       remove: (path) => {
         if (store.delete(path)) return Effect.void
