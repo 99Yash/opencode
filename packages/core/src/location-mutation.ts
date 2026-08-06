@@ -86,6 +86,54 @@ interface ResolvedPath {
 
 const slash = (value: string) => value.replaceAll("\\", "/")
 
+/**
+ * Resolution primitives the shared ancestor walk uses; absence reports
+ * undefined so the walk owns the missing-path vocabulary.
+ */
+interface WalkBackend<E> {
+  readonly paths: Pick<path.PlatformPath, "dirname" | "resolve" | "relative">
+  readonly realPathOptional: (path: string) => Effect.Effect<string | undefined, E>
+  readonly statOptional: (path: string) => Effect.Effect<{ readonly type: ResolvedPath["type"] } | undefined, E>
+}
+
+/**
+ * Canonicalize an existing path, or resolve a missing path below its nearest
+ * existing ancestor directory.
+ */
+const resolvePathWith = <E>(backend: WalkBackend<E>) =>
+  Effect.fnUntraced(function* (absolute: string) {
+    const existing = yield* backend.realPathOptional(absolute)
+    if (existing !== undefined) {
+      const info = yield* backend.statOptional(existing)
+      if (info === undefined) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+      return {
+        canonical: existing,
+        type: info.type,
+        directory: info.type === "Directory" ? existing : backend.paths.dirname(existing),
+        lexicalDirectory: info.type === "Directory" ? absolute : backend.paths.dirname(absolute),
+      } satisfies ResolvedPath
+    }
+
+    let anchor = backend.paths.dirname(absolute)
+    while (true) {
+      const canonical = yield* backend.realPathOptional(anchor)
+      if (canonical !== undefined) {
+        const info = yield* backend.statOptional(canonical)
+        if (info === undefined || info.type !== "Directory") {
+          return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+        }
+        return {
+          canonical: backend.paths.resolve(canonical, backend.paths.relative(anchor, absolute)),
+          directory: canonical,
+          lexicalDirectory: anchor,
+        } satisfies ResolvedPath
+      }
+      const parent = backend.paths.dirname(anchor)
+      if (parent === anchor) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+      anchor = parent
+    }
+  })
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -96,36 +144,10 @@ const layer = Layer.effect(
       return effect.pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
     }
 
-    const resolvePath = Effect.fnUntraced(function* (absolute: string) {
-      const existing = yield* notFound(fs.realPath(absolute))
-      if (existing !== undefined) {
-        const info = yield* fs.stat(existing)
-        return {
-          canonical: existing,
-          type: info.type,
-          directory: info.type === "Directory" ? existing : path.dirname(existing),
-          lexicalDirectory: info.type === "Directory" ? absolute : path.dirname(absolute),
-        } satisfies ResolvedPath
-      }
-
-      let anchor = path.dirname(absolute)
-      while (true) {
-        const canonical = yield* notFound(fs.realPath(anchor))
-        if (canonical !== undefined) {
-          const info = yield* fs.stat(canonical)
-          if (info.type !== "Directory") {
-            return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
-          }
-          return {
-            canonical: path.resolve(canonical, path.relative(anchor, absolute)),
-            directory: canonical,
-            lexicalDirectory: anchor,
-          } satisfies ResolvedPath
-        }
-        const parent = path.dirname(anchor)
-        if (parent === anchor) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
-        anchor = parent
-      }
+    const resolvePath = resolvePathWith({
+      paths: path,
+      realPathOptional: (target) => notFound(fs.realPath(target)),
+      statOptional: (target) => notFound(fs.stat(target)),
     })
 
     const resolve = Effect.fn("LocationMutation.resolve")(function* (input: ResolveInput) {
@@ -175,39 +197,15 @@ const hostedLayer = Layer.effect(
   Effect.gen(function* () {
     const env = yield* WorkspaceEnvironment.Service
     const location = yield* Location.Service
+    // Canonicalized even when the Location sits on the workspace root: the
+    // environment does not guarantee a canonical directory (local fakes root
+    // at symlinked temp paths).
     const root = yield* env.files.realPath(location.directory).pipe(Effect.orDie)
 
-    const resolvePath = Effect.fnUntraced(function* (absolute: string) {
-      const existing = yield* WorkspaceEnvironment.optional(env.files.realPath(absolute))
-      if (existing !== undefined) {
-        const info = yield* WorkspaceEnvironment.optional(env.files.stat(existing))
-        if (info === undefined) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
-        return {
-          canonical: existing,
-          type: info.type,
-          directory: info.type === "Directory" ? existing : path.posix.dirname(existing),
-          lexicalDirectory: info.type === "Directory" ? absolute : path.posix.dirname(absolute),
-        } satisfies ResolvedPath
-      }
-
-      let anchor = path.posix.dirname(absolute)
-      while (true) {
-        const canonical = yield* WorkspaceEnvironment.optional(env.files.realPath(anchor))
-        if (canonical !== undefined) {
-          const info = yield* WorkspaceEnvironment.optional(env.files.stat(canonical))
-          if (info === undefined || info.type !== "Directory") {
-            return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
-          }
-          return {
-            canonical: path.posix.resolve(canonical, path.posix.relative(anchor, absolute)),
-            directory: canonical,
-            lexicalDirectory: anchor,
-          } satisfies ResolvedPath
-        }
-        const parent = path.posix.dirname(anchor)
-        if (parent === anchor) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
-        anchor = parent
-      }
+    const resolvePath = resolvePathWith({
+      paths: path.posix,
+      realPathOptional: (target) => WorkspaceEnvironment.optional(env.files.realPath(target)),
+      statOptional: (target) => WorkspaceEnvironment.optional(env.files.stat(target)),
     })
 
     const resolve = Effect.fn("LocationMutation.resolve")(function* (input: ResolveInput) {
