@@ -11,6 +11,7 @@ import { FileMutation } from "./file-mutation"
 import { Formatter } from "./formatter"
 import { FileSystem } from "./filesystem"
 import { FileSystemSearch } from "./filesystem/search"
+import { Ripgrep } from "./ripgrep"
 import { Generate } from "./generate"
 import { Form } from "./form"
 import { Image } from "./image"
@@ -130,6 +131,7 @@ export function buildLocationServiceMap(
                   [Config.node, Config.configured({ project: false })],
                   [InstructionDiscovery.node, InstructionDiscovery.configured({ project: false })],
                   [WorkspaceEnvironment.node, WorkspaceEnvironment.hostedNode(workspaceID)],
+                  [Ripgrep.node, Ripgrep.hostedNode],
                   [FileSystem.node, FileSystem.hostedNode],
                   [LocationMutation.node, LocationMutation.hostedNode],
                   [FileMutation.node, FileMutation.hostedNode],

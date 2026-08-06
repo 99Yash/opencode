@@ -32,7 +32,6 @@ import { Npm } from "@opencode-ai/util/npm"
 import { Permission } from "../permission"
 import { Reference } from "../reference"
 import { WebSearch } from "../websearch"
-import { Ripgrep } from "../ripgrep"
 import { SessionInstructions } from "../session/instructions"
 import { Shell } from "../shell"
 import { Skill } from "../skill"
@@ -89,7 +88,6 @@ const services = Effect.fn("PluginInternal.services")(function* () {
   const read = yield* ReadToolFileSystem.Service
   const reference = yield* Reference.Service
   const websearch = yield* WebSearch.Service
-  const ripgrep = yield* Ripgrep.Service
   const instructions = yield* SessionInstructions.Service
   const shell = yield* Shell.Service
   const skill = yield* Skill.Service
@@ -121,7 +119,6 @@ const services = Effect.fn("PluginInternal.services")(function* () {
     Context.make(ReadToolFileSystem.Service, read),
     Context.make(Reference.Service, reference),
     Context.make(WebSearch.Service, websearch),
-    Context.make(Ripgrep.Service, ripgrep),
     Context.make(SessionInstructions.Service, instructions),
     Context.make(Shell.Service, shell),
     Context.make(Skill.Service, skill),
@@ -171,13 +168,7 @@ const post = [
   ConfigPolicyPlugin.Plugin,
 ] as const satisfies readonly InternalPlugin[]
 
-// Not advertised for hosted Locations until their execution is
-// environment-backed: glob/grep spawn the host ripgrep binary against
-// provider paths. Hosted glob/grep later spawn rg inside the workspace image.
-const hostedExcluded: ReadonlySet<string> = new Set([GlobTool.Plugin.id, GrepTool.Plugin.id])
-
 export const list = Effect.fn("PluginInternal.list")(function* () {
-  const location = yield* Location.Service
   const context = yield* services()
   const resolve = (plugins: readonly InternalPlugin[]) =>
     plugins.map(
@@ -187,7 +178,7 @@ export const list = Effect.fn("PluginInternal.list")(function* () {
       }),
     )
   return {
-    pre: resolve(location.workspaceID ? pre.filter((plugin) => !hostedExcluded.has(plugin.id)) : pre),
+    pre: resolve(pre),
     post: resolve(post),
   }
 })

@@ -337,7 +337,6 @@ const nodeDeps = [
   Form.node,
   ReadToolFileSystem.node,
   Reference.node,
-  Ripgrep.node,
   SessionInstructions.node,
   Shell.node,
   Skill.node,

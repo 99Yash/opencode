@@ -175,6 +175,7 @@ const hostedLayer = Layer.effect(
   Effect.gen(function* () {
     const env = yield* WorkspaceEnvironment.Service
     const location = yield* Location.Service
+    const root = yield* env.files.realPath(location.directory).pipe(Effect.orDie)
 
     const resolvePath = Effect.fnUntraced(function* (absolute: string) {
       const existing = yield* WorkspaceEnvironment.optional(env.files.realPath(absolute))
@@ -214,6 +215,8 @@ const hostedLayer = Layer.effect(
       if (!FSUtil.containsPosix(location.directory, absolute))
         return yield* new PathError({ path: absolute, reason: "outside_workspace" })
       const resolved = yield* resolvePath(absolute)
+      if (!FSUtil.containsPosix(root, resolved.canonical))
+        return yield* new PathError({ path: absolute, reason: "outside_workspace" })
       return {
         canonical: resolved.canonical,
         absolute,

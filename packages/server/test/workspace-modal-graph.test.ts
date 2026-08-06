@@ -62,7 +62,7 @@ describe.skipIf(!hasCredentials)("hosted location graph on modal (live)", () => 
 
           const shell = yield* Shell.Service
           const command = yield* shell.create({
-            command: "cat hello.txt && printf 'bash-made' > bash.txt",
+            command: "cat hello.txt && printf 'bash-made' > bash.txt && ln -s /etc escaped",
             timeout: 60_000,
           })
           const finished = yield* shell.wait(command.id)
@@ -73,6 +73,17 @@ describe.skipIf(!hasCredentials)("hosted location graph on modal (live)", () => 
           const filesystem = yield* FileSystem.Service
           const fromBash = yield* filesystem.read({ path: RelativePath.make("bash.txt") })
           expect(new TextDecoder().decode(fromBash.content)).toBe("bash-made")
+          const root = yield* mutation.resolve({ path: "." })
+          const entries = yield* filesystem.glob({ target: root, pattern: "*.txt", limit: 10 })
+          expect(entries.map((entry) => String(entry.path)).sort()).toEqual(["bash.txt", "hello.txt"])
+          const matches = yield* filesystem.grep({
+            target: yield* mutation.resolve({ path: "hello.txt" }),
+            pattern: "opencode",
+            limit: 10,
+          })
+          expect(matches).toMatchObject([{ entry: { path: "hello.txt" }, line: 1 }])
+          const escaped = yield* mutation.resolve({ path: "escaped/passwd" }).pipe(Effect.flip)
+          expect(escaped).toMatchObject({ _tag: "LocationMutation.PathError", reason: "outside_workspace" })
         }).pipe(Effect.provide(locations.get(ref)))
 
         yield* locations.invalidate(ref)

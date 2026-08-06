@@ -102,7 +102,7 @@ describe("hosted workspace end to end", () => {
 
         const shell = yield* Shell.Service
         const command = yield* shell.create({
-          command: "printf 'from-bash' > bash.txt && cat hello.txt",
+          command: "printf 'from-bash' > bash.txt && ln -s /etc escaped && cat hello.txt",
           timeout: 30_000,
         })
         const finished = yield* shell.wait(command.id)
@@ -113,6 +113,21 @@ describe("hosted workspace end to end", () => {
         const filesystem = yield* FileSystem.Service
         const fromBash = yield* filesystem.read({ path: RelativePath.make("bash.txt") })
         expect(new TextDecoder().decode(fromBash.content)).toBe("from-bash")
+        const root = yield* mutation.resolve({ path: "." })
+        const entries = yield* filesystem.glob({ target: root, pattern: "*.txt", limit: 10 })
+        expect(entries.map((entry) => String(entry.path)).sort()).toEqual(["bash.txt", "hello.txt"])
+        const limited = yield* filesystem.glob({ target: root, pattern: "*.txt", limit: 1 })
+        expect(limited).toHaveLength(1)
+        const matches = yield* filesystem.grep({
+          target: yield* mutation.resolve({ path: "hello.txt" }),
+          pattern: "workspace",
+          limit: 10,
+        })
+        expect(matches).toMatchObject([{ entry: { path: "hello.txt" }, line: 1 }])
+        const invalid = yield* filesystem.grep({ target: root, pattern: "[", limit: 10 }).pipe(Effect.flip)
+        expect(invalid).toMatchObject({ _tag: "FileSystem.InvalidPatternError", pattern: "[" })
+        const escaped = yield* mutation.resolve({ path: "escaped/passwd" }).pipe(Effect.flip)
+        expect(escaped).toMatchObject({ _tag: "LocationMutation.PathError", reason: "outside_workspace" })
       }).pipe(Effect.provide(locations.get(ref)))
 
       expect(connects.count).toBe(1)

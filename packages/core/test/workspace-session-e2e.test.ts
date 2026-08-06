@@ -132,6 +132,8 @@ describe("hosted workspace session", () => {
           patchText: "*** Begin Patch\n*** Add File: from-patch.txt\n+patched\n*** End Patch",
         }),
         TestLLM.tool("call-shell", "shell", { command: "printf 'from-model' > from-model.txt" }),
+        TestLLM.tool("call-glob", "glob", { pattern: "*.txt" }),
+        TestLLM.tool("call-grep", "grep", { pattern: "from-model" }),
         TestLLM.text("done", "text-1"),
       )
       yield* sessions.prompt({ sessionID: session.id, text: "Write a file in the workspace", resume: false })
@@ -143,14 +145,14 @@ describe("hosted workspace session", () => {
       const patched = yield* Effect.promise(() => readFile(path.join(created.root, "from-patch.txt"), "utf8"))
       expect(patched).toBe("patched\n")
 
-      // The hosted catalog was advertised to the model: shell and patch (the
-      // gpt-style editor), without host-bound search tools or edit/write.
+      // The hosted catalog includes search tools now that they execute through
+      // the Workspace process seam, plus patch as the gpt-style editor.
       const requests = (yield* TestLLM.Service).requests
       const advertised = requests[0]?.tools.map((tool) => tool.name) ?? []
       expect(advertised).toContain("shell")
       expect(advertised).toContain("patch")
-      expect(advertised).not.toContain("glob")
-      expect(advertised).not.toContain("grep")
+      expect(advertised).toContain("glob")
+      expect(advertised).toContain("grep")
       expect(advertised).not.toContain("edit")
       expect(advertised).not.toContain("write")
 
@@ -165,6 +167,12 @@ describe("hosted workspace session", () => {
       })
       expect(assistants.at(1)).toMatchObject({
         content: [{ type: "tool", id: "call-shell", state: { status: "completed" } }],
+      })
+      expect(assistants.at(2)).toMatchObject({
+        content: [{ type: "tool", id: "call-glob", state: { status: "completed" } }],
+      })
+      expect(assistants.at(3)).toMatchObject({
+        content: [{ type: "tool", id: "call-grep", state: { status: "completed" } }],
       })
       expect(assistants.at(-1)).toMatchObject({ content: [{ type: "text", text: "done" }] })
 
