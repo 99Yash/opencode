@@ -1,5 +1,8 @@
 export * as ConfigMigrateV1 from "./migrate"
 
+import { Info } from "@opencode-ai/schema/config"
+import { ConfigAgent } from "@opencode-ai/schema/config/agent"
+import { Schema } from "effect"
 import { ConfigV1 } from "./config"
 import { ConfigAgentV1 } from "./agent"
 import { ConfigCommandV1 } from "./command"
@@ -10,80 +13,52 @@ import { ConfigProviderOptionsV1 } from "./provider-options"
 import { Provider } from "../../provider"
 import { Model } from "../../model"
 
-const keys = new Set([
-  "logLevel",
-  "server",
-  "command",
-  "reference",
-  "snapshot",
-  "plugin",
-  "autoshare",
-  "disabled_providers",
-  "enabled_providers",
-  "small_model",
-  "mode",
-  "agent",
-  "provider",
-  "permission",
-  "tools",
-  "attachment",
-  "layout",
-])
-
-export function isV1(input: unknown) {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) return false
-  const record = input as Record<string, unknown>
-  if (Object.keys(record).some((key) => keys.has(key))) return true
-  // `mcp` exists in both versions, so presence alone is ambiguous: v1 lists servers directly under
-  // `mcp`, while v2 nests them under `mcp.servers`. Only the v1 shape (a server entry with `type`)
-  // counts, so a bare `mcp`-only file still migrates instead of silently parsing to zero servers.
-  const mcp = record.mcp
-  return (
-    typeof mcp === "object" &&
-    mcp !== null &&
-    !Array.isArray(mcp) &&
-    !("servers" in mcp) &&
-    Object.values(mcp).some((server) => typeof server === "object" && server !== null && "type" in server)
-  )
-}
-
+const decodeOptions = { errors: "all", onExcessProperty: "ignore", propertyOrder: "original" } as const
+const decodeInfo = Schema.decodeUnknownSync(Schema.fromJsonString(Info), decodeOptions)
+const encodeInfo = Schema.encodeSync(Info)
+const decodeAgent = Schema.decodeUnknownSync(Schema.fromJsonString(ConfigAgent.Info), decodeOptions)
+const encodeAgent = Schema.encodeSync(ConfigAgent.Info)
 export function migrate(info: typeof ConfigV1.Info.Type) {
-  return {
-    $schema: info.$schema,
-    shell: info.shell,
-    model: modelSelection(info.model),
-    default_agent: info.default_agent,
-    autoupdate: info.autoupdate,
-    share: info.share ?? (info.autoshare ? "auto" : undefined),
-    enterprise: info.enterprise,
-    username: info.username,
-    permissions: permissions(info.permission, info.tools),
-    agents: agents(info),
-    snapshots: info.snapshot,
-    watcher: info.watcher,
-    formatter: info.formatter,
-    lsp: info.lsp,
-    media: info.attachment,
-    tool_output: info.tool_output,
-    mcp: mcp(info),
-    compaction: info.compaction && {
-      auto: info.compaction.auto,
-      prune: info.compaction.prune,
-      keep: {
-        tokens: info.compaction.preserve_recent_tokens,
-      },
-      buffer: info.compaction.reserved,
-    },
-    skills: info.skills && [...(info.skills.paths ?? []), ...(info.skills.urls ?? [])],
-    commands: commands(info.command),
-    instructions: info.instructions,
-    references: info.references ?? info.reference,
-    experimental: experimental(info),
-    plugins: info.plugin?.map((plugin) =>
-      typeof plugin === "string" ? plugin : { package: plugin[0], options: plugin[1] },
+  return encodeInfo(
+    decodeInfo(
+      JSON.stringify({
+        $schema: info.$schema,
+        shell: info.shell,
+        model: modelSelection(info.model),
+        default_agent: info.default_agent,
+        autoupdate: info.autoupdate,
+        share: info.share ?? (info.autoshare ? "auto" : undefined),
+        enterprise: info.enterprise,
+        username: info.username,
+        permissions: permissions(info.permission, info.tools),
+        agents: agents(info),
+        snapshots: info.snapshot,
+        watcher: info.watcher,
+        formatter: info.formatter,
+        lsp: info.lsp,
+        media: info.attachment,
+        tool_output: info.tool_output,
+        mcp: mcp(info),
+        compaction: info.compaction && {
+          auto: info.compaction.auto,
+          prune: info.compaction.prune,
+          keep: {
+            tokens: info.compaction.preserve_recent_tokens,
+          },
+          buffer: info.compaction.reserved,
+        },
+        skills: info.skills && [...(info.skills.paths ?? []), ...(info.skills.urls ?? [])],
+        commands: commands(info.command),
+        instructions: info.instructions,
+        references: info.references ?? info.reference,
+        experimental: experimental(info),
+        plugins: info.plugin?.map((plugin) =>
+          typeof plugin === "string" ? plugin : { package: plugin[0], options: plugin[1] },
+        ),
+        providers: providers(info.provider),
+      }),
     ),
-    providers: providers(info.provider),
-  }
+  )
 }
 
 function experimental(info: typeof ConfigV1.Info.Type) {
@@ -132,7 +107,7 @@ function permissions(info?: ConfigPermissionV1.Info, tools?: Readonly<Record<str
 }
 
 // Map v1 permission/tool keys onto their renamed v2 tool actions so migrated rules keep matching.
-function normalizeAction(action: string) {
+export function normalizeAction(action: string) {
   if (action === "write" || action === "patch") return "edit"
   if (action === "task") return "subagent"
   if (action === "bash") return "shell"
@@ -154,21 +129,25 @@ export function migrateAgent(info: ConfigAgentV1.Info) {
     ...(info.temperature === undefined ? {} : { temperature: info.temperature }),
     ...(info.top_p === undefined ? {} : { top_p: info.top_p }),
   }
-  return {
-    model: modelSelection(info.model, info.variant),
-    request: Object.keys(body).length ? { body } : undefined,
-    system: info.prompt,
-    description: info.description,
-    mode: info.mode,
-    hidden: info.hidden,
-    color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
-    steps: info.steps,
-    disabled: info.disable,
-    permissions: permissions(info.permission),
-  }
+  return encodeAgent(
+    decodeAgent(
+      JSON.stringify({
+        model: modelSelection(info.model, info.variant),
+        request: Object.keys(body).length ? { body } : undefined,
+        system: info.prompt,
+        description: info.description,
+        mode: info.mode,
+        hidden: info.hidden,
+        color: info.color === undefined ? undefined : info.color.startsWith("#") ? info.color : "#aaaaaa",
+        steps: info.steps,
+        disabled: info.disable,
+        permissions: permissions(info.permission),
+      }),
+    ),
+  )
 }
 
-function commands(info?: Readonly<Record<string, ConfigCommandV1.Info>>) {
+export function commands(info?: Readonly<Record<string, ConfigCommandV1.Info>>) {
   if (!info) return undefined
   return Object.fromEntries(
     Object.entries(info).map(([id, command]) => [
@@ -205,7 +184,7 @@ function mcp(info: typeof ConfigV1.Info.Type) {
   return { timeout: timeout === undefined ? undefined : { catalog: timeout, execution: timeout }, servers }
 }
 
-function migrateMcp(info: ConfigMCPV1.Info) {
+export function migrateMcp(info: ConfigMCPV1.Info) {
   const disabled = info.enabled === undefined ? undefined : !info.enabled
   if (info.type === "local")
     return {
@@ -244,7 +223,7 @@ function providers(info?: Readonly<Record<string, ConfigProviderV1.Info>>) {
   )
 }
 
-function migrateProvider(sourceID: string, info: ConfigProviderV1.Info) {
+export function migrateProvider(sourceID: string, info: ConfigProviderV1.Info) {
   if (sourceID === "azure-cognitive-services") return migrateAzureCognitiveServicesProvider(info)
   if (sourceID === "google-vertex-anthropic") return migrateGoogleVertexAnthropicProvider(info)
   return migrateStandardProvider(info)
@@ -256,7 +235,7 @@ function migrateStandardProvider(info: ConfigProviderV1.Info) {
     name: info.name,
     env: info.env,
     package: info.npm ? Provider.aisdk(info.npm) : undefined,
-    settings: info.api ? { ...options.settings, baseURL: info.api } : options.settings,
+    settings: info.api ? { ...options.settings, baseURL: info.api } : info.options ? options.settings : undefined,
     headers: info.options && options.headers,
     body: info.options && options.body,
     models:
@@ -300,8 +279,8 @@ function migrateGoogleVertexAnthropicProvider(info: ConfigProviderV1.Info) {
   }
 }
 
-// Rename these only in files detected as V1 by a field that exists only in the old config format.
-function providerID(input: string) {
+// Rename these only while migrating unambiguous V1 fields.
+export function providerID(input: string) {
   if (input === "azure-cognitive-services") return "azure"
   if (input === "google-vertex-anthropic") return "google-vertex"
   return input
