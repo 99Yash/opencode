@@ -190,17 +190,112 @@ Reuses the seam proven on `origin/remote-workspaces-plan` (`fd92aeac66`) — a l
 export * as WorkspaceEnvironment from "./environment"
 
 export interface Interface {
-  readonly platform: NodeJS.Platform
   readonly directory: string // the Workspace root, absolute in the provider filesystem
-  readonly files: Files // read / resolve / list / write / writeIfUnchanged / remove ...
+  readonly files: Files // stat / realPath / read / list / write / remove — one provider round trip each
   readonly process: ChildProcessSpawner["Service"]
   readonly shell: Shell // executable + args lowering for the bash tool; linuxShell default
 }
 ```
 
 - `files` is separate from `process`: providers expose direct filesystem APIs far faster than shelling out `cat`, and read/write/edit are the hottest ops.
+- `Files` grows only when a domain service needs the verb. Type mismatches (read a directory, list a file) fail from the op itself — no stat pre-checks on the happy path.
 - Core builds tools (bash, read, edit, glob, grep) on top. Drivers never know what a tool is.
 - The branch's `ripgrep` field is dropped — tool implementation detail leaking into the seam. The image contract mandates `rg`; the hosted graph provides the existing `RipgrepBinary.Service` as `Effect.succeed("rg")`.
+
+## Target Architecture
+
+**Hosting is decided when the Location graph compiles, never when a tool executes.** A tool cannot name `WorkspaceEnvironment`, `FSUtil`, or any host path API; if a tool can observe where it runs, the layering is broken. Everything model-facing sits on four Location-scoped domain services, and only their implementations know about machines:
+
+```
+                    TOOLS (hosting-blind policy + orchestration)
+        edit      write      patch      shell-tool      read-tool
+          │         │          │           │               │
+          ▼         ▼          ▼           ▼               ▼
+   ┌───────────────────────────────────────────────────────────────┐
+   │                DOMAIN SERVICES — one implementation each      │
+   │                                                               │
+   │  LocationMutation.resolve   path → Target (canonical,        │
+   │                             permission resources,            │
+   │                             external-directory approvals)    │
+   │  FileMutation               read / write / remove — locks,   │
+   │                             BOM, formatting, typed errors    │
+   │  FileSystem                 read-model queries               │
+   │  Shell                      spawn + lifecycle (owns cwd      │
+   │                             validation per backend)          │
+   └───────────────────────────┬───────────────────────────────────┘
+                               │ consumes only
+                               ▼
+   ┌───────────────────────────────────────────────────────────────┐
+   │        WorkspaceEnvironment — THE seam (one per graph)        │
+   │        directory ∙ files ∙ process ∙ shell                    │
+   └──────────────┬──────────────────────────────┬─────────────────┘
+                  │ local graph                  │ hosted graph
+                  ▼                              ▼
+        host adapter                    driver.connect(binding)
+        (the only home of               (Modal, fake, …)
+         FSUtil / host spawn)
+```
+
+The four domain services own all cross-cutting policy exactly once:
+
+- **`LocationMutation.resolve(path, kind?)`** — path → `Target { canonical, resource, externalDirectory? }`. Path semantics (posix in providers, win32 locally), containment, and permission-resource derivation live here; tools pass targets around without re-deriving anything.
+- **`FileMutation`** — the read–transform–write seam:
+
+  ```typescript
+  read(target)                        → string    // BOM stripped inside the seam
+  writeTextPreservingBom({ target, content })
+                                      → { existed, content }  // lock ∙ BOM rejoin ∙ format ∙ final text
+  write({ target, content })          → { existed }           // raw bytes, no formatting
+  remove(target)                      → void
+  // errors: FileMutation.NotFoundError | FileMutation.NotAFileError | filesystem error
+  ```
+
+  BOM handling, per-target locking, formatter execution, and error classification are implementation details here. Tools never import `Bom`, never call `Formatter`, never see a backend error vocabulary.
+- **`FileSystem`** — read-model queries for the read tool and file browsing.
+- **`Shell`** — command execution; each backend validates its own cwd and surfaces one error shape.
+
+Every model-facing tool then reads as pure policy over these:
+
+```typescript
+// EditTool.execute — identical local and hosted
+const target = yield* mutation.resolve({ path: input.path, kind: "file" })
+const original = yield* files.read(target) // NotFoundError → "File not found"
+const replaced = replace(original, input.oldString, input.newString) // pure
+yield* permission.assert({ action: "edit", resources: [target.resource], diff })
+const result = yield* files.writeTextPreservingBom({ target, content: replaced })
+return { files: [fileDiff(target.resource, original, result.content)] }
+
+// PatchTool.execute — identical local and hosted
+const hunks = Patch.parse(input.patchText) // pure
+for (const hunk of hunks) {
+  const target = yield* mutation.resolve({ path: hunk.path })
+  const original = yield* files.read(target) // updates and deletes
+  prepared.push(derive(hunk, target, original)) // pure
+}
+yield* permission.assert({ action: "edit", resources, diffs })
+for (const change of prepared) {
+  // add/update → files.writeTextPreservingBom, delete/move → files.remove
+}
+```
+
+Local vs hosted is then a compilation difference, not a code difference:
+
+| Layer | Local graph | Hosted graph |
+| --- | --- | --- |
+| Tools | identical bytes | identical bytes |
+| Domain services | identical bytes | identical bytes |
+| WorkspaceEnvironment | host adapter (fs + spawn) | `driver.connect(binding)` |
+| Formatting | runs (host binaries, host files) | inert until an environment formatter runtime exists |
+| Catalog | full | minus tools without environment-backed execution yet (glob/grep) |
+
+### Staging
+
+1. **Now:** tools move onto the domain services; each service carries a local and a hosted node. Plugins become provably hosting-blind — the plugin context stops carrying any environment or host filesystem capability.
+2. **Follow-up ("local is an environment"):** bind `WorkspaceEnvironment` in every graph — local binds a host adapter — and collapse each domain service's hosted/local node pair into one implementation over `env.files`/`env.process`. `FSUtil` remains only below the seam and in genuinely host-domain services (global config, credentials, npm). The hosted branch of graph construction shrinks to swapping `Location`, `Config`/`InstructionDiscovery`, and `WorkspaceEnvironment`.
+
+### Prior Art Convergence
+
+Surveyed grok-build (xAI), pi-mono, and flue (2026-08): all three converged on this exact seam — one byte-level filesystem-plus-exec capability that tools never bypass (grok's `AsyncFileSystem` resource with an ACP-remote adapter, pi-mono's `ExecutionEnv` with typed backend-independent `FileError` codes, flue's `Sandbox` where local is just another adapter). Flue ships stage 2 outright: zero mode branching in tools, local as an adapter file. None found a smaller shape; the simpler-looking tool layers achieve it by descoping policy we deliberately keep (flue and grok-build skip BOM handling and share the resulting byte-0 match bug; flue propagates raw `ENOENT` to the model; none run formatters or in-tool permission prompts). pi-mono's per-path mutation queue and flue's `withFileMutationLock` are this design's `FileMutation` locking, independently reinvented.
 
 ## Persistence
 
