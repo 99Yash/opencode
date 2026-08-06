@@ -1551,9 +1551,7 @@ export interface WebsearchApi<E = never> {
   readonly query: WebsearchQueryOperation<E>
 }
 
-export type Endpoint29_0Input = {
-  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-}
+export type Endpoint29_0Input = { readonly location?: { readonly directory?: string | undefined } | undefined }
 export type Endpoint29_0Output = ReadonlyArray<Config.Entry>
 export type ConfigGetOperation<E = never> = (input?: Endpoint29_0Input) => Effect.Effect<Endpoint29_0Output, E>
 

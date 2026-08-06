@@ -134,6 +134,7 @@ describe("hosted workspace session", () => {
         TestLLM.tool("call-shell", "shell", { command: "printf 'from-model' > from-model.txt" }),
         TestLLM.tool("call-glob", "glob", { pattern: "*.txt" }),
         TestLLM.tool("call-grep", "grep", { pattern: "from-model" }),
+        TestLLM.tool("call-read", "read", { path: "from-patch.txt" }),
         TestLLM.text("done", "text-1"),
       )
       yield* sessions.prompt({ sessionID: session.id, text: "Write a file in the workspace", resume: false })
@@ -153,6 +154,7 @@ describe("hosted workspace session", () => {
       expect(advertised).toContain("patch")
       expect(advertised).toContain("glob")
       expect(advertised).toContain("grep")
+      expect(advertised).toContain("read")
       expect(advertised).not.toContain("edit")
       expect(advertised).not.toContain("write")
 
@@ -173,6 +175,9 @@ describe("hosted workspace session", () => {
       })
       expect(assistants.at(3)).toMatchObject({
         content: [{ type: "tool", id: "call-grep", state: { status: "completed" } }],
+      })
+      expect(assistants.at(4)).toMatchObject({
+        content: [{ type: "tool", id: "call-read", state: { status: "completed" } }],
       })
       expect(assistants.at(-1)).toMatchObject({ content: [{ type: "text", text: "done" }] })
 

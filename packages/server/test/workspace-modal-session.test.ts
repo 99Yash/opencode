@@ -98,6 +98,9 @@ describe.skipIf(!hasCredentials)("hosted session on modal (live)", () => {
           TestLLM.tool("call-shell", "shell", { command: "printf 'from-model' > from-model.txt" }),
           TestLLM.tool("call-glob", "glob", { pattern: "*.txt" }),
           TestLLM.tool("call-grep", "grep", { pattern: "from-model" }),
+          // Read must go through the sandbox filesystem: the host has no
+          // /workspace/from-patch.txt, so a host-backed reader would fail.
+          TestLLM.tool("call-read", "read", { path: "from-patch.txt" }),
           TestLLM.text("done", "text-1"),
         )
         yield* sessions.prompt({ sessionID: session.id, text: "Write a file in the workspace", resume: false })
@@ -109,6 +112,7 @@ describe.skipIf(!hasCredentials)("hosted session on modal (live)", () => {
         expect(advertised).toContain("patch")
         expect(advertised).toContain("glob")
         expect(advertised).toContain("grep")
+        expect(advertised).toContain("read")
         expect(advertised).not.toContain("edit")
         expect(advertised).not.toContain("write")
 
@@ -126,6 +130,9 @@ describe.skipIf(!hasCredentials)("hosted session on modal (live)", () => {
         })
         expect(assistants.at(3)).toMatchObject({
           content: [{ type: "tool", id: "call-grep", state: { status: "completed" } }],
+        })
+        expect(assistants.at(4)).toMatchObject({
+          content: [{ type: "tool", id: "call-read", state: { status: "completed" } }],
         })
         expect(assistants.at(-1)).toMatchObject({ content: [{ type: "text", text: "done" }] })
 

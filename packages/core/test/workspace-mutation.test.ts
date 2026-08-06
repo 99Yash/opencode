@@ -4,6 +4,8 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { FileMutation } from "@opencode-ai/core/file-mutation"
 import { Location } from "@opencode-ai/core/location"
 import { LocationMutation } from "@opencode-ai/core/location-mutation"
+import { ReadToolFileSystem } from "@opencode-ai/core/tool/read-filesystem"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { WorkspaceEnvironment } from "@opencode-ai/core/workspace/environment"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { testEffect } from "./lib/effect"
@@ -15,10 +17,13 @@ const memory = memoryEnvironment({
 })
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([LocationMutation.hostedNode, FileMutation.hostedNode]), [
-    [WorkspaceEnvironment.node, Layer.succeed(WorkspaceEnvironment.Service, memory.environment)],
-    [Location.node, hostedLocationLayer()],
-  ]),
+  AppNodeBuilder.build(
+    LayerNode.group([LocationMutation.hostedNode, FileMutation.hostedNode, ReadToolFileSystem.hostedNode]),
+    [
+      [WorkspaceEnvironment.node, Layer.succeed(WorkspaceEnvironment.Service, memory.environment)],
+      [Location.node, hostedLocationLayer()],
+    ],
+  ),
 )
 
 describe("hosted mutation", () => {
@@ -62,6 +67,29 @@ describe("hosted mutation", () => {
       const second = yield* files.write({ target: created, content: "- shipped\n" })
       expect(second.existed).toBe(true)
       expect(memory.contents("/workspace/notes/todo.md")).toBe("- shipped\n")
+    }),
+  )
+
+  // The reader must consume the environment, never the host filesystem:
+  // these paths exist only in the memory store.
+  it.effect("reads files and directories through the environment", () =>
+    Effect.gen(function* () {
+      const reader = yield* ReadToolFileSystem.Service
+
+      expect(yield* reader.inspect(AbsolutePath.make("/workspace/README.md"))).toBe("file")
+      expect(yield* reader.inspect(AbsolutePath.make("/workspace/src"))).toBe("directory")
+
+      const content = yield* reader.read(AbsolutePath.make("/workspace/README.md"), "README.md")
+      expect(content).toMatchObject({ type: "file", content: "# hello\n", encoding: "utf8" })
+
+      const paged = yield* reader.read(AbsolutePath.make("/workspace/README.md"), "README.md", { limit: 1 })
+      expect(paged).toMatchObject({ type: "text-page", content: "# hello", offset: 1, truncated: false })
+
+      const listed = yield* reader.list(AbsolutePath.make("/workspace/src"))
+      expect(listed.entries.map((entry) => String(entry.path))).toEqual(["index.ts"])
+
+      const missing = yield* reader.inspect(AbsolutePath.make("/workspace/nope.txt")).pipe(Effect.flip)
+      expect(missing).toMatchObject({ _tag: "PlatformError", reason: { _tag: "NotFound" } })
     }),
   )
 })

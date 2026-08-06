@@ -4632,9 +4632,7 @@ export type WebsearchQueryOutput = {
 }
 
 export type ConfigGetInput = {
-  readonly location?: {
-    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
-  }["location"]
+  readonly location?: { readonly location?: { readonly directory?: string | undefined } | undefined }["location"]
 }
 
 export type ConfigGetOutput = Array<ConfigEntry>

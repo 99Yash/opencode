@@ -135,6 +135,7 @@ export function buildLocationServiceMap(
                   [FileSystem.node, FileSystem.hostedNode],
                   [LocationMutation.node, LocationMutation.hostedNode],
                   [FileMutation.node, FileMutation.hostedNode],
+                  [ReadToolFileSystem.node, ReadToolFileSystem.hostedNode],
                   [Shell.node, Shell.hostedNode],
                 ]
               : [[Location.node, Location.boundNode(ref)]],
