@@ -146,6 +146,7 @@ const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
         },
         catch: (cause) => new WorkspaceEnvironment.Error({ operation: "write", path, cause }),
       }),
+    remove: (path) => wrap("remove", path, () => sandbox.filesystem.remove(path)),
   }
 }
 

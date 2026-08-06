@@ -4,7 +4,7 @@ import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin
 import { ToolFailure } from "@opencode-ai/ai"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { createTwoFilesPatch, diffLines } from "diff"
-import { Effect, Schema } from "effect"
+import { Effect, FileSystem, Option, Schema } from "effect"
 import { PlatformError } from "effect/PlatformError"
 import path from "path"
 import { Bom } from "@opencode-ai/util/bom"
@@ -13,6 +13,7 @@ import { Formatter } from "../../formatter"
 import { Location } from "../../location"
 import { Patch } from "@opencode-ai/util/patch"
 import { Permission } from "../../permission"
+import { WorkspaceEnvironment } from "../../workspace/environment"
 import DESCRIPTION from "../patch.txt"
 
 export const name = "patch"
@@ -66,6 +67,33 @@ interface Target {
   }
 }
 
+type BackendError = PlatformError | globalThis.Error | WorkspaceEnvironment.Error | WorkspaceEnvironment.NotFoundError
+
+/** The four verbs patch needs, provided by the host filesystem or the workspace environment. */
+interface Backend {
+  readonly read: (path: string) => Effect.Effect<{ readonly bom: boolean; readonly text: string }, BackendError>
+  readonly stat: (path: string) => Effect.Effect<{ readonly type: FileSystem.File.Type }, BackendError>
+  readonly write: (path: string, content: string) => Effect.Effect<void, BackendError>
+  readonly remove: (path: string) => Effect.Effect<void, BackendError>
+}
+
+const hostBackend = (fs: FSUtil.Interface): Backend => ({
+  read: (target) => Bom.readFile(fs, target),
+  stat: (target) => fs.stat(target),
+  write: (target, content) => fs.writeWithDirs(target, content),
+  remove: (target) => fs.remove(target),
+})
+
+const environmentBackend = (environment: WorkspaceEnvironment.Interface): Backend => {
+  const encoder = new TextEncoder()
+  return {
+    read: (target) => Effect.map(environment.files.read(target), Bom.fromBytes),
+    stat: (target) => environment.files.stat(target),
+    write: (target, content) => Effect.asVoid(environment.files.write(target, encoder.encode(content))),
+    remove: (target) => environment.files.remove(target),
+  }
+}
+
 export const Plugin = {
   id: "opencode.tool.patch",
   effect: Effect.fn("PatchTool.Plugin")(function* (ctx: PluginContext) {
@@ -73,6 +101,11 @@ export const Plugin = {
     const formatter = yield* Formatter.Service
     const location = yield* Location.Service
     const permission = yield* Permission.Service
+    // Hosted Locations bind the workspace environment: file verbs run at the
+    // provider, paths resolve as posix, and host formatters never run.
+    const environment = Option.getOrUndefined(yield* Effect.serviceOption(WorkspaceEnvironment.Service))
+    const hosted = environment !== undefined
+    const backend = environment ? environmentBackend(environment) : hostBackend(fs)
 
     yield* ctx.tool
       .transform((draft) =>
@@ -111,7 +144,7 @@ export const Plugin = {
                   const updates = new Map<string, string>()
                   for (const hunk of hunks) {
                     yield* Effect.gen(function* () {
-                      const target = resolveTarget(location, hunk.path)
+                      const target = resolveTarget(location, hunk.path, hosted)
                       targets.push(target)
                       if (target.externalDirectory) {
                         yield* permission.assert({
@@ -141,7 +174,7 @@ export const Plugin = {
                         return
                       }
                       if (hunk.type === "delete") {
-                        const content = yield* Bom.readFile(fs, target.canonical).pipe(
+                        const content = yield* backend.read(target.canonical).pipe(
                           Effect.mapError(
                             (error) =>
                               new ToolFailure({
@@ -156,7 +189,7 @@ export const Plugin = {
                       const original =
                         previous ??
                         (yield* Effect.gen(function* () {
-                          const stats = yield* fs.stat(target.canonical).pipe(
+                          const stats = yield* backend.stat(target.canonical).pipe(
                             Effect.mapError(
                               (error) =>
                                 new ToolFailure({
@@ -169,7 +202,7 @@ export const Plugin = {
                               message: `patch verification failed: Failed to read file to update ${target.canonical}: path is a directory`,
                             })
                           }
-                          const content = yield* Bom.readFile(fs, target.canonical).pipe(
+                          const content = yield* backend.read(target.canonical).pipe(
                             Effect.mapError(
                               (error) =>
                                 new ToolFailure({
@@ -185,7 +218,7 @@ export const Plugin = {
                         catch: (error) =>
                           new ToolFailure({ message: `patch verification failed: ${errorMessage(error)}` }),
                       })
-                      const moveTarget = hunk.movePath ? resolveTarget(location, hunk.movePath) : undefined
+                      const moveTarget = hunk.movePath ? resolveTarget(location, hunk.movePath, hosted) : undefined
                       if (moveTarget) targets.push(moveTarget)
                       if (moveTarget?.externalDirectory) {
                         yield* permission.assert({
@@ -239,8 +272,8 @@ export const Plugin = {
                     (change) =>
                       Effect.gen(function* () {
                         if (change.type === "add") {
-                          yield* fs
-                            .writeWithDirs(
+                          yield* backend
+                            .write(
                               change.target.canonical,
                               change.contents.endsWith("\n") || change.contents === ""
                                 ? change.contents
@@ -257,7 +290,7 @@ export const Plugin = {
                           return
                         }
                         if (change.type === "delete") {
-                          yield* fs
+                          yield* backend
                             .remove(change.target.canonical)
                             .pipe(
                               Effect.mapError((error) => fail(`Failed to delete ${change.target.resource}`, error)),
@@ -271,10 +304,10 @@ export const Plugin = {
                         }
                         if (change.moveTarget) {
                           const moveTarget = change.moveTarget
-                          yield* fs
-                            .writeWithDirs(moveTarget.canonical, change.content)
+                          yield* backend
+                            .write(moveTarget.canonical, change.content)
                             .pipe(Effect.mapError((error) => fail(`Failed to write ${moveTarget.resource}`, error)))
-                          yield* fs.remove(change.target.canonical).pipe(
+                          yield* backend.remove(change.target.canonical).pipe(
                             Effect.mapError((error) =>
                               fail(`Wrote ${moveTarget.resource} but failed to remove ${change.target.resource}`, error),
                             ),
@@ -286,8 +319,8 @@ export const Plugin = {
                           })
                           return
                         }
-                        yield* fs
-                          .writeWithDirs(change.target.canonical, change.content)
+                        yield* backend
+                          .write(change.target.canonical, change.content)
                           .pipe(Effect.mapError((error) => fail(`Failed to write ${change.target.resource}`, error)))
                         applied.push({
                           type: change.type,
@@ -297,25 +330,29 @@ export const Plugin = {
                       }),
                     { discard: true },
                   )
+                  // Hosted Locations skip formatting: formatters are host
+                  // binaries and cannot run against provider paths. patchFile
+                  // then falls back to the in-memory after-content.
                   const formatted = new Map<string, string>()
-                  yield* Effect.forEach(
-                    [...new Set(applied.filter((item) => item.type !== "delete").map((item) => item.target))],
-                    (target) =>
-                      Effect.gen(function* () {
-                        const current = yield* Bom.readFile(fs, target).pipe(
-                          Effect.mapError((error) => fail(`Failed to read ${target}`, error)),
-                        )
-                        formatted.set(
-                          target,
-                          (yield* formatter.file(target))
-                            ? yield* Bom.syncFile(fs, target, current.bom).pipe(
-                                Effect.mapError((error) => fail(`Failed to sync ${target}`, error)),
-                              )
-                            : current.text,
-                        )
-                      }),
-                    { discard: true },
-                  )
+                  if (!hosted)
+                    yield* Effect.forEach(
+                      [...new Set(applied.filter((item) => item.type !== "delete").map((item) => item.target))],
+                      (target) =>
+                        Effect.gen(function* () {
+                          const current = yield* Bom.readFile(fs, target).pipe(
+                            Effect.mapError((error) => fail(`Failed to read ${target}`, error)),
+                          )
+                          formatted.set(
+                            target,
+                            (yield* formatter.file(target))
+                              ? yield* Bom.syncFile(fs, target, current.bom).pipe(
+                                  Effect.mapError((error) => fail(`Failed to sync ${target}`, error)),
+                                )
+                              : current.text,
+                          )
+                        }),
+                      { discard: true },
+                    )
                   const files = yield* Effect.forEach(prepared, (change) => {
                     if (change.type === "delete") return Effect.succeed(patchFile(change))
                     const target = change.type === "update" && change.moveTarget ? change.moveTarget : change.target
@@ -356,6 +393,7 @@ export const Plugin = {
 }
 
 function errorMessage(error: unknown) {
+  if (error instanceof WorkspaceEnvironment.NotFoundError) return "file does not exist"
   if (error instanceof PlatformError) {
     if (error.reason._tag === "NotFound") return "file does not exist"
     return error.reason.description ?? error.reason.message
@@ -415,23 +453,27 @@ function trimDiff(diff: string) {
     .join("\n")
 }
 
-function resolveTarget(location: Location.Interface, value: string): Target {
+function resolveTarget(location: Location.Interface, value: string, hosted: boolean): Target {
+  // Hosted paths live in the provider filesystem: always posix, regardless of
+  // the host platform.
+  const paths = hosted ? path.posix : path
+  const contains = hosted ? FSUtil.containsPosix : FSUtil.contains
   const canonical =
-    process.platform === "win32"
+    !hosted && process.platform === "win32"
       ? FSUtil.normalizePath(path.resolve(location.directory, value))
-      : path.resolve(location.directory, value)
-  const projectRoot = path.parse(location.project.directory).root
+      : paths.resolve(location.directory, value)
+  const projectRoot = paths.parse(location.project.directory).root
   const external =
-    !FSUtil.contains(location.directory, canonical) &&
-    (location.project.directory === projectRoot || !FSUtil.contains(location.project.directory, canonical))
-  const directory = path.dirname(canonical)
+    !contains(location.directory, canonical) &&
+    (location.project.directory === projectRoot || !contains(location.project.directory, canonical))
+  const directory = paths.dirname(canonical)
   const resource =
-    process.platform === "win32"
+    !hosted && process.platform === "win32"
       ? FSUtil.normalizePathPattern(path.join(directory, "*"))
-      : path.join(directory, "*").replaceAll("\\", "/")
+      : paths.join(directory, "*").replaceAll("\\", "/")
   return {
     canonical,
-    resource: path.relative(location.project.directory, canonical).replaceAll("\\", "/") || ".",
+    resource: paths.relative(location.project.directory, canonical).replaceAll("\\", "/") || ".",
     externalDirectory: external ? { directory, resource } : undefined,
   }
 }

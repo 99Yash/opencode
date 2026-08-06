@@ -63,7 +63,9 @@ const registry = makeGlobalNode({
   deps: [AppProcess.node],
 })
 
-const model = LanguageModel.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route })
+// A gpt-style id so the patch plugin's context hook advertises apply_patch as
+// the only editor, matching production GPT-5 sessions.
+const model = LanguageModel.make({ id: "gpt-fake", provider: "fake", route: OpenAIChat.route })
 const models = Layer.mock(SessionRunnerModel.Service)({
   resolve: () =>
     Effect.succeed(
@@ -107,7 +109,7 @@ const it = testEffect(
   ).pipe(Layer.provideMerge(TestLLM.layer({ fallback: [] }))),
 )
 
-const sessionModel = Model.Ref.make({ id: Model.ID.make("fake-model"), providerID: Provider.ID.make("fake") })
+const sessionModel = Model.Ref.make({ id: Model.ID.make("gpt-fake"), providerID: Provider.ID.make("fake") })
 
 describe("hosted workspace session", () => {
   it.live("runs a scripted model through the real runner on a hosted Location", () =>
@@ -126,23 +128,31 @@ describe("hosted workspace session", () => {
       })
 
       yield* TestLLM.push(
+        TestLLM.tool("call-patch", "patch", {
+          patchText: "*** Begin Patch\n*** Add File: from-patch.txt\n+patched\n*** End Patch",
+        }),
         TestLLM.tool("call-shell", "shell", { command: "printf 'from-model' > from-model.txt" }),
         TestLLM.text("done", "text-1"),
       )
       yield* sessions.prompt({ sessionID: session.id, text: "Write a file in the workspace", resume: false })
       yield* sessions.resume(session.id)
 
-      // The tool executed inside the workspace, not on a host path.
+      // Both tools executed inside the workspace, not on a host path.
       const written = yield* Effect.promise(() => readFile(path.join(created.root, "from-model.txt"), "utf8"))
       expect(written).toBe("from-model")
+      const patched = yield* Effect.promise(() => readFile(path.join(created.root, "from-patch.txt"), "utf8"))
+      expect(patched).toBe("patched\n")
 
-      // The hosted catalog was advertised to the model: shell without host-bound tools.
+      // The hosted catalog was advertised to the model: shell and patch (the
+      // gpt-style editor), without host-bound search tools or edit/write.
       const requests = (yield* TestLLM.Service).requests
       const advertised = requests[0]?.tools.map((tool) => tool.name) ?? []
       expect(advertised).toContain("shell")
+      expect(advertised).toContain("patch")
       expect(advertised).not.toContain("glob")
       expect(advertised).not.toContain("grep")
-      expect(advertised).not.toContain("patch")
+      expect(advertised).not.toContain("edit")
+      expect(advertised).not.toContain("write")
 
       // Projected history shows the completed tool call and the final text.
       // Instruction updates (e.g. the Code Mode catalog settling after boot)
@@ -151,6 +161,9 @@ describe("hosted workspace session", () => {
       expect(context.at(0)).toMatchObject({ type: "user", text: "Write a file in the workspace" })
       const assistants = context.filter((message) => message.type === "assistant")
       expect(assistants.at(0)).toMatchObject({
+        content: [{ type: "tool", id: "call-patch", state: { status: "completed" } }],
+      })
+      expect(assistants.at(1)).toMatchObject({
         content: [{ type: "tool", id: "call-shell", state: { status: "completed" } }],
       })
       expect(assistants.at(-1)).toMatchObject({ content: [{ type: "text", text: "done" }] })

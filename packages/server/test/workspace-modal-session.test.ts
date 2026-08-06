@@ -31,7 +31,9 @@ const hasCredentials = process.env.MODAL_TOKEN_ID !== undefined || existsSync(pa
 
 const databaseFile = path.join(mkdtempSync(path.join(tmpdir(), "opencode-modal-session-")), "session.db")
 
-const model = LanguageModel.make({ id: "fake-model", provider: "fake", route: OpenAIChat.route })
+// A gpt-style id so the patch plugin's context hook advertises apply_patch as
+// the only editor, matching production GPT-5 sessions.
+const model = LanguageModel.make({ id: "gpt-fake", provider: "fake", route: OpenAIChat.route })
 const models = Layer.mock(SessionRunnerModel.Service)({
   resolve: () =>
     Effect.succeed(
@@ -63,7 +65,7 @@ const layer = AppNodeBuilder.build(
   ],
 ).pipe(Layer.provideMerge(TestLLM.layer({ fallback: [] })))
 
-const sessionModel = Model.Ref.make({ id: Model.ID.make("fake-model"), providerID: Provider.ID.make("fake") })
+const sessionModel = Model.Ref.make({ id: Model.ID.make("gpt-fake"), providerID: Provider.ID.make("fake") })
 
 // A scripted model through the real runner against a real Modal sandbox: the
 // session-level counterpart of workspace-modal-graph.test.ts.
@@ -90,6 +92,9 @@ describe.skipIf(!hasCredentials)("hosted session on modal (live)", () => {
         })
 
         yield* TestLLM.push(
+          TestLLM.tool("call-patch", "patch", {
+            patchText: "*** Begin Patch\n*** Add File: from-patch.txt\n+patched\n*** End Patch",
+          }),
           TestLLM.tool("call-shell", "shell", { command: "printf 'from-model' > from-model.txt" }),
           TestLLM.text("done", "text-1"),
         )
@@ -99,23 +104,30 @@ describe.skipIf(!hasCredentials)("hosted session on modal (live)", () => {
         const requests = (yield* TestLLM.Service).requests
         const advertised = requests[0]?.tools.map((tool) => tool.name) ?? []
         expect(advertised).toContain("shell")
-        expect(advertised).not.toContain("patch")
+        expect(advertised).toContain("patch")
+        expect(advertised).not.toContain("edit")
+        expect(advertised).not.toContain("write")
 
         const context = yield* sessions.context(session.id)
         expect(context.at(0)).toMatchObject({ type: "user", text: "Write a file in the workspace" })
         const assistants = context.filter((message) => message.type === "assistant")
         expect(assistants.at(0)).toMatchObject({
+          content: [{ type: "tool", id: "call-patch", state: { status: "completed" } }],
+        })
+        expect(assistants.at(1)).toMatchObject({
           content: [{ type: "tool", id: "call-shell", state: { status: "completed" } }],
         })
         expect(assistants.at(-1)).toMatchObject({ content: [{ type: "text", text: "done" }] })
 
-        // The tool executed inside the sandbox: read the file back through the
-        // hosted filesystem rather than any host path.
+        // Both tools executed inside the sandbox: read the files back through
+        // the hosted filesystem rather than any host path.
         const locations = yield* LocationServiceMap.Service
         yield* Effect.gen(function* () {
           const filesystem = yield* FileSystem.Service
           const written = yield* filesystem.read({ path: RelativePath.make("from-model.txt") })
           expect(new TextDecoder().decode(written.content)).toBe("from-model")
+          const patched = yield* filesystem.read({ path: RelativePath.make("from-patch.txt") })
+          expect(new TextDecoder().decode(patched.content)).toBe("patched\n")
         }).pipe(Effect.provide(locations.get(location)))
       }).pipe(Effect.scoped, Effect.provide(layer), Effect.runPromise)
     },

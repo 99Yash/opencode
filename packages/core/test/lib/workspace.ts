@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, realpath, stat, writeFile } from "fs/promises"
+import { mkdir, readdir, readFile, realpath, rm, stat, writeFile } from "fs/promises"
 import nodePath from "path"
 import { Effect, Layer } from "effect"
 import { make } from "effect/unstable/process/ChildProcessSpawner"
@@ -83,6 +83,7 @@ export const directoryEnvironment = (
           },
           catch: (cause) => new WorkspaceEnvironment.Error({ operation: "write", path, cause }),
         }),
+      remove: (path) => wrap("remove", path, () => rm(path)),
     },
     process: make(spawn),
     shell: {
@@ -144,6 +145,10 @@ export const memoryEnvironment = (files: Record<string, string>): MemoryEnvironm
           store.set(path, Uint8Array.from(content))
           return { existed }
         }),
+      remove: (path) => {
+        if (store.delete(path)) return Effect.void
+        return isDirectory(path) ? wrongType("remove", path) : notFound(path)
+      },
     },
     process: make(() => Effect.die(new Error("no processes in the memory environment"))),
     shell: WorkspaceEnvironment.linuxShell,

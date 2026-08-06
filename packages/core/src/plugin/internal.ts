@@ -181,9 +181,8 @@ const post = [
 
 // Not advertised for hosted Locations until their execution is
 // environment-backed: glob/grep spawn the host ripgrep binary against
-// provider paths, and patch has host filesystem assumptions. Hosted glob/grep
-// later spawn rg inside the workspace image.
-const hostedExcluded: ReadonlySet<string> = new Set([PatchTool.Plugin.id, GlobTool.Plugin.id, GrepTool.Plugin.id])
+// provider paths. Hosted glob/grep later spawn rg inside the workspace image.
+const hostedExcluded: ReadonlySet<string> = new Set([GlobTool.Plugin.id, GrepTool.Plugin.id])
 
 export const list = Effect.fn("PluginInternal.list")(function* () {
   const location = yield* Location.Service

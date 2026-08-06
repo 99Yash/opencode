@@ -42,6 +42,8 @@ export interface Files {
   readonly list: (path: string) => Effect.Effect<readonly DirectoryEntry[], Error | NotFoundError>
   /** Creates parent directories, matching FSUtil.writeWithDirs. Reports whether the file already existed. */
   readonly write: (path: string, content: Uint8Array) => Effect.Effect<{ readonly existed: boolean }, Error>
+  /** Removes one file. Removing a missing path fails with NotFoundError. */
+  readonly remove: (path: string) => Effect.Effect<void, Error | NotFoundError>
 }
 
 export interface Shell {
