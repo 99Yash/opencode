@@ -175,6 +175,8 @@ export interface Interface extends State.Transformable<Draft> {
       readonly integrationID: ID
       /** Secret entered by the user. */
       readonly key: string
+      /** Provider-specific values collected before the secret. */
+      readonly inputs?: Inputs
       /** User-facing label for the stored credential. */
       readonly label?: string
     }) => Effect.Effect<void, AuthorizationError>
@@ -704,7 +706,11 @@ const layer = Layer.effect(
           yield* credentials.create({
             integrationID: input.integrationID,
             label: input.label,
-            value: Credential.Key.make({ type: "key", key: input.key }),
+            value: Credential.Key.make({
+              type: "key",
+              key: input.key,
+              metadata: input.inputs && Object.keys(input.inputs).length > 0 ? input.inputs : undefined,
+            }),
           })
           yield* bus.publish(Integration.Event.ConnectionUpdated, { integrationID: input.integrationID })
           yield* bus.publish(Integration.Event.Updated, {})

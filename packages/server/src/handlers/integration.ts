@@ -58,6 +58,7 @@ export const IntegrationHandler = HttpApiBuilder.group(Api, "server.integration"
             service.connection.key({
               integrationID: ctx.params.integrationID,
               key: ctx.payload.key,
+              inputs: ctx.payload.inputs,
               label: ctx.payload.label,
             }),
           )

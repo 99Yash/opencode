@@ -7,6 +7,7 @@ import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { CloudflareWorkersAIPlugin } from "@opencode-ai/core/plugin/provider/cloudflare-workers-ai"
 import { Provider } from "@opencode-ai/core/provider"
+import { Integration } from "@opencode-ai/core/integration"
 import type { LanguageModelV3 } from "@ai-sdk/provider"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
@@ -79,6 +80,28 @@ function cloudflareHeaders(sdk: unknown, modelID = "@cf/model") {
 }
 
 describe("CloudflareWorkersAIPlugin", () => {
+  it.effect("prompts for the account ID when the environment does not provide it", () =>
+    withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined }, () =>
+      Effect.gen(function* () {
+        yield* addPlugin()
+        expect(
+          (yield* (yield* Integration.Service).get(Integration.ID.make("cloudflare-workers-ai")))?.methods,
+        ).toContainEqual({
+          type: "key",
+          label: "API key",
+          prompts: [
+            {
+              type: "text",
+              key: "accountId",
+              message: "Enter your Cloudflare Account ID",
+              placeholder: "e.g. 1234567890abcdef1234567890abcdef",
+            },
+          ],
+        })
+      }),
+    ),
+  )
+
   it.effect("maps account ID to endpoint URL and creates an OpenAI-compatible SDK", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {

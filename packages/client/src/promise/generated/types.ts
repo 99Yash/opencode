@@ -197,8 +197,6 @@ export type IntegrationWhen = { key: string; op: "eq" | "neq"; value: string }
 
 export type IntegrationCommandMethod = { id: string; type: "command"; label: string; command: Array<string> }
 
-export type IntegrationKeyMethod = { type: "key"; label?: string }
-
 export type IntegrationEnvMethod = { type: "env"; names: Array<string> }
 
 export type ConnectionCredentialInfo = { type: "credential"; id: string; label: string }
@@ -1635,6 +1633,12 @@ export type IntegrationOAuthMethod = {
   id: string
   type: "oauth"
   label: string
+  prompts?: Array<IntegrationTextPrompt | IntegrationSelectPrompt>
+}
+
+export type IntegrationKeyMethod = {
+  type: "key"
+  label?: string
   prompts?: Array<IntegrationTextPrompt | IntegrationSelectPrompt>
 }
 
@@ -3119,8 +3123,21 @@ export type IntegrationConnectKeyInput = {
   readonly location?: {
     readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   }["location"]
-  readonly key: { readonly key: string; readonly label?: string | undefined }["key"]
-  readonly label?: { readonly key: string; readonly label?: string | undefined }["label"]
+  readonly key: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["key"]
+  readonly inputs?: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["inputs"]
+  readonly label?: {
+    readonly key: string
+    readonly inputs?: { readonly [x: string]: string } | undefined
+    readonly label?: string | undefined
+  }["label"]
 }
 
 export type IntegrationConnectKeyOutput = void

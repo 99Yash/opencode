@@ -561,7 +561,13 @@ function ProviderConnection(props: {
           if (!alive.value) return
           dispatch({ type: "auth.error", error: formatError(e, language.t("common.requestFailed")) })
         })
+      return
     }
+    if (method.prompts?.length && !inputs) {
+      dispatch({ type: "auth.prompt" })
+      return
+    }
+    dispatch({ type: "auth.inputs", inputs: inputs ?? {} })
   }
 
   function AuthPromptsView() {
@@ -572,7 +578,7 @@ function ProviderConnection(props: {
 
     const prompts = createMemo(() => {
       const value = method()
-      return value?.type === "oauth" ? (value.prompts ?? []) : []
+      return value?.prompts ?? []
     })
     const matches = (prompt: NonNullable<ReturnType<typeof prompts>[number]>, value: Record<string, string>) => {
       if (!prompt.when) return true
@@ -820,6 +826,7 @@ function ProviderConnection(props: {
         integrationID: props.provider,
         location: location(),
         key: apiKey,
+        inputs: store.promptInputs ?? {},
       })
       await complete()
     }

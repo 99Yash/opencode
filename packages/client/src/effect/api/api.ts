@@ -992,6 +992,7 @@ export type Endpoint10_3Input = {
   readonly integrationID: Integration.ID
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   readonly key: string
+  readonly inputs?: { readonly [x: string]: string } | undefined
   readonly label?: string | undefined
 }
 export type Endpoint10_3Output = void

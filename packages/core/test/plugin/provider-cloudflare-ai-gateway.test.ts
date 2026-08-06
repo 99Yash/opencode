@@ -6,6 +6,7 @@ import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { CloudflareAIGatewayPlugin } from "@opencode-ai/core/plugin/provider/cloudflare-ai-gateway"
 import { Provider } from "@opencode-ai/core/provider"
+import { Integration } from "@opencode-ai/core/integration"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -102,6 +103,39 @@ mock.module("ai-gateway-provider/providers/unified", () => ({
 }))
 
 describe("CloudflareAIGatewayPlugin", () => {
+  it.effect("prompts for account and gateway IDs when the environment does not provide them", () =>
+    withEnv(
+      cloudflareEnv({
+        CLOUDFLARE_ACCOUNT_ID: undefined,
+        CLOUDFLARE_GATEWAY_ID: undefined,
+      }),
+      () =>
+        Effect.gen(function* () {
+          yield* addPlugin()
+          expect(
+            (yield* (yield* Integration.Service).get(Integration.ID.make("cloudflare-ai-gateway")))?.methods,
+          ).toContainEqual({
+            type: "key",
+            label: "Gateway API token",
+            prompts: [
+              {
+                type: "text",
+                key: "accountId",
+                message: "Enter your Cloudflare Account ID",
+                placeholder: "e.g. 1234567890abcdef1234567890abcdef",
+              },
+              {
+                type: "text",
+                key: "gatewayId",
+                message: "Enter your Cloudflare AI Gateway ID",
+                placeholder: "e.g. my-gateway",
+              },
+            ],
+          })
+        }),
+    ),
+  )
+
   it.effect("requires account, gateway, and token before creating the unified SDK", () =>
     withEnv(
       {

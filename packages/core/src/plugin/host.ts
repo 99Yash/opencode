@@ -192,6 +192,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: import("../p
           integration.connection.key({
             integrationID: Integration.ID.make(input.integrationID),
             key: input.key,
+            inputs: input.inputs,
             label: input.label,
           }),
       },
@@ -398,7 +399,7 @@ function methodImplementation(input: IntegrationMethodRegistration): Integration
   }
   return {
     integrationID: Integration.ID.make(input.integrationID),
-    method: { type: "key", label: input.method.label },
+    method: { type: "key", label: input.method.label, prompts: input.method.prompts },
   }
 }
 

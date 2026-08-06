@@ -68,6 +68,7 @@ export interface KeyMethod extends Schema.Schema.Type<typeof KeyMethod> {}
 export const KeyMethod = Schema.Struct({
   type: Schema.Literal("key"),
   label: optional(Schema.String),
+  prompts: optional(Schema.Array(Prompt)),
 }).annotate({ identifier: "Integration.KeyMethod" })
 
 export interface EnvMethod extends Schema.Schema.Type<typeof EnvMethod> {}

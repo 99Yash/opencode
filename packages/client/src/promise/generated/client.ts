@@ -963,7 +963,7 @@ export function make(options: ClientOptions) {
               method: "POST",
               path: `/api/integration/${encodeURIComponent(input.integrationID)}/connect/key`,
               query: { location: input["location"] },
-              body: { key: input["key"], label: input["label"] },
+              body: { key: input["key"], inputs: input["inputs"], label: input["label"] },
               successStatus: 204,
               declaredStatuses: [400, 401],
               empty: true,

@@ -6,6 +6,37 @@ import { define } from "@opencode-ai/plugin/effect/plugin"
 export const CloudflareAIGatewayPlugin = define({
   id: "opencode.provider.cloudflare-ai-gateway",
   effect: Effect.fn(function* (ctx) {
+    yield* ctx.integration.transform((draft) => {
+      draft.method.update({
+        integrationID: "cloudflare-ai-gateway",
+        method: {
+          type: "key",
+          label: "Gateway API token",
+          prompts: [
+            ...(process.env.CLOUDFLARE_ACCOUNT_ID
+              ? []
+              : [
+                  {
+                    type: "text" as const,
+                    key: "accountId",
+                    message: "Enter your Cloudflare Account ID",
+                    placeholder: "e.g. 1234567890abcdef1234567890abcdef",
+                  },
+                ]),
+            ...(process.env.CLOUDFLARE_GATEWAY_ID
+              ? []
+              : [
+                  {
+                    type: "text" as const,
+                    key: "gatewayId",
+                    message: "Enter your Cloudflare AI Gateway ID",
+                    placeholder: "e.g. my-gateway",
+                  },
+                ]),
+          ],
+        },
+      })
+    })
     yield* ctx.aisdk.hook(
       "sdk",
       Effect.fn(function* (evt) {

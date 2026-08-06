@@ -180,7 +180,7 @@ function openMethod(
   onConnected?: OnIntegrationConnected,
 ) {
   if (method.type === "key") {
-    dialog.replace(() => <KeyMethod integration={integration} method={method} onConnected={onConnected} />)
+    void beginKey(integration, method, dialog, onConnected)
     return
   }
   if (method.type === "command") {
@@ -188,6 +188,19 @@ function openMethod(
     return
   }
   void beginOAuth(integration, method, dialog, onConnected)
+}
+
+async function beginKey(
+  integration: IntegrationInfo,
+  method: Extract<ConnectMethod, { type: "key" }>,
+  dialog: ReturnType<typeof useDialog>,
+  onConnected?: OnIntegrationConnected,
+) {
+  const inputs = method.prompts?.length ? await promptInputs(dialog, method.prompts) : {}
+  if (inputs === null) return
+  dialog.replace(() => (
+    <KeyMethod integration={integration} method={method} inputs={inputs} onConnected={onConnected} />
+  ))
 }
 
 function CommandStarting(props: {
@@ -335,6 +348,7 @@ function CommandView(props: { title: string; output: string; message: string }) 
 function KeyMethod(props: {
   integration: IntegrationInfo
   method: Extract<ConnectMethod, { type: "key" }>
+  inputs: Record<string, string>
   onConnected?: OnIntegrationConnected
 }) {
   const data = useData()
@@ -355,6 +369,7 @@ function KeyMethod(props: {
             integrationID: props.integration.id,
             location: location(data),
             key,
+            inputs: props.inputs,
           })
           .then(() => connected(props.integration, data, dialog, toast, props.onConnected))
           .catch((cause) => setError(message(cause)))
