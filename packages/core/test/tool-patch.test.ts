@@ -606,6 +606,24 @@ describe("PatchTool", () => {
     ),
   )
 
+  it.live("preserves a BOM when moving a file", () =>
+    withTempTool((directory, registry) =>
+      Effect.gen(function* () {
+        const source = path.join(directory, "source.txt")
+        const moved = path.join(directory, "moved.txt")
+        yield* Effect.promise(() => fs.writeFile(source, "\uFEFFbefore\n"))
+        yield* executeTool(
+          registry,
+          call(
+            "*** Begin Patch\n*** Update File: source.txt\n*** Move to: moved.txt\n@@\n-before\n+after\n*** End Patch",
+          ),
+        )
+        expect(yield* exists(source)).toBe(false)
+        expect(yield* Effect.promise(() => fs.readFile(moved, "utf8"))).toBe("\uFEFFafter\n")
+      }),
+    ),
+  )
+
   it.live("rejects an update with missing context", () =>
     withTempTool((directory, registry) =>
       Effect.gen(function* () {

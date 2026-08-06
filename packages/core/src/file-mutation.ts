@@ -33,6 +33,8 @@ export interface WriteInput {
 export interface TextWriteInput {
   readonly target: Target
   readonly content: string
+  /** Existing source whose BOM should transfer when writing a new target. */
+  readonly bomSource?: Target
 }
 
 export interface WriteResult {
@@ -93,15 +95,17 @@ const layer = Layer.effect(
     const read = Effect.fn("FileMutation.read")((target: Target) =>
       Bom.readFile(fs, target.canonical).pipe(
         Effect.map((content) => content.text),
-        Effect.catchTag("PlatformError", (error): Effect.Effect<never, NotFoundError | NotAFileError | FSUtil.Error> =>
-          error.reason._tag === "NotFound"
-            ? Effect.fail(new NotFoundError({ path: target.canonical }))
-            : fs.stat(target.canonical).pipe(
-                Effect.catchTag("PlatformError", () => Effect.succeed(undefined)),
-                Effect.flatMap((info) =>
-                  Effect.fail(info?.type === "Directory" ? new NotAFileError({ path: target.canonical }) : error),
+        Effect.catchTag(
+          "PlatformError",
+          (error): Effect.Effect<never, NotFoundError | NotAFileError | FSUtil.Error> =>
+            error.reason._tag === "NotFound"
+              ? Effect.fail(new NotFoundError({ path: target.canonical }))
+              : fs.stat(target.canonical).pipe(
+                  Effect.catchTag("PlatformError", () => Effect.succeed(undefined)),
+                  Effect.flatMap((info) =>
+                    Effect.fail(info?.type === "Directory" ? new NotAFileError({ path: target.canonical }) : error),
+                  ),
                 ),
-              ),
         ),
       ),
     )
@@ -123,7 +127,12 @@ const layer = Layer.effect(
           const current = yield* fs
             .readFile(input.target.canonical)
             .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
-          const bom = Boolean(current && Bom.has(current)) || next.bom
+          const source = input.bomSource
+            ? yield* fs
+                .readFile(input.bomSource.canonical)
+                .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)))
+            : undefined
+          const bom = Boolean((current && Bom.has(current)) || (source && Bom.has(source))) || next.bom
           yield* fs.writeWithDirs(input.target.canonical, Bom.join(next.text, bom))
           // Formatters may rewrite the file, so re-sync the BOM and report the
           // final text.
@@ -173,6 +182,8 @@ const hostedLayer = Layer.effect(
       error._tag === "WorkspaceEnvironment.NotFoundError"
         ? new NotFoundError({ path: error.path })
         : new FSUtil.FileSystemError({ method, cause: error })
+    const mapFileSystemError = (method: string) => (error: WorkspaceEnvironment.Error) =>
+      new FSUtil.FileSystemError({ method, cause: error })
 
     const read = Effect.fn("FileMutation.read")((target: Target) =>
       env.files.read(target.canonical).pipe(
@@ -197,12 +208,10 @@ const hostedLayer = Layer.effect(
 
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
       withTargetLock(input.target)(
-        env.files
-          .write(input.target.canonical, bytes(input.content))
-          .pipe(
-            Effect.orDie,
-            Effect.map((result) => writeResult(input.target, result.existed)),
-          ),
+        env.files.write(input.target.canonical, bytes(input.content)).pipe(
+          Effect.mapError(mapFileSystemError("write")),
+          Effect.map((result) => writeResult(input.target, result.existed)),
+        ),
       ),
     )
 
@@ -210,9 +219,20 @@ const hostedLayer = Layer.effect(
       withTargetLock(input.target)(
         Effect.gen(function* () {
           const next = Bom.split(input.content)
-          const current = yield* WorkspaceEnvironment.optional(env.files.read(input.target.canonical))
-          const text = Bom.join(next.text, Boolean(current && Bom.has(current)) || next.bom)
-          const result = yield* env.files.write(input.target.canonical, bytes(text)).pipe(Effect.orDie)
+          const optionalRead = (target: Target) =>
+            env.files.read(target.canonical).pipe(
+              Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+              Effect.mapError(mapFileSystemError("read")),
+            )
+          const current = yield* optionalRead(input.target)
+          const source = input.bomSource ? yield* optionalRead(input.bomSource) : undefined
+          const text = Bom.join(
+            next.text,
+            Boolean((current && Bom.has(current)) || (source && Bom.has(source))) || next.bom,
+          )
+          const result = yield* env.files
+            .write(input.target.canonical, bytes(text))
+            .pipe(Effect.mapError(mapFileSystemError("write")))
           return { ...writeResult(input.target, result.existed), content: next.text }
         }),
       ),

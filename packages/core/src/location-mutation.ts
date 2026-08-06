@@ -31,7 +31,7 @@ export class PathError extends Schema.TaggedErrorClass<PathError>()("LocationMut
 
 export interface ExternalDirectoryAuthorization {
   readonly action: "external_directory"
-  /** Canonical existing directory used as the external approval boundary. */
+  /** Lexical directory used as the external approval boundary. */
   readonly directory: string
   /** `external_directory` permission resource. */
   readonly resource: string
@@ -53,7 +53,7 @@ export interface Target {
    * the name itself.
    */
   readonly absolute: string
-  /** Permission resource: Location-relative for internal paths, canonical for external paths. */
+  /** Permission resource: Location-relative for internal paths, lexical absolute for external paths. */
   readonly resource: string
   readonly externalDirectory?: ExternalDirectoryAuthorization
 }
@@ -81,6 +81,7 @@ interface ResolvedPath {
     | "Socket"
     | "Unknown"
   readonly directory: string
+  readonly lexicalDirectory: string
 }
 
 const slash = (value: string) => value.replaceAll("\\", "/")
@@ -103,6 +104,7 @@ const layer = Layer.effect(
           canonical: existing,
           type: info.type,
           directory: info.type === "Directory" ? existing : path.dirname(existing),
+          lexicalDirectory: info.type === "Directory" ? absolute : path.dirname(absolute),
         } satisfies ResolvedPath
       }
 
@@ -117,6 +119,7 @@ const layer = Layer.effect(
           return {
             canonical: path.resolve(canonical, path.relative(anchor, absolute)),
             directory: canonical,
+            lexicalDirectory: anchor,
           } satisfies ResolvedPath
         }
         const parent = path.dirname(anchor)
@@ -133,9 +136,8 @@ const layer = Layer.effect(
 
       const resolved = yield* resolvePath(absolute)
       const external = !lexicallyInternal
-      const resource = external ? slash(resolved.canonical) : slash(path.relative(location.directory, absolute) || ".")
-      const externalDirectory =
-        input.kind === "directory" && resolved.type === "Directory" ? resolved.canonical : resolved.directory
+      const resource = external ? slash(absolute) : slash(path.relative(location.directory, absolute) || ".")
+      const externalDirectory = resolved.lexicalDirectory
       const externalResource = slash(path.join(externalDirectory, "*"))
       return {
         canonical: resolved.canonical,
@@ -183,6 +185,7 @@ const hostedLayer = Layer.effect(
           canonical: existing,
           type: info.type,
           directory: info.type === "Directory" ? existing : path.posix.dirname(existing),
+          lexicalDirectory: info.type === "Directory" ? absolute : path.posix.dirname(absolute),
         } satisfies ResolvedPath
       }
 
@@ -197,6 +200,7 @@ const hostedLayer = Layer.effect(
           return {
             canonical: path.posix.resolve(canonical, path.posix.relative(anchor, absolute)),
             directory: canonical,
+            lexicalDirectory: anchor,
           } satisfies ResolvedPath
         }
         const parent = path.posix.dirname(anchor)

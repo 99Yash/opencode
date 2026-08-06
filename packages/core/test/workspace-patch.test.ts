@@ -128,6 +128,34 @@ describe("PatchTool on a hosted location", () => {
     )
   })
 
+  it.effect("reports hosted write failures through the tool error channel", () => {
+    const base = memoryEnvironment({})
+    const memory: MemoryEnvironment = {
+      ...base,
+      environment: WorkspaceEnvironment.make({
+        ...base.environment,
+        files: {
+          ...base.environment.files,
+          write: (path, content) =>
+            path.endsWith("fail.txt")
+              ? Effect.fail(new WorkspaceEnvironment.Error({ operation: "write", path }))
+              : base.environment.files.write(path, content),
+        },
+      }),
+    }
+    return withTool(memory, (registry) =>
+      Effect.gen(function* () {
+        const settled = yield* executeTool(
+          registry,
+          call("*** Begin Patch\n*** Add File: fail.txt\n+created\n*** End Patch"),
+        )
+        expect(settled.status).toBe("error")
+        if (settled.status !== "error") return
+        expect(settled.error?.message).toContain("Failed to write fail.txt")
+      }),
+    )
+  })
+
   it.effect("rejects targets outside the workspace", () => {
     const memory = memoryEnvironment({})
     return withTool(memory, (registry) =>

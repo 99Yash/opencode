@@ -7,7 +7,7 @@ A **Workspace** is a durable place a Session executes: a filesystem root plus pr
 ## Decisions
 
 - **Workspace is the noun; sandbox is a kind.** `Location.workspaceID` names a Workspace; omitted still means implicit local, unchanged.
-- **A Workspace is an empty environment.** No repository, project, or name at creation. Cloning happens later, inside a Session. *A Workspace may contain a Project; a Workspace is not a Project.*
+- **A Workspace is an empty environment.** No repository, project, or name at creation. Cloning happens later, inside a Session. _A Workspace may contain a Project; a Workspace is not a Project._
 - **Creation is eager.** `create` resolves when the environment is usable. No pending states, no lazy attachment, no detached Sessions.
 - **Providers are pluggable drivers** behind a three-verb seam, selected by provider string.
 
@@ -33,13 +33,13 @@ const workspace = await workspaces.get(id) // { id, provider, root } — table r
 
 ## Domain Model
 
-| Concept | What it is | Visibility |
-| --- | --- | --- |
-| Workspace | Durable execution environment: `id` + `root` | Public |
-| Sandbox | The hosted kind of Workspace | Vocabulary only, not an API noun |
-| Binding | Smallest provider-owned JSON to reconnect to the same resource | Internal, stored opaquely |
-| WorkspaceEnvironment | Scoped live connection: files + processes at the root | Internal seam |
-| Project | Repository identity discovered *within* a Location | Public, becomes optional |
+| Concept              | What it is                                                     | Visibility                       |
+| -------------------- | -------------------------------------------------------------- | -------------------------------- |
+| Workspace            | Durable execution environment: `id` + `root`                   | Public                           |
+| Sandbox              | The hosted kind of Workspace                                   | Vocabulary only, not an API noun |
+| Binding              | Smallest provider-owned JSON to reconnect to the same resource | Internal, stored opaquely        |
+| WorkspaceEnvironment | Scoped live connection: files + processes at the root          | Internal seam                    |
+| Project              | Repository identity discovered _within_ a Location             | Public, becomes optional         |
 
 Binding is all that earlier drafts called "placement" — a column, not a concept. Provider resource replacement (Modal snapshot → new sandbox) is the same Workspace with an updated binding.
 
@@ -80,7 +80,9 @@ export interface Registry {
   readonly get: (provider: string) => Effect.Effect<Interface, ProviderNotFoundError>
 }
 
-export class RegistryService extends Context.Service<RegistryService, Registry>()("@opencode/WorkspaceDriverRegistry") {}
+export class RegistryService extends Context.Service<RegistryService, Registry>()(
+  "@opencode/WorkspaceDriverRegistry",
+) {}
 ```
 
 - Fresh-create and restart-reconnect both flow through `connect` — where the prior tracers found their bugs.
@@ -169,14 +171,14 @@ Core consumes it blindly:
 
 ```typescript
 // workspaces.create
-const driver = yield* registry.get(input.provider)
-const created = yield* driver.create({ workspaceID: id })
-yield* store.insert({ id, provider: input.provider, binding: created.binding, root: created.root })
+const driver = yield * registry.get(input.provider)
+const created = yield * driver.create({ workspaceID: id })
+yield * store.insert({ id, provider: input.provider, binding: created.binding, root: created.root })
 
 // hosted Location graph construction (inside the existing scoped cache)
-const workspace = yield* store.get(location.workspaceID)
-const driver = yield* registry.get(workspace.provider)
-const env = yield* driver.connect(workspace.binding)
+const workspace = yield * store.get(location.workspaceID)
+const driver = yield * registry.get(workspace.provider)
+const env = yield * driver.connect(workspace.binding)
 ```
 
 - Core defines the key and consumes; Server defines drivers and provides the layer; core never sees a provider SDK.
@@ -214,7 +216,8 @@ export interface Interface {
    ┌───────────────────────────────────────────────────────────────┐
    │                DOMAIN SERVICES — one implementation each      │
    │                                                               │
-   │  LocationMutation.resolve   path → Target (canonical,        │
+   │  LocationMutation.resolve   path → Target (lexical path,     │
+   │                             canonical referent,              │
    │                             permission resources,            │
    │                             external-directory approvals)    │
    │  FileMutation               read / write / remove — locks,   │
@@ -238,7 +241,7 @@ export interface Interface {
 
 The four domain services own all cross-cutting policy exactly once:
 
-- **`LocationMutation.resolve(path, kind?)`** — path → `Target { canonical, resource, externalDirectory? }`. Path semantics (posix in providers, win32 locally), containment, and permission-resource derivation live here; tools pass targets around without re-deriving anything.
+- **`LocationMutation.resolve(path, kind?)`** — path → `Target { absolute, canonical, resource, externalDirectory? }`. `absolute` is the normalized lexical path the model named; permissions and entry operations use it. `canonical` is the resolved referent used for reads, writes, and locking. Thus reads/writes follow a symlink while remove unlinks the symlink itself, and permission resources always describe the named path. Path semantics (posix in providers, win32 locally), containment, and permission-resource derivation live here; tools pass targets around without re-deriving anything.
 - **`FileMutation`** — the read–transform–write seam:
 
   ```typescript
@@ -251,6 +254,7 @@ The four domain services own all cross-cutting policy exactly once:
   ```
 
   BOM handling, per-target locking, formatter execution, and error classification are implementation details here. Tools never import `Bom`, never call `Formatter`, never see a backend error vocabulary.
+
 - **`FileSystem`** — read-model queries for the read tool and file browsing.
 - **`Shell`** — command execution; each backend validates its own cwd and surfaces one error shape.
 
@@ -258,21 +262,21 @@ Every model-facing tool then reads as pure policy over these:
 
 ```typescript
 // EditTool.execute — identical local and hosted
-const target = yield* mutation.resolve({ path: input.path, kind: "file" })
-const original = yield* files.read(target) // NotFoundError → "File not found"
+const target = yield * mutation.resolve({ path: input.path, kind: "file" })
+const original = yield * files.read(target) // NotFoundError → "File not found"
 const replaced = replace(original, input.oldString, input.newString) // pure
-yield* permission.assert({ action: "edit", resources: [target.resource], diff })
-const result = yield* files.writeTextPreservingBom({ target, content: replaced })
+yield * permission.assert({ action: "edit", resources: [target.resource], diff })
+const result = yield * files.writeTextPreservingBom({ target, content: replaced })
 return { files: [fileDiff(target.resource, original, result.content)] }
 
 // PatchTool.execute — identical local and hosted
 const hunks = Patch.parse(input.patchText) // pure
 for (const hunk of hunks) {
-  const target = yield* mutation.resolve({ path: hunk.path })
-  const original = yield* files.read(target) // updates and deletes
+  const target = yield * mutation.resolve({ path: hunk.path })
+  const original = yield * files.read(target) // updates and deletes
   prepared.push(derive(hunk, target, original)) // pure
 }
-yield* permission.assert({ action: "edit", resources, diffs })
+yield * permission.assert({ action: "edit", resources, diffs })
 for (const change of prepared) {
   // add/update → files.writeTextPreservingBom, delete/move → files.remove
 }
@@ -280,13 +284,13 @@ for (const change of prepared) {
 
 Local vs hosted is then a compilation difference, not a code difference:
 
-| Layer | Local graph | Hosted graph |
-| --- | --- | --- |
-| Tools | identical bytes | identical bytes |
-| Domain services | identical bytes | identical bytes |
-| WorkspaceEnvironment | host adapter (fs + spawn) | `driver.connect(binding)` |
-| Formatting | runs (host binaries, host files) | inert until an environment formatter runtime exists |
-| Catalog | full | minus tools without environment-backed execution yet (glob/grep) |
+| Layer                | Local graph                      | Hosted graph                                                     |
+| -------------------- | -------------------------------- | ---------------------------------------------------------------- |
+| Tools                | identical bytes                  | identical bytes                                                  |
+| Domain services      | identical bytes                  | identical bytes                                                  |
+| WorkspaceEnvironment | host adapter (fs + spawn)        | `driver.connect(binding)`                                        |
+| Formatting           | runs (host binaries, host files) | inert until an environment formatter runtime exists              |
+| Catalog              | full                             | minus tools without environment-backed execution yet (glob/grep) |
 
 ### Staging
 
@@ -318,16 +322,16 @@ const table = sqliteTable("workspace", {
 2. **Location graph** — `LocationServiceMap` selects local or hosted construction; hosted acquires via `driver.connect(binding)` inside the existing scoped cache.
 3. **Tool catalog** — hosted Locations advertise only environment-backed tools. Nothing may fall back to host authority.
 
-| In an empty Workspace | |
-| --- | --- |
-| Available | read/write/edit, bash, glob/grep, global config/agents/instructions, models, integrations |
-| Needs a Project | git status/diffs, snapshots/revert, project instructions/config/skills/plugins, repo-scoped permissions |
+| In an empty Workspace |                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| Available             | read/write/edit, bash, glob/grep, global config/agents/instructions, models, integrations               |
+| Needs a Project       | git status/diffs, snapshots/revert, project instructions/config/skills/plugins, repo-scoped permissions |
 
 ### Project Identity For Hosted Sessions
 
 - Admission consults **stored facts only** — never live discovery, never a driver. A stopped sandbox must not block `sessions.create`.
 - An empty Workspace has no repository, so hosted Sessions reuse `Project.ID.global` — the same degenerate Project local non-VCS directories already get. This is "not discovered yet," not a new concept.
-- Project identity is machine-independent by design (`Hash.fast("git-remote:" + origin)`, root-commit fallback). Once the rediscover slice runs discovery *inside* the Workspace, a hosted clone of a repo joins the same Project as local checkouts automatically.
+- Project identity is machine-independent by design (`Hash.fast("git-remote:" + origin)`, root-commit fallback). Once the rediscover slice runs discovery _inside_ the Workspace, a hosted clone of a repo joins the same Project as local checkouts automatically.
 - The rediscover slice adds nullable `workspace.project_id`, stamped when discovery finds a repo; admission then reads `workspace.project_id ?? global`. Not added now — nothing writes it in this slice.
 
 ## First Milestone
