@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import type { DatabaseMigration } from "../migration"
 
 export default {
-  id: "20260805232152_add_workspace",
+  id: "20260806150824_add_workspace",
   up(tx) {
     return Effect.gen(function* () {
       yield* tx.run(`
