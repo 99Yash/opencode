@@ -128,6 +128,7 @@ export function buildLocationServiceMap(
               ? [
                   [Location.node, Location.hostedBoundNode(ref, workspaceID)],
                   [Config.node, Config.configured({ project: false })],
+                  [InstructionDiscovery.node, InstructionDiscovery.configured({ project: false })],
                   [WorkspaceEnvironment.node, WorkspaceEnvironment.hostedNode(workspaceID)],
                   [FileSystem.node, FileSystem.hostedNode],
                   [LocationMutation.node, LocationMutation.hostedNode],

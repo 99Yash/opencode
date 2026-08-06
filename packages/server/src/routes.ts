@@ -39,6 +39,8 @@ import { PtyEnvironment } from "./pty-environment"
 import { layer } from "./location"
 import { formLocationLayer } from "./middleware/form-location"
 import { sessionLocationLayer } from "./middleware/session-location"
+import { WorkspaceDriver } from "@opencode-ai/core/workspace/driver"
+import { ServerWorkspaceDrivers } from "./workspace/drivers"
 import { ServerInfo } from "./server-info"
 import type { ServerOptions } from "./options"
 
@@ -83,6 +85,7 @@ function makeRoutes<AuthError, AuthServices>(
   const pluginRuntimeCell = PluginRuntime.makeCell()
   const replacements: LayerNode.Replacements = [
     [Database.node, Database.configured(options.database)],
+    [WorkspaceDriver.registryNode, ServerWorkspaceDrivers.node],
     [App.node, App.configured(options.app)],
     [ModelsDev.node, ModelsDev.configured(options.models)],
     [Watcher.node, Watcher.configured({ enabled: options.fs?.filewatcher })],
