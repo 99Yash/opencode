@@ -1,7 +1,8 @@
 export * as PluginInternal from "./internal"
 
 import type { Plugin } from "@opencode-ai/plugin/effect/plugin"
-import { Context, Effect, Scope } from "effect"
+import { Context, Effect, Option, Scope } from "effect"
+import { WorkspaceEnvironment } from "../workspace/environment"
 import { HttpClient } from "effect/unstable/http"
 import { Agent } from "../agent"
 import { Catalog } from "../catalog"
@@ -95,7 +96,14 @@ const services = Effect.fn("PluginInternal.services")(function* () {
   const skill = yield* Skill.Service
   const tools = yield* Tool.Service
   const wellknown = yield* WellKnown.Service
+  // Bound only in hosted Location graphs; plugins read it with serviceOption
+  // to route filesystem checks at the provider instead of the host.
+  const environment = yield* Effect.serviceOption(WorkspaceEnvironment.Service)
   return Context.mergeAll(
+    Option.match(environment, {
+      onSome: (value) => Context.make(WorkspaceEnvironment.Service, value),
+      onNone: () => Context.empty(),
+    }),
     Context.make(Agent.Service, agent),
     Context.make(Catalog.Service, catalog),
     Context.make(Command.Service, command),

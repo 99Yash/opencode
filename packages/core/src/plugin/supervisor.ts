@@ -40,6 +40,7 @@ import { ReadToolFileSystem } from "../tool/read-filesystem"
 import { Tool } from "../tool"
 import { WebSearch } from "../websearch"
 import { WellKnown } from "../wellknown"
+import { WorkspaceEnvironment } from "../workspace/environment"
 import { PluginInternal } from "./internal"
 import { PluginRuntime } from "./runtime"
 import { SdkPlugins } from "./sdk"
@@ -282,7 +283,9 @@ const layer = Layer.effect(
     })
     const updates = Stream.merge(
       config.changes().pipe(
-        Stream.filterEffect((update) => Effect.map(config.entries(), (entries) => isPluginSource(entries, update.path))),
+        Stream.filterEffect((update) =>
+          Effect.map(config.entries(), (entries) => isPluginSource(entries, update.path)),
+        ),
         Stream.merge(Stream.fromPubSub(configuredChanges)),
       ),
       bus.subscribe([Event.Updated, SdkPlugins.Updated]),
@@ -308,45 +311,54 @@ const layer = Layer.effect(
 
 const nodeLayer = layer as Layer.Layer<Service, never, PluginInternal.Requirements>
 
+const nodeDeps = [
+  Plugin.node,
+  SdkPlugins.node,
+  Agent.node,
+  Catalog.node,
+  Command.node,
+  Config.node,
+  Credential.node,
+  Bus.node,
+  FileMutation.node,
+  Formatter.node,
+  FileSystem.node,
+  FSUtil.node,
+  Global.node,
+  httpClient,
+  Image.node,
+  Integration.node,
+  KV.node,
+  Location.node,
+  LocationMutation.node,
+  ModelsDev.node,
+  Npm.node,
+  Permission.node,
+  PluginRuntime.node,
+  Form.node,
+  ReadToolFileSystem.node,
+  Reference.node,
+  Ripgrep.node,
+  SessionInstructions.node,
+  Shell.node,
+  Skill.node,
+  Tool.node,
+  Watcher.node,
+  WebSearch.node,
+  WellKnown.node,
+] as const
+
 export const node = makeLocationNode({
   service: Service,
   layer: nodeLayer,
-  deps: [
-    Plugin.node,
-    SdkPlugins.node,
-    Agent.node,
-    Catalog.node,
-    Command.node,
-    Config.node,
-    Credential.node,
-    Bus.node,
-    FileMutation.node,
-    Formatter.node,
-    FileSystem.node,
-    FSUtil.node,
-    Global.node,
-    httpClient,
-    Image.node,
-    Integration.node,
-    KV.node,
-    Location.node,
-    LocationMutation.node,
-    ModelsDev.node,
-    Npm.node,
-    Permission.node,
-    PluginRuntime.node,
-    Form.node,
-    ReadToolFileSystem.node,
-    Reference.node,
-    Ripgrep.node,
-    SessionInstructions.node,
-    Shell.node,
-    Skill.node,
-    Tool.node,
-    Watcher.node,
-    WebSearch.node,
-    WellKnown.node,
-  ],
+  deps: nodeDeps,
+})
+
+/** Hosted graphs bind the workspace environment so internal plugins can reach it. */
+export const hostedNode = makeLocationNode({
+  service: Service,
+  layer: nodeLayer,
+  deps: [...nodeDeps, WorkspaceEnvironment.node],
 })
 
 export { layer }

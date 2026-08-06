@@ -134,6 +134,7 @@ export function buildLocationServiceMap(
                   [LocationMutation.node, LocationMutation.hostedNode],
                   [FileMutation.node, FileMutation.hostedNode],
                   [Shell.node, Shell.hostedNode],
+                  [PluginSupervisor.node, PluginSupervisor.hostedNode],
                 ]
               : [[Location.node, Location.boundNode(ref)]],
           )
