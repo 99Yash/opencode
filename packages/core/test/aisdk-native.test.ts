@@ -52,7 +52,7 @@ describe("AISDKNative", () => {
         {
           accountId: "account/id",
           apiKey: "secret",
-          baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+          baseURL: "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/v1",
           headers: { "x-custom": "value" },
           queryParams: { version: "preview" },
           reasoningEffort: "high",

@@ -16,6 +16,7 @@ import { Credential } from "./credential"
 import { Integration } from "./integration"
 import { Capabilities, ID, Info, Ref, VariantID } from "./model"
 import { Npm } from "@opencode-ai/util/npm"
+import { PluginHooks } from "./plugin/hooks"
 import { Provider } from "./provider"
 
 export class VariantUnavailableError extends Schema.TaggedErrorClass<VariantUnavailableError>()(
@@ -133,6 +134,11 @@ export const withVariant = (
 export interface Dependencies {
   readonly loadPackage?: (specifier: string) => Effect.Effect<Provider.ProviderPackage, Provider.LoadError>
   readonly loadAISDK?: (model: Info) => Effect.Effect<LanguageModel, AISDK.InitError>
+  readonly resolveProvider?: (input: {
+    readonly model: Info
+    readonly credential?: Credential.Value
+    readonly settings: Record<string, unknown>
+  }) => Effect.Effect<Record<string, unknown>>
 }
 
 export const fromCatalogModel = (
@@ -142,9 +148,6 @@ export const fromCatalogModel = (
 ): Effect.Effect<LanguageModel, UnsupportedPackageError> => {
   const resolved = produce(model, (draft) => {
     if (draft.settings?.apiKey === "") delete draft.settings.apiKey
-    if (credential?.type === "key" && credential.metadata !== undefined)
-      draft.body = Provider.mergeOverlay(draft.body, credential.metadata)
-    if (draft.providerID === "cloudflare-workers-ai" && draft.body) delete draft.body.accountId
   })
   const packageName = Provider.packageName(resolved.package)
   const key = apiKey(resolved, credential)
@@ -246,7 +249,25 @@ export const resolveModel = (
   variant: VariantID | undefined,
   credential?: Credential.Value,
   dependencies?: Dependencies,
-) => withVariant(model, variant).pipe(Effect.flatMap((model) => fromCatalogModel(model, credential, dependencies)))
+) =>
+  withVariant(model, variant).pipe(
+    Effect.flatMap((model) => {
+      if (!dependencies?.resolveProvider) return fromCatalogModel(model, credential, dependencies)
+      return dependencies
+        .resolveProvider({ model, credential, settings: { ...model.settings, ...credential?.metadata } })
+        .pipe(
+          Effect.flatMap((settings) =>
+            fromCatalogModel(
+              produce(model, (draft) => {
+                draft.settings = settings
+              }),
+              credential,
+              dependencies,
+            ),
+          ),
+        )
+    }),
+  )
 
 export const supported = (model: Info) => Boolean(model.package)
 
@@ -258,6 +279,7 @@ export const layer = Layer.effect(
     const integrations = yield* Integration.Service
     const npm = yield* Npm.Service
     const aisdk = yield* AISDK.Service
+    const hooks = yield* PluginHooks.Service
     const load = Effect.fn("ModelResolver.resolveModel")(function* (selected: Info, variant?: VariantID) {
       const provider = yield* catalog.provider.get(selected.providerID)
       const connection = yield* integrations.connection.active(
@@ -270,6 +292,8 @@ export const layer = Layer.effect(
         {
           loadPackage: (specifier) => Provider.loadPackage(specifier, npm),
           loadAISDK: (model) => aisdk.model(model),
+          resolveProvider: (input) =>
+            hooks.trigger("provider", "resolve", input).pipe(Effect.map((event) => event.settings)),
         },
       )
       return {
@@ -307,5 +331,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Catalog.node, Integration.node, Npm.node, AISDK.node],
+  deps: [Catalog.node, Integration.node, Npm.node, AISDK.node, PluginHooks.node],
 })

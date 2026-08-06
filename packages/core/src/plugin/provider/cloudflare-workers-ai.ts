@@ -14,25 +14,30 @@ export const CloudflareWorkersAIPlugin = define({
       if (!item) return
       evt.provider.update(item.provider.id, (provider) => {
         if (!Provider.isAISDK(provider.package)) return
-        const accountId = resolveAccountId(provider.settings ?? {})
-        if (accountId)
-          provider.settings = {
-            ...provider.settings,
-            baseURL:
-              typeof provider.settings?.baseURL === "string"
-                ? provider.settings.baseURL.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
-                : workersEndpoint(accountId),
-          }
+        const baseURL = resolveBaseURL(provider.settings ?? {})
+        if (baseURL) provider.settings = { ...provider.settings, baseURL }
         provider.headers = Provider.mergeHeaders(provider.headers, {
           "User-Agent": `${App.useragent(ctx.app)} cloudflare-workers-ai (${os.platform()} ${os.release()}; ${os.arch()})`,
         })
       })
     })
+    yield* ctx.provider.hook(
+      "resolve",
+      Effect.fn(function* (evt) {
+        if (evt.model.providerID !== providerID) return
+        const baseURL = resolveBaseURL(evt.settings)
+        if (baseURL) evt.settings.baseURL = baseURL
+      }),
+    )
   }),
 })
 
-function resolveAccountId(options: Record<string, unknown>) {
-  return process.env.CLOUDFLARE_ACCOUNT_ID ?? stringOption(options, "accountId")
+function resolveBaseURL(options: Record<string, unknown>) {
+  const baseURL = stringOption(options, "baseURL")
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID ?? stringOption(options, "accountId")
+  if (!accountId) return baseURL
+  if (baseURL) return baseURL.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
+  return workersEndpoint(accountId)
 }
 
 function workersEndpoint(accountId: string) {

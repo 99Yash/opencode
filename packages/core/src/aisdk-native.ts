@@ -73,19 +73,11 @@ function mapOpenAICompatible(
   input: MapInput,
   baseSettings: Readonly<Record<string, unknown>>,
 ): Mapping | undefined {
-  const accountId =
-    input.providerID === "cloudflare-workers-ai" && typeof input.settings.accountId === "string"
-      ? input.settings.accountId
-      : undefined
-  const baseURL =
-    typeof baseSettings.baseURL === "string" && accountId
-      ? baseSettings.baseURL.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
-      : baseSettings.baseURL
-  if (typeof baseURL !== "string") return undefined
+  if (typeof baseSettings.baseURL !== "string") return undefined
   return {
     package: "@opencode-ai/ai/providers/openai-compatible",
     settings: {
-      baseURL,
+      baseURL: baseSettings.baseURL,
       ...mapAPIKey(input.settings),
       provider: input.providerID,
       ...(isStringRecord(input.settings.queryParams) ? { queryParams: input.settings.queryParams } : {}),

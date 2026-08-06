@@ -133,7 +133,7 @@ describe("ModelResolver", () => {
 
   it.effect("routes Cloudflare Workers AI through the generic OpenAI-compatible provider", () =>
     Effect.gen(function* () {
-      const resolved = yield* ModelResolver.fromCatalogModel(
+      const resolved = yield* ModelResolver.resolveModel(
         model(Provider.aisdk("@ai-sdk/openai-compatible"), {
           providerID: Provider.ID.make("cloudflare-workers-ai"),
           modelID: "@cf/meta/llama-3.1-8b-instruct",
@@ -143,8 +143,19 @@ describe("ModelResolver", () => {
             reasoningEffort: "high",
           },
         }),
+        undefined,
         Credential.Key.make({ type: "key", key: "secret", metadata: { accountId: "account/id" } }),
-        { loadAISDK: () => Effect.die("AI SDK loader should not be called") },
+        {
+          loadAISDK: () => Effect.die("AI SDK loader should not be called"),
+          resolveProvider: (input) =>
+            Effect.succeed({
+              ...input.settings,
+              baseURL: String(input.settings.baseURL).replace(
+                "${CLOUDFLARE_ACCOUNT_ID}",
+                encodeURIComponent(String(input.settings.accountId)),
+              ),
+            }),
+        },
       )
       const headers = yield* resolved.route.auth.apply({
         request: LLM.request({ model: resolved, prompt: "Hello" }),
@@ -395,7 +406,7 @@ describe("ModelResolver", () => {
     }),
   )
 
-  it.effect("prefers stored credentials over configured auth", () =>
+  it.effect("keeps key credential metadata out of request bodies", () =>
     Effect.gen(function* () {
       const credential = Credential.Key.make({ type: "key", key: "stored-secret", metadata: { tenant: "work" } })
       const resolved = yield* ModelResolver.fromCatalogModel(
@@ -415,7 +426,7 @@ describe("ModelResolver", () => {
       })
 
       expect(headers.authorization).toBe("Bearer stored-secret")
-      expect(resolved.route.defaults.http?.body).toEqual({ tenant: "work" })
+      expect(resolved.route.defaults.http?.body).toEqual({})
     }),
   )
 

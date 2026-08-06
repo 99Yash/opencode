@@ -1,8 +1,11 @@
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
+import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { CloudflareWorkersAIPlugin } from "@opencode-ai/core/plugin/provider/cloudflare-workers-ai"
 import { Provider } from "@opencode-ai/core/provider"
+import { Credential } from "@opencode-ai/core/credential"
+import { ID, Info } from "@opencode-ai/core/model"
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import { testEffect } from "../lib/effect"
@@ -78,6 +81,40 @@ describe("CloudflareWorkersAIPlugin", () => {
     ),
   )
 
+  it.effect("resolves an account ID from credential metadata before native routing", () =>
+    withEnv(undefined, () =>
+      Effect.gen(function* () {
+        yield* addPlugin()
+        const event = yield* (yield* PluginHooks.Service).trigger("provider", "resolve", {
+          model: Info.make({
+            id: ID.make("model"),
+            modelID: ID.make("@cf/model"),
+            providerID,
+            name: "Model",
+            package: Provider.aisdk("@ai-sdk/openai-compatible"),
+            settings: {},
+            capabilities: { tools: true, input: ["text"], output: ["text"] },
+            variants: [],
+            time: { released: 0 },
+            cost: [],
+            status: "active",
+            enabled: true,
+            limit: { context: 128_000, output: 8_192 },
+          }),
+          credential: Credential.Key.make({ type: "key", key: "secret", metadata: { accountId: "stored/account" } }),
+          settings: {
+            accountId: "stored/account",
+            baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+          },
+        })
+
+        expect(event.settings.baseURL).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/stored%2Faccount/ai/v1",
+        )
+      }),
+    ),
+  )
+
   it.effect("expands account placeholders and preserves configured endpoints", () =>
     withEnv("env-account", () =>
       Effect.gen(function* () {
@@ -98,14 +135,14 @@ describe("CloudflareWorkersAIPlugin", () => {
     ),
   )
 
-  it.effect("preserves a custom endpoint without an account ID", () =>
+  it.effect("preserves a custom endpoint when an account ID is configured", () =>
     withEnv(undefined, () =>
       Effect.gen(function* () {
         const catalog = yield* Catalog.Service
         yield* catalog.transform((draft) =>
           draft.provider.update(providerID, (provider) => {
             provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
-            provider.settings = { baseURL: "https://proxy.example/v1" }
+            provider.settings = { accountId: "configured-account", baseURL: "https://proxy.example/v1" }
           }),
         )
         yield* addPlugin()
