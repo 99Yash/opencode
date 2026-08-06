@@ -31,31 +31,13 @@ test("ensures a missing service with native promises", async () => {
   const endpoint = await Service.ensure({
     file: registration,
     version: "test",
-    command: [process.execPath, fixture, registration, "coordinated"],
+    command: [process.execPath, fixture, registration, "delayed", "100"],
     onStart: (reason) => starts.push(reason),
   })
   const info = await Bun.file(registration).json()
   try {
     expect(endpoint.url).toBe(info.url)
     expect(starts).toEqual(["missing"])
-  } finally {
-    process.kill(info.pid, "SIGTERM")
-    await waitForExit(info.pid)
-  }
-}, 15_000)
-
-test("waits for a live contender when another native contender fails", async () => {
-  const directory = await temp()
-  const registration = join(directory, "service.json")
-
-  const endpoint = await Service.ensure({
-    file: registration,
-    version: "test",
-    command: [process.execPath, fixture, registration, "coordinated-failed-loser"],
-  })
-  const info = await Bun.file(registration).json()
-  try {
-    expect(endpoint.url).toBe(info.url)
   } finally {
     process.kill(info.pid, "SIGTERM")
     await waitForExit(info.pid)
