@@ -6,6 +6,7 @@ import { ChildProcess } from "effect/unstable/process"
 import { produce } from "immer"
 import { Shell } from "@opencode-ai/schema/shell"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
+import { FSUtil } from "@opencode-ai/util/fs-util"
 import { AppProcess } from "@opencode-ai/util/process"
 import { Config } from "./config"
 import { Bus } from "./bus"
@@ -19,6 +20,18 @@ import { PluginHooks } from "./plugin/hooks"
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Shell.NotFoundError", {
   id: Shell.ID,
 }) {}
+
+export class InvalidCwdError extends Schema.TaggedErrorClass<InvalidCwdError>()("Shell.InvalidCwdError", {
+  path: Schema.String,
+  reason: Schema.Literals(["not_found", "not_directory", "unavailable"]),
+  cause: Schema.optional(Schema.Defect()),
+}) {
+  override get message() {
+    if (this.reason === "not_found") return `Working directory does not exist: ${this.path}`
+    if (this.reason === "not_directory") return `Working directory is not a directory: ${this.path}`
+    return `Unable to inspect working directory: ${this.path}`
+  }
+}
 
 // Exited processes stay observable (status, exit code, retained output) until removed explicitly.
 // Cap retention so abandoned commands do not accumulate unbounded state and output files.
@@ -51,7 +64,7 @@ export interface Interface {
   readonly create: <E = never, R = never>(
     input: Shell.CreateInput,
     before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
-  ) => Effect.Effect<Shell.Info, E, R>
+  ) => Effect.Effect<Shell.Info, E | InvalidCwdError, R>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
   readonly list: () => Effect.Effect<Shell.Info[]>
   readonly get: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
@@ -75,6 +88,7 @@ interface Backend {
   /** Base environment for spawned commands. Hosted backends must not leak host process.env. */
   readonly env: Readonly<Record<string, string | undefined>>
   readonly detached: boolean
+  readonly validateCwd: (cwd: string) => Effect.Effect<void, InvalidCwdError>
 }
 
 const layerWith = <E, R>(backend: Effect.Effect<Backend, E, R>) => Layer.effect(
@@ -201,6 +215,7 @@ const layerWith = <E, R>(backend: Effect.Effect<Backend, E, R>) => Layer.effect(
       }
       yield* hooks.trigger("shell", "create.before", invocation)
       if (before) yield* before(invocation)
+      yield* spawner.validateCwd(invocation.cwd)
 
       const id = Shell.ID.ascending()
       const args = spawner.args(invocation.shell, invocation.command)
@@ -350,6 +365,7 @@ export const layer = (options?: ShellSelect.Options) =>
     Effect.gen(function* () {
       const config = yield* Config.Service
       const appProcess = yield* AppProcess.Service
+      const fs = yield* FSUtil.Service
       return {
         spawn: (command) => appProcess.spawn(command),
         shell: config
@@ -358,6 +374,21 @@ export const layer = (options?: ShellSelect.Options) =>
         args: ShellSelect.args,
         env: process.env,
         detached: process.platform !== "win32",
+        validateCwd: (cwd) =>
+          fs.stat(cwd).pipe(
+            Effect.mapError((error) =>
+              new InvalidCwdError({
+                path: cwd,
+                reason: error.reason._tag === "NotFound" ? "not_found" : "unavailable",
+                cause: error,
+              }),
+            ),
+            Effect.flatMap((info) =>
+              info.type === "Directory"
+                ? Effect.void
+                : Effect.fail(new InvalidCwdError({ path: cwd, reason: "not_directory" })),
+            ),
+          ),
       } satisfies Backend
     }),
   )
@@ -366,7 +397,7 @@ export function configured(options?: ShellSelect.Options) {
   return makeLocationNode({
     service: Service,
     layer: layer(options),
-    deps: [Bus.node, Location.node, Config.node, Global.node, AppProcess.node, PluginHooks.node],
+    deps: [Bus.node, Location.node, Config.node, Global.node, AppProcess.node, FSUtil.node, PluginHooks.node],
   })
 }
 
@@ -385,6 +416,21 @@ export const hostedNode = makeLocationNode({
         args: (_shell, command) => env.shell.args(command),
         env: env.shell.environmentOverrides,
         detached: env.shell.detached,
+        validateCwd: (cwd) =>
+          env.files.stat(cwd).pipe(
+            Effect.mapError((error) =>
+              new InvalidCwdError({
+                path: cwd,
+                reason: error._tag === "WorkspaceEnvironment.NotFoundError" ? "not_found" : "unavailable",
+                cause: error,
+              }),
+            ),
+            Effect.flatMap((info) =>
+              info.type === "Directory"
+                ? Effect.void
+                : Effect.fail(new InvalidCwdError({ path: cwd, reason: "not_directory" })),
+            ),
+          ),
       } satisfies Backend
     }),
   ),

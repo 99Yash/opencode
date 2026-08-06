@@ -9,10 +9,7 @@ export * as WriteTool from "./write"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
-import { Bom } from "@opencode-ai/util/bom"
-import { FSUtil } from "@opencode-ai/util/fs-util"
 import { FileMutation } from "../../file-mutation"
-import { Formatter } from "../../formatter"
 import { LocationMutation } from "../../location-mutation"
 import { Permission } from "../../permission"
 import { fileDiff } from "./file-diff"
@@ -48,8 +45,6 @@ export const Plugin = {
   effect: Effect.fn("WriteTool.Plugin")(function* (ctx: PluginContext) {
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
-    const formatter = yield* Formatter.Service
-    const fs = yield* FSUtil.Service
     const permission = yield* Permission.Service
 
     yield* ctx.tool
@@ -78,15 +73,15 @@ export const Plugin = {
                       agent: context.agent,
                       source,
                     })
-                  const current = yield* Bom.readFile(fs, target.canonical).pipe(
-                    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(undefined)),
-                  )
-                  const next = Bom.split(input.content)
+                  const current = yield* files
+                    .read(target)
+                    .pipe(Effect.catchTag("FileMutation.NotFoundError", () => Effect.succeed(undefined)))
+                  const content = FileMutation.normalizeText(input.content)
                   const preview = fileDiff(
                     target.resource,
-                    current?.text ?? "",
-                    next.text,
-                    current ? "modified" : "added",
+                    current ?? "",
+                    content,
+                    current === undefined ? "added" : "modified",
                   )
                   yield* permission.assert({
                     action: "edit",
@@ -98,9 +93,12 @@ export const Plugin = {
                     source,
                   })
                   const result = yield* files.writeTextPreservingBom({ target, content: input.content })
-                  const bom = (yield* Bom.readFile(fs, target.canonical)).bom
-                  if (yield* formatter.file(target.canonical)) yield* Bom.syncFile(fs, target.canonical, bom)
-                  return result
+                  return {
+                    operation: result.operation,
+                    target: result.target,
+                    resource: result.resource,
+                    existed: result.existed,
+                  }
                 }).pipe(
                   Effect.map((output) => ({ output, content: toModelOutput(output) })),
                   Effect.mapError((error) => new ToolFailure({ message: `Unable to write ${input.path}`, error })),

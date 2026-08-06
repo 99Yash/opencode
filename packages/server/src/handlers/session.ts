@@ -402,6 +402,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
                   }),
                 ),
               ),
+              Effect.catchTag("Shell.InvalidCwdError", (error) =>
+                Effect.fail(new InvalidRequestError({ message: error.message })),
+              ),
             )
           return HttpApiSchema.NoContent.make()
         }),

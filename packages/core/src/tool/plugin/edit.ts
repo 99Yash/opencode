@@ -12,8 +12,6 @@ import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { Bom } from "@opencode-ai/util/bom"
 import { Effect, Schema } from "effect"
 import { FileMutation } from "../../file-mutation"
-import { Formatter } from "../../formatter"
-import { FSUtil } from "@opencode-ai/util/fs-util"
 import { LocationMutation } from "../../location-mutation"
 import { Permission } from "../../permission"
 import { fileDiff } from "./file-diff"
@@ -110,8 +108,6 @@ export const Plugin = {
   effect: Effect.fn("EditTool.Plugin")(function* (ctx: PluginContext) {
     const mutation = yield* LocationMutation.Service
     const files = yield* FileMutation.Service
-    const formatter = yield* Formatter.Service
-    const fs = yield* FSUtil.Service
     const permission = yield* Permission.Service
 
     yield* ctx.tool
@@ -153,16 +149,14 @@ export const Plugin = {
                     })
                   }
 
-                  const info = yield* fs.stat(target.canonical).pipe(
-                    Effect.catchReason("PlatformError", "NotFound", () =>
+                  const source = yield* files.read(target).pipe(
+                    Effect.catchTag("FileMutation.NotFoundError", () =>
                       Effect.fail(new ToolFailure({ message: `File not found: ${input.path}` })),
                     ),
+                    Effect.catchTag("FileMutation.NotAFileError", () =>
+                      Effect.fail(new ToolFailure({ message: `Path is a directory, not a file: ${input.path}` })),
+                    ),
                   )
-                  if (info.type === "Directory") {
-                    return yield* new ToolFailure({ message: `Path is a directory, not a file: ${input.path}` })
-                  }
-                  const original = yield* Bom.readFile(fs, target.canonical)
-                  const source = original.text
                   const ending = source.includes(crlf) ? crlf : "\n"
                   const oldString = input.oldString.replaceAll(crlf, "\n").replaceAll("\n", ending)
                   const newString = input.newString.replaceAll(crlf, "\n").replaceAll("\n", ending)
@@ -183,9 +177,10 @@ export const Plugin = {
                         `${content.slice(0, match.start)}${newString}${content.slice(match.end)}`,
                       source,
                     )
+                  const content = FileMutation.normalizeText(replaced)
                   const preview =
                     replacements > 0 && (replacements === 1 || input.replaceAll === true)
-                      ? fileDiff(target.resource, source, replaced)
+                      ? fileDiff(target.resource, source, content)
                       : undefined
                   yield* permission.assert({
                     action: "edit",
@@ -206,17 +201,9 @@ export const Plugin = {
                       message: `Found ${replacements} matches for oldString, but expected exactly one. Add more surrounding context to make oldString unique, or set replaceAll to true to replace every occurrence.`,
                     })
                   }
-                  const replacementBom = replaced.startsWith("\uFEFF")
-                  const result = yield* files.write({
-                    target,
-                    content: Bom.join(replaced, original.bom || replacementBom),
-                  })
-                  const bom = original.bom || replacementBom
-                  const formatted = (yield* formatter.file(target.canonical))
-                    ? yield* Bom.syncFile(fs, target.canonical, bom)
-                    : (yield* Bom.readFile(fs, target.canonical)).text
+                  const result = yield* files.writeTextPreservingBom({ target, content: replaced })
                   return {
-                    files: [fileDiff(result.resource, source, formatted)],
+                    files: [fileDiff(result.resource, source, result.content)],
                     replacements,
                   } satisfies Output
                 }).pipe(

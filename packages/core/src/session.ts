@@ -233,7 +233,7 @@ export interface Interface {
     id?: Event.ID
     sessionID: SessionSchema.ID
     command: string
-  }) => Effect.Effect<void, NotFoundError>
+  }) => Effect.Effect<void, NotFoundError | Shell.InvalidCwdError>
   readonly skill: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID

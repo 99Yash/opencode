@@ -47,6 +47,12 @@ export const externalDirectoryPermission = (input: ExternalDirectoryAuthorizatio
 export interface Target {
   /** Canonical existing path, or missing path below a canonical directory. */
   readonly canonical: string
+  /**
+   * Lexical resolved path before symlink canonicalization. Reads and writes
+   * address the referent (canonical); entry operations like remove address
+   * the name itself.
+   */
+  readonly absolute: string
   /** Permission resource: Location-relative for internal paths, canonical for external paths. */
   readonly resource: string
   readonly externalDirectory?: ExternalDirectoryAuthorization
@@ -133,6 +139,7 @@ const layer = Layer.effect(
       const externalResource = slash(path.join(externalDirectory, "*"))
       return {
         canonical: resolved.canonical,
+        absolute,
         resource,
         externalDirectory: external
           ? {
@@ -205,6 +212,7 @@ const hostedLayer = Layer.effect(
       const resolved = yield* resolvePath(absolute)
       return {
         canonical: resolved.canonical,
+        absolute,
         resource: path.posix.relative(location.directory, absolute) || ".",
       } satisfies Target
     })

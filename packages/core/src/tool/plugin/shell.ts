@@ -4,9 +4,7 @@ import path from "path"
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Content } from "@opencode-ai/schema/tool"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import { Deferred, Effect, Option, Schema, Scope } from "effect"
-import { FSUtil } from "@opencode-ai/util/fs-util"
-import { WorkspaceEnvironment } from "../../workspace/environment"
+import { Deferred, Effect, Schema, Scope } from "effect"
 import { LocationMutation } from "../../location-mutation"
 import { Permission } from "../../permission"
 import { PluginRuntime } from "../../plugin/runtime"
@@ -83,22 +81,6 @@ export const Plugin = {
   effect: Effect.fn("ShellTool.Plugin")(function* (ctx: PluginContext) {
     const runtime = yield* PluginRuntime.Service
     const scope = yield* Scope.Scope
-    const fsUtil = yield* FSUtil.Service
-    // Hosted Locations bind the workspace environment; the workdir check must
-    // stat the provider filesystem there, never the host's.
-    const environment = Option.getOrUndefined(yield* Effect.serviceOption(WorkspaceEnvironment.Service))
-    const statWorkdir = (canonical: string) =>
-      environment
-        ? environment.files.stat(canonical).pipe(
-            Effect.catchTag("WorkspaceEnvironment.NotFoundError", () =>
-              Effect.fail(new Error(`Working directory does not exist: ${canonical}`)),
-            ),
-          )
-        : fsUtil.stat(canonical).pipe(
-            Effect.catchReason("PlatformError", "NotFound", () =>
-              Effect.fail(new Error(`Working directory does not exist: ${canonical}`)),
-            ),
-          )
     const mutation = yield* LocationMutation.Service
     const shell = yield* Shell.Service
     const permission = yield* Permission.Service
@@ -192,9 +174,6 @@ export const Plugin = {
                           agent: context.agent,
                           source,
                         })
-                      const workdir = yield* statWorkdir(target.canonical)
-                      if (workdir.type !== "Directory")
-                        return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.canonical}`))
                     }),
                 )
                 yield* context.progress({ shellID: info.id })

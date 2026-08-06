@@ -2,9 +2,9 @@ import { describe, expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
-import { FSUtil } from "@opencode-ai/util/fs-util"
-import { Formatter } from "@opencode-ai/core/formatter"
+import { FileMutation } from "@opencode-ai/core/file-mutation"
 import { Location } from "@opencode-ai/core/location"
+import { LocationMutation } from "@opencode-ai/core/location-mutation"
 import { Permission } from "@opencode-ai/core/permission"
 import { Session } from "@opencode-ai/core/session"
 import { Tool } from "@opencode-ai/core/tool"
@@ -35,32 +35,12 @@ const permission = Layer.succeed(
   }),
 )
 
-// Hosted patch must never format nor touch the host filesystem: both die.
-const formatter = Layer.mock(Formatter.Service, {
-  file: () => Effect.die("hosted patch must not run host formatters"),
-})
-
-const poisoned = () => Effect.die("hosted patch must not touch the host filesystem")
-const filesystem = Layer.effect(
-  FSUtil.Service,
-  Effect.gen(function* () {
-    const fs = yield* FSUtil.Service
-    return FSUtil.Service.of({
-      ...fs,
-      stat: poisoned,
-      readFile: poisoned,
-      writeWithDirs: poisoned,
-      remove: poisoned,
-    })
-  }),
-).pipe(Layer.provide(LayerNode.compile(FSUtil.node)))
-
 const withTool = <A, E, R>(memory: MemoryEnvironment, body: (registry: Tool.Interface) => Effect.Effect<A, E, R>) => {
   const environment = Layer.succeed(WorkspaceEnvironment.Service, memory.environment)
   const patchToolNode = makeLocationNode({
     name: "test/workspace-patch-plugin",
     layer: Layer.effectDiscard(registerToolPlugin(PatchTool.Plugin)),
-    deps: [Tool.node, Formatter.node, FSUtil.node, Location.node, Permission.node, WorkspaceEnvironment.node],
+    deps: [Tool.node, LocationMutation.node, FileMutation.node, Permission.node],
   })
   return Effect.gen(function* () {
     assertions.length = 0
@@ -68,9 +48,9 @@ const withTool = <A, E, R>(memory: MemoryEnvironment, body: (registry: Tool.Inte
   }).pipe(
     Effect.provide(
       AppNodeBuilder.build(LayerNode.group([Tool.node, patchToolNode]), [
-        [FSUtil.node, filesystem],
         [Location.node, hostedLocationLayer()],
-        [Formatter.node, formatter],
+        [LocationMutation.node, LocationMutation.hostedNode],
+        [FileMutation.node, FileMutation.hostedNode],
         [Permission.node, permission],
         [WorkspaceEnvironment.node, environment],
       ]),
@@ -148,13 +128,19 @@ describe("PatchTool on a hosted location", () => {
     )
   })
 
-  it.effect("resolves external targets with posix containment", () => {
+  it.effect("rejects targets outside the workspace", () => {
     const memory = memoryEnvironment({})
     return withTool(memory, (registry) =>
       Effect.gen(function* () {
-        yield* executeTool(registry, call("*** Begin Patch\n*** Add File: /outside/new.txt\n+created\n*** End Patch"))
-        expect(assertions.map((input) => input.action)).toEqual(["external_directory", "edit"])
-        expect(assertions[0]?.metadata).toMatchObject({ filepath: "/outside/new.txt", parentDir: "/outside" })
+        const settled = yield* executeTool(
+          registry,
+          call("*** Begin Patch\n*** Add File: /outside/new.txt\n+created\n*** End Patch"),
+        )
+        expect(settled.status).toBe("error")
+        if (settled.status !== "error") return
+        expect(settled.error?.message).toContain("path is outside the workspace")
+        expect(assertions).toEqual([])
+        expect(memory.contents("/outside/new.txt")).toBeUndefined()
       }),
     )
   })

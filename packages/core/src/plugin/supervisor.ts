@@ -40,7 +40,6 @@ import { ReadToolFileSystem } from "../tool/read-filesystem"
 import { Tool } from "../tool"
 import { WebSearch } from "../websearch"
 import { WellKnown } from "../wellknown"
-import { WorkspaceEnvironment } from "../workspace/environment"
 import { PluginInternal } from "./internal"
 import { PluginRuntime } from "./runtime"
 import { SdkPlugins } from "./sdk"
@@ -352,13 +351,6 @@ export const node = makeLocationNode({
   service: Service,
   layer: nodeLayer,
   deps: nodeDeps,
-})
-
-/** Hosted graphs bind the workspace environment so internal plugins can reach it. */
-export const hostedNode = makeLocationNode({
-  service: Service,
-  layer: nodeLayer,
-  deps: [...nodeDeps, WorkspaceEnvironment.node],
 })
 
 export { layer }
