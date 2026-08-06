@@ -84,8 +84,6 @@ interface ResolvedPath {
   readonly lexicalDirectory: string
 }
 
-const slash = (value: string) => value.replaceAll("\\", "/")
-
 /**
  * Resolution primitives the shared ancestor walk uses; absence reports
  * undefined so the walk owns the missing-path vocabulary.
@@ -158,9 +156,11 @@ const layer = Layer.effect(
 
       const resolved = yield* resolvePath(absolute)
       const external = !lexicallyInternal
-      const resource = external ? slash(absolute) : slash(path.relative(location.directory, absolute) || ".")
+      const resource = external
+        ? FSUtil.slash(absolute)
+        : FSUtil.slash(path.relative(location.directory, absolute) || ".")
       const externalDirectory = resolved.lexicalDirectory
-      const externalResource = slash(path.join(externalDirectory, "*"))
+      const externalResource = FSUtil.slash(path.join(externalDirectory, "*"))
       return {
         canonical: resolved.canonical,
         absolute,
@@ -170,7 +170,7 @@ const layer = Layer.effect(
               action: "external_directory",
               directory: externalDirectory,
               resource: externalResource,
-              save: slash(
+              save: FSUtil.slash(
                 path.join((yield* Project.root(fs, AbsolutePath.make(externalDirectory))) ?? externalDirectory, "*"),
               ),
             }

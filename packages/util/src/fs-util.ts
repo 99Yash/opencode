@@ -269,6 +269,11 @@ export namespace FSUtil {
     return contains(a, b) || contains(b, a)
   }
 
+  /** Normalize path separators to forward slashes for display and resources. */
+  export function slash(value: string) {
+    return value.replaceAll("\\", "/")
+  }
+
   export function contains(parent: string, child: string) {
     return containsUsing({ relative, isAbsolute, sep }, parent, child)
   }

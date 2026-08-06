@@ -353,7 +353,7 @@ const layer = Layer.effect(
               parentID: input.parentID,
               location,
               subpath: RelativePath.make(
-                Location.paths(location).relative(project.directory, location.directory).replaceAll("\\", "/"),
+                FSUtil.slash(Location.paths(location).relative(project.directory, location.directory)),
               ),
               title: input.title,
               agent: input.agent,
@@ -730,7 +730,7 @@ const layer = Layer.effect(
             sessionID: input.sessionID,
             location: Location.Ref.make({ directory }),
             projectID: project.id,
-            subpath: RelativePath.make(path.relative(project.directory, directory).replaceAll("\\", "/")),
+            subpath: RelativePath.make(FSUtil.slash(path.relative(project.directory, directory))),
           },
           { location: current.location },
         )
