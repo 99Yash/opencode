@@ -37,6 +37,13 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/FileMutation") {}
 
+const writeResult = (target: Target, existed: boolean): WriteResult => ({
+  operation: "write",
+  target: target.canonical,
+  resource: target.resource,
+  existed,
+})
+
 /**
  * Serialize file changes by canonical target. Conditional writes compare and
  * write under the same process-local lock so cooperating OpenCode mutations do
@@ -51,13 +58,6 @@ const layer = Layer.effect(
       (target: Target) =>
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         locks.withLock(target.canonical)(Effect.uninterruptible(effect))
-
-    const writeResult = (target: Target, existed: boolean): WriteResult => ({
-      operation: "write",
-      target: target.canonical,
-      resource: target.resource,
-      existed,
-    })
 
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
       withTargetLock(input.target)(
@@ -91,7 +91,8 @@ const layer = Layer.effect(
 
 export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
 
-// Same cooperative locking, writes through WorkspaceEnvironment.Files.
+// Same cooperative locking, writes through WorkspaceEnvironment.Files. The
+// environment write reports prior existence, so no stat pre-check round trip.
 const hostedLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -103,29 +104,16 @@ const hostedLayer = Layer.effect(
       <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         locks.withLock(target.canonical)(Effect.uninterruptible(effect))
 
-    const writeResult = (target: Target, existed: boolean): WriteResult => ({
-      operation: "write",
-      target: target.canonical,
-      resource: target.resource,
-      existed,
-    })
-
-    const exists = (path: string) =>
-      env.files.stat(path).pipe(
-        Effect.as(true),
-        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(false)),
-        Effect.orDie,
-      )
-
     const bytes = (content: string | Uint8Array) => (typeof content === "string" ? encoder.encode(content) : content)
 
     const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
       withTargetLock(input.target)(
-        Effect.gen(function* () {
-          const existed = yield* exists(input.target.canonical)
-          yield* env.files.write(input.target.canonical, bytes(input.content)).pipe(Effect.orDie)
-          return writeResult(input.target, existed)
-        }),
+        env.files
+          .write(input.target.canonical, bytes(input.content))
+          .pipe(
+            Effect.orDie,
+            Effect.map((result) => writeResult(input.target, result.existed)),
+          ),
       ),
     )
 
@@ -133,13 +121,10 @@ const hostedLayer = Layer.effect(
       withTargetLock(input.target)(
         Effect.gen(function* () {
           const next = Bom.split(input.content)
-          const current = yield* env.files.read(input.target.canonical).pipe(
-            Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
-            Effect.orDie,
-          )
+          const current = yield* WorkspaceEnvironment.optional(env.files.read(input.target.canonical))
           const text = Bom.join(next.text, Boolean(current && Bom.has(current)) || next.bom)
-          yield* env.files.write(input.target.canonical, bytes(text)).pipe(Effect.orDie)
-          return writeResult(input.target, current !== undefined)
+          const result = yield* env.files.write(input.target.canonical, bytes(text)).pipe(Effect.orDie)
+          return writeResult(input.target, result.existed)
         }),
       ),
     )

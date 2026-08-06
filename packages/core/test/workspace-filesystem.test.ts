@@ -3,14 +3,10 @@ import { Effect, Layer } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Location } from "@opencode-ai/core/location"
-import { Project } from "@opencode-ai/core/project"
-import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
-import { Workspace } from "@opencode-ai/core/workspace"
+import { RelativePath } from "@opencode-ai/core/schema"
 import { WorkspaceEnvironment } from "@opencode-ai/core/workspace/environment"
 import { testEffect } from "./lib/effect"
-import { memoryEnvironment, ROOT } from "./lib/workspace"
-
-const workspaceID = Workspace.ID.make("wrk_test")
+import { hostedLocationLayer, memoryEnvironment } from "./lib/workspace"
 
 const memory = memoryEnvironment({
   "/workspace/README.md": "# hello\n",
@@ -18,23 +14,10 @@ const memory = memoryEnvironment({
   "/workspace/src/util/deep.ts": "export const deep = 1\n",
 })
 
-const locationLayer = Layer.succeed(
-  Location.Service,
-  Location.Service.of({
-    directory: AbsolutePath.make(ROOT),
-    workspaceID,
-    project: {
-      id: Project.ID.global,
-      directory: AbsolutePath.make(ROOT),
-      canonical: AbsolutePath.make("/"),
-    },
-  }),
-)
-
 const it = testEffect(
   AppNodeBuilder.build(FileSystem.hostedNode, [
     [WorkspaceEnvironment.node, Layer.succeed(WorkspaceEnvironment.Service, memory.environment)],
-    [Location.node, locationLayer],
+    [Location.node, hostedLocationLayer()],
   ]),
 )
 

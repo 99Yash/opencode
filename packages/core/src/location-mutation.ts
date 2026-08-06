@@ -167,17 +167,10 @@ const hostedLayer = Layer.effect(
     const env = yield* WorkspaceEnvironment.Service
     const location = yield* Location.Service
 
-    function notFound<A>(effect: Effect.Effect<A, WorkspaceEnvironment.Error | WorkspaceEnvironment.NotFoundError>) {
-      return effect.pipe(
-        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
-        Effect.orDie,
-      )
-    }
-
     const resolvePath = Effect.fnUntraced(function* (absolute: string) {
-      const existing = yield* notFound(env.files.realPath(absolute))
+      const existing = yield* WorkspaceEnvironment.optional(env.files.realPath(absolute))
       if (existing !== undefined) {
-        const info = yield* notFound(env.files.stat(existing))
+        const info = yield* WorkspaceEnvironment.optional(env.files.stat(existing))
         if (info === undefined) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
         return {
           canonical: existing,
@@ -188,9 +181,9 @@ const hostedLayer = Layer.effect(
 
       let anchor = path.posix.dirname(absolute)
       while (true) {
-        const canonical = yield* notFound(env.files.realPath(anchor))
+        const canonical = yield* WorkspaceEnvironment.optional(env.files.realPath(anchor))
         if (canonical !== undefined) {
-          const info = yield* notFound(env.files.stat(canonical))
+          const info = yield* WorkspaceEnvironment.optional(env.files.stat(canonical))
           if (info === undefined || info.type !== "Directory") {
             return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
           }
@@ -207,13 +200,12 @@ const hostedLayer = Layer.effect(
 
     const resolve = Effect.fn("LocationMutation.resolve")(function* (input: ResolveInput) {
       const absolute = path.posix.resolve(location.directory, input.path)
-      const relative = path.posix.relative(location.directory, absolute)
-      if (relative.startsWith("..") || path.posix.isAbsolute(relative))
+      if (!FSUtil.containsPosix(location.directory, absolute))
         return yield* new PathError({ path: absolute, reason: "outside_workspace" })
       const resolved = yield* resolvePath(absolute)
       return {
         canonical: resolved.canonical,
-        resource: relative || ".",
+        resource: path.posix.relative(location.directory, absolute) || ".",
       } satisfies Target
     })
 

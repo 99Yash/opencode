@@ -273,4 +273,10 @@ export namespace FSUtil {
     const result = relative(parent, child)
     return result === "" || (!isAbsolute(result) && result !== ".." && !result.startsWith(`..${sep}`))
   }
+
+  /** `contains` with posix rules regardless of host platform, for provider paths. */
+  export function containsPosix(parent: string, child: string) {
+    const result = path.posix.relative(parent, child)
+    return result === "" || (!path.posix.isAbsolute(result) && result !== ".." && !result.startsWith("../"))
+  }
 }

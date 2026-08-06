@@ -117,13 +117,9 @@ export const node = makeLocationNode({
   deps: [FSUtil.node, Location.node, FileSystemSearch.node],
 })
 
-const containsPosix = (parent: string, child: string) => {
-  const relative = path.posix.relative(parent, child)
-  return relative === "" || (!relative.startsWith("..") && !path.posix.isAbsolute(relative))
-}
-
 // Mirrors baseLayer over WorkspaceEnvironment.Files with posix path rules.
-// Host filesystem services never see provider paths.
+// Host filesystem services never see provider paths. Type mismatches surface
+// from the environment operation itself; no stat pre-checks.
 const hostedLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -132,18 +128,18 @@ const hostedLayer = Layer.effect(
     const root = yield* env.files.realPath(location.directory).pipe(Effect.orDie)
     const resolve = Effect.fnUntraced(function* (input?: RelativePath) {
       const absolute = path.posix.resolve(location.directory, input ?? ".")
-      if (!containsPosix(location.directory, absolute))
+      if (!FSUtil.containsPosix(location.directory, absolute))
         return yield* Effect.die(new Error("Path escapes the location"))
       const real = yield* env.files.realPath(absolute).pipe(Effect.orDie)
-      if (!containsPosix(root, real)) return yield* Effect.die(new Error("Path escapes the location"))
+      if (!FSUtil.containsPosix(root, real)) return yield* Effect.die(new Error("Path escapes the location"))
       return { absolute, real, directory: location.directory, root }
     })
     return Service.of({
-      find: () => Effect.die(new Error("find is not supported for hosted locations yet")),
+      // Graceful like the hosted tool-catalog filter: completion surfaces keep
+      // working with empty results instead of defecting.
+      find: () => Effect.logWarning("find is not supported for hosted locations yet").pipe(Effect.as([])),
       read: Effect.fn("FileSystem.read")(function* (input) {
         const target = yield* resolve(input.path)
-        const info = yield* env.files.stat(target.real).pipe(Effect.orDie)
-        if (info.type !== "File") return yield* Effect.die(new Error("Path is not a file"))
         return {
           content: yield* env.files.read(target.real).pipe(Effect.orDie),
           mime: FSUtil.mimeType(target.real),
@@ -151,8 +147,6 @@ const hostedLayer = Layer.effect(
       }),
       list: Effect.fn("FileSystem.list")(function* (input = {}) {
         const target = yield* resolve(input.path)
-        const info = yield* env.files.stat(target.real).pipe(Effect.orDie)
-        if (info.type !== "Directory") return yield* Effect.die(new Error("Path is not a directory"))
         return yield* env.files.list(target.real).pipe(
           Effect.orDie,
           Effect.map((items) =>

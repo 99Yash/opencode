@@ -2,6 +2,7 @@ export * as Workspace from "./workspace"
 
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
+import { AbsolutePath } from "@opencode-ai/schema/schema"
 import { Workspace } from "@opencode-ai/schema/workspace"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { Database } from "./database/database"
@@ -19,7 +20,7 @@ export interface Info extends Schema.Schema.Type<typeof Info> {}
 export const Info = Schema.Struct({
   id: ID,
   provider: Schema.String,
-  root: Schema.String,
+  root: AbsolutePath,
 }).annotate({ identifier: "Workspace.Info" })
 
 export interface Interface {
@@ -59,11 +60,11 @@ const layer = Layer.effect(
           .insert(WorkspaceTable)
           .values({ id, provider: input.provider, binding: created.binding, root: created.root })
           .pipe(Effect.orDie)
-        return Info.make({ id, provider: input.provider, root: created.root })
+        return Info.make({ id, provider: input.provider, root: AbsolutePath.make(created.root) })
       }),
       get: Effect.fn("Workspace.get")(function* (id) {
         const row = yield* require(id)
-        return Info.make({ id: row.id, provider: row.provider, root: row.root })
+        return Info.make({ id: row.id, provider: row.provider, root: AbsolutePath.make(row.root) })
       }),
       binding: Effect.fn("Workspace.binding")(function* (id) {
         const row = yield* require(id)

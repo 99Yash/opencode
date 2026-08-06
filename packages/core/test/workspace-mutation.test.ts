@@ -4,38 +4,20 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { FileMutation } from "@opencode-ai/core/file-mutation"
 import { Location } from "@opencode-ai/core/location"
 import { LocationMutation } from "@opencode-ai/core/location-mutation"
-import { Project } from "@opencode-ai/core/project"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { Workspace } from "@opencode-ai/core/workspace"
 import { WorkspaceEnvironment } from "@opencode-ai/core/workspace/environment"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { testEffect } from "./lib/effect"
-import { memoryEnvironment, ROOT } from "./lib/workspace"
-
-const workspaceID = Workspace.ID.make("wrk_test")
+import { hostedLocationLayer, memoryEnvironment } from "./lib/workspace"
 
 const memory = memoryEnvironment({
   "/workspace/README.md": "# hello\n",
   "/workspace/src/index.ts": "export {}\n",
 })
 
-const locationLayer = Layer.succeed(
-  Location.Service,
-  Location.Service.of({
-    directory: AbsolutePath.make(ROOT),
-    workspaceID,
-    project: {
-      id: Project.ID.global,
-      directory: AbsolutePath.make(ROOT),
-      canonical: AbsolutePath.make("/"),
-    },
-  }),
-)
-
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([LocationMutation.hostedNode, FileMutation.hostedNode]), [
     [WorkspaceEnvironment.node, Layer.succeed(WorkspaceEnvironment.Service, memory.environment)],
-    [Location.node, locationLayer],
+    [Location.node, hostedLocationLayer()],
   ]),
 )
 

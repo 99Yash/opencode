@@ -297,23 +297,16 @@ const layer = Layer.effect(
     const shellLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Info)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
-    // Hosted Sessions reuse the global Project until a repository is discovered
-    // inside the Workspace. Canonical "/" matches the local non-VCS fallback so
-    // the global row is never repointed at a provider path. Host Project
-    // discovery must not run against provider directories.
+    // Host Project discovery must not run against provider directories; hosted
+    // Sessions state the global Project until rediscovery inside the Workspace.
     const hostedProject = Effect.fn("Session.hostedProject")(function* (
       workspaceID: Workspace.ID,
       directory: AbsolutePath,
     ) {
       const workspace = yield* workspaces.get(workspaceID)
-      const relative = path.posix.relative(workspace.root, directory)
-      if (path.posix.isAbsolute(relative) || relative === ".." || relative.startsWith("../"))
+      if (!FSUtil.containsPosix(workspace.root, directory))
         return yield* new WorkspaceDirectoryError({ workspaceID, directory, root: workspace.root })
-      return {
-        id: Project.ID.global,
-        directory: AbsolutePath.make(workspace.root),
-        canonical: AbsolutePath.make("/"),
-      } satisfies Project.Resolved
+      return Project.hostedGlobal(workspace.root)
     })
     const persistProject = (project: Project.Resolved) => {
       const vcs = project.vcs?.type

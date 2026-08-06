@@ -19,41 +19,45 @@ import { Workspace } from "@opencode-ai/core/workspace"
 import { WorkspaceDriver } from "@opencode-ai/core/workspace/driver"
 import { AppProcess } from "@opencode-ai/util/process"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { testEffect } from "./lib/effect"
 import { directoryEnvironment } from "./lib/workspace"
 
 const FakeBinding = Schema.Struct({ root: Schema.String })
 
-// The driver spawns through whatever AppProcess the test resolved; the holder
-// bridges module-scope driver construction and effect-scope service access.
-const state = { spawner: undefined as AppProcess.Interface | undefined, connects: 0 }
+const connects = { count: 0 }
 
-const driver = WorkspaceDriver.make({
-  create: () =>
-    Effect.promise(async () => {
-      const root = await mkdtemp(path.join(tmpdir(), "opencode-workspace-e2e-"))
-      return { binding: { root }, root }
-    }),
-  connect: (binding) =>
-    Schema.decodeUnknownEffect(FakeBinding)(binding).pipe(
-      Effect.mapError((cause) => new WorkspaceDriver.Error({ provider: "fake", cause })),
-      Effect.map((decoded) => {
-        state.connects++
-        return directoryEnvironment(decoded.root, (command) =>
-          Effect.suspend(() => {
-            if (!state.spawner) return Effect.die(new Error("spawner not resolved yet"))
-            return state.spawner.spawn(command)
-          }),
-        )
-      }),
-    ),
-  destroy: () => Effect.void,
-})
-
-const registry = Layer.succeed(
+// Replacement nodes may introduce tagged dependencies; declaring AppProcess
+// lets the driver spawn through the real test spawner.
+const registryLayer = Layer.effect(
   WorkspaceDriver.RegistryService,
-  WorkspaceDriver.RegistryService.of(WorkspaceDriver.registry({ fake: driver })),
+  Effect.gen(function* () {
+    const appProcess = yield* AppProcess.Service
+    const driver = WorkspaceDriver.make({
+      create: () =>
+        Effect.promise(async () => {
+          const root = await mkdtemp(path.join(tmpdir(), "opencode-workspace-e2e-"))
+          return { binding: { root }, root }
+        }),
+      connect: (binding) =>
+        Schema.decodeUnknownEffect(FakeBinding)(binding).pipe(
+          Effect.mapError((cause) => new WorkspaceDriver.Error({ provider: "fake", cause })),
+          Effect.map((decoded) => {
+            connects.count++
+            return directoryEnvironment(decoded.root, (command) => appProcess.spawn(command))
+          }),
+        ),
+      destroy: () => Effect.void,
+    })
+    return WorkspaceDriver.RegistryService.of(WorkspaceDriver.registry({ fake: driver }))
+  }),
 )
+
+const registry = makeGlobalNode({
+  service: WorkspaceDriver.RegistryService,
+  layer: registryLayer,
+  deps: [AppProcess.node],
+})
 
 // Outer and hoisted location graphs must share one durable database, like the
 // production file-backed configuration; :memory: would give each its own.
@@ -72,8 +76,6 @@ const it = testEffect(
 describe("hosted workspace end to end", () => {
   it.live("creates, works inside, evicts, and reconnects", () =>
     Effect.gen(function* () {
-      state.spawner = yield* AppProcess.Service
-
       const workspaces = yield* Workspace.Service
       const created = yield* workspaces.create({ provider: "fake" })
       expect(created.provider).toBe("fake")
@@ -113,7 +115,7 @@ describe("hosted workspace end to end", () => {
         expect(new TextDecoder().decode(fromBash.content)).toBe("from-bash")
       }).pipe(Effect.provide(locations.get(ref)))
 
-      expect(state.connects).toBe(1)
+      expect(connects.count).toBe(1)
 
       // Evict the cached graph, then reconnect through the driver: the
       // workspace contents survive because the binding names durable state.
@@ -127,7 +129,7 @@ describe("hosted workspace end to end", () => {
         expect(new TextDecoder().decode(fromBash.content)).toBe("from-bash")
       }).pipe(Effect.provide(locations.get(ref)))
 
-      expect(state.connects).toBe(2)
+      expect(connects.count).toBe(2)
     }),
   )
 })

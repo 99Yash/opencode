@@ -1,8 +1,8 @@
 import { Context, Effect, Layer } from "effect"
 import { Info, Ref, response } from "@opencode-ai/schema/location"
-import { AbsolutePath } from "@opencode-ai/schema/schema"
+import { Workspace } from "@opencode-ai/schema/workspace"
 import { Project } from "./project"
-import { Workspace } from "./workspace"
+import { WorkspaceEnvironment } from "./workspace/environment"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { makeLocationNode, tags } from "@opencode-ai/util/effect/app-node"
 
@@ -42,9 +42,9 @@ export const boundNode = (ref: Ref) =>
 
 /**
  * Hosted Locations state their Project instead of discovering it: host git
- * and filesystem walks must never run against a provider directory. Project
- * identity stays global until rediscovery inside the Workspace stamps a real
- * one.
+ * and filesystem walks must never run against a provider directory. The
+ * Workspace root comes from the already-connected environment, avoiding a
+ * second workspace row read per graph build.
  */
 export const hostedBoundNode = (ref: Ref, workspaceID: Workspace.ID) =>
   makeLocationNode({
@@ -52,19 +52,13 @@ export const hostedBoundNode = (ref: Ref, workspaceID: Workspace.ID) =>
     layer: Layer.effect(
       Service,
       Effect.gen(function* () {
-        const workspaces = yield* Workspace.Service
-        const workspace = yield* workspaces.get(workspaceID)
+        const env = yield* WorkspaceEnvironment.Service
         return Service.of({
           directory: ref.directory,
           workspaceID,
-          // Canonical "/" matches the local non-VCS fallback shape.
-          project: {
-            id: Project.ID.global,
-            directory: AbsolutePath.make(workspace.root),
-            canonical: AbsolutePath.make("/"),
-          },
+          project: Project.hostedGlobal(env.directory),
         })
       }),
     ),
-    deps: [Workspace.node],
+    deps: [WorkspaceEnvironment.node],
   })

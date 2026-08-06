@@ -30,7 +30,9 @@ export interface DirectoryEntry {
 /**
  * The minimal primitive set the hosted implementations of Filesystem,
  * LocationMutation, and FileMutation consume. Grow it only when a real
- * consumer appears.
+ * consumer appears. Every method is one provider round trip: type mismatches
+ * (read a directory, list a file) fail with Error instead of requiring a
+ * stat pre-check.
  */
 export interface Files {
   readonly stat: (path: string) => Effect.Effect<FileInfo, Error | NotFoundError>
@@ -38,8 +40,8 @@ export interface Files {
   readonly realPath: (path: string) => Effect.Effect<string, Error | NotFoundError>
   readonly read: (path: string) => Effect.Effect<Uint8Array, Error | NotFoundError>
   readonly list: (path: string) => Effect.Effect<readonly DirectoryEntry[], Error | NotFoundError>
-  /** Creates parent directories, matching FSUtil.writeWithDirs. */
-  readonly write: (path: string, content: Uint8Array) => Effect.Effect<void, Error>
+  /** Creates parent directories, matching FSUtil.writeWithDirs. Reports whether the file already existed. */
+  readonly write: (path: string, content: Uint8Array) => Effect.Effect<{ readonly existed: boolean }, Error>
 }
 
 export interface Shell {
@@ -50,7 +52,6 @@ export interface Shell {
 }
 
 export interface Interface {
-  readonly platform: NodeJS.Platform
   /** The Workspace root, absolute in the provider filesystem. */
   readonly directory: string
   readonly files: Files
@@ -59,6 +60,13 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/WorkspaceEnvironment") {}
+
+/** NotFound becomes undefined; other environment failures become defects. */
+export const optional = <A>(effect: Effect.Effect<A, Error | NotFoundError>): Effect.Effect<A | undefined> =>
+  effect.pipe(
+    Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+    Effect.orDie,
+  )
 
 /** Present only in hosted Location graphs; local graphs never bind it. */
 export const node = LayerNode.unbound(Service, tags.values.location)
@@ -71,6 +79,8 @@ export const node = LayerNode.unbound(Service, tags.values.location)
 export const hostedNode = (workspaceID: Workspace.ID) =>
   makeLocationNode({
     service: Service,
+    // Connect failures during graph build are defects, matching the local
+    // graph's E = never. Typed availability errors are a later design.
     layer: Layer.effect(
       Service,
       Effect.gen(function* () {
@@ -80,7 +90,7 @@ export const hostedNode = (workspaceID: Workspace.ID) =>
         const driver = yield* registry.get(found.provider)
         return yield* driver.connect(found.binding)
       }),
-    ),
+    ).pipe(Layer.orDie),
     deps: [Workspace.node, WorkspaceDriver.registryNode],
   })
 
