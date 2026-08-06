@@ -39,12 +39,11 @@ export const directoryEnvironment = (
   spawn: ChildProcessSpawner["Service"]["spawn"],
 ): WorkspaceEnvironment.Interface => {
   const wrap = <A>(operation: string, path: string, run: () => Promise<A>) =>
-    Effect.tryPromise({
-      try: run,
-      catch: (cause) =>
-        (cause as NodeJS.ErrnoException).code === "ENOENT"
-          ? new WorkspaceEnvironment.NotFoundError({ path })
-          : new WorkspaceEnvironment.Error({ operation, path, cause }),
+    WorkspaceEnvironment.tryOperation({
+      operation,
+      path,
+      run,
+      isNotFound: (cause) => (cause as NodeJS.ErrnoException).code === "ENOENT",
     })
   return WorkspaceEnvironment.make({
     directory: root,

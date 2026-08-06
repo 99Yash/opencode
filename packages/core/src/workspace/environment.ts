@@ -18,6 +18,24 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Wor
   path: Schema.String,
 }) {}
 
+/**
+ * Wrap one driver promise, translating the driver's not-found signal into the
+ * environment error vocabulary so drivers and fakes never construct it ad hoc.
+ */
+export const tryOperation = <A>(input: {
+  readonly operation: string
+  readonly path: string
+  readonly run: () => Promise<A>
+  readonly isNotFound: (cause: unknown) => boolean
+}): Effect.Effect<A, Error | NotFoundError> =>
+  Effect.tryPromise({
+    try: input.run,
+    catch: (cause) =>
+      input.isNotFound(cause)
+        ? new NotFoundError({ path: input.path })
+        : new Error({ operation: input.operation, path: input.path, cause }),
+  })
+
 export interface FileInfo {
   readonly type: FileSystem.File.Type
 }

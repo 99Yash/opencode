@@ -95,12 +95,11 @@ const FILE_TYPE = { file: "File", directory: "Directory", symlink: "SymbolicLink
 
 const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
   const wrap = <A>(operation: string, path: string, run: () => Promise<A>) =>
-    Effect.tryPromise({
-      try: run,
-      catch: (cause) =>
-        cause instanceof SandboxFilesystemNotFoundError
-          ? new WorkspaceEnvironment.NotFoundError({ path })
-          : new WorkspaceEnvironment.Error({ operation, path, cause }),
+    WorkspaceEnvironment.tryOperation({
+      operation,
+      path,
+      run,
+      isNotFound: (cause) => cause instanceof SandboxFilesystemNotFoundError,
     })
   return {
     stat: (path) =>
