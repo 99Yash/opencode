@@ -59,6 +59,25 @@ describe("CloudflareWorkersAIPlugin", () => {
     ),
   )
 
+  it.effect("resolves an account ID from provider settings", () =>
+    withEnv(undefined, () =>
+      Effect.gen(function* () {
+        const catalog = yield* Catalog.Service
+        yield* catalog.transform((draft) =>
+          draft.provider.update(providerID, (provider) => {
+            provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
+            provider.settings = { accountId: "configured/account" }
+          }),
+        )
+        yield* addPlugin()
+
+        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/configured%2Faccount/ai/v1",
+        )
+      }),
+    ),
+  )
+
   it.effect("expands account placeholders and preserves configured endpoints", () =>
     withEnv("env-account", () =>
       Effect.gen(function* () {

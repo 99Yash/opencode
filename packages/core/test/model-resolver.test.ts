@@ -131,7 +131,7 @@ describe("ModelResolver", () => {
     }),
   )
 
-  it.effect("routes Cloudflare Workers AI through its native provider", () =>
+  it.effect("routes Cloudflare Workers AI through the generic OpenAI-compatible provider", () =>
     Effect.gen(function* () {
       const resolved = yield* ModelResolver.fromCatalogModel(
         model(Provider.aisdk("@ai-sdk/openai-compatible"), {
@@ -139,6 +139,8 @@ describe("ModelResolver", () => {
           modelID: "@cf/meta/llama-3.1-8b-instruct",
           settings: {
             baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+            queryParams: { version: "preview" },
+            reasoningEffort: "high",
           },
         }),
         Credential.Key.make({ type: "key", key: "secret", metadata: { accountId: "account/id" } }),
@@ -152,9 +154,18 @@ describe("ModelResolver", () => {
         headers: Headers.empty,
       })
 
-      expect(resolved.route.id).toBe("cloudflare-workers-ai")
+      expect(resolved.route.id).toBe("openai-compatible-chat")
+      expect(String(resolved.provider)).toBe("cloudflare-workers-ai")
       expect(resolved.route.endpoint.baseURL).toBe("https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/v1")
+      expect(resolved.route.endpoint.query).toEqual({ version: "preview" })
+      expect(resolved.route.defaults.providerOptions).toEqual({ openai: { reasoningEffort: "high" } })
       expect(resolved.route.defaults.http?.body).toEqual({ custom_extension: { enabled: true } })
+      const prepared = yield* compileRequest(LLM.request({ model: resolved, prompt: "Hello" }))
+      expect(prepared.body).toMatchObject({
+        reasoning_effort: "high",
+        stream_options: { include_usage: true },
+      })
+      expect(prepared.body).not.toHaveProperty("accountId")
       expect(headers.authorization).toBe("Bearer secret")
     }),
   )

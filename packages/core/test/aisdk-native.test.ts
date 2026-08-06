@@ -45,7 +45,7 @@ describe("AISDKNative", () => {
     )
   })
 
-  test("maps Cloudflare Workers AI to its native provider", () => {
+  test("maps Cloudflare Workers AI to the generic OpenAI-compatible provider", () => {
     expect(
       map(
         "@ai-sdk/openai-compatible",
@@ -53,19 +53,23 @@ describe("AISDKNative", () => {
           accountId: "account/id",
           apiKey: "secret",
           baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+          headers: { "x-custom": "value" },
+          queryParams: { version: "preview" },
           reasoningEffort: "high",
         },
         "@cf/model",
         "cloudflare-workers-ai",
       ),
     ).toEqual({
-      package: "@opencode-ai/ai/providers/cloudflare/workers-ai",
+      package: "@opencode-ai/ai/providers/openai-compatible",
       settings: {
-        accountId: "account/id",
         apiKey: "secret",
         baseURL: "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/v1",
+        provider: "cloudflare-workers-ai",
+        queryParams: { version: "preview" },
         providerOptions: { openai: { reasoningEffort: "high" } },
       },
+      headers: { "x-custom": "value" },
     })
   })
 

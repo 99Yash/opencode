@@ -144,6 +144,7 @@ export const fromCatalogModel = (
     if (draft.settings?.apiKey === "") delete draft.settings.apiKey
     if (credential?.type === "key" && credential.metadata !== undefined)
       draft.body = Provider.mergeOverlay(draft.body, credential.metadata)
+    if (draft.providerID === "cloudflare-workers-ai" && draft.body) delete draft.body.accountId
   })
   const packageName = Provider.packageName(resolved.package)
   const key = apiKey(resolved, credential)

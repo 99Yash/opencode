@@ -53,9 +53,7 @@ export function map(input: MapInput): Mapping | undefined {
         },
       }
     case "@ai-sdk/openai-compatible":
-      return input.providerID === "cloudflare-workers-ai"
-        ? mapCloudflareWorkers(input, baseSettings)
-        : mapOpenAICompatible(input, baseSettings)
+      return mapOpenAICompatible(input, baseSettings)
     case "@openrouter/ai-sdk-provider":
       return mapOpenRouter(input.settings, baseSettings)
     case "@ai-sdk/xai":
@@ -68,47 +66,33 @@ export function map(input: MapInput): Mapping | undefined {
         },
       }
   }
-}
-
-function mapCloudflareWorkers(input: MapInput, baseSettings: Readonly<Record<string, unknown>>): Mapping {
-  const accountId = typeof input.settings.accountId === "string" ? input.settings.accountId : undefined
-  const configured = typeof baseSettings.baseURL === "string" ? baseSettings.baseURL : undefined
-  const baseURL =
-    configured && accountId
-      ? configured.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
-      : configured
-  return {
-    package: "@opencode-ai/ai/providers/cloudflare/workers-ai",
-    settings: {
-      ...(baseURL?.includes("${CLOUDFLARE_ACCOUNT_ID}") ? {} : baseURL ? { baseURL } : {}),
-      ...mapAPIKey(input.settings),
-      ...(accountId ? { accountId } : {}),
-      ...mapOpenAICompatibleOptions(input.settings, ["accountId"]),
-    },
-  }
+  return undefined
 }
 
 function mapOpenAICompatible(
   input: MapInput,
   baseSettings: Readonly<Record<string, unknown>>,
 ): Mapping | undefined {
-  if (typeof baseSettings.baseURL !== "string") return
+  const accountId =
+    input.providerID === "cloudflare-workers-ai" && typeof input.settings.accountId === "string"
+      ? input.settings.accountId
+      : undefined
+  const baseURL =
+    typeof baseSettings.baseURL === "string" && accountId
+      ? baseSettings.baseURL.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
+      : baseSettings.baseURL
+  if (typeof baseURL !== "string") return undefined
   return {
     package: "@opencode-ai/ai/providers/openai-compatible",
     settings: {
-      ...baseSettings,
+      baseURL,
       ...mapAPIKey(input.settings),
       provider: input.providerID,
-      ...mapOpenAICompatibleOptions(input.settings),
+      ...(isStringRecord(input.settings.queryParams) ? { queryParams: input.settings.queryParams } : {}),
+      ...mapOpenAIOptions(input.settings),
     },
+    ...(isStringRecord(input.settings.headers) ? { headers: input.settings.headers } : {}),
   }
-}
-
-function mapOpenAICompatibleOptions(settings: Readonly<Record<string, unknown>>, exclude: readonly string[] = []) {
-  const options = Object.fromEntries(
-    Object.entries(settings).filter(([key]) => !["apiKey", "baseURL", ...exclude].includes(key)),
-  )
-  return Object.keys(options).length === 0 ? {} : { providerOptions: { openai: options } }
 }
 
 function mapBedrockMantle(input: MapInput, baseSettings: Readonly<Record<string, unknown>>): Mapping | undefined {
