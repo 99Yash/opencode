@@ -1,7 +1,7 @@
 export * as Workspace from "./workspace"
 
 import { eq } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Exit, Layer, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/schema/schema"
 import { Workspace } from "@opencode-ai/schema/workspace"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
@@ -31,10 +31,9 @@ export interface Interface {
   /** Metadata read; never contacts a driver. */
   readonly get: (id: ID) => Effect.Effect<Info, NotFoundError>
   /** Provider key and opaque binding for WorkspaceDriver.connect. Hosted Location construction only. */
-  readonly binding: (id: ID) => Effect.Effect<
-    { readonly provider: string; readonly binding: WorkspaceDriver.Binding },
-    NotFoundError
-  >
+  readonly binding: (
+    id: ID,
+  ) => Effect.Effect<{ readonly provider: string; readonly binding: WorkspaceDriver.Binding }, NotFoundError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Workspace") {}
@@ -55,11 +54,15 @@ const layer = Layer.effect(
       create: Effect.fn("Workspace.create")(function* (input) {
         const driver = yield* registry.get(input.provider)
         const id = ID.create()
-        const created = yield* driver.create({ workspaceID: id })
-        yield* db
-          .insert(WorkspaceTable)
-          .values({ id, provider: input.provider, binding: created.binding, root: created.root })
-          .pipe(Effect.orDie)
+        const created = yield* Effect.acquireUseRelease(
+          driver.create({ workspaceID: id }),
+          (created) =>
+            db
+              .insert(WorkspaceTable)
+              .values({ id, provider: input.provider, binding: created.binding, root: created.root })
+              .pipe(Effect.orDie, Effect.as(created)),
+          (created, exit) => (Exit.isFailure(exit) ? driver.destroy(created.binding).pipe(Effect.ignore) : Effect.void),
+        )
         return Info.make({ id, provider: input.provider, root: AbsolutePath.make(created.root) })
       }),
       get: Effect.fn("Workspace.get")(function* (id) {

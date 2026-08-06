@@ -4,7 +4,7 @@ import path from "path"
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Content } from "@opencode-ai/schema/tool"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import { Deferred, Effect, Schema, Scope } from "effect"
+import { Array, Deferred, Effect, Schema, Scope } from "effect"
 import { LocationMutation } from "../../location-mutation"
 import { Permission } from "../../permission"
 import { PluginRuntime } from "../../plugin/runtime"
@@ -152,10 +152,12 @@ export const Plugin = {
                       )
                       invocation.cwd = target.canonical
                       finalTimeout = invocation.timeout
-                      const external = [target, ...directories]
-                        .map((item) => item.externalDirectory)
-                        .filter((item) => item !== undefined)
-                        .filter((item, index, items) => items.findIndex((other) => other.resource === item.resource) === index)
+                      const external = Array.dedupeWith(
+                        [target, ...directories]
+                          .map((item) => item.externalDirectory)
+                          .filter((item) => item !== undefined),
+                        (left, right) => left.resource === right.resource,
+                      )
                       if (external.length > 0)
                         yield* permission.assert({
                           action: "external_directory",

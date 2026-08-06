@@ -11,7 +11,7 @@ import { WorkspaceEnvironment } from "./workspace/environment"
 export interface Target {
   readonly canonical: string
   /** Lexical path for entry operations; remove unlinks the name, not the referent. */
-  readonly absolute?: string
+  readonly absolute: string
   readonly resource: string
 }
 
@@ -148,7 +148,7 @@ const layer = Layer.effect(
     const remove = Effect.fn("FileMutation.remove")((target: Target) =>
       withTargetLock(target)(
         fs
-          .remove(target.absolute ?? target.canonical)
+          .remove(target.absolute)
           .pipe(Effect.catchReason("PlatformError", "NotFound", () => new NotFoundError({ path: target.canonical }))),
       ),
     )
@@ -240,9 +240,7 @@ const hostedLayer = Layer.effect(
 
     // Removing a symlink unlinks the link itself, never its referent.
     const remove = Effect.fn("FileMutation.remove")((target: Target) =>
-      withTargetLock(target)(
-        env.files.remove(target.absolute ?? target.canonical).pipe(Effect.mapError(mapError("remove"))),
-      ),
+      withTargetLock(target)(env.files.remove(target.absolute).pipe(Effect.mapError(mapError("remove")))),
     )
 
     return Service.of({ read, write, writeTextPreservingBom, remove })
