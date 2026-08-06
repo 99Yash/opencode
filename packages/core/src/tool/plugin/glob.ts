@@ -42,7 +42,7 @@ export const Plugin = {
   effect: Effect.fn("GlobTool.Plugin")(function* (ctx: PluginContext) {
     const filesystem = yield* FileSystem.Service
     const location = yield* Location.Service
-    const resolve = location.workspaceID ? path.posix.resolve : path.resolve
+    const resolve = Location.paths(location).resolve
     const mutation = yield* LocationMutation.Service
     const permission = yield* Permission.Service
 
@@ -88,15 +88,7 @@ export const Plugin = {
                   limit: limit + 1,
                 })
                 .pipe(
-                  Effect.timeoutOrElse({
-                    duration: FileSystem.DEFAULT_SEARCH_TIMEOUT_MS,
-                    orElse: () =>
-                      Effect.fail(
-                        new ToolFailure({
-                          message: `Search timed out after ${FileSystem.DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
-                        }),
-                      ),
-                  }),
+                  FileSystem.searchTimeout((message) => new ToolFailure({ message })),
                   Effect.catchTag("FileSystem.SearchPathError", (error) =>
                     Effect.fail(
                       new ToolFailure({

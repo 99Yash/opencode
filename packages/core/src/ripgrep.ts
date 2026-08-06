@@ -20,6 +20,13 @@ import { WorkspaceEnvironment } from "./workspace/environment"
 const ERROR_BYTES = 8 * 1024
 const MAX_SUBMATCHES = 100
 
+/**
+ * Provider-side kill for hosted searches, since hosted process kill is not
+ * implemented. Kept below FileSystem.DEFAULT_SEARCH_TIMEOUT_MS so the sandbox
+ * process dies before the caller's timeout fires.
+ */
+export const HOSTED_KILL_TIMEOUT_SECONDS = 29
+
 const RawMatch = Schema.Struct({
   type: Schema.Literal("match"),
   data: Schema.Struct({
@@ -319,8 +326,8 @@ export const hostedNode = makeLocationNode({
               [
                 ...env.shell.args(
                   input.output === "lines"
-                    ? 'set -o pipefail; limit=$1; shift; timeout --signal=KILL 29s rg "$@" | head -n "$limit"'
-                    : `set -o pipefail; limit=$1; shift; timeout --signal=KILL 29s rg "$@" | awk -v limit="$limit" '{ print } /"type":"match"/ { if (++matches >= limit) exit }'`,
+                    ? `set -o pipefail; limit=$1; shift; timeout --signal=KILL ${HOSTED_KILL_TIMEOUT_SECONDS}s rg "$@" | head -n "$limit"`
+                    : `set -o pipefail; limit=$1; shift; timeout --signal=KILL ${HOSTED_KILL_TIMEOUT_SECONDS}s rg "$@" | awk -v limit="$limit" '{ print } /"type":"match"/ { if (++matches >= limit) exit }'`,
                 ),
                 "opencode-ripgrep",
                 String(input.limit + 1),

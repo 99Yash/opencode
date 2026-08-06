@@ -116,13 +116,14 @@ export const Plugin = {
                     })
                   }
                   if (hunk.type === "add") {
+                    const contents =
+                      hunk.contents.endsWith("\n") || hunk.contents === "" ? hunk.contents : `${hunk.contents}\n`
                     prepared.push({
                       ...hunk,
+                      contents,
                       target,
                       before: "",
-                      after: FileMutation.normalizeText(
-                        hunk.contents.endsWith("\n") || hunk.contents === "" ? hunk.contents : `${hunk.contents}\n`,
-                      ),
+                      after: FileMutation.normalizeText(contents),
                     })
                     return
                   }
@@ -149,7 +150,6 @@ export const Plugin = {
                           }),
                       ),
                     ))
-                  const before = original
                   const update = yield* Effect.try({
                     try: () => Patch.derive(hunk.path, hunk.chunks, original),
                     catch: (error) => new ToolFailure({ message: `patch verification failed: ${errorMessage(error)}` }),
@@ -169,7 +169,7 @@ export const Plugin = {
                     ...hunk,
                     target,
                     content: Patch.joinBom(update.content, update.bom),
-                    before,
+                    before: original,
                     after: content,
                     moveTarget,
                   })
@@ -207,13 +207,7 @@ export const Plugin = {
                   Effect.gen(function* () {
                     if (change.type === "add") {
                       const result = yield* files
-                        .write({
-                          target: change.target,
-                          content:
-                            change.contents.endsWith("\n") || change.contents === ""
-                              ? change.contents
-                              : `${change.contents}\n`,
-                        })
+                        .write({ target: change.target, content: change.contents })
                         .pipe(Effect.mapError((error) => fail(`Failed to write ${change.target.resource}`, error)))
                       formatted.set(change.target.canonical, result.content)
                       applied.push({

@@ -1,3 +1,4 @@
+import path from "path"
 import { Context, Effect, Layer } from "effect"
 import { Info, Ref, response } from "@opencode-ai/schema/location"
 import { Workspace } from "@opencode-ai/schema/workspace"
@@ -15,6 +16,12 @@ export interface Interface extends Info {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Location") {}
+
+/**
+ * Path rules for a Location's directory. Hosted directories live in the
+ * provider filesystem: posix semantics regardless of the host platform.
+ */
+export const paths = (location: Pick<Info, "workspaceID">) => (location.workspaceID ? path.posix : path)
 
 export const node = LayerNode.unbound(Service, tags.values.location)
 

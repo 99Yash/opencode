@@ -34,7 +34,24 @@ export type ListInput = typeof ListInput.Type
 export { FindInput }
 
 export const DEFAULT_SEARCH_LIMIT = 100
-export const DEFAULT_SEARCH_TIMEOUT_MS = 30_000
+/** One second of headroom over the hosted provider-side ripgrep kill. */
+export const DEFAULT_SEARCH_TIMEOUT_MS = (Ripgrep.HOSTED_KILL_TIMEOUT_SECONDS + 1) * 1_000
+
+/** Applies the shared search budget, failing with a search-scoped message. */
+export const searchTimeout =
+  <F>(fail: (message: string) => F) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E | F, R> =>
+    effect.pipe(
+      Effect.timeoutOrElse({
+        duration: DEFAULT_SEARCH_TIMEOUT_MS,
+        orElse: () =>
+          Effect.fail(
+            fail(
+              `Search timed out after ${DEFAULT_SEARCH_TIMEOUT_MS / 1_000} seconds. Consider using a more specific path or pattern.`,
+            ),
+          ),
+      }),
+    )
 
 export class GlobInput extends Schema.Class<GlobInput>("FileSystem.GlobInput")({
   pattern: Schema.String,

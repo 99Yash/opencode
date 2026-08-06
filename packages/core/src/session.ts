@@ -352,12 +352,8 @@ const layer = Layer.effect(
               projectID: project.id,
               parentID: input.parentID,
               location,
-              // Hosted directories live in the provider filesystem: posix
-              // semantics regardless of the host platform.
               subpath: RelativePath.make(
-                location.workspaceID
-                  ? path.posix.relative(project.directory, location.directory)
-                  : path.relative(project.directory, location.directory).replaceAll("\\", "/"),
+                Location.paths(location).relative(project.directory, location.directory).replaceAll("\\", "/"),
               ),
               title: input.title,
               agent: input.agent,
@@ -718,10 +714,10 @@ const layer = Layer.effect(
         const expanded =
           value === "~" ? global.home : value.startsWith("~/") ? path.join(global.home, value.slice(2)) : value
         const directory = AbsolutePath.make(path.resolve(current.location.directory, expanded))
+        if (current.location.directory === directory) return
         const info = yield* fs.stat(directory).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!info) return yield* new DestinationNotFoundError({ directory })
         if (info.type !== "Directory") return yield* new DestinationNotDirectoryError({ directory })
-        if (current.location.directory === directory) return
         const project = yield* projects.resolve(directory)
         yield* persistProject(project)
         if ((yield* execution.active).has(input.sessionID)) {
