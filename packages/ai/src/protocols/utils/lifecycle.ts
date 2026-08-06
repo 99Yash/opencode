@@ -59,7 +59,9 @@ export const reasoningEnd = (
 ): State => {
   if (!state.reasoning.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.reasoningEnd({ id, providerMetadata: providerMetadata ?? stepped.reasoning.get(id) }))
+  events.push(
+    LLMEvent.reasoningEnd({ id, providerMetadata: mergeMetadata(stepped.reasoning.get(id), providerMetadata) }),
+  )
   const reasoning = new Map(stepped.reasoning)
   reasoning.delete(id)
   return { ...stepped, reasoning }
@@ -68,10 +70,18 @@ export const reasoningEnd = (
 export const textEnd = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
   if (!state.text.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.textEnd({ id, providerMetadata: providerMetadata ?? stepped.text.get(id) }))
+  events.push(LLMEvent.textEnd({ id, providerMetadata: mergeMetadata(stepped.text.get(id), providerMetadata) }))
   const text = new Map(stepped.text)
   text.delete(id)
   return { ...stepped, text }
+}
+
+const mergeMetadata = (left: ProviderMetadata | undefined, right: ProviderMetadata | undefined) => {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return Object.fromEntries(
+    Array.from(new Set([...Object.keys(left), ...Object.keys(right)]), (key) => [key, { ...left[key], ...right[key] }]),
+  )
 }
 
 const closeOpenBlocks = (state: State, events: LLMEvent[]): State => {

@@ -286,10 +286,9 @@ export interface ParserState {
   readonly messagePhase: (value: unknown) => MessagePhase | null | undefined
   readonly messagePhases: Readonly<Record<string, MessagePhase | null>>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
-  readonly store: boolean | undefined
 }
 
-type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
+type ReasoningSummaryStatus = "active" | "can-conclude"
 
 interface ReasoningStreamItem {
   readonly encryptedContent: string | null | undefined
@@ -328,9 +327,20 @@ export const lowerToolChoice = (protocolName: string, toolChoice: NonNullable<LL
   })
 
 const responseItemID = (prefix: string, id: string) => {
-  const value = id.replace(/^[^_]+_/, "").replace(/[^a-zA-Z0-9_-]/g, "_")
-  return `${prefix}_${value || "item"}`.slice(0, 64)
+  const value = id.startsWith("call_") ? id.slice(5) : id
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "item"
+  const direct = `${prefix}_${sanitized}`
+  if (value === sanitized && direct.length <= 64) return direct
+  const hash = Array.from(id).reduce(
+    (hash, character) => BigInt.asUintN(64, (hash ^ BigInt(character.codePointAt(0) ?? 0)) * 1099511628211n),
+    14695981039346656037n,
+  )
+  const suffix = hash.toString(36)
+  return `${prefix}_${sanitized.slice(0, 62 - prefix.length - suffix.length)}_${suffix}`
 }
+
+const validResponseItemID = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= 64 && /^[a-zA-Z0-9]+_.+$/.test(value)
 
 const responseItemMetadata = (part: { readonly providerMetadata?: ProviderMetadata }, providerMetadataKey: string) => {
   const metadata = part.providerMetadata?.[providerMetadataKey]
@@ -341,7 +351,7 @@ const lowerToolCall = (part: ToolCallPart, providerMetadataKey: string): OpenRes
   const metadata = responseItemMetadata(part, providerMetadataKey)
   return {
     type: "function_call",
-    id: typeof metadata?.itemId === "string" ? metadata.itemId : responseItemID("fc", part.id),
+    id: validResponseItemID(metadata?.itemId) ? metadata.itemId : responseItemID("fc", part.id),
     call_id: part.id,
     name: part.name,
     arguments: ProviderShared.encodeJson(part.input),
@@ -351,15 +361,14 @@ const lowerToolCall = (part: ToolCallPart, providerMetadataKey: string): OpenRes
 
 const lowerReasoning = (part: ReasoningPart, providerMetadataKey: string): OpenResponsesReasoningInput | undefined => {
   const metadata = part.providerMetadata?.[providerMetadataKey]
-  if (!ProviderShared.isRecord(metadata) || typeof metadata.itemId !== "string" || metadata.itemId.length === 0)
-    return undefined
+  if (!ProviderShared.isRecord(metadata) || typeof metadata.itemId !== "string") return undefined
   const encryptedContent =
     typeof metadata.reasoningEncryptedContent === "string" || metadata.reasoningEncryptedContent === null
       ? metadata.reasoningEncryptedContent
       : undefined
   return {
     type: "reasoning",
-    id: metadata.itemId,
+    id: validResponseItemID(metadata.itemId) ? metadata.itemId : responseItemID("rs", metadata.itemId),
     summary: part.text.length > 0 ? [{ type: "summary_text", text: part.text }] : [],
     encrypted_content: encryptedContent,
   }
@@ -372,14 +381,26 @@ const hostedToolItem = (part: ToolResultPart, providerMetadataKey: string): Open
     typeof metadata.responseItem.id === "string" &&
     typeof metadata.responseItem.type === "string"
   )
-    return { ...metadata.responseItem, type: metadata.responseItem.type, id: metadata.responseItem.id }
+    return {
+      ...metadata.responseItem,
+      type: metadata.responseItem.type,
+      id: validResponseItemID(metadata.responseItem.id)
+        ? metadata.responseItem.id
+        : responseItemID("item", metadata.responseItem.id),
+    }
   if (
     part.result.type === "json" &&
     ProviderShared.isRecord(part.result.value) &&
     typeof part.result.value.id === "string" &&
     typeof part.result.value.type === "string"
   )
-    return { ...part.result.value, type: part.result.value.type, id: part.result.value.id }
+    return {
+      ...part.result.value,
+      type: part.result.value.type,
+      id: validResponseItemID(part.result.value.id)
+        ? part.result.value.id
+        : responseItemID("item", part.result.value.id),
+    }
   return undefined
 }
 
@@ -472,6 +493,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
       const content: TextPart[] = []
       const reasoningItems: Record<string, OpenResponsesReasoningReplay> = {}
       const hostedToolItems = new Set<string>()
+      let textItemIndex = 0
       const flushText = () => {
         if (content.length === 0) return
         const groups = content.reduce<Array<{ phase: MessagePhase | null | undefined; parts: TextPart[] }>>(
@@ -486,17 +508,17 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
           [],
         )
         input.push(
-          ...groups.map((group, index) => {
+          ...groups.map((group) => {
+            const index = textItemIndex++
             const first = group.parts[0]
             const metadata = first ? responseItemMetadata(first, providerMetadataKey) : undefined
-            const id =
-              typeof metadata?.itemId === "string"
-                ? metadata.itemId
-                : message.id === undefined
-                  ? undefined
-                  : index === 0
-                    ? message.id
-                    : responseItemID("msg", `${message.id}_${index}`)
+            const id = validResponseItemID(metadata?.itemId)
+              ? metadata.itemId
+              : message.id === undefined && typeof metadata?.itemId !== "string"
+                ? undefined
+                : index === 0 && validResponseItemID(message.id)
+                  ? message.id
+                  : responseItemID("msg", `${message.id ?? metadata?.itemId}_${index}`)
             return {
               type: "message" as const,
               ...(id === undefined ? {} : { id }),
@@ -810,23 +832,11 @@ const onReasoningSummaryPartAdded = (state: ParserState, event: Event): StepResu
   }
 
   const events: LLMEvent[] = []
-  const closed = Object.entries(item.summaryParts)
-    .filter((entry) => entry[1] === "can-conclude")
-    .reduce(
-      (lifecycle, entry) =>
-        Lifecycle.reasoningEnd(
-          lifecycle,
-          events,
-          `${event.item_id}:${entry[0]}`,
-          providerMetadata(state, { itemId: event.item_id }),
-        ),
-      state.lifecycle,
-    )
   return [
     {
       ...state,
       lifecycle: Lifecycle.reasoningStart(
-        closed,
+        state.lifecycle,
         events,
         `${event.item_id}:${event.summary_index}`,
         providerMetadata(state, { itemId: event.item_id, reasoningEncryptedContent: item.encryptedContent ?? null }),
@@ -836,11 +846,7 @@ const onReasoningSummaryPartAdded = (state: ParserState, event: Event): StepResu
         [event.item_id]: {
           ...item,
           summaryParts: {
-            ...Object.fromEntries(
-              Object.entries(item.summaryParts).map((entry) =>
-                entry[1] === "can-conclude" ? [entry[0], "concluded" as const] : entry,
-              ),
-            ),
+            ...item.summaryParts,
             [event.summary_index]: "active",
           },
         },
@@ -858,22 +864,13 @@ const onReasoningSummaryPartDone = (state: ParserState, event: Event): StepResul
   return [
     {
       ...state,
-      lifecycle:
-        state.store !== false
-          ? Lifecycle.reasoningEnd(
-              state.lifecycle,
-              events,
-              `${event.item_id}:${event.summary_index}`,
-              providerMetadata(state, { itemId: event.item_id }),
-            )
-          : state.lifecycle,
       reasoningItems: {
         ...state.reasoningItems,
         [event.item_id]: {
           ...item,
           summaryParts: {
             ...item.summaryParts,
-            [event.summary_index]: state.store !== false ? "concluded" : "can-conclude",
+            [event.summary_index]: "can-conclude",
           },
         },
       },
@@ -1089,7 +1086,6 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   messagePhase: (value) => messagePhase(value, extension),
   messagePhases: {},
   reasoningItems: {},
-  store: OpenResponsesOptions.resolve(request).store,
 })
 
 const messagePhase = (value: unknown, extension: Extension): MessagePhase | null | undefined => {
