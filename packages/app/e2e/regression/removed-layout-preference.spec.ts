@@ -1,18 +1,18 @@
 import { expect, test } from "@playwright/test"
 import { mockOpenCodeServer } from "../utils/mock-server"
 
-const draftID = "draft_legacy_new_session"
-const directory = "C:/OpenCode/LegacyNewSession"
+const draftID = "draft_removed_layout_preference"
+const directory = "C:/OpenCode/RemovedLayoutPreference"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
 test("ignores persisted old layout preferences when opening drafts", async ({ page }) => {
   await mockOpenCodeServer(page, {
     directory,
     project: {
-      id: "proj_legacy_new_session",
+      id: "proj_removed_layout_preference",
       worktree: directory,
       vcs: "git",
-      name: "legacy-new-session",
+      name: "removed-layout-preference",
       time: { created: 1700000000000, updated: 1700000000000 },
       sandboxes: [],
     },
