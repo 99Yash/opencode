@@ -5,8 +5,6 @@ import { LanguageModel } from "@opencode-ai/ai"
 // ast-grep-ignore: no-star-import
 import * as AnthropicMessages from "@opencode-ai/ai/protocols/anthropic-messages"
 // ast-grep-ignore: no-star-import
-import * as OpenAICompatibleChat from "@opencode-ai/ai/protocols/openai-compatible-chat"
-// ast-grep-ignore: no-star-import
 import * as OpenAIResponses from "@opencode-ai/ai/protocols/openai-responses"
 import { Auth, type AnyRoute } from "@opencode-ai/ai/route"
 import { Context, Effect, Layer, Schema } from "effect"
@@ -164,21 +162,11 @@ export const fromCatalogModel = (
         .model({ id: resolved.modelID ?? resolved.id, compatibility: resolved.compatibility }),
     )
   }
-  if (
-    Provider.isAISDK(resolved.package) &&
-    packageName === "@ai-sdk/openai-compatible" &&
-    typeof resolved.settings?.baseURL === "string"
-  ) {
-    return Effect.succeed(
-      withDefaults(resolved, OpenAICompatibleChat.route)
-        .with({ auth: key === undefined ? Auth.none : Auth.bearer(key) })
-        .model({ id: resolved.modelID ?? resolved.id, compatibility: resolved.compatibility }),
-    )
-  }
   const configured = { ...resolved.settings, ...credential?.metadata }
   const mapping = Provider.isAISDK(resolved.package)
     ? AISDKNative.map({
         packageName,
+        providerID: resolved.providerID,
         settings: configured,
         modelID: resolved.modelID ?? resolved.id,
       })

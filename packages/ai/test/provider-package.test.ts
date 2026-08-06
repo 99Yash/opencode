@@ -26,6 +26,7 @@ describe("provider package entrypoints", () => {
       import("@opencode-ai/ai/providers/amazon-bedrock/mantle"),
       import("@opencode-ai/ai/providers/amazon-bedrock/mantle/chat"),
       import("@opencode-ai/ai/providers/amazon-bedrock/mantle/responses"),
+      import("@opencode-ai/ai/providers/cloudflare/workers-ai"),
     ])
 
     for (const module of modules) expect(module.model).toBeFunction()
@@ -33,6 +34,25 @@ describe("provider package entrypoints", () => {
     expect(modules[8].model).toBe(modules[9].model)
     expect(modules[12].model).toBe(modules[13].model)
     expect(modules[19].model).toBe(modules[20].model)
+  })
+
+  test("maps Cloudflare Workers AI settings onto its native route", async () => {
+    const WorkersAI = await import("@opencode-ai/ai/providers/cloudflare/workers-ai")
+    const model = WorkersAI.model("@cf/meta/llama-3.1-8b-instruct", {
+      accountId: "account/id",
+      apiKey: "secret",
+      body: { custom: true, accountId: "account/id" },
+      limits: { context: 128_000, output: 8_192 },
+    })
+
+    expect(model.route).toMatchObject({
+      id: "cloudflare-workers-ai",
+      endpoint: { baseURL: "https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/v1" },
+      defaults: {
+        http: { body: { custom: true } },
+        limits: { context: 128_000, output: 8_192 },
+      },
+    })
   })
 
   test("maps OpenRouter and xAI package settings onto executable models", async () => {

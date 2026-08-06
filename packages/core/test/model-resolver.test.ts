@@ -131,6 +131,34 @@ describe("ModelResolver", () => {
     }),
   )
 
+  it.effect("routes Cloudflare Workers AI through its native provider", () =>
+    Effect.gen(function* () {
+      const resolved = yield* ModelResolver.fromCatalogModel(
+        model(Provider.aisdk("@ai-sdk/openai-compatible"), {
+          providerID: Provider.ID.make("cloudflare-workers-ai"),
+          modelID: "@cf/meta/llama-3.1-8b-instruct",
+          settings: {
+            baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+          },
+        }),
+        Credential.Key.make({ type: "key", key: "secret", metadata: { accountId: "account/id" } }),
+        { loadAISDK: () => Effect.die("AI SDK loader should not be called") },
+      )
+      const headers = yield* resolved.route.auth.apply({
+        request: LLM.request({ model: resolved, prompt: "Hello" }),
+        method: "POST",
+        url: "https://example.com",
+        body: "{}",
+        headers: Headers.empty,
+      })
+
+      expect(resolved.route.id).toBe("cloudflare-workers-ai")
+      expect(resolved.route.endpoint.baseURL).toBe("https://api.cloudflare.com/client/v4/accounts/account%2Fid/ai/v1")
+      expect(resolved.route.defaults.http?.body).toEqual({ custom_extension: { enabled: true } })
+      expect(headers.authorization).toBe("Bearer secret")
+    }),
+  )
+
   it.effect("uses the API modelID instead of the catalog ID for native OpenAI routes", () =>
     Effect.gen(function* () {
       const catalog = model(Provider.aisdk("@ai-sdk/openai"), {

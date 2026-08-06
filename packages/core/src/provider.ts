@@ -47,6 +47,10 @@ const builtins = new Map<string, () => Promise<unknown>>([
   ["@opencode-ai/ai/providers/azure", () => import("@opencode-ai/ai/providers/azure")],
   ["@opencode-ai/ai/providers/azure/chat", () => import("@opencode-ai/ai/providers/azure/chat")],
   ["@opencode-ai/ai/providers/azure/responses", () => import("@opencode-ai/ai/providers/azure/responses")],
+  [
+    "@opencode-ai/ai/providers/cloudflare/workers-ai",
+    () => import("@opencode-ai/ai/providers/cloudflare/workers-ai"),
+  ],
   ["@opencode-ai/ai/providers/google", () => import("@opencode-ai/ai/providers/google")],
   ["@opencode-ai/ai/providers/openai", () => import("@opencode-ai/ai/providers/openai")],
   ["@opencode-ai/ai/providers/openai/chat", () => import("@opencode-ai/ai/providers/openai/chat")],

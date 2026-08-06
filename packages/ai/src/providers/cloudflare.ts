@@ -2,6 +2,7 @@ import type { Config, Redacted } from "effect"
 import * as OpenAICompatibleChat from "../protocols/openai-compatible-chat"
 import { Auth } from "../route/auth"
 import { AuthOptions, type AtLeastOne, type ProviderAuthOption } from "../route/auth-options"
+import type { ProviderPackage } from "../provider-package"
 import type { RouteDefaultsInput } from "../route/client"
 import { ProviderID, type ModelID } from "../schema"
 import type { OpenAIProviderOptionsInput } from "./openai-options"
@@ -38,6 +39,13 @@ export type WorkersAIOptions = WorkersAIURL &
   ProviderAuthOption<"optional"> & {
     readonly providerOptions?: OpenAIProviderOptionsInput
   }
+
+export interface WorkersAISettings extends ProviderPackage.Settings {
+  readonly accountId?: string
+  readonly apiKey?: string
+  readonly baseURL?: string
+  readonly providerOptions?: OpenAIProviderOptionsInput
+}
 
 export const aiGatewayBaseURL = (input: GatewayURL) => {
   if (input.baseURL) return input.baseURL
@@ -130,4 +138,22 @@ export const CloudflareAIGateway = {
 export const CloudflareWorkersAI = {
   id: workersAIID,
   configure: configureWorkersAI,
+}
+
+export const workersAIModel: ProviderPackage.Definition<WorkersAISettings, OpenAIProviderOptionsInput>["model"] = (
+  modelID,
+  settings,
+) => {
+  const body = settings.body === undefined ? undefined : { ...settings.body }
+  if (body) delete body.accountId
+  const defaults = {
+    apiKey: settings.apiKey,
+    headers: settings.headers === undefined ? undefined : { ...settings.headers },
+    http: body === undefined ? undefined : { body },
+    limits: settings.limits,
+    providerOptions: settings.providerOptions,
+  }
+  if (settings.baseURL) return configureWorkersAI({ ...defaults, baseURL: settings.baseURL }).model(modelID)
+  if (settings.accountId) return configureWorkersAI({ ...defaults, accountId: settings.accountId }).model(modelID)
+  throw new Error("Cloudflare Workers AI requires accountId or baseURL")
 }

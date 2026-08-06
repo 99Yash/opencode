@@ -12,6 +12,7 @@ export interface Mapping {
 
 export interface MapInput {
   readonly packageName: string | undefined
+  readonly providerID: string
   readonly settings: Readonly<Record<string, unknown>>
   readonly modelID: string
 }
@@ -51,6 +52,10 @@ export function map(input: MapInput): Mapping | undefined {
           ...mapGoogleOptions(input.settings),
         },
       }
+    case "@ai-sdk/openai-compatible":
+      return input.providerID === "cloudflare-workers-ai"
+        ? mapCloudflareWorkers(input, baseSettings)
+        : mapOpenAICompatible(input, baseSettings)
     case "@openrouter/ai-sdk-provider":
       return mapOpenRouter(input.settings, baseSettings)
     case "@ai-sdk/xai":
@@ -63,6 +68,47 @@ export function map(input: MapInput): Mapping | undefined {
         },
       }
   }
+}
+
+function mapCloudflareWorkers(input: MapInput, baseSettings: Readonly<Record<string, unknown>>): Mapping {
+  const accountId = typeof input.settings.accountId === "string" ? input.settings.accountId : undefined
+  const configured = typeof baseSettings.baseURL === "string" ? baseSettings.baseURL : undefined
+  const baseURL =
+    configured && accountId
+      ? configured.replaceAll("${CLOUDFLARE_ACCOUNT_ID}", encodeURIComponent(accountId))
+      : configured
+  return {
+    package: "@opencode-ai/ai/providers/cloudflare/workers-ai",
+    settings: {
+      ...(baseURL?.includes("${CLOUDFLARE_ACCOUNT_ID}") ? {} : baseURL ? { baseURL } : {}),
+      ...mapAPIKey(input.settings),
+      ...(accountId ? { accountId } : {}),
+      ...mapOpenAICompatibleOptions(input.settings, ["accountId"]),
+    },
+  }
+}
+
+function mapOpenAICompatible(
+  input: MapInput,
+  baseSettings: Readonly<Record<string, unknown>>,
+): Mapping | undefined {
+  if (typeof baseSettings.baseURL !== "string") return
+  return {
+    package: "@opencode-ai/ai/providers/openai-compatible",
+    settings: {
+      ...baseSettings,
+      ...mapAPIKey(input.settings),
+      provider: input.providerID,
+      ...mapOpenAICompatibleOptions(input.settings),
+    },
+  }
+}
+
+function mapOpenAICompatibleOptions(settings: Readonly<Record<string, unknown>>, exclude: readonly string[] = []) {
+  const options = Object.fromEntries(
+    Object.entries(settings).filter(([key]) => !["apiKey", "baseURL", ...exclude].includes(key)),
+  )
+  return Object.keys(options).length === 0 ? {} : { providerOptions: { openai: options } }
 }
 
 function mapBedrockMantle(input: MapInput, baseSettings: Readonly<Record<string, unknown>>): Mapping | undefined {
