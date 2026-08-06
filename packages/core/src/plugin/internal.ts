@@ -171,7 +171,14 @@ const post = [
   ConfigPolicyPlugin.Plugin,
 ] as const satisfies readonly InternalPlugin[]
 
+// Not advertised for hosted Locations until their execution is
+// environment-backed: glob/grep spawn the host ripgrep binary against
+// provider paths, and patch has host filesystem assumptions. Hosted glob/grep
+// later spawn rg inside the workspace image.
+const hostedExcluded: ReadonlySet<string> = new Set([PatchTool.Plugin.id, GlobTool.Plugin.id, GrepTool.Plugin.id])
+
 export const list = Effect.fn("PluginInternal.list")(function* () {
+  const location = yield* Location.Service
   const context = yield* services()
   const resolve = (plugins: readonly InternalPlugin[]) =>
     plugins.map(
@@ -181,7 +188,7 @@ export const list = Effect.fn("PluginInternal.list")(function* () {
       }),
     )
   return {
-    pre: resolve(pre),
+    pre: resolve(location.workspaceID ? pre.filter((plugin) => !hostedExcluded.has(plugin.id)) : pre),
     post: resolve(post),
   }
 })
