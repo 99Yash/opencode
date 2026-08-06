@@ -5,7 +5,7 @@ const draftID = "draft_legacy_new_session"
 const directory = "C:/OpenCode/LegacyNewSession"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
 
-test("keeps drafts in the tabs layout for profiles with an old layout preference", async ({ page }) => {
+test("ignores persisted old layout preferences when opening drafts", async ({ page }) => {
   await mockOpenCodeServer(page, {
     directory,
     project: {
