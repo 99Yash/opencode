@@ -12,6 +12,7 @@ import { Bus } from "./bus"
 import { Location } from "./location"
 import { Global } from "@opencode-ai/util/global"
 import { ShellSelect } from "./shell/select"
+import { WorkspaceEnvironment } from "./workspace/environment"
 import type { ShellCreateBefore } from "@opencode-ai/plugin/effect/shell"
 import { PluginHooks } from "./plugin/hooks"
 
@@ -65,14 +66,24 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Shell") {}
 
-export const layer = (options?: ShellSelect.Options) => Layer.effect(
+/** The provider-facing seams; everything else in this service is host-owned bookkeeping. */
+interface Backend {
+  readonly spawn: (command: ChildProcess.Command) => ReturnType<AppProcess.Interface["spawn"]>
+  /** Shell executable; re-evaluated per command so config changes apply. */
+  readonly shell: Effect.Effect<string>
+  readonly args: (shell: string, command: string) => readonly string[]
+  /** Base environment for spawned commands. Hosted backends must not leak host process.env. */
+  readonly env: Readonly<Record<string, string | undefined>>
+  readonly detached: boolean
+}
+
+const layerWith = <E, R>(backend: Effect.Effect<Backend, E, R>) => Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const location = yield* Location.Service
-    const config = yield* Config.Service
     const global = yield* Global.Service
-    const appProcess = yield* AppProcess.Service
+    const spawner = yield* backend
     const hooks = yield* PluginHooks.Service
     const context = yield* Effect.context()
     const runFork = Effect.runForkWith(context)
@@ -141,12 +152,7 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
       return session.info
     })
 
-    const resolve = () =>
-      config
-        .entries()
-        .pipe(Effect.map((entries) => ShellSelect.preferred(Config.latest(entries, "shell"), options)))
-
-    const name = () => resolve().pipe(Effect.map(ShellSelect.name))
+    const name = () => spawner.shell.pipe(Effect.map(ShellSelect.name))
 
     const output = Effect.fn("Shell.output")(function* (id: Shell.ID, input?: Shell.OutputInput) {
       const session = yield* require(id)
@@ -186,9 +192,9 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
         command: input.command,
         cwd: input.cwd ?? location.directory,
         timeout: input.timeout,
-        shell: yield* resolve(),
+        shell: yield* spawner.shell,
         env: {
-          ...process.env,
+          ...spawner.env,
           TERM: "xterm-256color",
           OPENCODE_TERMINAL: "1",
         },
@@ -197,7 +203,7 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
       if (before) yield* before(invocation)
 
       const id = Shell.ID.ascending()
-      const args = ShellSelect.args(invocation.shell, invocation.command)
+      const args = spawner.args(invocation.shell, invocation.command)
       const file = path.join(outputDir, `${id}.out`)
 
       const info: Info = {
@@ -218,12 +224,12 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
       runFork(
         Effect.scoped(
           Effect.gen(function* () {
-            const handle = yield* appProcess.spawn(
+            const handle = yield* spawner.spawn(
               ChildProcess.make(invocation.shell, args, {
                 cwd: invocation.cwd,
                 env: invocation.env,
                 stdin: "ignore",
-                detached: process.platform !== "win32",
+                detached: spawner.detached,
                 forceKillAfter: Duration.seconds(3),
               }),
             )
@@ -339,6 +345,23 @@ export const layer = (options?: ShellSelect.Options) => Layer.effect(
   }),
 )
 
+export const layer = (options?: ShellSelect.Options) =>
+  layerWith(
+    Effect.gen(function* () {
+      const config = yield* Config.Service
+      const appProcess = yield* AppProcess.Service
+      return {
+        spawn: (command) => appProcess.spawn(command),
+        shell: config
+          .entries()
+          .pipe(Effect.map((entries) => ShellSelect.preferred(Config.latest(entries, "shell"), options))),
+        args: ShellSelect.args,
+        env: process.env,
+        detached: process.platform !== "win32",
+      } satisfies Backend
+    }),
+  )
+
 export function configured(options?: ShellSelect.Options) {
   return makeLocationNode({
     service: Service,
@@ -348,3 +371,22 @@ export function configured(options?: ShellSelect.Options) {
 }
 
 export const node = configured()
+
+// Commands run inside the workspace: provider spawner, image shell lowering,
+// and no host process.env leakage. Output capture files remain host-owned.
+export const hostedNode = makeLocationNode({
+  service: Service,
+  layer: layerWith(
+    Effect.gen(function* () {
+      const env = yield* WorkspaceEnvironment.Service
+      return {
+        spawn: (command) => env.process.spawn(command),
+        shell: Effect.succeed(env.shell.executable),
+        args: (_shell, command) => env.shell.args(command),
+        env: env.shell.environmentOverrides,
+        detached: env.shell.detached,
+      } satisfies Backend
+    }),
+  ),
+  deps: [Bus.node, Location.node, Global.node, WorkspaceEnvironment.node, PluginHooks.node],
+})
