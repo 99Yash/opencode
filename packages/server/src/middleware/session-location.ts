@@ -39,7 +39,7 @@ export const sessionLocationLayer = Layer.effect(
           ),
         )
         const row = yield* db
-          .select({ directory: SessionTable.directory })
+          .select({ directory: SessionTable.directory, workspace_id: SessionTable.workspace_id })
           .from(SessionTable)
           .where(eq(SessionTable.id, sessionID))
           .get()
@@ -53,8 +53,11 @@ export const sessionLocationLayer = Layer.effect(
         return yield* effect.pipe(
           Effect.provide(
             locations.get(
+              // Hosted-ness is a server-side fact from the session row; clients
+              // never assert workspace identity per-request.
               Location.Ref.make({
                 directory: AbsolutePath.make(row.directory),
+                workspaceID: row.workspace_id ?? undefined,
               }),
             ),
           ),
