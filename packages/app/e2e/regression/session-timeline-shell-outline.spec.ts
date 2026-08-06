@@ -57,7 +57,7 @@ for (const deviceScaleFactor of [1.25, 1.5]) {
     expect(edges.box.height).toBeCloseTo(geometry.outputHeight, 2)
     expect(geometry.borderColor).toBe("rgb(255, 0, 255)")
     expect(geometry.boxShadow).toBe("none")
-    expect(geometry.clipMargin).toBe("0.5px")
+    expect(geometry.clipMargin).toBe("1px")
     expect(edges.magenta.top).toBeGreaterThan(0.75)
     expect(edges.magenta.bottom).toBeGreaterThan(0.75)
     expect(edges.magenta.vertical).toBeGreaterThanOrEqual(2)
@@ -117,7 +117,40 @@ test("keeps the patch card inside a fractionally short virtual row", async ({ pa
   expect(edges.luminance.top).toBeLessThan(245)
   expect(edges.luminance.bottom).toBeLessThan(245)
   expect(Math.abs(edges.luminance.bottom - edges.luminance.top)).toBeLessThan(10)
-  expect(geometry.clipMargin).toBe("0.5px")
+  expect(geometry.clipMargin).toBe("1px")
+})
+
+test("keeps the shell outline inside a fractionally high virtual row", async ({ page }) => {
+  const shellID = "prt_shell_top_outline"
+  const timeline = await setupTimeline(page, {
+    messages: [userMessage(), assistantMessage([shell(shellID, "completed", "shell output")])],
+    settings: { newLayoutDesigns: true, shellToolPartsExpanded: true },
+    reducedMotion: true,
+    deviceScaleFactor: 1.25,
+  })
+  const part = page.locator(`[data-timeline-part-id="${shellID}"]`)
+  const output = part.locator('[data-component="bash-output"]')
+  const row = page.locator("[data-timeline-key]", { has: part })
+  await expect(output).toBeVisible()
+  await timeline.settle()
+
+  const overflow = await row.evaluate((element) => {
+    const output = element.querySelector<HTMLElement>('[data-component="bash-output"]')
+    if (!output) throw new Error("Shell output is unavailable")
+    const offset = output.getBoundingClientRect().top - element.getBoundingClientRect().top + 0.99
+    output.style.transform = `translateY(-${offset}px)`
+    output.style.setProperty("--v2-border-border-base", "rgb(255, 0, 255)")
+    output.style.setProperty("background", "rgb(0, 0, 0)", "important")
+    return {
+      top: element.getBoundingClientRect().top - output.getBoundingClientRect().top,
+      clipMargin: getComputedStyle(element).overflowClipMargin,
+    }
+  })
+  await timeline.settle()
+
+  expect(overflow.top).toBeCloseTo(0.99, 1)
+  expect(overflow.clipMargin).toBe("1px")
+  expect((await captureCardEdges(page, output)).magenta.top).toBeGreaterThan(0.75)
 })
 
 test("allows paint rounding for every framed row but not fixed turn gaps", async ({ page }) => {
@@ -153,7 +186,7 @@ test("allows paint rounding for every framed row but not fixed turn gaps", async
       clipMargin: getComputedStyle(element).overflowClipMargin,
     })),
   )
-  expect(rows.filter((row) => row.tag !== "TurnGap").every((row) => row.clipMargin === "0.5px")).toBe(true)
+  expect(rows.filter((row) => row.tag !== "TurnGap").every((row) => row.clipMargin === "1px")).toBe(true)
   expect(rows.filter((row) => row.tag === "TurnGap")).toEqual([{ tag: "TurnGap", clipMargin: "0px" }])
 })
 
