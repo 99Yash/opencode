@@ -52,7 +52,13 @@ export const directoryEnvironment = (
       stat: (path) =>
         wrap("stat", path, async () => {
           const info = await stat(path)
-          return { type: info.isFile() ? ("File" as const) : info.isDirectory() ? ("Directory" as const) : ("Unknown" as const) }
+          return {
+            type: info.isFile()
+              ? ("File" as const)
+              : info.isDirectory()
+                ? ("Directory" as const)
+                : ("Unknown" as const),
+          }
         }),
       realPath: (path) => wrap("realPath", path, () => realpath(path)),
       read: (path) => wrap("read", path, async () => Uint8Array.from(await readFile(path))),

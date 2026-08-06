@@ -4,12 +4,7 @@ import { Effect, Schema, Sink, Stream } from "effect"
 import { systemError } from "effect/PlatformError"
 import type { Command } from "effect/unstable/process/ChildProcess"
 import { ExitCode, ProcessId, make as makeSpawner, makeHandle } from "effect/unstable/process/ChildProcessSpawner"
-import {
-  ModalClient,
-  type Sandbox,
-  SandboxFilesystemNotFoundError,
-  NotFoundError,
-} from "modal"
+import { ModalClient, type Sandbox, SandboxFilesystemNotFoundError, NotFoundError } from "modal"
 import { WorkspaceDriver } from "@opencode-ai/core/workspace/driver"
 import { WorkspaceEnvironment } from "@opencode-ai/core/workspace/environment"
 
@@ -131,7 +126,12 @@ const files = (sandbox: Sandbox): WorkspaceEnvironment.Files => {
         const entries = await sandbox.filesystem.listFiles(path)
         return entries.map((entry) => ({
           name: entry.name,
-          type: entry.type === "file" ? ("file" as const) : entry.type === "directory" ? ("directory" as const) : ("symlink" as const),
+          type:
+            entry.type === "file"
+              ? ("file" as const)
+              : entry.type === "directory"
+                ? ("directory" as const)
+                : ("symlink" as const),
         }))
       }),
     write: (path, content) =>
