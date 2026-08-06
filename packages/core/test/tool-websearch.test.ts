@@ -241,6 +241,7 @@ describe("WebSearchTool registration", () => {
         {
           sessionID,
           title: "Web Search",
+          coalesce: "msg_tool_test:websearch-consent",
           metadata: { kind: "websearch.provider" },
           fields: [
             {
@@ -298,6 +299,7 @@ describe("WebSearchTool registration", () => {
       expect(formRequests[1]).toEqual({
         sessionID,
         title: "Choose a web search provider",
+        coalesce: "msg_tool_test:websearch-provider",
         metadata: { kind: "websearch.provider" },
         fields: [
           {

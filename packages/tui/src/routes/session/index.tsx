@@ -1026,10 +1026,10 @@ export function Session() {
                   </Show>
                 </Match>
                 <Match when={forms().length > 0}>
-                  <Show when={forms()[0]?.id} keyed>
+                  <Show when={forms()[0]?.coalesce ?? forms()[0]?.id} keyed>
                     {(_) => {
                       const form = forms()[0]
-                      return form ? <FormPrompt form={form} /> : null
+                      return form ? <FormPrompt form={form} forms={forms()} /> : null
                     }}
                   </Show>
                 </Match>

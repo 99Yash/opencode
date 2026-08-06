@@ -15,6 +15,7 @@ const input = {
   id: formID,
   sessionID: SessionSchema.ID.make("ses_test"),
   title: "Test form",
+  coalesce: "test-form",
   fields: [{ key: "name", type: "string", required: true }],
 } satisfies Form.CreateInput
 
@@ -32,6 +33,7 @@ describe("Form", () => {
       yield* Effect.addFinalizer(() => unsubscribe)
       const fiber = yield* service.ask(input).pipe(Effect.forkScoped)
       const form = yield* Deferred.await(created)
+      expect(form.coalesce).toBe("test-form")
 
       yield* service.cancel(form.id)
 

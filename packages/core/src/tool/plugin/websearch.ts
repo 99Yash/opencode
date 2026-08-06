@@ -59,6 +59,7 @@ export const Plugin = {
                     const response = yield* forms.ask({
                       sessionID: context.sessionID,
                       title: "Web Search",
+                      coalesce: `${context.messageID}:websearch-consent`,
                       metadata: { kind: "websearch.provider" },
                       fields: [
                         {
@@ -91,6 +92,7 @@ export const Plugin = {
                         ? yield* forms.ask({
                             sessionID: context.sessionID,
                             title: "Choose a web search provider",
+                            coalesce: `${context.messageID}:websearch-provider`,
                             metadata: { kind: "websearch.provider" },
                             fields: [
                               {

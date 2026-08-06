@@ -93,13 +93,13 @@ export function Home() {
       <box width="100%" flexShrink={0}>
         <PluginSlot name="home.footer" input={{}} mode="replace" />
       </box>
-      <Show when={forms()[0]?.id} keyed>
+      <Show when={forms()[0]?.coalesce ?? forms()[0]?.id} keyed>
         {(_) => {
           const form = forms()[0]
           return form ? (
             <box position="absolute" zIndex={2000} left={0} right={0} bottom={1} paddingLeft={2} paddingRight={2}>
               <box width="100%">
-                <FormPrompt form={form} />
+                <FormPrompt form={form} forms={forms()} />
               </box>
             </box>
           ) : null

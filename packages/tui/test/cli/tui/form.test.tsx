@@ -15,7 +15,7 @@ import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { createApi, createEventStream, createFetch } from "../../fixture/tui-client"
 
-async function mountForm(root: string, width = 80) {
+async function mountForm(root: string, width = 80, coalesce = false) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
 
@@ -24,7 +24,7 @@ async function mountForm(root: string, width = 80) {
   const events = createEventStream()
   const transport = createFetch(
     (url, request) =>
-      url.pathname === "/api/session/ses_test/form/frm_test/reply"
+      /^\/api\/session\/ses_test\/form\/frm_(?:test|other)\/reply$/.test(url.pathname)
         ? request.json().then((answer) => {
             replies.push(answer)
             return new Response(null, { status: 204 })
@@ -37,6 +37,7 @@ async function mountForm(root: string, width = 80) {
     id: "frm_test",
     sessionID: "ses_test",
     title: "Authorization required",
+    ...(coalesce ? { coalesce: "authorization" } : {}),
     fields: [
       {
         key: "authorization",
@@ -71,7 +72,7 @@ async function mountForm(root: string, width = 80) {
               <ClientProvider api={createApi(transport.fetch)}>
                 <ThemeProvider mode="dark" source={{ discover: () => Promise.resolve({}) }}>
                   <ToastProvider>
-                    <FormPrompt form={form} />
+                    <FormPrompt form={form} forms={coalesce ? [form, { ...form, id: "frm_other" }] : undefined} />
                   </ToastProvider>
                 </ThemeProvider>
               </ClientProvider>
@@ -122,6 +123,27 @@ test("includes external acknowledgements in progress", async () => {
   try {
     expect(prompt.app.captureCharFrame()).toContain("0/1")
     expect(prompt.replies).toEqual([])
+  } finally {
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("replies to every coalesced form", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountForm(tmp.path, 80, true)
+  try {
+    prompt.app.mockInput.pressKey("right")
+    await prompt.app.waitForFrame((frame) => frame.includes("(acknowledgement required)"))
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("External action must be acknowledged"))
+    prompt.app.mockInput.pressKey("left")
+    prompt.app.mockInput.pressKey("c")
+    await prompt.app.waitForFrame((frame) => frame.includes("press enter to confirm"))
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("Acknowledged"))
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitFor(() => prompt.replies.length === 2)
+    expect(prompt.replies).toEqual([{ answer: { authorization: true } }, { answer: { authorization: true } }])
   } finally {
     prompt.app.renderer.destroy()
   }

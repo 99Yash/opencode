@@ -124,6 +124,9 @@ const InfoBase = {
   // on non-session owners anywhere else.
   sessionID: Schema.String,
   title: Schema.String,
+  coalesce: Schema.String.pipe(optional).annotate({
+    description: "Client-local key for displaying equivalent pending forms once and broadcasting one response.",
+  }),
   metadata: Metadata.pipe(optional),
 }
 

@@ -1937,9 +1937,23 @@ export type IntegrationInfo = {
   connections: Array<ConnectionInfo>
 }
 
-export type FormInfo = { id: string; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
+export type FormInfo = {
+  id: string
+  sessionID: string
+  title: string
+  coalesce?: string
+  metadata?: FormMetadata
+  fields: FormFields
+}
 
-export type FormInfo1 = { id: string; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields1 }
+export type FormInfo1 = {
+  id: string
+  sessionID: string
+  title: string
+  coalesce?: string
+  metadata?: FormMetadata1
+  fields: FormFields1
+}
 
 export type SessionInputAdmitted = {
   id: string

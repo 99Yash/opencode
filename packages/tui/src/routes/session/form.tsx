@@ -42,7 +42,7 @@ function requestOptions(form: FormWithLocation) {
   }
 }
 
-export function FormPrompt(props: { form: FormWithLocation }) {
+export function FormPrompt(props: { form: FormWithLocation; forms?: readonly FormWithLocation[] }) {
   const client = useClient()
   const themes = useThemes()
   const theme = useTheme("elevated")
@@ -68,6 +68,11 @@ export function FormPrompt(props: { form: FormWithLocation }) {
 
   let textarea: TextareaRenderable | undefined
   let review: ScrollBoxRenderable | undefined
+
+  const forms = createMemo(() => {
+    if (!props.form.coalesce) return [props.form]
+    return (props.forms ?? [props.form]).filter((form) => form.coalesce === props.form.coalesce)
+  })
 
   const message = createMemo(() => {
     const value = props.form.metadata?.["message"]
@@ -180,24 +185,30 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     setStore("error", "")
   }
 
-  function replySingle(field: FormAnswerField, value: FormValue) {
-    client.api.form
-      .reply(
-        {
-          sessionID: props.form.sessionID,
-          formID: props.form.id,
-          answer: { [field.key]: value },
-        },
-        requestOptions(props.form),
+  function reply(answer: Record<string, FormValue>) {
+    Promise.all(
+      forms().map((form) =>
+        client.api.form.reply(
+          {
+            sessionID: form.sessionID,
+            formID: form.id,
+            answer,
+          },
+          requestOptions(form),
+        ),
+      ),
+    ).catch((error: unknown) => {
+      setStore(
+        "error",
+        typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+          ? error.message
+          : "Invalid answer",
       )
-      .catch((error: unknown) => {
-        setStore(
-          "error",
-          typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
-            ? error.message
-            : "Invalid answer",
-        )
-      })
+    })
+  }
+
+  function replySingle(field: FormAnswerField, value: FormValue) {
+    reply({ [field.key]: value })
   }
 
   function pick(value: FormValue, customValue?: string) {
@@ -350,7 +361,8 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   }
 
   function cancel() {
-    void client.api.form.cancel({ sessionID: props.form.sessionID, formID: props.form.id }, requestOptions(props.form))
+    for (const form of forms())
+      void client.api.form.cancel({ sessionID: form.sessionID, formID: form.id }, requestOptions(form))
   }
 
   function openExternal() {
@@ -402,28 +414,14 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       setStore("error", formValidateValue(invalid, store.answers[invalid.key]) ?? "Invalid answer")
       return
     }
-    client.api.form
-      .reply(
-        {
-          sessionID: props.form.sessionID,
-          formID: props.form.id,
-          answer: Object.fromEntries(
-            fields().flatMap((field) => {
-              const value = store.answers[field.key]
-              return value === undefined ? [] : [[field.key, value] as const]
-            }),
-          ),
-        },
-        requestOptions(props.form),
-      )
-      .catch((error: unknown) => {
-        setStore(
-          "error",
-          typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
-            ? error.message
-            : "Invalid answer",
-        )
-      })
+    reply(
+      Object.fromEntries(
+        fields().flatMap((field) => {
+          const value = store.answers[field.key]
+          return value === undefined ? [] : [[field.key, value] as const]
+        }),
+      ),
+    )
   }
 
   onMount(() => onCleanup(keymap.mode.push(FORM_MODE)))

@@ -132,6 +132,7 @@ export const layer = Layer.effect(
             id,
             sessionID: input.sessionID,
             title: input.title,
+            ...(input.coalesce === undefined ? {} : { coalesce: input.coalesce }),
             ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
             fields: input.fields,
           }
