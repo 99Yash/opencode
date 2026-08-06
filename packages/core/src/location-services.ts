@@ -47,6 +47,7 @@ import { McpTool } from "./tool/mcp"
 import { ReadToolFileSystem } from "./tool/read-filesystem"
 import { Tool } from "./tool"
 import { Vcs } from "./vcs"
+import { WorkspaceEnvironment } from "./workspace/environment"
 
 export { LocationServiceMap } from "./location-service-map"
 
@@ -118,7 +119,19 @@ export function buildLocationServiceMap(
       LayerMap.make(
         (ref: Location.Ref) => {
           const startedAt = performance.now()
-          const allReplacements = replacements.concat([[Location.node, Location.boundNode(ref)]])
+          const workspaceID = ref.workspaceID
+          // Hosted graphs state their Location (no host discovery), read only
+          // global config sources, and bind the workspace environment; local
+          // graphs are byte-identical to before.
+          const allReplacements = replacements.concat(
+            workspaceID
+              ? [
+                  [Location.node, Location.hostedBoundNode(ref, workspaceID)],
+                  [Config.node, Config.configured({ project: false })],
+                  [WorkspaceEnvironment.node, WorkspaceEnvironment.hostedNode(workspaceID)],
+                ]
+              : [[Location.node, Location.boundNode(ref)]],
+          )
           // Apply replacements during hoist, not afterward: replacements can
           // introduce new tagged dependencies (Location.boundNode depends on
           // Project), and the hoist walk is the only pass that can still slice

@@ -1,7 +1,11 @@
 export * as WorkspaceEnvironment from "./environment"
 
-import { Context, Effect, FileSystem, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Schema } from "effect"
 import type { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
+import { makeLocationNode, tags } from "@opencode-ai/util/effect/app-node"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { Workspace } from "../workspace"
+import { WorkspaceDriver } from "./driver"
 
 export class Error extends Schema.TaggedErrorClass<Error>()("WorkspaceEnvironment.Error", {
   operation: Schema.String,
@@ -55,6 +59,30 @@ export interface Interface {
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/WorkspaceEnvironment") {}
+
+/** Present only in hosted Location graphs; local graphs never bind it. */
+export const node = LayerNode.unbound(Service, tags.values.location)
+
+/**
+ * Connects on graph boot and stays connected for the graph's cached lifetime:
+ * Layer.effect supplies the build scope, so releasing the LayerMap entry
+ * closes the connection. It never stops or deletes the provider resource.
+ */
+export const hostedNode = (workspaceID: Workspace.ID) =>
+  makeLocationNode({
+    service: Service,
+    layer: Layer.effect(
+      Service,
+      Effect.gen(function* () {
+        const workspaces = yield* Workspace.Service
+        const registry = yield* WorkspaceDriver.RegistryService
+        const found = yield* workspaces.binding(workspaceID)
+        const driver = yield* registry.get(found.provider)
+        return yield* driver.connect(found.binding)
+      }),
+    ),
+    deps: [Workspace.node, WorkspaceDriver.registryNode],
+  })
 
 /** Identity constructor so environment literals get contextual typing. */
 export const make = (environment: Interface) => environment
