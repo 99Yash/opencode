@@ -7,6 +7,7 @@ import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Location } from "./location"
 import { Project } from "./project"
 import { AbsolutePath } from "./schema"
+import { WorkspaceEnvironment } from "./workspace/environment"
 
 export const Kind = Schema.Literals(["file", "directory"])
 export type Kind = typeof Kind.Type
@@ -25,7 +26,7 @@ export type ResolveInput = typeof ResolveInput.Type
 
 export class PathError extends Schema.TaggedErrorClass<PathError>()("LocationMutation.PathError", {
   path: Schema.String,
-  reason: Schema.Literal("non_directory_ancestor"),
+  reason: Schema.Literals(["non_directory_ancestor", "outside_workspace"]),
 }) {}
 
 export interface ExternalDirectoryAuthorization {
@@ -154,4 +155,74 @@ export const node = makeLocationNode({
   service: Service,
   layer: layer.pipe(Layer.orDie),
   deps: [FSUtil.node, Location.node],
+})
+
+// Mirrors the local resolve walk over WorkspaceEnvironment.Files with posix
+// rules. Hosted paths are never external: everything outside the Location is
+// rejected instead of routed to external_directory approval, because the
+// approval boundary vocabulary is host-relative.
+const hostedLayer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const env = yield* WorkspaceEnvironment.Service
+    const location = yield* Location.Service
+
+    function notFound<A>(effect: Effect.Effect<A, WorkspaceEnvironment.Error | WorkspaceEnvironment.NotFoundError>) {
+      return effect.pipe(
+        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+        Effect.orDie,
+      )
+    }
+
+    const resolvePath = Effect.fnUntraced(function* (absolute: string) {
+      const existing = yield* notFound(env.files.realPath(absolute))
+      if (existing !== undefined) {
+        const info = yield* notFound(env.files.stat(existing))
+        if (info === undefined) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+        return {
+          canonical: existing,
+          type: info.type,
+          directory: info.type === "Directory" ? existing : path.posix.dirname(existing),
+        } satisfies ResolvedPath
+      }
+
+      let anchor = path.posix.dirname(absolute)
+      while (true) {
+        const canonical = yield* notFound(env.files.realPath(anchor))
+        if (canonical !== undefined) {
+          const info = yield* notFound(env.files.stat(canonical))
+          if (info === undefined || info.type !== "Directory") {
+            return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+          }
+          return {
+            canonical: path.posix.resolve(canonical, path.posix.relative(anchor, absolute)),
+            directory: canonical,
+          } satisfies ResolvedPath
+        }
+        const parent = path.posix.dirname(anchor)
+        if (parent === anchor) return yield* new PathError({ path: absolute, reason: "non_directory_ancestor" })
+        anchor = parent
+      }
+    })
+
+    const resolve = Effect.fn("LocationMutation.resolve")(function* (input: ResolveInput) {
+      const absolute = path.posix.resolve(location.directory, input.path)
+      const relative = path.posix.relative(location.directory, absolute)
+      if (relative.startsWith("..") || path.posix.isAbsolute(relative))
+        return yield* new PathError({ path: absolute, reason: "outside_workspace" })
+      const resolved = yield* resolvePath(absolute)
+      return {
+        canonical: resolved.canonical,
+        resource: relative || ".",
+      } satisfies Target
+    })
+
+    return Service.of({ resolve })
+  }),
+)
+
+export const hostedNode = makeLocationNode({
+  service: Service,
+  layer: hostedLayer.pipe(Layer.orDie),
+  deps: [WorkspaceEnvironment.node, Location.node],
 })

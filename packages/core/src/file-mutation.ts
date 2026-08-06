@@ -5,6 +5,7 @@ import { Context, Effect, Layer } from "effect"
 import { KeyedMutex } from "./effect/keyed-mutex"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Bom } from "@opencode-ai/util/bom"
+import { WorkspaceEnvironment } from "./workspace/environment"
 
 export interface Target {
   readonly canonical: string
@@ -89,6 +90,69 @@ const layer = Layer.effect(
 )
 
 export const node = makeLocationNode({ service: Service, layer, deps: [FSUtil.node] })
+
+// Same cooperative locking, writes through WorkspaceEnvironment.Files.
+const hostedLayer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const env = yield* WorkspaceEnvironment.Service
+    const encoder = new TextEncoder()
+    const locks = KeyedMutex.makeUnsafe<string>()
+    const withTargetLock =
+      (target: Target) =>
+      <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+        locks.withLock(target.canonical)(Effect.uninterruptible(effect))
+
+    const writeResult = (target: Target, existed: boolean): WriteResult => ({
+      operation: "write",
+      target: target.canonical,
+      resource: target.resource,
+      existed,
+    })
+
+    const exists = (path: string) =>
+      env.files.stat(path).pipe(
+        Effect.as(true),
+        Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(false)),
+        Effect.orDie,
+      )
+
+    const bytes = (content: string | Uint8Array) => (typeof content === "string" ? encoder.encode(content) : content)
+
+    const write = Effect.fn("FileMutation.write")((input: WriteInput) =>
+      withTargetLock(input.target)(
+        Effect.gen(function* () {
+          const existed = yield* exists(input.target.canonical)
+          yield* env.files.write(input.target.canonical, bytes(input.content)).pipe(Effect.orDie)
+          return writeResult(input.target, existed)
+        }),
+      ),
+    )
+
+    const writeTextPreservingBom = Effect.fn("FileMutation.writeTextPreservingBom")((input: TextWriteInput) =>
+      withTargetLock(input.target)(
+        Effect.gen(function* () {
+          const next = Bom.split(input.content)
+          const current = yield* env.files.read(input.target.canonical).pipe(
+            Effect.catchTag("WorkspaceEnvironment.NotFoundError", () => Effect.succeed(undefined)),
+            Effect.orDie,
+          )
+          const text = Bom.join(next.text, Boolean(current && Bom.has(current)) || next.bom)
+          yield* env.files.write(input.target.canonical, bytes(text)).pipe(Effect.orDie)
+          return writeResult(input.target, current !== undefined)
+        }),
+      ),
+    )
+
+    return Service.of({ write, writeTextPreservingBom })
+  }),
+)
+
+export const hostedNode = makeLocationNode({
+  service: Service,
+  layer: hostedLayer,
+  deps: [WorkspaceEnvironment.node],
+})
 
 /**
  * Deferred until the corresponding integrations exist.
