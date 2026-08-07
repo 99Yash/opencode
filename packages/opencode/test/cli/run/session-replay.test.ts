@@ -416,7 +416,14 @@ describe("run session replay", () => {
     } as const
 
     expect(
-      replayLocalRows([userMessage("msg-user-2", "successful")], [persisted], [{ commit: failed }, { commit: error }]),
+      replayLocalRows(
+        [userMessage("msg-user-2", "successful")],
+        [persisted],
+        [
+          { commit: failed, created: 0 },
+          { commit: error, created: 0 },
+        ],
+      ),
     ).toEqual([failed, error, persisted])
   })
 
@@ -657,35 +664,35 @@ describe("run session replay", () => {
     ).toEqual([prompt, running, error, completed])
   })
 
-  test("retains an unpersisted local diagnostic before later persisted prompts", () => {
+  test("appends an unanchored local diagnostic without inferring chronology from message IDs", () => {
     const first = {
       kind: "user",
       text: "before",
       phase: "start",
       source: "system",
-      messageID: "msg-user-1",
+      messageID: "msg-user-z",
     } as const
     const error = {
       kind: "error",
       text: "failed to start new session",
       phase: "start",
       source: "system",
-      messageID: "msg-user-2",
+      messageID: "msg-user-m",
     } as const
     const second = {
       kind: "user",
       text: "after",
       phase: "start",
       source: "system",
-      messageID: "msg-user-3",
+      messageID: "msg-user-a",
     } as const
 
     expect(
       replayLocalRows(
-        [userMessage("msg-user-1", "before"), userMessage("msg-user-3", "after")],
+        [userMessage("msg-user-z", "before"), userMessage("msg-user-a", "after")],
         [first, second],
         [{ commit: error }],
       ),
-    ).toEqual([first, error, second])
+    ).toEqual([first, second, error])
   })
 })

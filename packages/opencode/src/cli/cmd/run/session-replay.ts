@@ -266,7 +266,7 @@ export function replayLocalRows(
   rows: LocalReplayRow[],
 ): StreamCommit[] {
   const persisted = new Set(messages.map((message) => message.info.id))
-  return rows.reduce((out, local) => {
+  return rows.reduce((out, local, index) => {
     const row = local.commit
     if (row.kind === "user" && row.messageID && persisted.has(row.messageID)) {
       return out
@@ -317,12 +317,35 @@ export function replayLocalRows(
       return [...out.slice(0, after + 1), row, ...out.slice(after + 1)]
     }
 
-    const before = out.findIndex((commit) => commit.messageID && row.messageID! < commit.messageID)
-    if (before === -1) {
-      return [...out, row]
+    const nextAnchor = rows
+      .slice(index + 1)
+      .find((next) => next.commit.messageID === row.messageID && next.after)?.after
+    if (nextAnchor) {
+      const before = out.findIndex((commit) =>
+        nextAnchor.partID
+          ? commit.partID === nextAnchor.partID
+          : commit.kind === nextAnchor.kind && commit.messageID === nextAnchor.messageID,
+      )
+      if (before !== -1) return [...out.slice(0, before), row, ...out.slice(before)]
     }
 
-    return [...out.slice(0, before), row, ...out.slice(before)]
+    if (local.created !== undefined) {
+      const created = local.created
+      const messageID = row.messageID
+      const later = new Set(
+        messages
+          .filter(
+            (message) =>
+              message.info.time.created > created ||
+              (message.info.time.created === created && message.info.id.localeCompare(messageID) > 0),
+          )
+          .map((message) => message.info.id),
+      )
+      const before = out.findIndex((commit) => commit.messageID && later.has(commit.messageID))
+      if (before !== -1) return [...out.slice(0, before), row, ...out.slice(before)]
+    }
+
+    return [...out, row]
   }, commits)
 }
 

@@ -365,7 +365,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
   })
   const footer = shell.footer
   const rememberLocal = (commit: StreamCommit, after?: LocalReplayAnchor) => {
-    state.localRows = [...state.localRows, { commit, after }].slice(-LOCAL_REPLAY_ROW_LIMIT)
+    state.localRows = [...state.localRows, { commit, after, created: Date.now() }].slice(-LOCAL_REPLAY_ROW_LIMIT)
   }
 
   const loadCatalog = async (): Promise<void> => {

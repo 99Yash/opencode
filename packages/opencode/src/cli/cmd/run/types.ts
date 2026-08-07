@@ -332,6 +332,7 @@ export type LocalReplayAnchor = {
 export type LocalReplayRow = {
   commit: StreamCommit
   after?: LocalReplayAnchor
+  created?: number
 }
 
 // The public contract between the stream transport / prompt queue and
