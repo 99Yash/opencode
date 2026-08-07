@@ -566,7 +566,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               : active()
                 ? theme.text.action[variant()].focused
                 : variant() === "destructive"
-                  ? theme.text.action.destructive.default
+                  ? theme.text.feedback.error.default
                   : theme.text.default
           }
           attributes={active() ? TextAttributes.BOLD : undefined}
