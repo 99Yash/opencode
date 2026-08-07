@@ -59,18 +59,40 @@ function selectMantleModel(sdk: MantleSDK, modelID: string) {
   return sdk.responses(modelID)
 }
 
+function defaultCredentialProvider(profile: string | undefined, region: string) {
+  const load = import("@aws-sdk/credential-providers").then((mod) =>
+    mod.fromNodeProviderChain(profile ? { profile } : {}),
+  )
+  return async () => ({ ...(await (await load)()), region })
+}
+
 export const AmazonBedrockPlugin = define({
   id: "opencode.provider.amazon-bedrock",
   effect: Effect.fn(function* (ctx) {
     yield* ctx.catalog.transform((evt) => {
       for (const item of evt.provider.list()) {
         if (!Provider.isAISDK(item.provider.package)) continue
-        if (Provider.packageName(item.provider.package) !== "@ai-sdk/amazon-bedrock") continue
+        if (
+          !["@ai-sdk/amazon-bedrock", "@ai-sdk/amazon-bedrock/mantle"].includes(
+            Provider.packageName(item.provider.package) ?? "",
+          )
+        )
+          continue
         evt.provider.update(item.provider.id, (provider) => {
-          if (typeof provider.settings?.endpoint !== "string") return
+          const settings = provider.settings ?? {}
+          const profile = typeof settings.profile === "string" ? settings.profile : process.env.AWS_PROFILE
+          const region = typeof settings.region === "string" ? settings.region : (process.env.AWS_REGION ?? "us-east-1")
+          provider.settings = {
+            ...settings,
+            region,
+            ...(typeof settings.credentialProvider === "function"
+              ? {}
+              : { credentialProvider: defaultCredentialProvider(profile, region) }),
+          }
+          if (typeof settings.endpoint !== "string") return
           // The AI SDK expects a base URL, but users configure Bedrock private/VPC
           // endpoints as `endpoint`; move it into the catalog endpoint URL once.
-          provider.settings.baseURL = provider.settings.endpoint
+          provider.settings.baseURL = settings.endpoint
           delete provider.settings.endpoint
         })
       }
@@ -95,8 +117,7 @@ export const AmazonBedrockPlugin = define({
         if (!bearerToken && options.credentialProvider === undefined) {
           // Do not gate SDK creation on explicit AWS env vars. The default chain
           // also handles ~/.aws/credentials, SSO, process creds, and instance roles.
-          const { fromNodeProviderChain } = yield* Effect.promise(() => import("@aws-sdk/credential-providers"))
-          options.credentialProvider = fromNodeProviderChain(profile ? { profile } : {})
+          options.credentialProvider = defaultCredentialProvider(profile, region)
         }
 
         if (evt.package === "@ai-sdk/amazon-bedrock/mantle") {

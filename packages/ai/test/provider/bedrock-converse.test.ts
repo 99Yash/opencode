@@ -519,14 +519,8 @@ describe("Bedrock Converse route", () => {
           fixedBytes(
             eventStreamBody(
               ["messageStart", { role: "assistant" }],
-              [
-                "contentBlockDelta",
-                { contentBlockIndex: 0, delta: { reasoningContent: { text: "Let me think." } } },
-              ],
-              [
-                "contentBlockDelta",
-                { contentBlockIndex: 0, delta: { reasoningContent: { signature: "sig_1" } } },
-              ],
+              ["contentBlockDelta", { contentBlockIndex: 0, delta: { reasoningContent: { text: "Let me think." } } }],
+              ["contentBlockDelta", { contentBlockIndex: 0, delta: { reasoningContent: { signature: "sig_1" } } }],
               ["messageStop", { stopReason: "end_turn" }],
             ),
           ),
@@ -561,10 +555,7 @@ describe("Bedrock Converse route", () => {
     Effect.gen(function* () {
       const body = eventStreamBody(
         ["messageStart", { role: "assistant" }],
-        [
-          "contentBlockDelta",
-          { contentBlockIndex: 0, delta: { reasoningContent: { signature: "sig_1" } } },
-        ],
+        ["contentBlockDelta", { contentBlockIndex: 0, delta: { reasoningContent: { signature: "sig_1" } } }],
         ["contentBlockStop", { contentBlockIndex: 0 }],
         ["messageStop", { stopReason: "end_turn" }],
       )
@@ -759,6 +750,26 @@ describe("Bedrock Converse route", () => {
       expect(prepared.model).toBe(signed)
     }),
   )
+
+  it.effect("resolves fresh SigV4 credentials for each request", () => {
+    let calls = 0
+    const signed = AmazonBedrock.configure({
+      baseURL: "https://bedrock-runtime.test",
+      credentials: async () => {
+        calls++
+        return {
+          region: "us-east-1",
+          accessKeyId: "AKIAIOSFODNN7EXAMPLE",
+          secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        }
+      },
+    }).model("anthropic.claude-3-5-sonnet-20240620-v1:0")
+
+    return LLMClient.generate(LLMRequest.update(baseRequest, { model: signed })).pipe(
+      Effect.provide(fixedBytes(eventStreamBody(["messageStop", { stopReason: "end_turn" }]))),
+      Effect.tap(() => Effect.sync(() => expect(calls).toBe(1))),
+    )
+  })
 
   it.effect("emits cachePoint markers after system, user-text, and assistant-text with cache hints", () =>
     Effect.gen(function* () {

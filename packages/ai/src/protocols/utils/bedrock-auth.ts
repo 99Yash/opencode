@@ -4,18 +4,15 @@ import { Headers } from "effect/unstable/http"
 import { Auth, type AuthInput } from "../../route/auth"
 import { ProviderShared } from "../shared"
 
-/**
- * AWS credentials for SigV4 signing. Bedrock also supports Bearer API key auth,
- * which provider facades configure as route auth instead of SigV4. STS-vended
- * credentials should be refreshed by the consumer (rebuild the model) before
- * they expire; the route does not refresh.
- */
+/** AWS credentials for SigV4 signing. */
 export interface Credentials {
   readonly region: string
   readonly accessKeyId: string
   readonly secretAccessKey: string
   readonly sessionToken?: string
 }
+
+export type CredentialProvider = () => Promise<Credentials>
 
 const signRequest = (input: {
   readonly url: string
@@ -48,7 +45,7 @@ const signRequest = (input: {
 
 /** Sign the exact JSON bytes with SigV4 using credentials configured on the route. */
 export const sigV4 = (
-  credentials: Credentials | undefined,
+  credentials: Credentials | CredentialProvider | undefined,
   options: { readonly service?: string; readonly name?: string } = {},
 ) =>
   Auth.custom((input: AuthInput) => {
@@ -58,12 +55,22 @@ export const sigV4 = (
           `${options.name ?? "Bedrock Converse"} requires either route bearer auth or AWS credentials configured on the route`,
         )
       }
+      const resolved =
+        typeof credentials === "function"
+          ? yield* Effect.tryPromise({
+              try: credentials,
+              catch: (error) =>
+                ProviderShared.invalidRequest(
+                  `${options.name ?? "Bedrock Converse"} credential resolution failed: ${error instanceof Error ? error.message : String(error)}`,
+                ),
+            })
+          : credentials
       const headersForSigning = Headers.set(input.headers, "content-type", "application/json")
       const signed = yield* signRequest({
         url: input.url,
         body: input.body,
         headers: headersForSigning,
-        credentials,
+        credentials: resolved,
         service: options.service ?? "bedrock",
         name: options.name ?? "Bedrock Converse",
       })

@@ -158,6 +158,18 @@ describe("AISDKNative", () => {
     })
   })
 
+  test("maps a Bedrock credential provider to the native runtime", () => {
+    const credentialProvider = async () => ({
+      region: "us-east-1",
+      accessKeyId: "key",
+      secretAccessKey: "secret",
+    })
+
+    for (const packageName of ["@ai-sdk/amazon-bedrock", "@ai-sdk/amazon-bedrock/mantle"]) {
+      expect(map(packageName, { credentialProvider })?.settings).toMatchObject({ credentials: credentialProvider })
+    }
+  })
+
   test("maps the legacy Bedrock endpoint override", () => {
     expect(
       map(

@@ -80,24 +80,66 @@ function openAIUrl(language: unknown, path: string, modelId: string) {
 
 describe("AmazonBedrockPlugin", () => {
   it.effect("moves endpoint setting to baseURL", () =>
-    Effect.gen(function* () {
-      const catalog = yield* Catalog.Service
-      yield* catalog.transform((catalog) => {
-        const bedrock = Provider.Info.make({
-          ...Provider.Info.empty(Provider.ID.amazonBedrock),
-          package: Provider.aisdk("@ai-sdk/amazon-bedrock"),
-          settings: { endpoint: "https://bedrock.example" },
+    withEnv({ AWS_PROFILE: undefined, AWS_REGION: undefined }, () =>
+      Effect.gen(function* () {
+        const catalog = yield* Catalog.Service
+        yield* catalog.transform((catalog) => {
+          const bedrock = Provider.Info.make({
+            ...Provider.Info.empty(Provider.ID.amazonBedrock),
+            package: Provider.aisdk("@ai-sdk/amazon-bedrock"),
+            settings: { endpoint: "https://bedrock.example" },
+          })
+          catalog.provider.update(bedrock.id, (item) => {
+            item.package = bedrock.package
+            item.settings = { endpoint: "https://bedrock.example" }
+          })
         })
-        catalog.provider.update(bedrock.id, (item) => {
-          item.package = bedrock.package
-          item.settings = { endpoint: "https://bedrock.example" }
+        yield* addPlugin()
+        const result = required(yield* catalog.provider.get(Provider.ID.amazonBedrock))
+        expect(result.package).toBe(Provider.aisdk("@ai-sdk/amazon-bedrock"))
+        expect(result.settings).toMatchObject({
+          baseURL: "https://bedrock.example",
+          region: "us-east-1",
+          credentialProvider: expect.any(Function),
         })
-      })
-      yield* addPlugin()
-      const result = required(yield* catalog.provider.get(Provider.ID.amazonBedrock))
-      expect(result.package).toBe(Provider.aisdk("@ai-sdk/amazon-bedrock"))
-      expect(result.settings).toEqual({ baseURL: "https://bedrock.example" })
-    }),
+      }),
+    ),
+  )
+
+  it.effect("discovers AWS credentials for the native Bedrock runtime", () =>
+    withEnv(
+      {
+        AWS_ACCESS_KEY_ID: "key",
+        AWS_SECRET_ACCESS_KEY: "secret",
+        AWS_SESSION_TOKEN: "session",
+        AWS_PROFILE: undefined,
+        AWS_REGION: "eu-west-1",
+      },
+      () =>
+        Effect.gen(function* () {
+          const catalog = yield* Catalog.Service
+          yield* catalog.transform((catalog) => {
+            const bedrock = Provider.Info.make({
+              ...Provider.Info.empty(Provider.ID.amazonBedrock),
+              package: Provider.aisdk("@ai-sdk/amazon-bedrock"),
+            })
+            catalog.provider.update(bedrock.id, (item) => {
+              item.package = bedrock.package
+            })
+          })
+          yield* addPlugin()
+          const result = required(yield* catalog.provider.get(Provider.ID.amazonBedrock))
+          const credentialProvider = result.settings?.credentialProvider
+          if (typeof credentialProvider !== "function") throw new Error("Expected credential provider")
+          const credentials = yield* Effect.promise(() => credentialProvider())
+          expect(credentials).toMatchObject({
+            region: "eu-west-1",
+            accessKeyId: "key",
+            secretAccessKey: "secret",
+            sessionToken: "session",
+          })
+        }),
+    ),
   )
 
   it.effect("prefers endpoint over baseURL for SDK base URL", () =>

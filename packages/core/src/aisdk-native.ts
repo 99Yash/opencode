@@ -88,7 +88,9 @@ function mapBedrockSettings(
       : typeof settings.bearerToken === "string"
         ? settings.bearerToken
         : undefined
-  const credentials = mapBedrockCredentials(settings)
+  const credentials =
+    mapBedrockCredentials(settings) ??
+    (typeof settings.credentialProvider === "function" ? settings.credentialProvider : undefined)
   return {
     ...baseSettings,
     ...(typeof settings.baseURL !== "string" && typeof settings.endpoint === "string"
