@@ -1,4 +1,4 @@
-import { ResponseItemID, type LLMEvent, type ProviderMetadata, type ToolResultValue } from "@opencode-ai/ai"
+import { type LLMEvent, type ProviderMetadata, type ToolResultValue } from "@opencode-ai/ai"
 import { Effect } from "effect"
 import { Bus } from "../../bus"
 import { Model } from "../../model"
@@ -269,7 +269,6 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       },
       ...failureSnapshot(tool),
       executed: false,
-      resultState: { itemId: ResponseItemID.create("fco") },
     })
   })
 
@@ -288,7 +287,6 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       error,
       ...failureSnapshot(tool),
       executed: tool.providerExecuted,
-      resultState: tool.providerExecuted ? undefined : { itemId: ResponseItemID.create("fco") },
     })
     return true
   })
@@ -498,7 +496,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
               : { type: "tool.execution", message: event.message },
           ...failureSnapshot(tool),
           executed: tool.providerExecuted,
-          resultState: providerState(event.providerMetadata, event.itemId) ?? { itemId: ResponseItemID.create("fco") },
+          resultState: providerState(event.providerMetadata, event.itemId),
         })
         return
       }
@@ -555,7 +553,6 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       content: [content[0], ...content.slice(1)],
       ...(result.metadata === undefined ? {} : { metadata: result.metadata }),
       executed: tool.providerExecuted,
-      resultState: tool.providerExecuted ? undefined : { itemId: ResponseItemID.create("fco") },
     })
   })
 

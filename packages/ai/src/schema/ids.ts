@@ -21,26 +21,7 @@ export type ProviderID = typeof ProviderID.Type
 export const ResponseID = Schema.String
 export type ResponseID = Schema.Schema.Type<typeof ResponseID>
 
-const uuidv7 = () => {
-  const bytes = crypto.getRandomValues(new Uint8Array(16))
-  const timestamp = BigInt(Date.now())
-  bytes.set(
-    Array.from({ length: 6 }, (_, index) => Number((timestamp >> BigInt((5 - index) * 8)) & 0xffn)),
-    0,
-  )
-  bytes[6] = 0x70 | ((bytes[6] ?? 0) & 0x0f)
-  bytes[8] = 0x80 | ((bytes[8] ?? 0) & 0x3f)
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
-}
-
-export const ResponseItemID = Object.assign(Schema.String, {
-  create: (prefix: string): ResponseItemID => `${prefix}_${uuidv7()}`,
-  isPrefixed: (value: string) => {
-    const separator = value.indexOf("_")
-    return separator > 0 && separator < value.length - 1
-  },
-})
+export const ResponseItemID = Schema.String
 export type ResponseItemID = Schema.Schema.Type<typeof ResponseItemID>
 
 export const ContentBlockID = Schema.String

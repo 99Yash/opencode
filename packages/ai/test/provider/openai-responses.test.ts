@@ -54,27 +54,15 @@ const expectToolOutput = (body: OpenAIResponses.OpenAIResponsesBody): OpenAITool
   return output!
 }
 
-const generatedResponseItemID =
-  /^(?:(?:msg|fc|fco|rs)_[0-9a-f-]{36}|(?:msg|fc|fco|rs)_msg_[0-9a-f-]{36}_\d+|msg_req_[0-9a-f-]{36}_system)$/i
-const withoutGeneratedResponseItemIDs = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(withoutGeneratedResponseItemIDs)
-  if (typeof value !== "object" || value === null) return value
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([key, item]) => !(key === "id" && typeof item === "string" && generatedResponseItemID.test(item)))
-      .map(([key, item]) => [key, withoutGeneratedResponseItemIDs(item)]),
-  )
-}
-
 describe("OpenAI Responses route", () => {
   it.effect("prepares OpenAI Responses target", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(request)
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body)).toEqual({
+      expect(prepared.body).toEqual({
         model: "gpt-4.1-mini",
         input: [
-          { role: "system", id: "msg_req_1_system", content: "You are concise." },
+          { role: "system", content: "You are concise." },
           { role: "user", content: [{ type: "input_text", text: "Say hello." }] },
         ],
         store: false,
@@ -218,7 +206,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           role: "user",
           content: [
@@ -294,7 +282,7 @@ describe("OpenAI Responses route", () => {
       expect(opened).toEqual([{ url: "wss://api.openai.test/v1/responses", authorization: "Bearer test" }])
       expect(closed).toBe(true)
       expect(sent).toHaveLength(1)
-      expect(withoutGeneratedResponseItemIDs(JSON.parse(sent[0]))).toEqual({
+      expect(JSON.parse(sent[0])).toEqual({
         type: "response.create",
         model: "gpt-4.1-mini",
         input: [{ role: "user", content: [{ type: "input_text", text: "Say hello." }] }],
@@ -442,13 +430,12 @@ describe("OpenAI Responses route", () => {
       })
       const call = prepared.body.input.find((item) => "type" in item && item.type === "function_call")
       const output = prepared.body.input.find((item) => "type" in item && item.type === "function_call_output")
-      expect(call?.id).toStartWith("fc_")
-      expect(output?.id).toStartWith("fco_")
-      expect(call?.id).not.toBe(output?.id)
+      expect(call?.id).toBeUndefined()
+      expect(output?.id).toBeUndefined()
     }),
   )
 
-  it.effect("generates canonical response item id prefixes", () =>
+  it.effect("does not generate response item ids for client-created history", () =>
     Effect.sync(() => {
       const canonical = LLM.request({
         model,
@@ -462,16 +449,16 @@ describe("OpenAI Responses route", () => {
         ],
       })
 
-      expect(canonical.messages[0]?.id).toStartWith("msg_")
-      expect(canonical.messages[1]?.id).toStartWith("msg_")
-      expect(canonical.messages[0]?.content[0]).toMatchObject({ itemId: expect.stringMatching(/^msg_/) })
-      expect(canonical.messages[0]?.content[1]).toMatchObject({ itemId: expect.stringMatching(/^rs_/) })
-      expect(canonical.messages[0]?.content[2]).toMatchObject({ itemId: expect.stringMatching(/^fc_/) })
-      expect(canonical.messages[1]?.content[0]).toMatchObject({ itemId: expect.stringMatching(/^fco_/) })
+      expect(canonical.messages[0]?.id).toBeUndefined()
+      expect(canonical.messages[1]?.id).toBeUndefined()
+      expect(canonical.messages[0]?.content.every((part) => part.type === "media" || part.itemId === undefined)).toBe(
+        true,
+      )
+      expect(canonical.messages[1]?.content[0]).not.toHaveProperty("itemId")
     }),
   )
 
-  it.effect("keeps unprefixed item ids canonical but omits them outbound", () =>
+  it.effect("preserves opaque assistant item ids without assigning ids to function items", () =>
     Effect.gen(function* () {
       const canonical = LLM.request({
         model,
@@ -490,8 +477,8 @@ describe("OpenAI Responses route", () => {
         "plain-call",
       ])
       expect(canonical.messages[1]?.content[0]).toMatchObject({ itemId: "plain-output" })
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
-        { role: "assistant", content: [{ type: "output_text", text: "Calling." }] },
+      expect(prepared.body.input).toEqual([
+        { role: "assistant", id: "plain-text", content: [{ type: "output_text", text: "Calling." }] },
         { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{}" },
         { type: "function_call_output", call_id: "call_1", output: '"done"' },
       ])
@@ -1023,7 +1010,7 @@ describe("OpenAI Responses route", () => {
       ])
 
       const prepared = yield* compileRequest(LLM.request({ model, messages: [response.message] }))
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           role: "assistant",
           id: "msg_commentary",
@@ -1415,7 +1402,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         { role: "assistant", content: [{ type: "output_text", text: "Before." }] },
         {
           type: "reasoning",
@@ -1446,7 +1433,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           type: "reasoning",
           id: "rs_1",
@@ -1486,7 +1473,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         { type: "item_reference", id: "ws_1" },
         { role: "user", content: [{ type: "input_text", text: "Continue." }] },
       ])
@@ -1527,7 +1514,7 @@ describe("OpenAI Responses route", () => {
       )
 
       expect(prepared.body.store).toBe(false)
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         { role: "user", content: [{ type: "input_text", text: "Generate a black triangle." }] },
         { role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AQID" }] },
         { role: "user", content: [{ type: "input_text", text: "Make it blue." }] },
@@ -1559,7 +1546,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           type: "reasoning",
           id: "rs_1",
@@ -1951,7 +1938,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           role: "user",
           content: [
@@ -1983,7 +1970,7 @@ describe("OpenAI Responses route", () => {
         }),
       )
 
-      expect(withoutGeneratedResponseItemIDs(prepared.body.input)).toEqual([
+      expect(prepared.body.input).toEqual([
         {
           role: "user",
           content: [

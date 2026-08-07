@@ -11,7 +11,6 @@ import {
   type LLMRequest,
   type MediaPart,
   type ProviderMetadata,
-  ResponseItemID,
   type ReasoningPart,
   type TextPart,
   type ToolCallPart,
@@ -336,13 +335,8 @@ const metadataItemID = (
     : undefined
 }
 
-const outboundItemID = (id: string | undefined) => (id !== undefined && ResponseItemID.isPrefixed(id) ? id : undefined)
-
-const lowerToolCall = (part: ToolCallPart, providerMetadataKey: string): OpenResponsesInputItem => ({
+const lowerToolCall = (part: ToolCallPart): OpenResponsesInputItem => ({
   type: "function_call",
-  ...(outboundItemID(metadataItemID(part, providerMetadataKey)) === undefined
-    ? {}
-    : { id: outboundItemID(metadataItemID(part, providerMetadataKey)) }),
   call_id: part.id,
   name: part.name,
   arguments: ProviderShared.encodeJson(part.input),
@@ -426,17 +420,8 @@ const lowerToolResultOutput = Effect.fn("OpenResponses.lowerToolResultOutput")(f
 
 const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (request: LLMRequest, extension: Extension) {
   const options = OpenResponsesOptions.resolve(request)
-  const systemItemID = request.id ?? options.promptCacheKey
   const system: LoweredInputItem[] =
-    request.system.length === 0
-      ? []
-      : [
-          {
-            role: "system",
-            ...(systemItemID === undefined ? {} : { id: `msg_${systemItemID}_system` }),
-            content: ProviderShared.joinText(request.system),
-          },
-        ]
+    request.system.length === 0 ? [] : [{ role: "system", content: ProviderShared.joinText(request.system) }]
   const input: LoweredInputItem[] = [...system]
   const store = options.store
   const providerMetadataKey = request.model.route.providerMetadataKey ?? "openresponses"
@@ -448,22 +433,15 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
       if (previous && "role" in previous && previous.role === "user" && Array.isArray(previous.content))
         input[input.length - 1] = {
           role: "user",
-          id: previous.id,
           content: [...previous.content, { type: "input_text", text: part.text }],
         }
-      else
-        input.push({
-          role: "user",
-          id: outboundItemID(message.id),
-          content: [{ type: "input_text", text: part.text }],
-        })
+      else input.push({ role: "user", content: [{ type: "input_text", text: part.text }] })
       continue
     }
 
     if (message.role === "user") {
       input.push({
         role: "user",
-        ...(outboundItemID(message.id) === undefined ? {} : { id: outboundItemID(message.id) }),
         content: yield* Effect.forEach(message.content, (part) => lowerUserContent(part, request, extension)),
       })
       continue
@@ -489,7 +467,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         input.push(
           ...groups.map((group) => ({
             role: "assistant" as const,
-            ...(outboundItemID(group.itemId) === undefined ? {} : { id: outboundItemID(group.itemId) }),
+            ...(group.itemId === undefined ? {} : { id: group.itemId }),
             content: group.parts.map((part) => ({ type: "output_text" as const, text: part.text })),
             ...(group.phase === undefined ? {} : { phase: group.phase }),
           })),
@@ -514,7 +492,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
           }
           const replay = {
             type: reasoning.type,
-            ...(outboundItemID(reasoning.id) === undefined ? {} : { id: outboundItemID(reasoning.id) }),
+            id: reasoning.id,
             summary: reasoning.summary,
             encrypted_content: reasoning.encrypted_content,
           }
@@ -525,7 +503,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         if (part.type === "tool-call") {
           flushText()
           if (part.providerExecuted === true) continue
-          input.push(lowerToolCall(part, providerMetadataKey))
+          input.push(lowerToolCall(part))
           continue
         }
         if (part.type === "tool-result" && part.providerExecuted === true) {
@@ -561,9 +539,6 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         return yield* ProviderShared.unsupportedContent(extension.name, "tool", ["tool-result"])
       input.push({
         type: "function_call_output",
-        ...(outboundItemID(metadataItemID(part, providerMetadataKey)) === undefined
-          ? {}
-          : { id: outboundItemID(metadataItemID(part, providerMetadataKey)) }),
         call_id: part.id,
         output: yield* lowerToolResultOutput(part, request, extension),
       })

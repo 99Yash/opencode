@@ -4,7 +4,7 @@ import { Auth } from "../route/auth"
 import { Endpoint } from "../route/endpoint"
 import { Protocol } from "../route/protocol"
 import { HttpTransport, WebSocketTransport } from "../route/transport"
-import { LLMEvent, LLMRequest, ResponseItemID, type JsonSchema, type ToolDefinition } from "../schema"
+import { LLMEvent, LLMRequest, type JsonSchema, type ToolDefinition } from "../schema"
 import { OpenResponses } from "./open-responses"
 import { optionalArray, ProviderShared } from "./shared"
 import { Lifecycle } from "./utils/lifecycle"
@@ -95,13 +95,12 @@ const extension = {
     if (metadata.item.type === "image_generation_call")
       return {
         type: metadata.item.type,
-        ...(id === undefined || !ResponseItemID.isPrefixed(id) ? {} : { id }),
+        ...(id === undefined ? {} : { id }),
         ...(typeof metadata.item.status === "string" ? { status: metadata.item.status } : {}),
         ...(typeof metadata.item.revised_prompt === "string" ? { revised_prompt: metadata.item.revised_prompt } : {}),
         ...(typeof metadata.item.result === "string" ? { result: metadata.item.result } : {}),
       }
     const item: Record<string, unknown> & { type: string } = { ...metadata.item, type: metadata.item.type }
-    if (id !== undefined && !ResponseItemID.isPrefixed(id)) delete item.id
     return item
   },
 } satisfies OpenResponses.Extension

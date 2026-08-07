@@ -85,7 +85,7 @@ test("local tool success serializes media base64 once through canonical content"
 
   const called = published.find((event) => event.type === "session.tool.called.1")?.data
   expect(called).toMatchObject({ state: { itemId: "fc_call-image" } })
-  expect(success?.data).toMatchObject({ resultState: { itemId: expect.stringMatching(/^fco_/) } })
+  expect(success?.data).not.toHaveProperty("resultState")
   expect(JSON.stringify(success?.data)).not.toContain('"itemId":"fc_call-image"')
 
   expect(success?.data).toMatchObject({

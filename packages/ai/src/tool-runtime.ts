@@ -1,7 +1,6 @@
 import { Effect } from "effect"
 import {
   LLMEvent,
-  ResponseItemID,
   type ToolCallPart,
   ToolFailure,
   ToolOutput,
@@ -63,10 +62,6 @@ const decodeAndExecute = (tool: AnyTool, call: ToolCallPart): Effect.Effect<Tool
 
 const result = (call: ToolCallPart, value: ToolResultValueType | ToolSettlement, error?: unknown): DispatchResult => {
   const settlement = ToolResultValue.is(value) ? { result: value } : value
-  const itemId =
-    call.itemId !== undefined && call.itemId.startsWith("fc_")
-      ? `fco_${call.itemId.slice(3)}`
-      : ResponseItemID.create("fco")
   return {
     result: settlement.result,
     output: settlement.output,
@@ -75,7 +70,6 @@ const result = (call: ToolCallPart, value: ToolResultValueType | ToolSettlement,
         ? [
             LLMEvent.toolError({
               id: call.id,
-              itemId,
               name: call.name,
               message: String(settlement.result.value),
               error,
@@ -83,7 +77,6 @@ const result = (call: ToolCallPart, value: ToolResultValueType | ToolSettlement,
             }),
             LLMEvent.toolResult({
               id: call.id,
-              itemId,
               name: call.name,
               result: settlement.result,
               ...(call.providerMetadata === undefined ? {} : { providerMetadata: call.providerMetadata }),
@@ -92,7 +85,6 @@ const result = (call: ToolCallPart, value: ToolResultValueType | ToolSettlement,
         : [
             LLMEvent.toolResult({
               id: call.id,
-              itemId,
               name: call.name,
               result: settlement.result,
               output: settlement.output,

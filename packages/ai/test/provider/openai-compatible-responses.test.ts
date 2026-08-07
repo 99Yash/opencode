@@ -54,7 +54,7 @@ describe("Open Responses-compatible route", () => {
         stream: true,
       })
       expect(prepared.body.input[0]).not.toHaveProperty("id")
-      expect(prepared.body.input[1]?.id).toStartWith("msg_")
+      expect(prepared.body.input[1]).not.toHaveProperty("id")
     }),
   )
 

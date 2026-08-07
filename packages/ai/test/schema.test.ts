@@ -11,7 +11,6 @@ import {
   LanguageModel,
   ModelID,
   ProviderID,
-  ResponseItemID,
   Usage,
 } from "../src/schema"
 import { ProviderShared } from "../src/protocols/shared"
@@ -68,12 +67,6 @@ describe("llm schema", () => {
   test("content part tagged union exposes guards", () => {
     expect(ContentPart.guards.text({ type: "text", text: "hi" })).toBe(true)
     expect(ContentPart.guards.media({ type: "text", text: "hi" })).toBe(false)
-  })
-
-  test("creates prefixed UUIDv7 response item ids", () => {
-    const id = ResponseItemID.create("msg")
-    expect(id).toMatch(/^msg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-    expect(ResponseItemID.isPrefixed(id)).toBe(true)
   })
 })
 

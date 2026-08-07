@@ -2534,12 +2534,10 @@ describe("SessionRunnerLLM", () => {
       yield* TestLLM.push([])
       yield* session.resume(sessionID)
 
-      const assistant = requests[1]?.messages[1]
       expect(requests[1]?.messages[1]?.content).toEqual([
         {
           type: "reasoning",
           text: "Signed thought",
-          itemId: `rs_${assistant?.id}_0`,
           providerMetadata: { openai: { signature: "sig_1" } },
         },
         {
@@ -2596,12 +2594,10 @@ describe("SessionRunnerLLM", () => {
       yield* TestLLM.push([])
       yield* session.resume(sessionID)
 
-      const assistant = requests[1]?.messages[1]
       expect(requests[1]?.messages[1]?.content).toEqual([
         {
           type: "text",
           text: "Checking.",
-          itemId: `msg_${assistant?.id}_0`,
           providerMetadata: { openai: { phase: "commentary" } },
         },
       ])
@@ -2639,7 +2635,6 @@ describe("SessionRunnerLLM", () => {
       yield* session.resume(sessionID)
 
       expect(messageRoles(requests[1])).toEqual(["user", "assistant", "user"])
-      const assistant = requests[1]?.messages[1]
       expect(requests[1]?.messages[1]?.content).toMatchObject([
         {
           type: "tool-call",
@@ -2653,7 +2648,6 @@ describe("SessionRunnerLLM", () => {
         {
           type: "tool-result",
           id: "hosted-search",
-          itemId: `fco_${assistant?.id}_1`,
           name: "web_search",
           // The generic replay result derives from canonical stored content.
           result: { type: "text", value: '[{"title":"Effect"}]' },

@@ -180,7 +180,7 @@ describe("LLMClient tools", () => {
           output: { structured: { count: "2" }, content: [{ type: "text", text: "count:2" }] },
         }),
       ])
-      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
+      expect(dispatched.events[0]?.itemId).toBeUndefined()
     }),
   )
 
@@ -207,7 +207,7 @@ describe("LLMClient tools", () => {
           providerMetadata,
         }),
       ])
-      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
+      expect(dispatched.events[0]?.itemId).toBeUndefined()
 
       const failed = yield* ToolRuntime.dispatch(
         {},
@@ -229,13 +229,12 @@ describe("LLMClient tools", () => {
       ])
       const errorItemID = failed.events.find(LLMEvent.is.toolError)?.itemId
       const resultItemID = failed.events.find(LLMEvent.is.toolResult)?.itemId
-      expect(errorItemID).toBe("fco_failed")
-      expect(resultItemID).toBe("fco_failed")
-      expect(errorItemID).not.toBe("fc_failed")
+      expect(errorItemID).toBeUndefined()
+      expect(resultItemID).toBeUndefined()
     }),
   )
 
-  it.effect("derives a stable function output item id from the function call item id", () =>
+  it.effect("does not derive a function output item id from the function call item id", () =>
     Effect.gen(function* () {
       const tool = Tool.make({
         description: "Return text.",
@@ -248,7 +247,7 @@ describe("LLMClient tools", () => {
         LLMEvent.toolCall({ id: "call_1", itemId: "fc_existing", name: "tool", input: {} }),
       )
 
-      expect(dispatched.events.find(LLMEvent.is.toolResult)?.itemId).toBe("fco_existing")
+      expect(dispatched.events.find(LLMEvent.is.toolResult)?.itemId).toBeUndefined()
     }),
   )
 
@@ -469,7 +468,7 @@ describe("LLMClient tools", () => {
           output: { structured: { ok: true }, content: [] },
         }),
       ])
-      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
+      expect(dispatched.events[0]?.itemId).toBeUndefined()
     }),
   )
 

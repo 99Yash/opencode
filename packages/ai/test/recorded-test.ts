@@ -17,66 +17,6 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const FIXTURES_DIR = path.resolve(__dirname, "fixtures", "recordings")
 
-const canonical = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(canonical)
-  if (typeof value !== "object" || value === null) return value
-  return Object.fromEntries(
-    Object.entries(value)
-      .toSorted(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => [key, canonical(item)]),
-  )
-}
-
-const generatedItemID =
-  /^(?:(?:msg|fc|fco|rs)_[0-9a-f-]{36}|(?:msg|fc|fco|rs)_msg_[0-9a-f-]{36}_\d+|msg_req_[0-9a-f-]{36}_system)$/i
-
-const responseItemBody = (body: string, url: string, omitIDs: ReadonlySet<number> = new Set()) => {
-  try {
-    const value: unknown = JSON.parse(body)
-    if (
-      !new URL(url).pathname.endsWith("/responses") ||
-      typeof value !== "object" ||
-      value === null ||
-      !("input" in value) ||
-      !Array.isArray(value.input)
-    )
-      return canonical(value)
-    return canonical({
-      ...value,
-      input: value.input.map((item: unknown, index: number) => {
-        if (typeof item !== "object" || item === null) return item
-        const id = "id" in item ? item.id : undefined
-        if (typeof id !== "string" || (!generatedItemID.test(id) && !omitIDs.has(index))) return item
-        return Object.fromEntries(Object.entries(item).filter(([key]) => key !== "id"))
-      }),
-    })
-  } catch {
-    return body
-  }
-}
-
-const missingResponseItemIDs = (body: string) => {
-  try {
-    const value: unknown = JSON.parse(body)
-    if (typeof value !== "object" || value === null || !("input" in value) || !Array.isArray(value.input))
-      return new Set<number>()
-    return new Set(
-      value.input.flatMap((item: unknown, index: number) =>
-        typeof item === "object" && item !== null && !("id" in item) ? [index] : [],
-      ),
-    )
-  } catch {
-    return new Set<number>()
-  }
-}
-
-const responseItemMatcher: HttpRecorder.RequestMatcher = (incoming, recorded) =>
-  incoming.method === recorded.method &&
-  incoming.url === recorded.url &&
-  JSON.stringify(canonical(incoming.headers)) === JSON.stringify(canonical(recorded.headers)) &&
-  JSON.stringify(responseItemBody(incoming.body, incoming.url, missingResponseItemIDs(recorded.body))) ===
-    JSON.stringify(responseItemBody(recorded.body, recorded.url))
-
 type RecordedEnv = RequestExecutorService | WebSocketExecutorService | LLMClientService | ImageClientService
 
 type RecordedTestsOptions = RecordedGroupOptions & {
@@ -138,7 +78,6 @@ export const recordedTests = (options: RecordedTestsOptions) =>
           HttpRecorder.layerFetch(cassette, {
             ...recorderOptions,
             directory: FIXTURES_DIR,
-            match: recorderOptions?.match ?? responseItemMatcher,
             metadata: recorderMetadata,
           }),
         ),
