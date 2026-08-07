@@ -210,6 +210,21 @@ export function RunFormBody(props: {
     }
     if (unsupported()) return
     if (state().editing) return
+    const character =
+      !event.ctrl &&
+      !event.meta &&
+      !event.option &&
+      !event.super &&
+      !event.hyper &&
+      /^[^\p{C}\p{Zl}\p{Zp}]$/u.test(event.sequence)
+        ? event.sequence
+        : undefined
+    if (custom() && state().selected === rows().length && character) {
+      const next = formPick(state(), props.request)
+      setState(formSetDraft(next, current(), formInput(next, current()) + character))
+      event.preventDefault()
+      return
+    }
     if (
       event.name === "tab" ||
       event.name === "left" ||

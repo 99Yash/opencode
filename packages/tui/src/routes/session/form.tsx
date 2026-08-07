@@ -175,6 +175,20 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     return answer === value
   })
 
+  onCleanup(
+    keymap.intercept("key", ({ event, consume }) => {
+      if (keymap.mode.current() !== FORM_MODE) return
+      if (store.editing || textual() || !other()) return
+      if (event.ctrl || event.meta || event.option || event.super || event.hyper) return
+      if (!/^[^\p{C}\p{Zl}\p{Zp}]$/u.test(event.sequence)) return
+      const current = answerField()
+      if (!current) return
+      setStore("custom", { ...store.custom, [current.key]: input() + event.sequence })
+      setStore("editing", true)
+      consume()
+    }),
+  )
+
   function answer(key: string, value: FormValue | undefined) {
     setStore("answers", { ...store.answers, [key]: value })
     setStore("error", "")
