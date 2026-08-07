@@ -148,9 +148,9 @@ test("typing starts a highlighted custom answer without losing the first charact
     expect(prompt.app.renderer.currentFocusedEditor).toBeNull()
 
     prompt.app.mockInput.pressKey("j")
-    prompt.app.mockInput.pressKey("1")
-    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "1")
-    expect(prompt.app.renderer.currentFocusedEditor?.plainText).toBe("1")
+    await prompt.app.mockInput.typeText("123")
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "123")
+    expect(prompt.app.renderer.currentFocusedEditor?.plainText).toBe("123")
   } finally {
     prompt.app.renderer.destroy()
   }

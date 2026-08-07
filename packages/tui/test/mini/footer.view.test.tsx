@@ -300,9 +300,9 @@ test("direct footer typing starts a highlighted custom answer without losing the
     expect(app.renderer.currentFocusedEditor).toBeNull()
 
     app.mockInput.pressKey("j")
-    app.mockInput.pressKey("h")
-    await app.waitFor(() => app.renderer.currentFocusedEditor?.plainText === "h")
-    expect(app.renderer.currentFocusedEditor?.plainText).toBe("h")
+    await app.mockInput.typeText("hello")
+    await app.waitFor(() => app.renderer.currentFocusedEditor?.plainText === "hello")
+    expect(app.renderer.currentFocusedEditor?.plainText).toBe("hello")
   } finally {
     app.cleanup()
   }
