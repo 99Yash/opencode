@@ -558,15 +558,6 @@ const messageTexts = (request: LLMRequest, role: "user" | "system") =>
 const userTexts = (request: LLMRequest) => messageTexts(request, "user")
 const systemTexts = (request: LLMRequest) => messageTexts(request, "system")
 const messageRoles = (request: LLMRequest | undefined) => request?.messages.map((message) => message.role)
-const withoutItemIDs = (messages: LLMRequest["messages"]) =>
-  messages.map((message) => ({
-    role: message.role,
-    content: message.content.map((part) => {
-      if (!("itemId" in part)) return part
-      const { itemId: _itemId, ...content } = part
-      return content
-    }),
-  }))
 
 const recordedEventTypes = (id: Session.ID) =>
   Effect.gen(function* () {
@@ -865,8 +856,8 @@ describe("SessionRunnerLLM", () => {
       yield* Fiber.join(renamed)
 
       expect(requests).toHaveLength(5)
-      expect(withoutItemIDs(requests[2]!.messages)).toContainEqual(withoutItemIDs([Message.user("First prompt")])[0])
-      expect(withoutItemIDs(requests[4]!.messages)).toContainEqual(withoutItemIDs([Message.user("First prompt")])[0])
+      expect(requests[2]?.messages).toContainEqual(Message.user("First prompt"))
+      expect(requests[4]?.messages).toContainEqual(Message.user("First prompt"))
       expect((yield* session.get(sessionID)).title).toBe("Generated title")
     }),
   )
@@ -891,7 +882,7 @@ describe("SessionRunnerLLM", () => {
       // A hook-removed call fails independently and continues while step allowance remains.
       expect(requests).toHaveLength(2)
       expect(requests[0]?.system.map((part) => part.text)).toEqual(["Hooked system"])
-      expect(withoutItemIDs(requests[0]!.messages)).toEqual(withoutItemIDs([Message.user("Hooked message")]))
+      expect(requests[0]?.messages).toEqual([Message.user("Hooked message")])
       expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("echo")
       expect(requests[0]?.tools.map((tool) => tool.name)).not.toContain("unregistered")
       expect(executions).toEqual([])
@@ -1316,14 +1307,12 @@ describe("SessionRunnerLLM", () => {
       systemBaseline = "Changed context"
       yield* runPrompt(session, "Second")
 
-      const firstSnapshot = PromptCacheDiagnostics.snapshot(requests[0]!)
-      const secondSnapshot = PromptCacheDiagnostics.snapshot(requests[1]!)
-      expect(PromptCacheDiagnostics.compare(firstSnapshot, secondSnapshot)).toEqual({
-        status: "append-only",
-        previousMessages: 1,
-        currentMessages: 3,
-      })
-      expect(secondSnapshot.messages[0]).toEqual(firstSnapshot.messages[0])
+      expect(
+        PromptCacheDiagnostics.compare(
+          PromptCacheDiagnostics.snapshot(requests[0]),
+          PromptCacheDiagnostics.snapshot(requests[1]),
+        ),
+      ).toEqual({ status: "append-only", previousMessages: 1, currentMessages: 3 })
       expect(requests.map((request) => request.system.map((part) => part.text))).toEqual([
         [defaultSystem, "Initial context"],
         [defaultSystem, "Initial context"],
@@ -2543,24 +2532,9 @@ describe("SessionRunnerLLM", () => {
         {
           type: "reasoning",
           text: "Encrypted thought",
-          itemId: "rs_1",
           providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "encrypted-state" } },
         },
       ])
-
-      yield* admit(session, "Continue again")
-      yield* TestLLM.push([])
-      yield* session.resume(sessionID)
-
-      expect(requests[2]?.messages[1]?.content.map((part) => ("itemId" in part ? part.itemId : undefined))).toEqual(
-        requests[1]?.messages[1]?.content.map((part) => ("itemId" in part ? part.itemId : undefined)),
-      )
-      expect(
-        PromptCacheDiagnostics.compare(
-          PromptCacheDiagnostics.snapshot(requests[1]!),
-          PromptCacheDiagnostics.snapshot(requests[2]!),
-        ),
-      ).toEqual({ status: "append-only", previousMessages: 3, currentMessages: 4 })
     }),
   )
 
@@ -2639,7 +2613,6 @@ describe("SessionRunnerLLM", () => {
         {
           type: "tool-call",
           id: "hosted-search",
-          itemId: "hosted-search",
           name: "web_search",
           input: { query: "Effect" },
           providerExecuted: true,

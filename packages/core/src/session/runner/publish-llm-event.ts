@@ -116,11 +116,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
   })
   const currentAssistantMessageID = () =>
     stepStarted ? Effect.succeed(assistantMessageID) : Effect.die(new Error("Tool event before assistant step start"))
-  const providerState = (metadata: ProviderMetadata | undefined, itemId?: string) => {
-    const state = metadata?.[input.providerMetadataKey]
-    if (itemId === undefined) return state
-    return { ...(typeof state === "object" && state !== null && !Array.isArray(state) ? state : {}), itemId }
-  }
+  const providerState = (metadata: ProviderMetadata | undefined) => metadata?.[input.providerMetadataKey]
   const fragments = (
     name: string,
     ended: (id: string, value: string, ordinal: number, state?: Record<string, unknown>) => Effect.Effect<void>,
@@ -344,7 +340,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
         return
       case "text-start":
         outputStarted = true
-        const startedTextOrdinal = yield* text.start(event.id, providerState(event.providerMetadata, event.itemId))
+        const startedTextOrdinal = yield* text.start(event.id, providerState(event.providerMetadata))
         yield* bus.publish(SessionEvent.Text.Started, {
           sessionID: input.sessionID,
           assistantMessageID: yield* startAssistant(),
@@ -352,11 +348,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
         })
         return
       case "text-delta":
-        const deltaTextOrdinal = yield* text.append(
-          event.id,
-          event.text,
-          providerState(event.providerMetadata, event.itemId),
-        )
+        const deltaTextOrdinal = yield* text.append(event.id, event.text, providerState(event.providerMetadata))
         yield* bus.publish(SessionEvent.Text.Delta, {
           sessionID: input.sessionID,
           assistantMessageID: yield* currentAssistantMessageID(),
@@ -365,26 +357,23 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
         })
         return
       case "text-end":
-        yield* text.end(event.id, providerState(event.providerMetadata, event.itemId))
+        yield* text.end(event.id, providerState(event.providerMetadata))
         return
       case "reasoning-start":
         outputStarted = true
-        const startedReasoningOrdinal = yield* reasoning.start(
-          event.id,
-          providerState(event.providerMetadata, event.itemId),
-        )
+        const startedReasoningOrdinal = yield* reasoning.start(event.id, providerState(event.providerMetadata))
         yield* bus.publish(SessionEvent.Reasoning.Started, {
           sessionID: input.sessionID,
           assistantMessageID: yield* startAssistant(),
           ordinal: startedReasoningOrdinal,
-          state: providerState(event.providerMetadata, event.itemId),
+          state: providerState(event.providerMetadata),
         })
         return
       case "reasoning-delta":
         const deltaReasoningOrdinal = yield* reasoning.append(
           event.id,
           event.text,
-          providerState(event.providerMetadata, event.itemId),
+          providerState(event.providerMetadata),
         )
         yield* bus.publish(SessionEvent.Reasoning.Delta, {
           sessionID: input.sessionID,
@@ -394,7 +383,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
         })
         return
       case "reasoning-end":
-        yield* reasoning.end(event.id, providerState(event.providerMetadata, event.itemId))
+        yield* reasoning.end(event.id, providerState(event.providerMetadata))
         return
       case "tool-input-start":
         outputStarted = true
@@ -438,7 +427,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
           id: event.id,
           input: asRecord(event.input),
           executed: tool.providerExecuted,
-          state: providerState(event.providerMetadata, event.itemId),
+          state: providerState(event.providerMetadata),
         })
         return
       }
@@ -456,7 +445,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
         }
         tool.settled = true
         const executed = event.providerExecuted === true || tool.providerExecuted
-        const resultState = providerState(event.providerMetadata, event.itemId)
+        const resultState = providerState(event.providerMetadata)
         if (event.result.type === "error") {
           yield* bus.publish(SessionEvent.Tool.Failed, {
             sessionID: input.sessionID,
@@ -496,7 +485,7 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
               : { type: "tool.execution", message: event.message },
           ...failureSnapshot(tool),
           executed: tool.providerExecuted,
-          resultState: providerState(event.providerMetadata, event.itemId),
+          resultState: providerState(event.providerMetadata),
         })
         return
       }
@@ -521,7 +510,8 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
 
   const progress = Effect.fnUntraced(function* (id: string, update: Tool.Metadata) {
     const tool = tools.get(id)
-    if (!tool?.called || tool.settled) return yield* Effect.die(new Error(`Tool progress outside running call: ${id}`))
+    if (!tool?.called || tool.settled)
+      return yield* Effect.die(new Error(`Tool progress outside running call: ${id}`))
     tool.progress = update
     yield* bus.publish(SessionEvent.Tool.Progress, {
       sessionID: input.sessionID,
@@ -532,7 +522,11 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
   })
 
   /** Publishes one canonical terminal event for a locally executed tool call. */
-  const toolExecution = Effect.fnUntraced(function* (id: string, name: string, result: Tool.Result) {
+  const toolExecution = Effect.fnUntraced(function* (
+    id: string,
+    name: string,
+    result: Tool.Result,
+  ) {
     const tool = tools.get(id)
     if (!tool?.called) return yield* Effect.die(new Error(`Tool execution before call: ${id}`))
     if (tool.name !== name)
