@@ -25,7 +25,7 @@ export const Input = Schema.Struct({
   prompt: Schema.String.annotate({ description: "The task for the subagent to perform" }),
   sessionID: Schema.optionalKey(SessionSchema.ID).annotate({
     description:
-      "This should only be set if you mean to resume a previous subagent session (you can pass a prior sessionID and the subagent will continue the same session as before instead of creating a fresh one)",
+      "Continue a specific previous subagent conversation by passing its sessionID. Calls without a sessionID start a new conversation.",
   }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
