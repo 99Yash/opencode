@@ -25,7 +25,7 @@ export const Input = Schema.Struct({
   prompt: Schema.String.annotate({ description: "The task for the subagent to perform" }),
   sessionID: Schema.optionalKey(SessionSchema.ID).annotate({
     description:
-      "An existing child session to continue in the foreground. Omit to start a new subagent session. Background continuation is not yet supported.",
+      "This should only be set if you mean to resume a previous subagent session (you can pass a prior sessionID and the subagent will continue the same session as before instead of creating a fresh one)",
   }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
@@ -39,10 +39,10 @@ export const Output = Schema.Struct({
   output: Schema.String,
 })
 export const description = [
-  "Spawns an agent in a child session, or continues an existing child session when sessionID is provided.",
-  "Include all relevant context and instructions when starting a new session because the child starts with fresh context.",
-  "When continuing a session, the subagent retains its previous messages and tool results.",
-  "Continuing a background subagent is not yet supported.",
+  "Spawns an agent in a child session to work on the specified task.",
+  "The output includes a sessionID you can reuse later to continue the same subagent session.",
+  "Each subagent invocation starts with a fresh context unless you provide sessionID to resume the same subagent session, which continues with its previous messages and tool outputs.",
+  "When starting fresh, include all relevant context and instructions in the prompt.",
   "Foreground (default) runs the subagent to completion and returns its final response.",
   "Background mode (background=true) launches it asynchronously and returns immediately; you are notified when it finishes.",
   "Use background only for independent work that can run while you continue elsewhere.",
