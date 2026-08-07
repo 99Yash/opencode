@@ -128,6 +128,7 @@ export function DialogMcp() {
               {
                 title: toggleTitle(),
                 command: "dialog.mcp.toggle",
+                variant: toggleTitle() === "disconnect" ? "destructive" : "primary",
                 onTrigger: (option) => {
                   setFocused(option.value as string)
                   toggle(option.value as string)
