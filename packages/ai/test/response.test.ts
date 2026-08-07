@@ -49,6 +49,43 @@ describe("LLMResponse reducer", () => {
     expect(state.message.content).toEqual([{ type: "text", text: "partial" }])
   })
 
+  test("assembles response item identity and provider metadata", () => {
+    const response = LLMResponse.fromEvents([
+      LLMEvent.textStart({ id: "text-block", itemId: "msg_existing" }),
+      LLMEvent.textDelta({
+        id: "text-block",
+        itemId: "msg_existing",
+        text: "Answer",
+        providerMetadata: { openai: { itemId: "msg_existing" } },
+      }),
+      LLMEvent.textEnd({ id: "text-block", itemId: "msg_existing" }),
+      LLMEvent.reasoningStart({ id: "reasoning-block", itemId: "rs_existing" }),
+      LLMEvent.reasoningDelta({
+        id: "reasoning-block",
+        itemId: "rs_existing",
+        text: "Thought",
+        providerMetadata: { openai: { itemId: "rs_existing" } },
+      }),
+      LLMEvent.reasoningEnd({ id: "reasoning-block", itemId: "rs_existing" }),
+      LLMEvent.finish({ reason: { normalized: "stop" } }),
+    ])
+
+    expect(response?.message.content).toEqual([
+      {
+        type: "text",
+        text: "Answer",
+        itemId: "msg_existing",
+        providerMetadata: { openai: { itemId: "msg_existing" } },
+      },
+      {
+        type: "reasoning",
+        text: "Thought",
+        itemId: "rs_existing",
+        providerMetadata: { openai: { itemId: "rs_existing" } },
+      },
+    ])
+  })
+
   test("does not complete ended content without a terminal finish", () => {
     const state = reduce([
       LLMEvent.textStart({ id: "t1" }),

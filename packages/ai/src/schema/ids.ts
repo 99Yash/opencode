@@ -21,6 +21,15 @@ export type ProviderID = typeof ProviderID.Type
 export const ResponseID = Schema.String
 export type ResponseID = Schema.Schema.Type<typeof ResponseID>
 
+export const ResponseItemID = Object.assign(Schema.String, {
+  create: (prefix: string): ResponseItemID => `${prefix}_${crypto.randomUUID()}`,
+  isPrefixed: (value: string) => {
+    const separator = value.indexOf("_")
+    return separator > 0 && separator < value.length - 1
+  },
+})
+export type ResponseItemID = Schema.Schema.Type<typeof ResponseItemID>
+
 export const ContentBlockID = Schema.String
 export type ContentBlockID = Schema.Schema.Type<typeof ContentBlockID>
 

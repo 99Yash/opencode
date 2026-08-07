@@ -9,6 +9,7 @@ import {
   LLMRequest,
   LLMResponse,
   Message,
+  ResponseItemID,
   LanguageModel,
   SystemPart,
   ToolChoice,
@@ -38,6 +39,17 @@ export const generate = LLMClient.generate
 
 export const stream = LLMClient.stream
 
+const providerItemID = (part: ContentPart, providerMetadataKey: string) => {
+  if (part.type === "media" || part.itemId !== undefined) return part.type === "media" ? undefined : part.itemId
+  const metadata = part.providerMetadata?.[providerMetadataKey]
+  return typeof metadata === "object" &&
+    metadata !== null &&
+    !Array.isArray(metadata) &&
+    typeof metadata.itemId === "string"
+    ? metadata.itemId
+    : undefined
+}
+
 export const request = <const SelectedLanguageModel extends LanguageModel>(
   input: RequestInput<SelectedLanguageModel>,
 ) => {
@@ -52,10 +64,29 @@ export const request = <const SelectedLanguageModel extends LanguageModel>(
     http: requestHttp,
     ...rest
   } = input
+  const normalized = [...(messages?.map(Message.make) ?? []), ...(prompt === undefined ? [] : [Message.user(prompt)])]
+  const providerMetadataKey = input.model.route.providerMetadataKey ?? input.model.provider
   return new LLMRequest({
     ...rest,
     system: SystemPart.content(requestSystem),
-    messages: [...(messages?.map(Message.make) ?? []), ...(prompt === undefined ? [] : [Message.user(prompt)])],
+    messages: normalized.map((message) => {
+      const id = message.id ?? ResponseItemID.create("msg")
+      return new Message({
+        id,
+        role: message.role,
+        content: message.content.map((part, index) => {
+          if (part.type === "media" || message.role === "user" || message.role === "system") return part
+          const itemId = providerItemID(part, providerMetadataKey)
+          if (itemId !== undefined) return { ...part, itemId }
+          if (part.type === "tool-call") return { ...part, itemId: `fc_${id}_${index}` }
+          if (part.type === "tool-result") return { ...part, itemId: `fco_${id}_${index}` }
+          if (part.type === "reasoning") return { ...part, itemId: `rs_${id}_${index}` }
+          return { ...part, itemId: `msg_${id}_${index}` }
+        }),
+        metadata: message.metadata,
+        native: message.native,
+      })
+    }),
     tools: tools?.map(ToolDefinition.make) ?? [],
     toolChoice: requestToolChoice ? ToolChoice.make(requestToolChoice) : undefined,
     generation: requestGeneration === undefined ? undefined : GenerationOptions.make(requestGeneration),

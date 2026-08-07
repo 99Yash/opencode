@@ -110,7 +110,13 @@ describe("toLLMMessages", () => {
     )
 
     expect(messages.map((message) => message.role)).toEqual(["system", "user", "user", "user", "user"])
-    expect(messages[0]).toEqual(Message.system("Updated context\n\nOther context"))
+    expect(messages[0]).toEqual(
+      Message.make({
+        id: "msg_system",
+        role: "system",
+        content: [{ type: "text", text: "Updated context\n\nOther context" }],
+      }),
+    )
     expect(messages[1]).toEqual(
       Message.make({
         id: id("user"),
@@ -476,6 +482,7 @@ Recent work
       {
         type: "tool-result",
         id: "completed",
+        itemId: "fco_completed",
         name: "read",
         result: {
           type: "content",
@@ -513,6 +520,7 @@ Recent work
       {
         type: "reasoning",
         text: "Think",
+        itemId: "rs_1",
         providerMetadata: { provider: { itemId: "rs_1", reasoningEncryptedContent: "encrypted-state" } },
       },
     ])
@@ -602,6 +610,7 @@ Recent work
       {
         type: "tool-call",
         id: "hosted-completed",
+        itemId: "call_completed",
         name: "web_search",
         input: { query: "Effect" },
         providerExecuted: true,
@@ -610,6 +619,7 @@ Recent work
       {
         type: "tool-result",
         id: "hosted-completed",
+        itemId: "result_completed",
         name: "web_search",
         result: { type: "text", value: '{"found":true}' },
         providerExecuted: true,
@@ -620,6 +630,7 @@ Recent work
       {
         type: "tool-call",
         id: "hosted-failed",
+        itemId: "call_failed",
         name: "web_search",
         input: { query: "Effect" },
         providerExecuted: true,
@@ -628,6 +639,7 @@ Recent work
       {
         type: "tool-result",
         id: "hosted-failed",
+        itemId: "result_failed",
         name: "web_search",
         result: {
           type: "error",
@@ -698,6 +710,7 @@ Recent work
       {
         type: "tool-call",
         id: "hosted-old-model",
+        itemId: undefined,
         name: "web_search",
         input: { query: "Effect" },
         providerExecuted: true,
@@ -706,6 +719,7 @@ Recent work
       {
         type: "tool-result",
         id: "hosted-old-model",
+        itemId: "hosted-old-model",
         name: "web_search",
         result: { type: "text", value: '{"status":"completed"}' },
         providerExecuted: true,
@@ -718,6 +732,7 @@ Recent work
       {
         type: "tool-call",
         id: "local-old-model",
+        itemId: undefined,
         name: "read",
         input: { path: "README.md" },
         providerExecuted: false,
@@ -728,6 +743,7 @@ Recent work
       {
         type: "tool-result",
         id: "local-old-model",
+        itemId: "fco_local-old-model",
         name: "read",
         result: { type: "text", value: "Hello" },
         providerExecuted: false,

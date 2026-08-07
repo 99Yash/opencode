@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { Tool } from "@opencode-ai/schema/tool"
-import { JsonSchema, MessageRole, ProviderMetadata } from "./ids"
+import { JsonSchema, MessageRole, ProviderMetadata, ResponseItemID } from "./ids"
 import { CacheHint, CachePolicy, GenerationOptions, HttpOptions, LanguageModelSchema, ProviderOptions } from "./options"
 import { isRecord } from "../utils/record"
 
@@ -25,6 +25,7 @@ export const SystemPart = Object.assign(systemPartSchema, {
 export const TextPart = Schema.Struct({
   type: Schema.Literal("text"),
   text: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   cache: Schema.optional(CacheHint),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   providerMetadata: Schema.optional(ProviderMetadata),
@@ -121,6 +122,7 @@ export const ToolCallPart = Object.assign(
   Schema.Struct({
     type: Schema.Literal("tool-call"),
     id: Schema.String,
+    itemId: Schema.optional(ResponseItemID),
     name: Schema.String,
     input: Schema.Unknown,
     providerExecuted: Schema.optional(Schema.Boolean),
@@ -138,6 +140,7 @@ export const ToolResultPart = Object.assign(
   Schema.Struct({
     type: Schema.Literal("tool-result"),
     id: Schema.String,
+    itemId: Schema.optional(ResponseItemID),
     name: Schema.String,
     result: ToolResultValue,
     providerExecuted: Schema.optional(Schema.Boolean),
@@ -154,6 +157,7 @@ export const ToolResultPart = Object.assign(
     ): ToolResultPart => ({
       type: "tool-result",
       id: input.id,
+      ...(input.itemId === undefined ? {} : { itemId: input.itemId }),
       name: input.name,
       result: ToolResultValue.make(input.result, input.resultType),
       providerExecuted: input.providerExecuted,
@@ -168,6 +172,7 @@ export type ToolResultPart = Schema.Schema.Type<typeof ToolResultPart>
 export const ReasoningPart = Schema.Struct({
   type: Schema.Literal("reasoning"),
   text: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   encrypted: Schema.optional(Schema.String),
   cache: Schema.optional(CacheHint),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
@@ -181,7 +186,7 @@ export const ContentPart = Schema.Union([TextPart, MediaPart, ToolCallPart, Tool
 export type ContentPart = Schema.Schema.Type<typeof ContentPart>
 
 export class Message extends Schema.Class<Message>("LLM.Message")({
-  id: Schema.optional(Schema.String),
+  id: Schema.optional(ResponseItemID),
   role: MessageRole,
   content: Schema.Array(ContentPart),
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),

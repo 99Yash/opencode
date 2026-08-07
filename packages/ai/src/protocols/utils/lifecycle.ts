@@ -1,4 +1,10 @@
-import { LLMEvent, type FinishReasonDetails, type ProviderMetadata, type Usage } from "../../schema"
+import {
+  LLMEvent,
+  type FinishReasonDetails,
+  type ProviderMetadata,
+  type ResponseItemID,
+  type Usage,
+} from "../../schema"
 
 export interface State {
   readonly stepStarted: boolean
@@ -14,16 +20,29 @@ export const stepStart = (state: State, events: LLMEvent[]): State => {
   return { ...state, stepStarted: true }
 }
 
-export const textStart = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
+export const textStart = (
+  state: State,
+  events: LLMEvent[],
+  id: string,
+  providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
+): State => {
   if (state.text.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.textStart({ id, providerMetadata }))
+  events.push(LLMEvent.textStart({ id, ...(itemId === undefined ? {} : { itemId }), providerMetadata }))
   return { ...stepped, text: new Set([...stepped.text, id]) }
 }
 
-export const textDelta = (state: State, events: LLMEvent[], id: string, text: string): State => {
-  const started = textStart(state, events, id)
-  events.push(LLMEvent.textDelta({ id, text }))
+export const textDelta = (
+  state: State,
+  events: LLMEvent[],
+  id: string,
+  text: string,
+  providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
+): State => {
+  const started = textStart(state, events, id, providerMetadata, itemId)
+  events.push(LLMEvent.textDelta({ id, ...(itemId === undefined ? {} : { itemId }), text, providerMetadata }))
   return started
 }
 
@@ -32,10 +51,11 @@ export const reasoningStart = (
   events: LLMEvent[],
   id: string,
   providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
 ): State => {
   if (state.reasoning.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.reasoningStart({ id, providerMetadata }))
+  events.push(LLMEvent.reasoningStart({ id, ...(itemId === undefined ? {} : { itemId }), providerMetadata }))
   return { ...stepped, reasoning: new Set([...stepped.reasoning, id]) }
 }
 
@@ -45,9 +65,10 @@ export const reasoningDelta = (
   id: string,
   text: string,
   providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
 ): State => {
-  const started = reasoningStart(state, events, id, providerMetadata)
-  events.push(LLMEvent.reasoningDelta({ id, text, providerMetadata }))
+  const started = reasoningStart(state, events, id, providerMetadata, itemId)
+  events.push(LLMEvent.reasoningDelta({ id, ...(itemId === undefined ? {} : { itemId }), text, providerMetadata }))
   return started
 }
 
@@ -56,19 +77,26 @@ export const reasoningEnd = (
   events: LLMEvent[],
   id: string,
   providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
 ): State => {
   if (!state.reasoning.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.reasoningEnd({ id, providerMetadata }))
+  events.push(LLMEvent.reasoningEnd({ id, ...(itemId === undefined ? {} : { itemId }), providerMetadata }))
   const reasoning = new Set(stepped.reasoning)
   reasoning.delete(id)
   return { ...stepped, reasoning }
 }
 
-export const textEnd = (state: State, events: LLMEvent[], id: string, providerMetadata?: ProviderMetadata): State => {
+export const textEnd = (
+  state: State,
+  events: LLMEvent[],
+  id: string,
+  providerMetadata?: ProviderMetadata,
+  itemId?: ResponseItemID,
+): State => {
   if (!state.text.has(id)) return state
   const stepped = stepStart(state, events)
-  events.push(LLMEvent.textEnd({ id, providerMetadata }))
+  events.push(LLMEvent.textEnd({ id, ...(itemId === undefined ? {} : { itemId }), providerMetadata }))
   const text = new Set(stepped.text)
   text.delete(id)
   return { ...stepped, text }

@@ -1,4 +1,10 @@
-import { Message, ToolCallPart, ToolResultPart, type ContentPart, type ProviderMetadata } from "@opencode-ai/ai"
+import {
+  Message,
+  ToolCallPart,
+  ToolResultPart,
+  type ContentPart,
+  type ProviderMetadata,
+} from "@opencode-ai/ai"
 import { Option, Schema } from "effect"
 import type { Model } from "../../model"
 import { SessionMessage } from "../message"
@@ -66,27 +72,46 @@ const providerMetadata = (
   state: Record<string, unknown> | undefined,
 ): ProviderMetadata | undefined => (state === undefined ? undefined : { [provider]: state })
 
+const responseItemID = (state: Record<string, unknown> | undefined) =>
+  typeof state?.itemId === "string" ? state.itemId : undefined
+
+const portableProviderState = (state: Record<string, unknown> | undefined) => {
+  if (state === undefined || !("itemId" in state)) return state
+  const { itemId: _itemId, ...portable } = state
+  return portable
+}
+
 const toolInput = (tool: SessionMessage.AssistantTool) =>
   tool.state.status === "streaming"
     ? Option.getOrElse(decodeToolInput(tool.state.input), () => tool.state.input)
     : tool.state.input
 
-const toolCall = (tool: SessionMessage.AssistantTool, providerMetadata: ProviderMetadata | undefined): ContentPart =>
+const toolCall = (
+  tool: SessionMessage.AssistantTool,
+  itemId: string | undefined,
+  providerMetadata: ProviderMetadata | undefined,
+): ContentPart =>
   ToolCallPart.make({
     id: tool.id,
+    ...(itemId === undefined ? {} : { itemId }),
     name: tool.name,
     input: toolInput(tool),
     providerExecuted: tool.executed,
     providerMetadata,
   })
 
-const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: ProviderMetadata | undefined) => {
+const toolResult = (
+  tool: SessionMessage.AssistantTool,
+  itemId: string | undefined,
+  providerMetadata: ProviderMetadata | undefined,
+) => {
   if (tool.state.status === "completed") {
     // TODO: Materialize remote and managed URIs before provider-history lowering.
     const content = tool.state.content
     const single = content.length === 1 ? content[0] : undefined
     return ToolResultPart.make({
       id: tool.id,
+      ...(itemId === undefined ? {} : { itemId }),
       name: tool.name,
       result:
         single?.type === "text"
@@ -99,6 +124,7 @@ const toolResult = (tool: SessionMessage.AssistantTool, providerMetadata: Provid
   if (tool.state.status === "error") {
     return ToolResultPart.make({
       id: tool.id,
+      ...(itemId === undefined ? {} : { itemId }),
       name: tool.name,
       result: { error: tool.state.error, content: tool.state.content ?? [] },
       resultType: "error",
@@ -118,7 +144,13 @@ const assistant = (message: SessionMessage.Assistant, model: Model.Ref, provider
         {
           type: "text",
           text: item.text,
-          providerMetadata: sameProvider ? providerMetadata(providerMetadataKey, item.state) : undefined,
+          itemId: reuseProviderMetadata ? responseItemID(item.state) : undefined,
+          providerMetadata: sameProvider
+            ? providerMetadata(
+                providerMetadataKey,
+                reuseProviderMetadata ? item.state : portableProviderState(item.state),
+              )
+            : undefined,
         },
       ]
     if (item.type === "reasoning")
@@ -127,6 +159,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model.Ref, provider
             {
               type: "reasoning",
               text: item.text,
+              itemId: responseItemID(item.state),
               providerMetadata: providerMetadata(providerMetadataKey, item.state),
             },
           ]
@@ -138,6 +171,7 @@ const assistant = (message: SessionMessage.Assistant, model: Model.Ref, provider
       (sameModel && item.executed === true && (item.state.status === "completed" || item.state.status === "error"))
     const call = toolCall(
       item,
+      reuseToolProviderMetadata ? responseItemID(item.providerState) : undefined,
       reuseToolProviderMetadata ? providerMetadata(providerMetadataKey, item.providerState) : undefined,
     )
     if (item.executed !== true) return [call]
@@ -145,6 +179,11 @@ const assistant = (message: SessionMessage.Assistant, model: Model.Ref, provider
     // replay must survive a model switch within the same provider.
     const result = toolResult(
       item,
+      reuseToolProviderMetadata
+        ? responseItemID(item.providerResultState ?? (item.executed === true ? item.providerState : undefined))
+        : sameProvider && item.executed === true
+          ? responseItemID(item.providerResultState)
+          : undefined,
       reuseToolProviderMetadata
         ? providerMetadata(providerMetadataKey, item.providerResultState ?? item.providerState)
         : sameProvider && item.executed === true && item.providerResultState !== undefined
@@ -163,9 +202,8 @@ const assistant = (message: SessionMessage.Assistant, model: Model.Ref, provider
     .map((item) =>
       toolResult(
         item,
-        reuseProviderMetadata
-          ? providerMetadata(providerMetadataKey, item.providerResultState ?? item.providerState)
-          : undefined,
+        responseItemID(item.providerResultState) ?? `fco_${item.id}`,
+        reuseProviderMetadata ? providerMetadata(providerMetadataKey, item.providerResultState) : undefined,
       ),
     )
     .filter((message) => message !== undefined)
@@ -204,7 +242,7 @@ function toLLMMessage(message: SessionMessage.Info, model: Model.Ref, providerMe
     case "skill":
       return [Message.make({ id: message.id, role: "user", content: message.text, metadata: message.metadata })]
     case "system":
-      return [Message.system(message.text)]
+      return [Message.make({ id: message.id, role: "system", content: message.text })]
     case "shell":
       return [
         Message.make({

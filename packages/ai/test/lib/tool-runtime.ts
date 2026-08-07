@@ -8,7 +8,6 @@ import {
   type ProviderMetadata,
   type ToolCallPart,
   ToolResultPart,
-  type ToolResultValue,
   type Usage,
 } from "../../src/schema"
 import { type Tools, toDefinitions } from "../../src/tool"
@@ -61,9 +60,10 @@ export const runTools = <T extends Tools>(options: RunOptions<T>) =>
             ...dispatched.map(([call, dispatched]) =>
               Message.tool({
                 id: call.id,
+                itemId: dispatched.events.find(LLMEvent.is.toolResult)?.itemId,
                 name: call.name,
                 result: dispatched.result,
-                providerMetadata: call.providerMetadata,
+                providerMetadata: dispatched.events.find(LLMEvent.is.toolResult)?.providerMetadata,
               }),
             ),
           ],
@@ -89,9 +89,15 @@ const stepState = (events: ReadonlyArray<LLMEvent>) => {
 
   for (const event of events) {
     if (event.type === "text-delta" || event.type === "reasoning-delta") {
-      appendText(assistantContent, event.type === "text-delta" ? "text" : "reasoning", event.text)
+      appendText(assistantContent, event.type === "text-delta" ? "text" : "reasoning", event.text, event.itemId)
     } else if (event.type === "text-end" || event.type === "reasoning-end") {
-      appendText(assistantContent, event.type === "text-end" ? "text" : "reasoning", "", event.providerMetadata)
+      appendText(
+        assistantContent,
+        event.type === "text-end" ? "text" : "reasoning",
+        "",
+        event.itemId,
+        event.providerMetadata,
+      )
     } else if (event.type === "tool-call") {
       assistantContent.push(event)
       if (!event.providerExecuted) toolCalls.push(event)
@@ -99,6 +105,7 @@ const stepState = (events: ReadonlyArray<LLMEvent>) => {
       assistantContent.push(
         ToolResultPart.make({
           id: event.id,
+          itemId: event.itemId,
           name: event.name,
           result: event.result,
           providerExecuted: true,
@@ -118,6 +125,7 @@ const appendText = (
   content: ContentPart[],
   type: "text" | "reasoning",
   text: string,
+  itemId?: string,
   providerMetadata?: ProviderMetadata,
 ) => {
   const last = content.at(-1)
@@ -125,11 +133,12 @@ const appendText = (
     content[content.length - 1] = {
       ...last,
       text: `${last.text}${text}`,
+      itemId: itemId ?? last.itemId,
       providerMetadata: providerMetadata ?? last.providerMetadata,
     }
     return
   }
-  content.push({ type, text, providerMetadata })
+  content.push({ type, text, itemId, providerMetadata })
 }
 
 const addUsage = (left: Usage | undefined, right: Usage | undefined): Usage | undefined => {

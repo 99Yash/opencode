@@ -1,5 +1,5 @@
 import { Schema } from "effect"
-import { ContentBlockID, FinishReason, ProviderMetadata, ToolCallID } from "./ids"
+import { ContentBlockID, FinishReason, ProviderMetadata, ResponseItemID, ToolCallID } from "./ids"
 import { Message, ToolCallPart, ToolOutput, ToolResultPart, ToolResultValue, type ContentPart } from "./messages"
 import { ProviderFailureClassification } from "./errors"
 
@@ -84,6 +84,7 @@ export type StepStart = Schema.Schema.Type<typeof StepStart>
 export const TextStart = Schema.Struct({
   type: Schema.tag("text-start"),
   id: ContentBlockID,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.TextStart" })
 export type TextStart = Schema.Schema.Type<typeof TextStart>
@@ -92,6 +93,7 @@ export const TextDelta = Schema.Struct({
   type: Schema.tag("text-delta"),
   id: ContentBlockID,
   text: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.TextDelta" })
 export type TextDelta = Schema.Schema.Type<typeof TextDelta>
@@ -99,6 +101,7 @@ export type TextDelta = Schema.Schema.Type<typeof TextDelta>
 export const TextEnd = Schema.Struct({
   type: Schema.tag("text-end"),
   id: ContentBlockID,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.TextEnd" })
 export type TextEnd = Schema.Schema.Type<typeof TextEnd>
@@ -106,6 +109,7 @@ export type TextEnd = Schema.Schema.Type<typeof TextEnd>
 export const ReasoningStart = Schema.Struct({
   type: Schema.tag("reasoning-start"),
   id: ContentBlockID,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ReasoningStart" })
 export type ReasoningStart = Schema.Schema.Type<typeof ReasoningStart>
@@ -114,6 +118,7 @@ export const ReasoningDelta = Schema.Struct({
   type: Schema.tag("reasoning-delta"),
   id: ContentBlockID,
   text: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ReasoningDelta" })
 export type ReasoningDelta = Schema.Schema.Type<typeof ReasoningDelta>
@@ -121,6 +126,7 @@ export type ReasoningDelta = Schema.Schema.Type<typeof ReasoningDelta>
 export const ReasoningEnd = Schema.Struct({
   type: Schema.tag("reasoning-end"),
   id: ContentBlockID,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ReasoningEnd" })
 export type ReasoningEnd = Schema.Schema.Type<typeof ReasoningEnd>
@@ -129,6 +135,7 @@ export const ToolInputStart = Schema.Struct({
   type: Schema.tag("tool-input-start"),
   id: ToolCallID,
   name: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   providerExecuted: Schema.optional(Schema.Boolean),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ToolInputStart" })
@@ -137,6 +144,7 @@ export type ToolInputStart = Schema.Schema.Type<typeof ToolInputStart>
 export const ToolInputDelta = Schema.Struct({
   type: Schema.tag("tool-input-delta"),
   id: ToolCallID,
+  itemId: Schema.optional(ResponseItemID),
   name: Schema.String,
   text: Schema.String,
 }).annotate({ identifier: "LLM.Event.ToolInputDelta" })
@@ -146,6 +154,7 @@ export const ToolInputEnd = Schema.Struct({
   type: Schema.tag("tool-input-end"),
   id: ToolCallID,
   name: Schema.String,
+  itemId: Schema.optional(ResponseItemID),
   providerMetadata: Schema.optional(ProviderMetadata),
 }).annotate({ identifier: "LLM.Event.ToolInputEnd" })
 export type ToolInputEnd = Schema.Schema.Type<typeof ToolInputEnd>
@@ -154,6 +163,7 @@ export type ToolInputEnd = Schema.Schema.Type<typeof ToolInputEnd>
 export const ToolInputError = Schema.Struct({
   type: Schema.tag("tool-input-error"),
   id: ToolCallID,
+  itemId: Schema.optional(ResponseItemID),
   name: Schema.String,
   raw: Schema.String,
 }).annotate({ identifier: "LLM.Event.ToolInputError" })
@@ -162,6 +172,7 @@ export type ToolInputError = Schema.Schema.Type<typeof ToolInputError>
 export const ToolCall = Schema.Struct({
   type: Schema.tag("tool-call"),
   id: ToolCallID,
+  itemId: Schema.optional(ResponseItemID),
   name: Schema.String,
   input: Schema.Unknown,
   providerExecuted: Schema.optional(Schema.Boolean),
@@ -172,6 +183,7 @@ export type ToolCall = Schema.Schema.Type<typeof ToolCall>
 export const ToolResult = Schema.Struct({
   type: Schema.tag("tool-result"),
   id: ToolCallID,
+  itemId: Schema.optional(ResponseItemID),
   name: Schema.String,
   result: ToolResultValue,
   output: Schema.optional(ToolOutput),
@@ -183,6 +195,7 @@ export type ToolResult = Schema.Schema.Type<typeof ToolResult>
 export const ToolError = Schema.Struct({
   type: Schema.tag("tool-error"),
   id: ToolCallID,
+  itemId: Schema.optional(ResponseItemID),
   name: Schema.String,
   message: Schema.String,
   error: Schema.optional(Schema.Defect()),
@@ -334,12 +347,14 @@ const responseUsage = (events: ReadonlyArray<LLMEvent>) =>
 interface ContentAssembly {
   readonly contentIndex: number
   readonly text: string
+  readonly itemId?: ResponseItemID
   readonly providerMetadata?: ProviderMetadata
 }
 
 interface ToolInputAssembly {
   readonly name: string
   readonly text: string
+  readonly itemId?: ResponseItemID
   readonly providerMetadata?: ProviderMetadata
 }
 
@@ -385,11 +400,27 @@ const appendEvent = (state: ResponseState, event: LLMEvent): ResponseState => {
   }
 }
 
-const textContent = (text: string, providerMetadata: ProviderMetadata | undefined): ContentPart =>
-  providerMetadata === undefined ? { type: "text", text } : { type: "text", text, providerMetadata }
+const textContent = (
+  text: string,
+  itemId: ResponseItemID | undefined,
+  providerMetadata: ProviderMetadata | undefined,
+): ContentPart => ({
+  type: "text",
+  text,
+  ...(itemId === undefined ? {} : { itemId }),
+  ...(providerMetadata === undefined ? {} : { providerMetadata }),
+})
 
-const reasoningContent = (text: string, providerMetadata: ProviderMetadata | undefined): ContentPart =>
-  providerMetadata === undefined ? { type: "reasoning", text } : { type: "reasoning", text, providerMetadata }
+const reasoningContent = (
+  text: string,
+  itemId: ResponseItemID | undefined,
+  providerMetadata: ProviderMetadata | undefined,
+): ContentPart => ({
+  type: "reasoning",
+  text,
+  ...(itemId === undefined ? {} : { itemId }),
+  ...(providerMetadata === undefined ? {} : { providerMetadata }),
+})
 
 const contentWith = (state: ResponseState, content: ReadonlyArray<ContentPart>): ResponseState => ({
   ...state,
@@ -404,26 +435,32 @@ const replaceContent = (state: ResponseState, index: number, part: ContentPart) 
     state.message.content.map((item, itemIndex) => (itemIndex === index ? part : item)),
   )
 
-const ensureText = (state: ResponseState, id: string, providerMetadata?: ProviderMetadata): ResponseState => {
+const ensureText = (
+  state: ResponseState,
+  id: string,
+  itemId?: ResponseItemID,
+  providerMetadata?: ProviderMetadata,
+): ResponseState => {
   if (state.textParts[id]) return state
   return {
-    ...appendContent(state, textContent("", providerMetadata)),
+    ...appendContent(state, textContent("", itemId, providerMetadata)),
     textParts: {
       ...state.textParts,
-      [id]: { contentIndex: state.message.content.length, text: "", providerMetadata },
+      [id]: { contentIndex: state.message.content.length, text: "", itemId, providerMetadata },
     },
   }
 }
 
 const reduceTextDelta = (state: ResponseState, event: TextDelta): ResponseState => {
-  const started = ensureText(state, event.id, event.providerMetadata)
+  const started = ensureText(state, event.id, event.itemId, event.providerMetadata)
   const current = started.textParts[event.id]
   if (!current) return started
   const text = current.text + event.text
+  const itemId = event.itemId ?? current.itemId
   const providerMetadata = event.providerMetadata ?? current.providerMetadata
   return {
-    ...replaceContent(started, current.contentIndex, textContent(text, providerMetadata)),
-    textParts: { ...started.textParts, [event.id]: { ...current, text, providerMetadata } },
+    ...replaceContent(started, current.contentIndex, textContent(text, itemId, providerMetadata)),
+    textParts: { ...started.textParts, [event.id]: { ...current, text, itemId, providerMetadata } },
   }
 }
 
@@ -431,32 +468,39 @@ const reduceTextEnd = (state: ResponseState, event: TextEnd): ResponseState => {
   const current = state.textParts[event.id]
   if (!current) return state
   const providerMetadata = event.providerMetadata ?? current.providerMetadata
+  const itemId = event.itemId ?? current.itemId
   return {
-    ...replaceContent(state, current.contentIndex, textContent(current.text, providerMetadata)),
-    textParts: { ...state.textParts, [event.id]: { ...current, providerMetadata } },
+    ...replaceContent(state, current.contentIndex, textContent(current.text, itemId, providerMetadata)),
+    textParts: { ...state.textParts, [event.id]: { ...current, itemId, providerMetadata } },
   }
 }
 
-const ensureReasoning = (state: ResponseState, id: string, providerMetadata?: ProviderMetadata): ResponseState => {
+const ensureReasoning = (
+  state: ResponseState,
+  id: string,
+  itemId?: ResponseItemID,
+  providerMetadata?: ProviderMetadata,
+): ResponseState => {
   if (state.reasoningParts[id]) return state
   return {
-    ...appendContent(state, reasoningContent("", providerMetadata)),
+    ...appendContent(state, reasoningContent("", itemId, providerMetadata)),
     reasoningParts: {
       ...state.reasoningParts,
-      [id]: { contentIndex: state.message.content.length, text: "", providerMetadata },
+      [id]: { contentIndex: state.message.content.length, text: "", itemId, providerMetadata },
     },
   }
 }
 
 const reduceReasoningDelta = (state: ResponseState, event: ReasoningDelta): ResponseState => {
-  const started = ensureReasoning(state, event.id, event.providerMetadata)
+  const started = ensureReasoning(state, event.id, event.itemId, event.providerMetadata)
   const current = started.reasoningParts[event.id]
   if (!current) return started
   const text = current.text + event.text
+  const itemId = event.itemId ?? current.itemId
   const providerMetadata = event.providerMetadata ?? current.providerMetadata
   return {
-    ...replaceContent(started, current.contentIndex, reasoningContent(text, providerMetadata)),
-    reasoningParts: { ...started.reasoningParts, [event.id]: { ...current, text, providerMetadata } },
+    ...replaceContent(started, current.contentIndex, reasoningContent(text, itemId, providerMetadata)),
+    reasoningParts: { ...started.reasoningParts, [event.id]: { ...current, text, itemId, providerMetadata } },
   }
 }
 
@@ -464,9 +508,10 @@ const reduceReasoningEnd = (state: ResponseState, event: ReasoningEnd): Response
   const current = state.reasoningParts[event.id]
   if (!current) return state
   const providerMetadata = event.providerMetadata ?? current.providerMetadata
+  const itemId = event.itemId ?? current.itemId
   return {
-    ...replaceContent(state, current.contentIndex, reasoningContent(current.text, providerMetadata)),
-    reasoningParts: { ...state.reasoningParts, [event.id]: { ...current, providerMetadata } },
+    ...replaceContent(state, current.contentIndex, reasoningContent(current.text, itemId, providerMetadata)),
+    reasoningParts: { ...state.reasoningParts, [event.id]: { ...current, itemId, providerMetadata } },
   }
 }
 
@@ -474,7 +519,7 @@ const reduceToolInputStart = (state: ResponseState, event: ToolInputStart): Resp
   ...state,
   toolInputs: {
     ...state.toolInputs,
-    [event.id]: { name: event.name, text: "", providerMetadata: event.providerMetadata },
+    [event.id]: { name: event.name, text: "", itemId: event.itemId, providerMetadata: event.providerMetadata },
   },
 })
 
@@ -495,6 +540,7 @@ const reduceToolInputEnd = (state: ResponseState, event: ToolInputEnd): Response
       [event.id]: {
         ...current,
         name: event.name,
+        itemId: event.itemId ?? current.itemId,
         providerMetadata: event.providerMetadata ?? current.providerMetadata,
       },
     },
@@ -504,6 +550,7 @@ const reduceToolInputEnd = (state: ResponseState, event: ToolInputEnd): Response
 const toolCallContent = (event: ToolCall): ContentPart =>
   ToolCallPart.make({
     id: event.id,
+    ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
     name: event.name,
     input: event.input,
     ...(event.providerExecuted === undefined ? {} : { providerExecuted: event.providerExecuted }),
@@ -513,6 +560,7 @@ const toolCallContent = (event: ToolCall): ContentPart =>
 const toolResultContent = (event: ToolResult): ContentPart =>
   ToolResultPart.make({
     id: event.id,
+    ...(event.itemId === undefined ? {} : { itemId: event.itemId }),
     name: event.name,
     result: event.result,
     ...(event.providerExecuted === undefined ? {} : { providerExecuted: event.providerExecuted }),
@@ -528,13 +576,13 @@ const reduceResponseState = (state: ResponseState, event: LLMEvent): ResponseSta
   const next = appendEvent(state, event)
   switch (event.type) {
     case "text-start":
-      return ensureText(next, event.id, event.providerMetadata)
+      return ensureText(next, event.id, event.itemId, event.providerMetadata)
     case "text-delta":
       return reduceTextDelta(next, event)
     case "text-end":
       return reduceTextEnd(next, event)
     case "reasoning-start":
-      return ensureReasoning(next, event.id, event.providerMetadata)
+      return ensureReasoning(next, event.id, event.itemId, event.providerMetadata)
     case "reasoning-delta":
       return reduceReasoningDelta(next, event)
     case "reasoning-end":

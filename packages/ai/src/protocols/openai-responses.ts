@@ -4,7 +4,7 @@ import { Auth } from "../route/auth"
 import { Endpoint } from "../route/endpoint"
 import { Protocol } from "../route/protocol"
 import { HttpTransport, WebSocketTransport } from "../route/transport"
-import { LLMEvent, LLMRequest, type JsonSchema, type ToolDefinition } from "../schema"
+import { LLMEvent, LLMRequest, ResponseItemID, type JsonSchema, type ToolDefinition } from "../schema"
 import { OpenResponses } from "./open-responses"
 import { optionalArray, ProviderShared } from "./shared"
 import { Lifecycle } from "./utils/lifecycle"
@@ -38,10 +38,14 @@ const OpenAIResponsesToolChoice = Schema.Union([
 const OpenAIResponsesInputItem = Schema.Union([
   Schema.Struct({
     role: Schema.tag("assistant"),
+    id: Schema.optionalKey(Schema.String),
     content: Schema.Array(Schema.Struct({ type: Schema.tag("output_text"), text: Schema.String })),
     phase: Schema.optionalKey(Schema.NullOr(OpenResponses.MessagePhase)),
   }),
   OpenResponses.InputItem,
+  Schema.StructWithRest(Schema.Struct({ type: Schema.String, id: Schema.optionalKey(Schema.String) }), [
+    Schema.Record(Schema.String, Schema.Unknown),
+  ]),
 ])
 
 const OpenAIResponsesCoreFields = {
@@ -79,6 +83,26 @@ const extension = {
       file_data: media.base64,
       mime_type: media.mime,
     }
+  },
+  lowerProviderItem: (part, providerMetadataKey, store) => {
+    const metadata = part.providerMetadata?.[providerMetadataKey]
+    if (!ProviderShared.isRecord(metadata) || !ProviderShared.isRecord(metadata.item)) return undefined
+    if (typeof metadata.item.type !== "string") return undefined
+    const id = typeof metadata.item.id === "string" ? metadata.item.id : undefined
+    // The public API requires stored state to replay image-generation items. In
+    // stateless mode, lower the generated file through the existing user-image fallback.
+    if (metadata.item.type === "image_generation_call" && store === false) return undefined
+    if (metadata.item.type === "image_generation_call")
+      return {
+        type: metadata.item.type,
+        ...(id === undefined || !ResponseItemID.isPrefixed(id) ? {} : { id }),
+        ...(typeof metadata.item.status === "string" ? { status: metadata.item.status } : {}),
+        ...(typeof metadata.item.revised_prompt === "string" ? { revised_prompt: metadata.item.revised_prompt } : {}),
+        ...(typeof metadata.item.result === "string" ? { result: metadata.item.result } : {}),
+      }
+    const item: Record<string, unknown> & { type: string } = { ...metadata.item, type: metadata.item.type }
+    if (id !== undefined && !ResponseItemID.isPrefixed(id)) delete item.id
+    return item
   },
 } satisfies OpenResponses.Extension
 
@@ -195,23 +219,29 @@ const onHostedToolDone = Effect.fn("OpenAIResponses.onHostedToolDone")(function*
   item: HostedToolItem,
 ) {
   const tool = HOSTED_TOOLS[item.type]
-  const providerMetadata = OpenResponses.providerMetadata(state, { itemId: item.id })
+  const callMetadata = OpenResponses.providerMetadata(state, { itemId: item.id })
+  const resultMetadata = OpenResponses.providerMetadata(
+    state,
+    item.type === "image_generation_call" ? { itemId: item.id } : { itemId: item.id, item },
+  )
   const events: LLMEvent[] = []
   const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
   events.push(
     LLMEvent.toolCall({
       id: item.id,
+      itemId: item.id,
       name: tool.name,
       input: tool.input(item),
       providerExecuted: true,
-      providerMetadata,
+      providerMetadata: callMetadata,
     }),
     LLMEvent.toolResult({
       id: item.id,
+      itemId: item.id,
       name: tool.name,
       result: yield* hostedToolResult(item),
       providerExecuted: true,
-      providerMetadata,
+      providerMetadata: resultMetadata,
     }),
   )
   return [{ ...state, lifecycle }, events] satisfies OpenResponses.StepResult

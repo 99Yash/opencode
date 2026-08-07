@@ -1,5 +1,12 @@
 import { Effect } from "effect"
-import { AIError, LLMEvent, type ProviderMetadata, type ToolCall, type ToolInputError } from "../../schema"
+import {
+  AIError,
+  LLMEvent,
+  type ProviderMetadata,
+  type ResponseItemID,
+  type ToolCall,
+  type ToolInputError,
+} from "../../schema"
 import { eventError, parseToolInput, type ToolAccumulator } from "../shared"
 
 type StreamKey = string | number
@@ -10,6 +17,7 @@ type StreamKey = string | number
  * so far, not the parsed object.
  */
 export interface PendingTool extends ToolAccumulator {
+  readonly itemId?: ResponseItemID
   readonly providerExecuted?: boolean
   readonly providerMetadata?: ProviderMetadata
 }
@@ -52,6 +60,7 @@ const withoutTool = <K extends StreamKey>(tools: State<K>, key: K): State<K> => 
 const inputStart = (tool: PendingTool) =>
   LLMEvent.toolInputStart({
     id: tool.id,
+    ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
     name: tool.name,
     providerExecuted: tool.providerExecuted ? true : undefined,
     providerMetadata: tool.providerMetadata,
@@ -60,6 +69,7 @@ const inputStart = (tool: PendingTool) =>
 const inputDelta = (tool: PendingTool, text: string) =>
   LLMEvent.toolInputDelta({
     id: tool.id,
+    ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
     name: tool.name,
     text,
   })
@@ -70,6 +80,7 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) => {
     Effect.map((input): ToolCall | ToolInputError =>
       LLMEvent.toolCall({
         id: tool.id,
+        ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
         name: tool.name,
         input,
         providerExecuted: tool.providerExecuted ? true : undefined,
@@ -82,6 +93,7 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) => {
         : Effect.succeed(
             LLMEvent.toolInputError({
               id: tool.id,
+              ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
               name: tool.name,
               raw,
             }),
@@ -93,7 +105,15 @@ const toolCall = (route: string, tool: PendingTool, inputOverride?: string) => {
 const finishEvents = (tool: PendingTool, event: ToolCall | ToolInputError): ReadonlyArray<LLMEvent> =>
   event.type === "tool-input-error"
     ? [event]
-    : [LLMEvent.toolInputEnd({ id: tool.id, name: tool.name, providerMetadata: tool.providerMetadata }), event]
+    : [
+        LLMEvent.toolInputEnd({
+          id: tool.id,
+          ...(tool.itemId === undefined ? {} : { itemId: tool.itemId }),
+          name: tool.name,
+          providerMetadata: tool.providerMetadata,
+        }),
+        event,
+      ]
 
 /** Store the updated tool and produce the optional public delta event. */
 const appendTool = <K extends StreamKey>(
@@ -148,6 +168,7 @@ export const appendOrStart = <K extends StreamKey>(
     id,
     name,
     input: `${current?.input ?? ""}${delta.text}`,
+    itemId: current?.itemId,
     providerExecuted: current?.providerExecuted,
     providerMetadata: current?.providerMetadata,
   }

@@ -172,7 +172,7 @@ describe("LLMClient tools", () => {
       expect(calls).toEqual([{ id: "call_projected", parameters: { prefix: "count" }, output: { count: "2" } }])
       expect(dispatched.result).toEqual({ type: "text", value: "count:2" })
       expect(dispatched.output).toEqual({ structured: { count: "2" }, content: [{ type: "text", text: "count:2" }] })
-      expect(dispatched.events).toEqual([
+      expect(dispatched.events).toMatchObject([
         LLMEvent.toolResult({
           id: "call_projected",
           name: "projected",
@@ -180,6 +180,7 @@ describe("LLMClient tools", () => {
           output: { structured: { count: "2" }, content: [{ type: "text", text: "count:2" }] },
         }),
       ])
+      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
     }),
   )
 
@@ -197,7 +198,7 @@ describe("LLMClient tools", () => {
         LLMEvent.toolCall({ id: "call_1", name: "tool", input: {}, providerMetadata }),
       )
 
-      expect(dispatched.events).toEqual([
+      expect(dispatched.events).toMatchObject([
         LLMEvent.toolResult({
           id: "call_1",
           name: "tool",
@@ -206,12 +207,13 @@ describe("LLMClient tools", () => {
           providerMetadata,
         }),
       ])
+      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
 
       const failed = yield* ToolRuntime.dispatch(
         {},
-        LLMEvent.toolCall({ id: "call_2", name: "missing", input: {}, providerMetadata }),
+        LLMEvent.toolCall({ id: "call_2", itemId: "fc_failed", name: "missing", input: {}, providerMetadata }),
       )
-      expect(failed.events).toEqual([
+      expect(failed.events).toMatchObject([
         LLMEvent.toolError({
           id: "call_2",
           name: "missing",
@@ -225,6 +227,28 @@ describe("LLMClient tools", () => {
           providerMetadata,
         }),
       ])
+      const errorItemID = failed.events.find(LLMEvent.is.toolError)?.itemId
+      const resultItemID = failed.events.find(LLMEvent.is.toolResult)?.itemId
+      expect(errorItemID).toBe("fco_failed")
+      expect(resultItemID).toBe("fco_failed")
+      expect(errorItemID).not.toBe("fc_failed")
+    }),
+  )
+
+  it.effect("derives a stable function output item id from the function call item id", () =>
+    Effect.gen(function* () {
+      const tool = Tool.make({
+        description: "Return text.",
+        parameters: Schema.Struct({}),
+        success: Schema.String,
+        execute: () => Effect.succeed("hello"),
+      })
+      const dispatched = yield* ToolRuntime.dispatch(
+        { tool },
+        LLMEvent.toolCall({ id: "call_1", itemId: "fc_existing", name: "tool", input: {} }),
+      )
+
+      expect(dispatched.events.find(LLMEvent.is.toolResult)?.itemId).toBe("fco_existing")
     }),
   )
 
@@ -437,7 +461,7 @@ describe("LLMClient tools", () => {
       )
 
       expect(dispatched.result).toEqual(callerOwned)
-      expect(dispatched.events).toEqual([
+      expect(dispatched.events).toMatchObject([
         LLMEvent.toolResult({
           id: "call_1",
           name: "eventful",
@@ -445,6 +469,7 @@ describe("LLMClient tools", () => {
           output: { structured: { ok: true }, content: [] },
         }),
       ])
+      expect(dispatched.events[0]?.itemId).toStartWith("fco_")
     }),
   )
 

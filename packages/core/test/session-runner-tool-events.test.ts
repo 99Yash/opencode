@@ -24,9 +24,7 @@ const capture = (providerMetadataKey = "anthropic", options?: { readonly interru
       const publish = Effect.sync(() => {
         const event = { id: Event.ID.create(), type: definition.type, data } as Event.Payload<typeof definition>
         published.push({
-          type: definition.durable
-            ? Bus.versionedType(definition.type, definition.durable.version)
-            : definition.type,
+          type: definition.durable ? Bus.versionedType(definition.type, definition.durable.version) : definition.type,
           data,
         })
         return event
@@ -66,9 +64,10 @@ const hostedResult = LLMEvent.toolResult({
 
 test("local tool success serializes media base64 once through canonical content", async () => {
   const { published, publisher } = capture()
-  await Effect.runPromise(publisher.publish(call))
+  const localCall = LLMEvent.toolCall({ ...call, itemId: "fc_call-image" })
+  await Effect.runPromise(publisher.publish(localCall))
   await Effect.runPromise(
-    publisher.toolExecution(call.id, call.name, {
+    publisher.toolExecution(localCall.id, localCall.name, {
       output: { type: "media", mime: "image/png" },
       content: [
         { type: "text", text: "Image read successfully" },
@@ -83,6 +82,11 @@ test("local tool success serializes media base64 once through canonical content"
   expect(serialized.split(base64)).toHaveLength(2)
   expect(success?.data).not.toHaveProperty("result")
   expect(success?.data).not.toHaveProperty("output")
+
+  const called = published.find((event) => event.type === "session.tool.called.1")?.data
+  expect(called).toMatchObject({ state: { itemId: "fc_call-image" } })
+  expect(success?.data).toMatchObject({ resultState: { itemId: expect.stringMatching(/^fco_/) } })
+  expect(JSON.stringify(success?.data)).not.toContain('"itemId":"fc_call-image"')
 
   expect(success?.data).toMatchObject({
     content: [
@@ -226,9 +230,7 @@ test("provider-executed tool metadata is flattened using the route key", async (
 test("binary failure emits no success event", async () => {
   const { published, publisher } = capture()
   await Effect.runPromise(publisher.publish(call))
-  await Effect.runPromise(
-    publisher.failTool(call.id, { type: "tool.execution", message: "Cannot read binary file" }),
-  )
+  await Effect.runPromise(publisher.failTool(call.id, { type: "tool.execution", message: "Cannot read binary file" }))
   expect(published.some((event) => event.type === "session.tool.success.2")).toBe(false)
   expect(published.some((event) => event.type === "session.tool.failed.2")).toBe(true)
 })

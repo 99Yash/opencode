@@ -45,7 +45,7 @@ describe("Open Responses-compatible route", () => {
           },
         },
       })
-      expect(prepared.body).toEqual({
+      expect(prepared.body).toMatchObject({
         model: "example-model",
         input: [
           { role: "system", content: "You are concise." },
@@ -53,6 +53,8 @@ describe("Open Responses-compatible route", () => {
         ],
         stream: true,
       })
+      expect(prepared.body.input[0]).not.toHaveProperty("id")
+      expect(prepared.body.input[1]?.id).toStartWith("msg_")
     }),
   )
 
