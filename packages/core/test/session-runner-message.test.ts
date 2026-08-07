@@ -498,4 +498,60 @@ Recent work
       },
     ])
   })
+
+  test("does not lower duplicate tool call IDs from interrupted history", () => {
+    const messages = toLLMMessages(
+      [
+        SessionMessage.Assistant.make({
+          id: id("duplicate-tool-call"),
+          type: "assistant",
+          agent: "build",
+          model: { id: ModelV2.ID.make("model"), providerID: ProviderV2.ID.make("provider") },
+          content: [
+            SessionMessage.AssistantTool.make({
+              type: "tool",
+              id: "call_1",
+              name: "read",
+              state: SessionMessage.ToolStateCompleted.make({
+                status: "completed",
+                input: { path: "README.md" },
+                content: [{ type: "text", text: "done" }],
+                structured: {},
+              }),
+              time: { created, completed: created },
+            }),
+            SessionMessage.AssistantTool.make({
+              type: "tool",
+              id: "call_1",
+              name: "unknown",
+              state: SessionMessage.ToolStateError.make({
+                status: "error",
+                input: {},
+                content: [],
+                structured: {},
+                error: { type: "unknown", message: "Tool execution interrupted" },
+              }),
+              time: { created, completed: created },
+            }),
+          ],
+          time: { created, completed: created },
+        }),
+      ],
+      model,
+    )
+
+    const calls = messages.flatMap((message) =>
+      message.content.filter((part) => part.type === "tool-call" && part.id === "call_1"),
+    )
+    expect(calls).toEqual([
+      {
+        type: "tool-call",
+        id: "call_1",
+        name: "read",
+        input: { path: "README.md" },
+        providerExecuted: undefined,
+        providerMetadata: undefined,
+      },
+    ])
+  })
 })
