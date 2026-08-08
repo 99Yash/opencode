@@ -69,34 +69,43 @@ export const Plugin = {
                 id: context.id,
               }
               const target = yield* mutation.resolve({ path: input.path, kind: "file" })
-              const external = target.externalDirectory
-              if (external)
-                yield* permission.assert({
-                  ...LocationMutation.externalDirectoryPermission(external),
-                  sessionID: context.sessionID,
-                  agent: context.agent,
-                  source,
-                })
-              const current = yield* FileMutation.readText(environment.files, target.absolute).pipe(
-                Effect.catchTag("Environment.NotFound", () => Effect.succeed(undefined)),
+              return yield* fileMutation.withLock([target.absolute])(
+                Effect.gen(function* () {
+                  const external = target.externalDirectory
+                  if (external)
+                    yield* permission.assert({
+                      ...LocationMutation.externalDirectoryPermission(external),
+                      sessionID: context.sessionID,
+                      agent: context.agent,
+                      source,
+                    })
+                  const current = yield* FileMutation.readText(environment.files, target.absolute).pipe(
+                    Effect.catchTag("Environment.NotFound", () => Effect.succeed(undefined)),
+                  )
+                  const next = Bom.split(input.content)
+                  const preview = fileDiff(
+                    target.resource,
+                    current?.text ?? "",
+                    next.text,
+                    current ? "modified" : "added",
+                  )
+                  yield* permission.assert({
+                    action: "edit",
+                    resources: [target.resource],
+                    save: ["*"],
+                    metadata: { files: [preview] },
+                    sessionID: context.sessionID,
+                    agent: context.agent,
+                    source,
+                  })
+                  const result = yield* fileMutation.writeTextPreservingBom({ target, content: input.content })
+                  const bom = (yield* FileMutation.readText(environment.files, target.absolute)).bom
+                  if (yield* formatter.file(target.absolute)) {
+                    yield* FileMutation.syncTextBom(environment.files, target.absolute, bom)
+                  }
+                  return result
+                }),
               )
-              const next = Bom.split(input.content)
-              const preview = fileDiff(target.resource, current?.text ?? "", next.text, current ? "modified" : "added")
-              yield* permission.assert({
-                action: "edit",
-                resources: [target.resource],
-                save: ["*"],
-                metadata: { files: [preview] },
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source,
-              })
-              const result = yield* fileMutation.writeTextPreservingBom({ target, content: input.content })
-              const bom = (yield* FileMutation.readText(environment.files, target.absolute)).bom
-              if (yield* formatter.file(target.absolute)) {
-                yield* FileMutation.syncTextBom(environment.files, target.absolute, bom)
-              }
-              return result
             }).pipe(
               Effect.map((output) => ({ output, content: toModelOutput(output) })),
               Effect.mapError((error) => new ToolFailure({ message: `Unable to write ${input.path}`, error })),
