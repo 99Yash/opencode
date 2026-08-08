@@ -286,6 +286,30 @@ describe("ShellTool", () => {
     ),
   )
 
+  it.live(
+    "reports a command that fails to spawn",
+    () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          return withSession(tmp.path, (registry) =>
+            executeTool(registry, call({ command: "printf before\0after" })),
+          ).pipe(
+            Effect.andThen((settled) =>
+              Effect.sync(() => {
+                expect(settled.status).toBe("error")
+                if (settled.status !== "error") return
+                expect(settled.error?.message).toContain("ChildProcess.spawn")
+              }),
+            ),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+      ),
+    { timeout: 2_000 },
+  )
+
   it.live("permissions compound commands separately", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

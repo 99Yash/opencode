@@ -1,7 +1,7 @@
 export * as Shell from "./shell"
 
 import path from "path"
-import { Context, Deferred, Duration, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Fiber, Layer, PlatformError, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { produce } from "immer"
 import { Shell } from "@opencode-ai/schema/shell"
@@ -50,7 +50,7 @@ export interface Interface {
   readonly create: <E = never, R = never>(
     input: Shell.CreateInput,
     before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
-  ) => Effect.Effect<Shell.Info, E, R>
+  ) => Effect.Effect<Shell.Info, E | PlatformError.PlatformError, R>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
   readonly list: () => Effect.Effect<Shell.Info[]>
   readonly get: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
@@ -213,7 +213,7 @@ export const layer = (options?: ShellSelect.Options) =>
         // Spawn through the Environment and stream combined output to the file. The handle is scope-bound, so
         // the managing fiber keeps its scope open until the command terminates (it awaits `done` at the
         // end). `create` returns once `ready` resolves with the registered session.
-        const ready = Deferred.makeUnsafe<Active>()
+        const ready = Deferred.makeUnsafe<Active, PlatformError.PlatformError>()
         runFork(
           Effect.scoped(
             Effect.gen(function* () {
@@ -327,7 +327,7 @@ export const layer = (options?: ShellSelect.Options) =>
               // release (kill) the process before its exit is observed.
               yield* Deferred.await(session.done).pipe(Effect.catch(() => Effect.void))
             }),
-          ).pipe(Effect.catch(() => Effect.void)),
+          ).pipe(Effect.catch((error) => Deferred.fail(ready, error))),
         )
 
         const session = yield* Deferred.await(ready)
