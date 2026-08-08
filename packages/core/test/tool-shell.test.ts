@@ -295,16 +295,15 @@ describe("ShellTool", () => {
           reset()
           const command = "printf before\0after"
           return withSession(tmp.path, (registry) =>
-            Effect.gen(function* () {
-              const shell = yield* Shell.Service
-              const error = yield* shell.create({ command, timeout: 100 }).pipe(Effect.flip)
-              expect(error).toBeInstanceOf(Shell.StartError)
-
-              const settled = yield* executeTool(registry, call({ command }))
-              expect(settled.status).toBe("error")
-              if (settled.status !== "error") return
-              expect(settled.error?.message).toContain("Failed to start shell command")
-            }),
+            executeTool(registry, call({ command })).pipe(
+              Effect.andThen((settled) =>
+                Effect.sync(() => {
+                  expect(settled.status).toBe("error")
+                  if (settled.status !== "error") return
+                  expect(settled.error?.message).toContain("Command failed")
+                }),
+              ),
+            ),
           )
         },
         (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),

@@ -1,10 +1,11 @@
 export * as Shell from "./shell"
 
 import path from "path"
-import { Cause, Context, Deferred, Duration, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { produce } from "immer"
 import { Shell } from "@opencode-ai/schema/shell"
+import { AppProcess } from "@opencode-ai/util/process"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Config } from "./config"
 import { Bus } from "./bus"
@@ -18,16 +19,6 @@ import { PluginHooks } from "./plugin/hooks"
 export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Shell.NotFoundError", {
   id: Shell.ID,
 }) {}
-
-export class StartError extends Schema.TaggedErrorClass<StartError>()("Shell.StartError", {
-  command: Schema.String,
-  cause: Schema.Defect(),
-}) {
-  override get message() {
-    const detail = this.cause instanceof Error ? this.cause.message : String(this.cause)
-    return `Failed to start shell command: ${this.command}: ${detail}`
-  }
-}
 
 // Exited processes stay observable (status, exit code, retained output) until removed explicitly.
 // Cap retention so abandoned commands do not accumulate unbounded state and output files.
@@ -60,7 +51,7 @@ export interface Interface {
   readonly create: <E = never, R = never>(
     input: Shell.CreateInput,
     before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
-  ) => Effect.Effect<Shell.Info, E | StartError, R>
+  ) => Effect.Effect<Shell.Info, E | AppProcess.AppProcessError, R>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
   readonly list: () => Effect.Effect<Shell.Info[]>
   readonly get: (id: Shell.ID) => Effect.Effect<Shell.Info, NotFoundError>
@@ -223,19 +214,23 @@ export const layer = (options?: ShellSelect.Options) =>
         // Spawn through the Environment and stream combined output to the file. The handle is scope-bound, so
         // the managing fiber keeps its scope open until the command terminates (it awaits `done` at the
         // end). `create` returns once `ready` resolves with the registered session.
-        const ready = Deferred.makeUnsafe<Active, StartError>()
+        const ready = Deferred.makeUnsafe<Active, AppProcess.AppProcessError>()
         runFork(
           Effect.scoped(
             Effect.gen(function* () {
-              const handle = yield* environment.spawner.spawn(
-                ChildProcess.make(invocation.shell, args, {
-                  cwd: invocation.cwd,
-                  env: invocation.env,
-                  stdin: "ignore",
-                  detached: process.platform !== "win32",
-                  forceKillAfter: Duration.seconds(3),
-                }),
-              )
+              const handle = yield* environment.spawner
+                .spawn(
+                  ChildProcess.make(invocation.shell, args, {
+                    cwd: invocation.cwd,
+                    env: invocation.env,
+                    stdin: "ignore",
+                    detached: process.platform !== "win32",
+                    forceKillAfter: Duration.seconds(3),
+                  }),
+                )
+                .pipe(
+                  Effect.mapError((cause) => new AppProcess.AppProcessError({ command: invocation.command, cause })),
+                )
               const session: Active = {
                 info: produce(info, (draft) => {
                   draft.pid = handle.pid
@@ -337,11 +332,7 @@ export const layer = (options?: ShellSelect.Options) =>
               // release (kill) the process before its exit is observed.
               yield* Deferred.await(session.done).pipe(Effect.catch(() => Effect.void))
             }),
-          ).pipe(
-            Effect.catchCause((cause) =>
-              Deferred.fail(ready, new StartError({ command: invocation.command, cause: Cause.squash(cause) })),
-            ),
-          ),
+          ).pipe(Effect.catchTag("AppProcessError", (error) => Deferred.fail(ready, error))),
         )
 
         const session = yield* Deferred.await(ready)

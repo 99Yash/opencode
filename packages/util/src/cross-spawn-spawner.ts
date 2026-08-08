@@ -256,35 +256,35 @@ const makeCrossSpawnSpawner = Effect.gen(function* () {
   }
 
   const spawn = (command: ChildProcess.StandardCommand, opts: NodeChildProcess.SpawnOptions) =>
-    Effect.try({
-      try: () => launch(command.command, command.args, opts),
-      catch: (err) => toPlatformError("spawn", toError(err), command),
-    }).pipe(
-      Effect.flatMap((proc) =>
-        Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
-          const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
-          let end = false
-          let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
-          proc.on("error", (err) => {
-            resume(Effect.fail(toPlatformError("spawn", err, command)))
-          })
-          proc.on("exit", (...args) => {
-            exit = args
-          })
-          proc.on("close", (...args) => {
-            if (end) return
-            end = true
-            Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
-          })
-          proc.on("spawn", () => {
-            resume(Effect.succeed([proc, signal]))
-          })
-          return Effect.sync(() => {
-            proc.kill("SIGTERM")
-          })
-        }),
-      ),
-    )
+    Effect.callback<readonly [NodeChildProcess.ChildProcess, ExitSignal], PlatformError.PlatformError>((resume) => {
+      const signal = Deferred.makeUnsafe<readonly [code: number | null, signal: NodeJS.Signals | null]>()
+      let proc: NodeChildProcess.ChildProcess
+      try {
+        proc = launch(command.command, command.args, opts)
+      } catch (err) {
+        resume(Effect.fail(toPlatformError("spawn", toError(err), command)))
+        return Effect.void
+      }
+      let end = false
+      let exit: readonly [code: number | null, signal: NodeJS.Signals | null] | undefined
+      proc.on("error", (err) => {
+        resume(Effect.fail(toPlatformError("spawn", err, command)))
+      })
+      proc.on("exit", (...args) => {
+        exit = args
+      })
+      proc.on("close", (...args) => {
+        if (end) return
+        end = true
+        Deferred.doneUnsafe(signal, Exit.succeed(exit ?? args))
+      })
+      proc.on("spawn", () => {
+        resume(Effect.succeed([proc, signal]))
+      })
+      return Effect.sync(() => {
+        proc.kill("SIGTERM")
+      })
+    })
 
   const killGroup = (
     command: ChildProcess.StandardCommand,
