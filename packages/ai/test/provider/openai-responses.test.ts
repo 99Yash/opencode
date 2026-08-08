@@ -458,14 +458,19 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("preserves opaque assistant item ids without assigning ids to function items", () =>
+  it.effect("replays provider function call item ids without assigning output ids", () =>
     Effect.gen(function* () {
       const canonical = LLM.request({
         model,
         messages: [
           Message.assistant([
             { type: "text", text: "Calling.", itemId: "plain-text" },
-            ToolCallPart.make({ id: "call_1", itemId: "plain-call", name: "lookup", input: {} }),
+            ToolCallPart.make({
+              id: "call_1",
+              name: "lookup",
+              input: {},
+              providerMetadata: { openai: { itemId: "plain-call" } },
+            }),
           ]),
           Message.tool({ id: "call_1", itemId: "plain-output", name: "lookup", result: "done" }),
         ],
@@ -474,12 +479,12 @@ describe("OpenAI Responses route", () => {
 
       expect(canonical.messages[0]?.content.map((part) => (part.type === "media" ? undefined : part.itemId))).toEqual([
         "plain-text",
-        "plain-call",
+        undefined,
       ])
       expect(canonical.messages[1]?.content[0]).toMatchObject({ itemId: "plain-output" })
       expect(prepared.body.input).toEqual([
         { role: "assistant", id: "plain-text", content: [{ type: "output_text", text: "Calling." }] },
-        { type: "function_call", call_id: "call_1", name: "lookup", arguments: "{}" },
+        { type: "function_call", id: "plain-call", call_id: "call_1", name: "lookup", arguments: "{}" },
         { type: "function_call_output", call_id: "call_1", output: '"done"' },
       ])
     }),

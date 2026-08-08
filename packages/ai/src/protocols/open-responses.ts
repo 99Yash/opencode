@@ -335,12 +335,16 @@ const metadataItemID = (
     : undefined
 }
 
-const lowerToolCall = (part: ToolCallPart): OpenResponsesInputItem => ({
-  type: "function_call",
-  call_id: part.id,
-  name: part.name,
-  arguments: ProviderShared.encodeJson(part.input),
-})
+const lowerToolCall = (part: ToolCallPart, providerMetadataKey: string): OpenResponsesInputItem => {
+  const itemId = metadataItemID(part, providerMetadataKey)
+  return {
+    type: "function_call",
+    ...(itemId === undefined ? {} : { id: itemId }),
+    call_id: part.id,
+    name: part.name,
+    arguments: ProviderShared.encodeJson(part.input),
+  }
+}
 
 const lowerReasoning = (part: ReasoningPart, providerMetadataKey: string): OpenResponsesReasoningInput | undefined => {
   const metadata = part.providerMetadata?.[providerMetadataKey]
@@ -503,7 +507,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
         if (part.type === "tool-call") {
           flushText()
           if (part.providerExecuted === true) continue
-          input.push(lowerToolCall(part))
+          input.push(lowerToolCall(part, providerMetadataKey))
           continue
         }
         if (part.type === "tool-result" && part.providerExecuted === true) {
