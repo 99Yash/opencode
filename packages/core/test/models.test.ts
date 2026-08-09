@@ -176,6 +176,25 @@ describe("ModelsDev Service", () => {
     }),
   )
 
+  it.live("get() returns an empty catalog when the initial fetch fails", () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make({ ...initialState, status: 503 })
+      const context = yield* Layer.build(buildLayer(state))
+      const result = yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          Flag.OPENCODE_DISABLE_MODELS_FETCH = false
+        }),
+        () => ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)),
+        () =>
+          Effect.sync(() => {
+            Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+          }),
+      )
+      expect(result).toEqual({})
+      expect((yield* Ref.get(state)).calls.length).toBe(3)
+    }),
+  )
+
   it.live("get() is single-flight under concurrent calls", () =>
     Effect.gen(function* () {
       yield* writeCache(fixture)
