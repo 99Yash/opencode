@@ -112,6 +112,18 @@ const writeCache = (data: object, mtimeMs?: number) => writeCacheText(JSON.strin
 const provided = <A, E>(state: Ref.Ref<MockState>, eff: Effect.Effect<A, E, ModelsDev.Service>) =>
   eff.pipe(Effect.provide(buildLayer(state)))
 
+const withFetch = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      Flag.OPENCODE_DISABLE_MODELS_FETCH = false
+    }),
+    () => effect,
+    () =>
+      Effect.sync(() => {
+        Flag.OPENCODE_DISABLE_MODELS_FETCH = true
+      }),
+  )
+
 beforeEach(async () => {
   await rm(cacheFile, { force: true })
 })
@@ -159,16 +171,7 @@ describe("ModelsDev Service", () => {
       yield* writeCacheText("{")
       const state = yield* Ref.make({ ...initialState, body: JSON.stringify(fixture2) })
       const context = yield* Layer.build(buildLayer(state))
-      const result = yield* Effect.acquireUseRelease(
-        Effect.sync(() => {
-          Flag.OPENCODE_DISABLE_MODELS_FETCH = false
-        }),
-        () => ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)),
-        () =>
-          Effect.sync(() => {
-            Flag.OPENCODE_DISABLE_MODELS_FETCH = true
-          }),
-      )
+      const result = yield* withFetch(ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)))
       expect(result).toEqual(fixture2)
       expect(yield* Effect.promise(() => readFile(cacheFile, "utf8"))).toBe(JSON.stringify(fixture2))
       const final = yield* Ref.get(state)
@@ -180,18 +183,31 @@ describe("ModelsDev Service", () => {
     Effect.gen(function* () {
       const state = yield* Ref.make({ ...initialState, status: 503 })
       const context = yield* Layer.build(buildLayer(state))
-      const result = yield* Effect.acquireUseRelease(
-        Effect.sync(() => {
-          Flag.OPENCODE_DISABLE_MODELS_FETCH = false
-        }),
-        () => ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)),
-        () =>
-          Effect.sync(() => {
-            Flag.OPENCODE_DISABLE_MODELS_FETCH = true
-          }),
-      )
+      const result = yield* withFetch(ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)))
       expect(result).toEqual({})
       expect((yield* Ref.get(state)).calls.length).toBe(3)
+    }),
+  )
+
+  it.live("get() returns an empty catalog when the response is malformed JSON", () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make({ ...initialState, body: "{" })
+      const context = yield* Layer.build(buildLayer(state))
+      const result = yield* withFetch(ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)))
+      expect(result).toEqual({})
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(yield* Effect.promise(() => Bun.file(cacheFile).exists())).toBe(false)
+    }),
+  )
+
+  it.live("get() returns an empty catalog when the response has an invalid shape", () =>
+    Effect.gen(function* () {
+      const state = yield* Ref.make({ ...initialState, body: JSON.stringify({ acme: {} }) })
+      const context = yield* Layer.build(buildLayer(state))
+      const result = yield* withFetch(ModelsDev.Service.use((s) => s.get()).pipe(Effect.provide(context)))
+      expect(result).toEqual({})
+      expect((yield* Ref.get(state)).calls.length).toBe(1)
+      expect(yield* Effect.promise(() => Bun.file(cacheFile).exists())).toBe(false)
     }),
   )
 
