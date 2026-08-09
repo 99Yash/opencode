@@ -9,13 +9,11 @@ export * as WriteTool from "./write"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
-import { Bom } from "@opencode-ai/util/bom"
 import { Environment } from "../../environment"
 import { FileMutation } from "../../file-mutation"
 import { Formatter } from "../../formatter"
 import { LocationMutation } from "../../location-mutation"
 import { Permission } from "../../permission"
-import { fileDiff } from "./file-diff"
 
 export const name = "write"
 
@@ -69,35 +67,24 @@ export const Plugin = {
                 id: context.id,
               }
               const target = yield* mutation.resolve({ path: input.path, kind: "file" })
+              const external = target.externalDirectory
+              if (external)
+                yield* permission.assert({
+                  ...LocationMutation.externalDirectoryPermission(external),
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source,
+                })
+              yield* permission.assert({
+                action: "edit",
+                resources: [target.resource],
+                save: ["*"],
+                sessionID: context.sessionID,
+                agent: context.agent,
+                source,
+              })
               return yield* fileMutation.withLock([target.absolute])(
                 Effect.gen(function* () {
-                  const external = target.externalDirectory
-                  if (external)
-                    yield* permission.assert({
-                      ...LocationMutation.externalDirectoryPermission(external),
-                      sessionID: context.sessionID,
-                      agent: context.agent,
-                      source,
-                    })
-                  const current = yield* FileMutation.readText(environment.files, target.absolute).pipe(
-                    Effect.catchTag("Environment.NotFound", () => Effect.succeed(undefined)),
-                  )
-                  const next = Bom.split(input.content)
-                  const preview = fileDiff(
-                    target.resource,
-                    current?.text ?? "",
-                    next.text,
-                    current ? "modified" : "added",
-                  )
-                  yield* permission.assert({
-                    action: "edit",
-                    resources: [target.resource],
-                    save: ["*"],
-                    metadata: { files: [preview] },
-                    sessionID: context.sessionID,
-                    agent: context.agent,
-                    source,
-                  })
                   const result = yield* fileMutation.writeTextPreservingBom({ target, content: input.content })
                   const bom = (yield* FileMutation.readText(environment.files, target.absolute)).bom
                   if (yield* formatter.file(target.absolute)) {

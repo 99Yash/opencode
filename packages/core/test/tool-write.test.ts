@@ -45,6 +45,7 @@ const editToolNode = makeLocationNode({
 const sessionID = Session.ID.make("ses_write_tool_test")
 const assertions: Permission.AssertInput[] = []
 const writes: string[] = []
+let reads = 0
 let formatFile = (_target: string): Effect.Effect<boolean> => Effect.succeed(false)
 let afterPermission = (_input: Permission.AssertInput): Effect.Effect<void> => Effect.void
 let denyAction: string | undefined
@@ -82,6 +83,7 @@ const formatter = Layer.mock(Formatter.Service, {
 const reset = () => {
   assertions.length = 0
   writes.length = 0
+  reads = 0
   formatFile = () => Effect.succeed(false)
   afterPermission = () => Effect.void
   denyAction = undefined
@@ -112,6 +114,7 @@ const withTool = <A, E, R>(
           [
             Environment.node,
             transformEnvironmentFiles(activeLocation, (files) => ({
+              read: (target, range) => Effect.sync(() => reads++).pipe(Effect.andThen(files.read(target, range))),
               write: (target, content) =>
                 Effect.sync(() => writes.push(target)).pipe(Effect.andThen(files.write(target, content))),
             })),
@@ -163,17 +166,7 @@ describe("WriteTool", () => {
               "created",
             )
             expect(assertions).toMatchObject([{ sessionID, action: "edit", resources: ["src/new.txt"], save: ["*"] }])
-            expect(assertions[0]?.metadata).toMatchObject({
-              files: [
-                {
-                  file: "src/new.txt",
-                  status: "added",
-                  additions: 1,
-                  deletions: 0,
-                  patch: expect.stringContaining("+created"),
-                },
-              ],
-            })
+            expect(assertions[0]?.metadata).toBeUndefined()
             expect(writes).toEqual([path.join(yield* Effect.promise(() => fs.realpath(tmp.path)), "src", "new.txt")])
           }),
         )
@@ -221,17 +214,7 @@ describe("WriteTool", () => {
               if (settled.status !== "completed") return
               expect(settled.content).toEqual([{ type: "text", text: "Wrote file successfully: existing.txt" }])
               expect(settled.output).toMatchObject({ resource: "existing.txt", existed: true })
-              expect(assertions[0]?.metadata).toMatchObject({
-                files: [
-                  {
-                    file: "existing.txt",
-                    status: "modified",
-                    additions: 1,
-                    deletions: 1,
-                    patch: expect.stringMatching(/-before[\s\S]*\+after/),
-                  },
-                ],
-              })
+              expect(assertions[0]?.metadata).toBeUndefined()
               expect(yield* Effect.promise(() => fs.readFile(path.join(tmp.path, "existing.txt"), "utf8"))).toBe(
                 "after",
               )
@@ -447,7 +430,7 @@ describe("WriteTool", () => {
     ),
   )
 
-  it.live("serializes write and edit transactions across Location service instances", () =>
+  it.live("authorizes an edit while a write holds the same-path execution lock", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -487,13 +470,12 @@ describe("WriteTool", () => {
               ),
             { edit: true },
           ).pipe(Effect.forkChild)
-          yield* Effect.yieldNow
-          expect(yield* Deferred.isDone(editApproved)).toBe(false)
+          yield* Deferred.await(editApproved)
+          expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("before")
 
           yield* Deferred.succeed(releaseFormatting, undefined)
           expect((yield* Fiber.join(write)).status).toBe("completed")
           expect((yield* Fiber.join(edit)).status).toBe("completed")
-          expect(yield* Deferred.isDone(editApproved)).toBe(true)
           expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("after")
         })
       },
@@ -501,4 +483,39 @@ describe("WriteTool", () => {
     ),
   )
 
+  it.live("does not hold the execution lock while waiting for permission", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        const target = path.join(tmp.path, "shared.txt")
+        return Effect.gen(function* () {
+          yield* Effect.promise(() => fs.writeFile(target, "initial"))
+          const firstAsked = yield* Deferred.make<void>()
+          const releaseFirst = yield* Deferred.make<void>()
+          afterPermission = (input) =>
+            input.source?.id === "call-waiting-write" && input.action === "edit"
+              ? Deferred.succeed(firstAsked, undefined).pipe(Effect.andThen(Deferred.await(releaseFirst)))
+              : Effect.void
+
+          const first = yield* withTool(tmp.path, (registry) =>
+            executeTool(registry, call({ path: "shared.txt", content: "first" }, "call-waiting-write")),
+          ).pipe(Effect.forkChild)
+          yield* Deferred.await(firstAsked)
+          expect(reads).toBe(0)
+
+          const second = yield* withTool(tmp.path, (registry) =>
+            executeTool(registry, call({ path: "shared.txt", content: "second" }, "call-approved-write")),
+          )
+          expect(second.status).toBe("completed")
+          expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("second")
+
+          yield* Deferred.succeed(releaseFirst, undefined)
+          expect((yield* Fiber.join(first)).status).toBe("completed")
+          expect(yield* Effect.promise(() => fs.readFile(target, "utf8"))).toBe("first")
+        })
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
 })
