@@ -358,6 +358,7 @@ describe("SessionProjector", () => {
           directory: "/project",
           title: "test",
           version: "test",
+          agent: build,
           model: previousModel,
         })
         .run()
@@ -366,7 +367,11 @@ describe("SessionProjector", () => {
 
       yield* bus.publish(SessionEvent.AgentSelected, {
         sessionID,
-        agent: build,
+        agent: Agent.ID.make("plan"),
+      })
+      yield* bus.publish(SessionEvent.AgentSelected, {
+        sessionID,
+        agent: Agent.ID.make("general"),
       })
       yield* bus.publish(SessionEvent.ModelSelected, {
         sessionID,
@@ -450,6 +455,7 @@ describe("SessionProjector", () => {
 
       expect(messages.map((message) => message.type)).toEqual([
         "agent-switched",
+        "agent-switched",
         "model-switched",
         "synthetic",
         "shell",
@@ -459,6 +465,10 @@ describe("SessionProjector", () => {
         text: "synthetic context",
         metadata: { source: "projector-test" },
       })
+      expect(messages.filter((message) => message.type === "agent-switched")).toMatchObject([
+        { agent: "plan", previous: "build" },
+        { agent: "general", previous: "plan" },
+      ])
       expect(messages.find((message) => message.type === "model-switched")).toMatchObject({ previous: previousModel })
       expect(messages.find((message) => message.type === "shell")).toMatchObject({
         command: "pwd",
@@ -474,7 +484,7 @@ describe("SessionProjector", () => {
       expect(
         yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       ).toMatchObject({
-        agent: "build",
+        agent: "general",
         model,
         time_updated: DateTime.toEpochMillis(created),
       })
