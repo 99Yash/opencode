@@ -1,6 +1,6 @@
 import { createMemo, createSignal } from "solid-js"
 import { useConfig } from "../config"
-import { useTheme } from "../context/theme"
+import { useThemes } from "../context/theme"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 
@@ -44,15 +44,6 @@ export const settings: Setting[] = [
     keywords: ["motion", "effects"],
   },
   {
-    title: "Onboarding",
-    category: "Appearance",
-    path: ["hints", "onboarding"],
-    default: true,
-    values: [false, true],
-    labels: ["off", "on"],
-    keywords: ["hints", "getting started", "guidance"],
-  },
-  {
     title: "Sidebar",
     category: "Session",
     path: ["session", "sidebar"],
@@ -92,6 +83,30 @@ export const settings: Setting[] = [
     default: "auto",
     values: ["none", "auto"],
     keywords: ["transcript", "messages"],
+  },
+  {
+    title: "Enabled",
+    category: "Tabs",
+    path: ["tabs", "enabled"],
+    default: true,
+    values: [false, true],
+    labels: ["off", "on"],
+  },
+  {
+    title: "Scope",
+    category: "Tabs",
+    path: ["tabs", "scope"],
+    default: "cwd",
+    values: ["cwd", "global"],
+    labels: ["current directory", "global"],
+  },
+  {
+    title: "Layout",
+    category: "Tabs",
+    path: ["tabs", "layout"],
+    default: "horizontal",
+    values: ["horizontal", "vertical"],
+    keywords: ["sidebar", "orientation", "left"],
   },
   {
     title: "Layout",
@@ -267,7 +282,7 @@ export function settingID(setting: Setting) {
 export function DialogConfig(props: { current?: string }) {
   const config = useConfig()
   const toast = useToast()
-  const themeState = useTheme()
+  const themes = useThemes()
   const current = Math.max(
     0,
     settings.findIndex((setting) => settingID(setting) === props.current),
@@ -280,12 +295,12 @@ export function DialogConfig(props: { current?: string }) {
       if (!result || typeof result !== "object") return undefined
       return (result as Record<string, unknown>)[key]
     }, config.data)
-    if (setting.path.join(".") === "theme.name") return current ?? themeState.selected
+    if (setting.path.join(".") === "theme.name") return current ?? themes.selected
     return current ?? setting.default
   }
   const values = (setting: Setting) =>
     setting.path.join(".") === "theme.name"
-      ? Object.keys(themeState.all()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+      ? Object.keys(themes.all()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
       : setting.values
   const display = (setting: Setting) => {
     const current = value(setting)

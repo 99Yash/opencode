@@ -2,13 +2,8 @@
 import { testRender } from "@opentui/solid"
 import { expect, test } from "bun:test"
 import { Schema } from "effect"
-import {
-  resolve,
-  ConfigProvider,
-  Info,
-  useConfig,
-  type Interface,
-} from "../src/config"
+import { resolve, ConfigProvider, Info, useConfig, type Interface } from "../src/config"
+import { settings } from "../src/component/dialog-config"
 
 test("validates mini replay settings", () => {
   const decode = Schema.decodeUnknownSync(Info)
@@ -18,6 +13,16 @@ test("validates mini replay settings", () => {
   })
   expect(() => decode({ mini: { replay_limit: 0 } })).toThrow()
   expect(() => decode({ mini: { replay_limit: 1.5 } })).toThrow()
+})
+
+test("validates the session tabs setting", () => {
+  const decode = Schema.decodeUnknownSync(Info)
+
+  expect(decode({ tabs: { enabled: true, layout: "vertical" } })).toEqual({
+    tabs: { enabled: true, layout: "vertical" },
+  })
+  expect(() => decode({ tabs: { layout: true } })).toThrow()
+  expect(() => decode({ tabs: { enabled: "on" } })).toThrow()
 })
 
 test("resolves nested config and keybind defaults", () => {
@@ -37,6 +42,13 @@ test("resolves nested config and keybind defaults", () => {
   expect(config.scroll).toEqual({ speed: 2, acceleration: true })
   expect(config.diffs).toEqual({ view: "split" })
   expect(config.debug).toEqual({ devtools: true })
+  expect(config.tabs).toEqual({ enabled: true, scope: "cwd", layout: "horizontal" })
+})
+
+test("shows resolved tab defaults in settings", () => {
+  expect(settings.find((setting) => setting.path.join(".") === "tabs.enabled")?.default).toBe(true)
+  expect(settings.find((setting) => setting.path.join(".") === "tabs.scope")?.default).toBe("cwd")
+  expect(settings.find((setting) => setting.path.join(".") === "tabs.layout")?.default).toBe("horizontal")
 })
 
 test("provides config and its host interface", async () => {

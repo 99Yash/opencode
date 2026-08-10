@@ -8,11 +8,10 @@ import {
   type KeyEvent,
 } from "@opentui/core"
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
-import { registerOpencodeSpinner } from "../register-spinner"
 import path from "path"
 import { fileURLToPath } from "url"
 import { useLocal } from "../../context/local"
-import { useTheme } from "../../context/theme"
+import { useTheme, useThemes } from "../../context/theme"
 import { tint } from "../../theme/color"
 import { EmptyBorder, SplitBorder } from "../../ui/border"
 import { useTuiPaths, useTuiTerminalEnvironment } from "../../context/runtime"
@@ -30,6 +29,7 @@ import { parseSlashHead } from "../../prompt/parse"
 import { stringWidth } from "../../util/string-width"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { emptyPrompt, usePromptHistory, type PromptInfo, type PromptPartRef } from "../../prompt/history"
+import { Skill } from "@opencode-ai/schema/skill"
 import { computePromptTraits } from "../../prompt/traits"
 import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
@@ -52,16 +52,16 @@ import { readLocalAttachment } from "./local-attachment"
 import { useData } from "../../context/data"
 import { useLocation } from "../../context/location"
 import { Keymap, type KeymapCommand } from "../../context/keymap"
-import { contextUsage, formatContextUsage } from "../../util/session"
 import { abbreviateHome } from "../../runtime"
-
-registerOpencodeSpinner()
+import { PluginSlot } from "../../plugin/render"
+import type { SessionPending } from "@opencode-ai/schema/session-pending"
 
 export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
   onSubmit?: () => void
+  onEmptySubmit?: () => boolean | Promise<boolean>
   ref?: (ref: PromptRef | undefined) => void
   hint?: JSX.Element
   right?: JSX.Element
@@ -92,11 +92,6 @@ export type PromptRef = {
   focus(): void
   submit(): void
 }
-
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 
@@ -170,26 +165,14 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => data.session.status(props.sessionID ?? ""))
-  const activeSubagents = createMemo(() => {
-    if (!props.sessionID) return 0
-    return data.session
-      .family(props.sessionID)
-      .filter((id) => id !== props.sessionID && data.session.status(id) === "running").length
-  })
-  const runningShells = createMemo(
-    () =>
-      data.shell.list(currentLocation.current).filter((shell) => shell.metadata.sessionID === props.sessionID).length,
-  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = Keymap.use()
-  const agentShortcut = Keymap.useShortcut("agent.cycle")
-  const paletteShortcut = Keymap.useShortcut("command.palette.show")
-  const liveWorkShortcut = Keymap.useShortcut("session.child.first")
   const renderer = useRenderer()
   const exit = useExit()
   const dimensions = useTerminalDimensions()
-  const { themeV2, syntax } = useTheme()
+  const theme = useTheme()
+  const { currentSyntax: syntax } = useThemes()
   const animationsEnabled = createMemo(() => config.animations ?? true)
   const list = createMemo(() => props.placeholders?.normal ?? [])
   const shell = createMemo(() => props.placeholders?.shell ?? [])
@@ -233,17 +216,31 @@ export function Prompt(props: PromptProps) {
   })
   Keymap.createLayer(() => ({
     mode: "global",
-    enabled: props.sessionID !== undefined,
     commands: [
       {
         id: "session.cd",
         title: "Change working directory",
         slash: { name: "cd", arguments: true },
         run: async (input) => {
-          const sessionID = props.sessionID
-          if (!sessionID) return
           if (!input?.trim()) {
             toast.show({ message: "Directory is required", variant: "error" })
+            return
+          }
+          const sessionID = props.sessionID
+          if (!sessionID) {
+            const value = input.trim()
+            const expanded =
+              value === "~" ? paths.home : value.startsWith("~/") ? path.join(paths.home, value.slice(2)) : value
+            const directory = path.resolve(
+              currentLocation.current?.directory ?? data.location.default().directory,
+              expanded,
+            )
+            const location = await client.api.location.get({ location: { directory } }).catch((error) => {
+              toast.show({ title: "Failed to change directory", message: errorMessage(error), variant: "error" })
+              return undefined
+            })
+            if (!location) return
+            currentLocation.set(location)
             return
           }
           await client.api.session
@@ -263,7 +260,7 @@ export function Prompt(props: PromptProps) {
   function promptModelWarning() {
     toast.show({
       variant: "warning",
-      message: "Connect a provider to send prompts",
+      message: "Connect an integration to send prompts",
       duration: 3000,
     })
     if (!connected()) {
@@ -277,6 +274,7 @@ export function Prompt(props: PromptProps) {
   }
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
+  const skillStyleId = syntax().getStyleId("extmark.skill")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
   let promptPartTypeId = 0
   const event = useEvent()
@@ -296,44 +294,8 @@ export function Prompt(props: PromptProps) {
 
   createEffect(() => {
     if (!input || input.isDestroyed) return
-    if (props.disabled) input.cursorColor = themeV2.background.surface.offset
-    if (!props.disabled) input.cursorColor = themeV2.text.default
-  })
-
-  const usage = createMemo(() => {
-    if (!props.sessionID) return
-    const session = data.session.get(props.sessionID)
-    if (!session) return
-    const cost = data.session.cost(props.sessionID)
-    const formattedCost = cost > 0 ? money.format(cost) : undefined
-    const context = contextUsage(
-      data.session.message.list(props.sessionID),
-      data.location.model.list(session.location),
-      session.revert?.messageID,
-    )
-    return {
-      context: context ? formatContextUsage(context.tokens, context.percent) : undefined,
-      cost: formattedCost,
-    }
-  })
-
-  const subagentStatusLabel = createMemo(() => {
-    const agents = activeSubagents()
-    if (!agents) return undefined
-    return `${agents} subagent${agents === 1 ? "" : "s"}`
-  })
-  const shellStatusLabel = createMemo(() => {
-    const shells = runningShells()
-    if (!shells) return undefined
-    return `${shells} shell${shells === 1 ? "" : "s"}`
-  })
-  const liveWorkStatusVisible = createMemo(() => Boolean(subagentStatusLabel() || shellStatusLabel()))
-
-  // Far-right footer cluster: live work counts lead, then context/cost usage.
-  // When empty, the cluster falls back to the hotkey hints.
-  const statusItems = createMemo(() => {
-    const stats = usage()
-    return [stats?.context, stats?.cost].filter(Boolean)
+    if (props.disabled) input.cursorColor = theme.background.surface.offset
+    if (!props.disabled) input.cursorColor = theme.text.default
   })
 
   const [store, setStore] = createStore<{
@@ -369,10 +331,6 @@ export function Prompt(props: PromptProps) {
     if (!session) return
     const agent = session.agent && local.agent.list().find((agent) => agent.id === session.agent)
     if (agent && !args.agent) local.agent.set(agent.id)
-    if (session.model) {
-      local.model.set({ providerID: session.model.providerID, modelID: session.model.id })
-      local.model.variant.set(session.model.variant)
-    }
     syncedSessionID = sessionID
   })
 
@@ -400,6 +358,20 @@ export function Prompt(props: PromptProps) {
           const handled = await submit()
           if (!handled) return
 
+          dialog.clear()
+        },
+      },
+      {
+        title: "Queue prompt",
+        name: "prompt.queue",
+        category: "Prompt",
+        palette: undefined,
+        run: async (_input: string | undefined, event?: KeyEvent) => {
+          event?.preventDefault()
+          event?.stopPropagation()
+          if (!input.focused) return
+          const handled = await submit("queue")
+          if (!handled) return
           dialog.clear()
         },
       },
@@ -523,12 +495,29 @@ export function Prompt(props: PromptProps) {
             <DialogSkill
               location={currentLocation.current}
               onSelect={(skill) => {
-                input.setText(`/${skill} `)
-                setStore("prompt", {
-                  ...emptyPrompt(),
-                  text: `/${skill} `,
+                if (store.prompt.skills?.some((item) => item.id === skill)) return
+                const text = `/${skill}`
+                const start = input.cursorOffset
+                input.insertText(text + " ")
+                const extmarkId = input.extmarks.create({
+                  start,
+                  end: start + promptOffsetWidth(text),
+                  virtual: true,
+                  styleId: skillStyleId,
+                  typeId: promptPartTypeId,
                 })
-                input.gotoBufferEnd()
+                setStore(
+                  produce((draft) => {
+                    draft.prompt.text = input.plainText
+                    const skills = (draft.prompt.skills ??= [])
+                    const index = skills.length
+                    skills.push({
+                      id: Skill.ID.make(skill),
+                      mention: { start, end: start + promptOffsetWidth(text), text },
+                    })
+                    draft.extmarkToPart.set(extmarkId, { type: "skill", index })
+                  }),
+                )
               }}
             />
           ))
@@ -559,6 +548,11 @@ export function Prompt(props: PromptProps) {
   Keymap.createLayer(() => ({
     mode: "global",
     commands: promptCommands(),
+  }))
+
+  Keymap.createLayer(() => ({
+    priority: 1,
+    bindings: ["prompt.queue"],
   }))
 
   Keymap.createLayer(() => ({
@@ -664,6 +658,11 @@ export function Prompt(props: PromptProps) {
         ref: { type: "agent" as const, index },
         styleId: agentStyleId,
       })),
+      ...(prompt.skills ?? []).map((part, index) => ({
+        mention: part.mention,
+        ref: { type: "skill" as const, index },
+        styleId: skillStyleId,
+      })),
       ...prompt.pasted.map((part, index) => ({
         mention: part.source,
         ref: { type: "pasted" as const, index },
@@ -696,6 +695,7 @@ export function Prompt(props: PromptProps) {
         const newMap = new Map<number, PromptPartRef>()
         const files: NonNullable<PromptInfo["files"]> = []
         const agents: NonNullable<PromptInfo["agents"]> = []
+        const skills: NonNullable<PromptInfo["skills"]> = []
         const pasted: PromptInfo["pasted"] = []
 
         for (const extmark of allExtmarks) {
@@ -721,6 +721,16 @@ export function Prompt(props: PromptProps) {
             newMap.set(extmark.id, { type: "agent", index })
             continue
           }
+          if (ref.type === "skill") {
+            const part = draft.prompt.skills?.[ref.index]
+            if (!part?.mention) continue
+            part.mention.start = extmark.start
+            part.mention.end = extmark.end
+            const index = skills.length
+            skills.push(part)
+            newMap.set(extmark.id, { type: "skill", index })
+            continue
+          }
           const part = draft.prompt.pasted[ref.index]
           if (!part) continue
           part.source.start = extmark.start
@@ -733,6 +743,7 @@ export function Prompt(props: PromptProps) {
         draft.extmarkToPart = newMap
         draft.prompt.files = files
         draft.prompt.agents = agents
+        draft.prompt.skills = skills
         draft.prompt.pasted = pasted
       }),
     )
@@ -946,7 +957,7 @@ export function Prompt(props: PromptProps) {
   })
 
   let submitting = false
-  async function submit() {
+  async function submit(delivery: SessionPending.Delivery = "steer") {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
     // input's native onSubmit racing another dispatch). Without this guard,
     // a second call slips past the empty-input check before the first call
@@ -956,13 +967,13 @@ export function Prompt(props: PromptProps) {
     if (submitting) return false
     submitting = true
     try {
-      return await submitInner()
+      return await submitInner(delivery)
     } finally {
       submitting = false
     }
   }
 
-  async function submitInner() {
+  async function submitInner(delivery: SessionPending.Delivery) {
     // IME: double-defer may fire before onContentChange flushes the last
     // composed character (e.g. Korean hangul) to the store, so read
     // plainText directly and sync before any downstream reads.
@@ -973,27 +984,77 @@ export function Prompt(props: PromptProps) {
     if (props.disabled) return false
     if (move.creating()) return false
     if (auto()?.visible) return false
-    if (!store.prompt.text) return false
     const trimmed = store.prompt.text.trim()
+    if (!trimmed) return delivery === "steer" ? (await props.onEmptySubmit?.()) === true : false
+    if (
+      delivery === "queue" &&
+      (store.mode === "shell" || trimmed === "exit" || trimmed === "quit" || trimmed === ":q")
+    ) {
+      toast.show({ message: "This prompt cannot be queued", variant: "warning" })
+      return false
+    }
     if (trimmed === "exit" || trimmed === "quit" || trimmed === ":q") {
       void exit()
       return true
     }
     const slash = argumentSlash(store.prompt.text, keymapCommands())
     if (slash) {
+      if (delivery === "queue") {
+        toast.show({ message: "This prompt cannot be queued", variant: "warning" })
+        return false
+      }
       clearPrompt()
       await slash.command.run(slash.input)
       return true
     }
+    const inputText = expandTrackedPastedText(
+      store.prompt.text,
+      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
+        const ref = store.extmarkToPart.get(extmark.id)
+        if (ref?.type !== "pasted") return []
+        const part = store.prompt.pasted[ref.index]
+        if (!part) return []
+        return [{ start: extmark.start, end: extmark.end, text: part.text }]
+      }),
+    )
+    const slashHead = parseSlashHead(inputText, /\s/)
+    const isSkill =
+      !(store.prompt.skills?.length ?? 0) &&
+      slashHead !== undefined &&
+      (data.location.skill.list(currentLocation.ref) ?? []).some(
+        (skill) => skill.slash === true && skill.id === slashHead.name,
+      )
+    const isCommand =
+      slashHead !== undefined &&
+      (data.location.command.list(currentLocation.ref) ?? []).some((command) => command.name === slashHead.name)
+    if (delivery === "queue" && isSkill) {
+      toast.show({ message: "Skills cannot be queued", variant: "warning" })
+      return false
+    }
+    const editorSelection = editorContext()
+    const pendingEditorSelection = editorSelection && editor.labelState() === "pending" ? editorSelection : undefined
+    if (delivery === "queue" && pendingEditorSelection) {
+      toast.show({ message: "Editor context cannot be queued", variant: "warning" })
+      return false
+    }
     const agent = local.agent.current()
     if (!agent) return false
-    const selectedModel = local.model.current()
-    if (!selectedModel) {
+    const selection = local.model.selection()
+    if (!selection) {
       void promptModelWarning()
       return false
     }
+    const usesModel = !props.sessionID || (store.mode !== "shell" && !isSkill)
+    if (usesModel && !local.model.available(selection)) {
+      toast.show({
+        title: "Model unavailable",
+        message: `${selection.providerID}/${selection.modelID} is not available in this session's location`,
+        variant: "warning",
+      })
+      return false
+    }
 
-    const variant = local.model.variant.current()
+    const variant = selection.variant
     let sessionID = props.sessionID
     let session = sessionID ? data.session.get(sessionID) : undefined
     let finishMoveProgress = false
@@ -1001,15 +1062,18 @@ export function Prompt(props: PromptProps) {
       const directory = await move.getDirectory()
       if (move.pending() && !directory) return false
       finishMoveProgress = Boolean(move.progress())
-      const location = data.location.default()
+      // The location context is where the next session is created: seeded by the home
+      // route (launch cwd, inherited session location, or picked project) and updated
+      // by /cd before a session exists.
+      const location = currentLocation.ref ?? data.location.default()
 
       const created = await client.api.session
         .create({
           location: directory ? { directory } : location,
           agent: agent.id,
           model: {
-            providerID: selectedModel.providerID,
-            id: selectedModel.modelID,
+            providerID: selection.providerID,
+            id: selection.modelID,
             variant,
           },
         })
@@ -1029,21 +1093,8 @@ export function Prompt(props: PromptProps) {
       session = created
     }
 
-    const inputText = expandTrackedPastedText(
-      store.prompt.text,
-      input.extmarks.getAllForTypeId(promptPartTypeId).flatMap((extmark) => {
-        const ref = store.extmarkToPart.get(extmark.id)
-        if (ref?.type !== "pasted") return []
-        const part = store.prompt.pasted[ref.index]
-        if (!part) return []
-        return [{ start: extmark.start, end: extmark.end, text: part.text }]
-      }),
-    )
-
     // Capture mode before it gets reset
     const currentMode = store.mode
-    const editorSelection = editorContext()
-    const pendingEditorSelection = editorSelection && editor.labelState() === "pending" ? editorSelection : undefined
 
     if (store.mode === "shell") {
       move.startSubmit()
@@ -1052,43 +1103,32 @@ export function Prompt(props: PromptProps) {
         command: inputText,
       })
       setStore("mode", "normal")
-    } else if (
-      inputText.startsWith("/") &&
-      (data.location.command.list(currentLocation.current) ?? []).some(
-        (command) => command.name === inputText.split("\n")[0].split(" ")[0].slice(1),
-      )
-    ) {
+    } else if (slashHead && isCommand) {
       move.startSubmit()
-      // Parse command from first line, preserve multi-line content in arguments
-      const firstLineEnd = inputText.indexOf("\n")
-      const firstLine = firstLineEnd === -1 ? inputText : inputText.slice(0, firstLineEnd)
-      const [command, ...firstLineArgs] = firstLine.split(" ")
-      const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
-      const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
+      const model = { providerID: selection.providerID, id: selection.modelID, variant }
+      const cancelCommit = local.model.trackSessionCommit(sessionID, model)
 
       void client.api.session
         .command({
           sessionID,
-          command: command.slice(1),
-          arguments: args,
+          command: slashHead.name,
+          arguments: slashHead.arguments,
           agent: agent.id,
-          model: { providerID: selectedModel.providerID, id: selectedModel.modelID, variant },
+          model,
           files: store.prompt.files,
           agents: store.prompt.agents,
+          skills: store.prompt.skills?.length ? store.prompt.skills : undefined,
+          delivery,
         })
         .catch((error) => {
+          cancelCommit()
           toast.show({ title: "Failed to run command", message: errorMessage(error), variant: "error" })
         })
-    } else if (
-      inputText.startsWith("/") &&
-      (data.location.skill.list(currentLocation.current) ?? []).some(
-        (skill) => skill.slash === true && skill.id === inputText.split("\n")[0].split(" ")[0].slice(1),
-      )
-    ) {
+    } else if (isSkill) {
       move.startSubmit()
       void client.api.session.skill({
         sessionID,
-        skill: inputText.split("\n")[0].split(" ")[0].slice(1),
+        skill: slashHead.name,
       })
     } else {
       move.startSubmit()
@@ -1100,13 +1140,15 @@ export function Prompt(props: PromptProps) {
         await client.api.session.switchAgent({ sessionID, agent: agent.id })
       }
       if (
-        session?.model?.providerID !== selectedModel.providerID ||
-        session.model.id !== selectedModel.modelID ||
+        session?.model?.providerID !== selection.providerID ||
+        session.model.id !== selection.modelID ||
         (session.model.variant ?? "default") !== (variant ?? "default")
       ) {
-        await client.api.session.switchModel({
-          sessionID,
-          model: { providerID: selectedModel.providerID, id: selectedModel.modelID, variant },
+        const model = { providerID: selection.providerID, id: selection.modelID, variant }
+        const cancelCommit = local.model.trackSessionCommit(sessionID, model)
+        await client.api.session.switchModel({ sessionID, model }).catch((error) => {
+          cancelCommit()
+          throw error
         })
       }
       if (session?.revert) {
@@ -1142,6 +1184,8 @@ export function Prompt(props: PromptProps) {
           text: inputText,
           files: store.prompt.files,
           agents: store.prompt.agents,
+          skills: store.prompt.skills?.length ? store.prompt.skills : undefined,
+          delivery,
         })
         .then(
           () => undefined,
@@ -1204,6 +1248,19 @@ export function Prompt(props: PromptProps) {
     )
   }
 
+  function expandPastedText(extmarkId: number) {
+    const extmark = input.extmarks.get(extmarkId)
+    const ref = store.extmarkToPart.get(extmarkId)
+    if (!extmark || ref?.type !== "pasted") return false
+    const part = store.prompt.pasted[ref.index]
+    if (!part) return false
+
+    input.extmarks.delete(extmarkId)
+    input.setSelection(extmark.start, extmark.end)
+    input.insertText(part.text)
+    return true
+  }
+
   async function pasteInputText(text: string) {
     const normalizedText = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
     const pastedContent = normalizedText.trim()
@@ -1227,6 +1284,15 @@ export function Prompt(props: PromptProps) {
 
     const lineCount = (pastedContent.match(/\n/g)?.length ?? 0) + 1
     if ((lineCount >= 3 || pastedContent.length > 150) && config.prompt?.paste !== "full") {
+      const extmark = input.extmarks.getAllForTypeId(promptPartTypeId).find((extmark) => {
+        const ref = store.extmarkToPart.get(extmark.id)
+        return (
+          (extmark.end === input.cursorOffset || extmark.end + 1 === input.cursorOffset) &&
+          ref?.type === "pasted" &&
+          store.prompt.pasted[ref.index]?.text === pastedContent
+        )
+      })
+      if (extmark && expandPastedText(extmark.id)) return
       pasteText(pastedContent, `[Pasted ~${lineCount} lines]`)
       return
     }
@@ -1299,10 +1365,10 @@ export function Prompt(props: PromptProps) {
   }
 
   const highlight = createMemo(() => {
-    if (leader()) return themeV2.border.default
-    if (store.mode === "shell") return themeV2.text.action.primary.selected
+    if (leader()) return theme.border.default
+    if (store.mode === "shell") return theme.text.action.primary.selected
     const agent = local.agent.current()
-    if (!agent) return themeV2.border.default
+    if (!agent) return theme.border.default
     return local.agent.color(agent.id)
   })
   const agentLabel = createMemo(() => {
@@ -1324,27 +1390,41 @@ export function Prompt(props: PromptProps) {
     () => !!local.agent.current() && store.mode === "normal" && showVariant(),
     animationsEnabled,
   )
-  const borderHighlight = createMemo(() => tint(themeV2.border.default, highlight(), agentMetaAlpha()))
+  const borderHighlight = createMemo(() => tint(theme.border.default, highlight(), agentMetaAlpha()))
 
   const placeholderText = createMemo(() => {
     if (props.showPlaceholder === false) return undefined
-    if (store.mode === "shell") {
-      if (!shell().length) return undefined
-      const example = shell()[store.placeholder % shell().length]
-      return `Run a command... "${example}"`
-    }
-    if (!list().length) return undefined
-    return `Ask anything... "${list()[store.placeholder % list().length]}"`
+    const value = (() => {
+      if (store.mode === "shell") {
+        if (!shell().length) return undefined
+        return `Run a command... "${shell()[store.placeholder % shell().length]}"`
+      }
+      if (!list().length) return undefined
+      return `Ask anything... "${list()[store.placeholder % list().length]}"`
+    })()
+    if (!value) return undefined
+    const width = dimensions().width < 44 ? dimensions().width - 5 : Math.min(75, dimensions().width - 4) - 5
+    return Locale.takeWidth(value, Math.max(1, width)).trimEnd()
   })
   const locationLabel = createMemo(() => {
-    if (!props.sessionID || status() !== "idle") return
-    const directory = data.session.get(props.sessionID)?.location.directory
-    return directory ? abbreviateHome(directory, paths.home) : undefined
+    if (!props.sessionID) {
+      // No session yet: show where the next session will be created.
+      const location = currentLocation.ref ?? data.location.default()
+      const directory = abbreviateHome(location.directory, paths.home)
+      const branch = data.location.vcs.info(location)?.branch.current
+      return branch ? `${directory}:${branch}` : directory
+    }
+    if (status() !== "idle") return
+    const location = data.session.get(props.sessionID)?.location
+    if (!location) return
+    const directory = abbreviateHome(location.directory, paths.home)
+    const branch = data.location.vcs.info(location)?.branch.current
+    return branch ? `${directory}:${branch}` : directory
   })
 
   const spinnerDef = createMemo(() => {
     const agent = status() === "running" ? local.agent.current() : local.agent.current()
-    const color = agent ? local.agent.color(agent.id) : themeV2.border.default
+    const color = agent ? local.agent.color(agent.id) : theme.border.default
     return {
       frames: createFrames({
         color,
@@ -1364,7 +1444,7 @@ export function Prompt(props: PromptProps) {
   })
   const maxHeight = createMemo(() => Math.max(6, Math.floor(dimensions().height / 3)))
 
-  const promptBg = createMemo(() => themeV2.raise(themeV2.background.surface.offset))
+  const promptBg = createMemo(() => theme.raise(theme.background.surface.offset))
 
   return (
     <>
@@ -1379,8 +1459,8 @@ export function Prompt(props: PromptProps) {
           }}
         >
           <box
-            paddingLeft={2}
-            paddingRight={2}
+            paddingLeft={dimensions().width < 44 ? 1 : 2}
+            paddingRight={dimensions().width < 44 ? 1 : 2}
             paddingTop={1}
             flexShrink={0}
             backgroundColor={promptBg()}
@@ -1390,9 +1470,9 @@ export function Prompt(props: PromptProps) {
             <textarea
               width="100%"
               placeholder={placeholderText()}
-              placeholderColor={themeV2.text.subdued}
-              textColor={leader() ? themeV2.text.subdued : themeV2.text.default}
-              focusedTextColor={leader() ? themeV2.text.subdued : themeV2.text.default}
+              placeholderColor={theme.text.subdued}
+              textColor={leader() ? theme.text.subdued : theme.text.default}
+              focusedTextColor={leader() ? theme.text.subdued : theme.text.default}
               minHeight={1}
               maxHeight={maxHeight()}
               onContentChange={() => {
@@ -1452,42 +1532,57 @@ export function Prompt(props: PromptProps) {
                 setTimeout(() => {
                   // setTimeout is a workaround and needs to be addressed properly
                   if (!input || input.isDestroyed) return
-                  input.cursorColor = themeV2.text.default
+                  input.cursorColor = theme.text.default
                 }, 0)
               }}
               onMouseDown={(r: MouseEvent) => {
-                if (props.disabled) return
+                if (props.disabled || r.button !== 0) return
                 r.target?.focus()
+                const extmark = input.extmarks
+                  .getAtOffset(input.cursorOffset)
+                  .find((item) => store.extmarkToPart.get(item.id)?.type === "pasted")
+                if (!extmark || !expandPastedText(extmark.id)) return
+                r.preventDefault()
+                r.stopPropagation()
               }}
               focusedBackgroundColor="transparent"
-              cursorColor={props.disabled ? themeV2.background.surface.offset : themeV2.text.default}
+              cursorColor={props.disabled ? theme.background.surface.offset : theme.text.default}
               syntaxStyle={syntax()}
             />
             <box flexDirection="row" flexShrink={0} paddingTop={1} gap={1} justifyContent="space-between">
-              <box flexDirection="row" gap={1}>
+              <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
                 <Show when={agentLabel()} fallback={<box height={1} />}>
                   {(label) => (
                     <>
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>{label()}</text>
-                      <Show when={store.mode === "normal" && local.permission.mode === "auto"}>
-                        <text fg={fadeColor(themeV2.text.subdued, agentMetaAlpha())}>auto</text>
+                      <Show
+                        when={store.mode === "normal" && local.permission.mode === "auto" && dimensions().width >= 44}
+                      >
+                        <text fg={fadeColor(theme.text.subdued, agentMetaAlpha())}>auto</text>
                       </Show>
-                      <Show when={store.mode === "normal"}>
-                        <box flexDirection="row" gap={1}>
-                          <text fg={fadeColor(themeV2.text.subdued, modelMetaAlpha())}>·</text>
+                      <Show when={store.mode === "normal" && dimensions().width >= 28}>
+                        <box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+                          <text fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>·</text>
                           <text
-                            flexShrink={0}
-                            fg={fadeColor(leader() ? themeV2.text.subdued : themeV2.text.default, modelMetaAlpha())}
+                            flexShrink={1}
+                            minWidth={0}
+                            wrapMode="none"
+                            truncate
+                            fg={fadeColor(leader() ? theme.text.subdued : theme.text.default, modelMetaAlpha())}
                           >
                             {local.model.parsed().model}
                           </text>
-                          <text fg={fadeColor(themeV2.text.subdued, modelMetaAlpha())}>{currentProviderLabel()}</text>
-                          <Show when={showVariant()}>
-                            <text fg={fadeColor(themeV2.text.subdued, variantMetaAlpha())}>·</text>
+                          <Show when={dimensions().width >= 50}>
+                            <text flexShrink={0} fg={fadeColor(theme.text.subdued, modelMetaAlpha())}>
+                              {currentProviderLabel()}
+                            </text>
+                          </Show>
+                          <Show when={showVariant() && dimensions().width >= 70}>
+                            <text fg={fadeColor(theme.text.subdued, variantMetaAlpha())}>·</text>
                             <text>
                               <span
                                 style={{
-                                  fg: fadeColor(themeV2.text.feedback.warning.default, variantMetaAlpha()),
+                                  fg: fadeColor(theme.text.feedback.warning.default, variantMetaAlpha()),
                                   bold: true,
                                 }}
                               >
@@ -1541,12 +1636,12 @@ export function Prompt(props: PromptProps) {
               <Match when={status() === "running"}>
                 <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-start">
                   <box marginLeft={1}>
-                    <Show when={config.animations ?? true} fallback={<text fg={themeV2.text.subdued}>[⋯]</text>}>
+                    <Show when={config.animations ?? true} fallback={<text fg={theme.text.subdued}>[⋯]</text>}>
                       <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
                     </Show>
                   </box>
                   <text
-                    fg={store.interrupt > 0 ? themeV2.background.action.primary.default : themeV2.text.default}
+                    fg={store.interrupt > 0 ? theme.background.action.primary.default : theme.text.default}
                     wrapMode="none"
                     truncate
                     flexShrink={1}
@@ -1554,7 +1649,7 @@ export function Prompt(props: PromptProps) {
                     esc{" "}
                     <span
                       style={{
-                        fg: store.interrupt > 0 ? themeV2.background.action.primary.default : themeV2.text.subdued,
+                        fg: store.interrupt > 0 ? theme.background.action.primary.default : theme.text.subdued,
                       }}
                     >
                       {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
@@ -1565,16 +1660,16 @@ export function Prompt(props: PromptProps) {
               <Match when={move.progress()}>
                 {(progress) => (
                   <box paddingLeft={3} height={1} minHeight={0} flexShrink={1}>
-                    <Spinner color={themeV2.hue.accent[500]}>
+                    <Spinner color={theme.hue.accent[500]}>
                       {progress()}
-                      <span style={{ fg: themeV2.text.subdued }}>{".".repeat(move.creatingDots())}</span>
+                      <span style={{ fg: theme.text.subdued }}>{".".repeat(move.creatingDots())}</span>
                     </Spinner>
                   </box>
                 )}
               </Match>
               <Match when={move.pendingNew()}>
                 <box paddingLeft={3} height={1} minHeight={0} flexShrink={1}>
-                  <text fg={themeV2.hue.accent[500]} wrapMode="none" truncate>
+                  <text fg={theme.hue.accent[500]} wrapMode="none" truncate>
                     (new working copy)
                   </text>
                 </box>
@@ -1582,7 +1677,7 @@ export function Prompt(props: PromptProps) {
               <Match when={true}>
                 <Show when={!props.hint && locationLabel()} fallback={props.hint ?? <text />}>
                   {(location) => (
-                    <text fg={themeV2.text.subdued} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
+                    <text fg={theme.text.subdued} wrapMode="none" truncate flexGrow={1} flexShrink={1}>
                       {location()}
                     </text>
                   )}
@@ -1596,53 +1691,17 @@ export function Prompt(props: PromptProps) {
                 wrapMode="none"
                 truncate
                 flexShrink={1}
-                fg={editorContextLabelState() === "pending" ? themeV2.hue.accent[500] : themeV2.text.subdued}
+                fg={editorContextLabelState() === "pending" ? theme.hue.accent[500] : theme.text.subdued}
               >
                 {file()}
               </text>
             )}
           </Show>
-          <Switch>
-            <Match when={store.mode === "normal"}>
-              <Switch>
-                <Match when={liveWorkStatusVisible() || statusItems().length > 0}>
-                  <text fg={themeV2.text.subdued} wrapMode="none" truncate flexShrink={1}>
-                    <Show when={liveWorkStatusVisible() && liveWorkShortcut()}>
-                      {(shortcut) => <span style={{ fg: themeV2.text.default }}>{shortcut()} </span>}
-                    </Show>
-                    <Show when={subagentStatusLabel()}>
-                      {(label) => <span style={{ fg: themeV2.text.subdued }}>{label()}</span>}
-                    </Show>
-                    <Show when={subagentStatusLabel() && shellStatusLabel()}>
-                      <span style={{ fg: themeV2.text.subdued }}> · </span>
-                    </Show>
-                    <Show when={shellStatusLabel()}>
-                      {(label) => <span style={{ fg: themeV2.text.subdued }}>{label()}</span>}
-                    </Show>
-                    <Show when={liveWorkStatusVisible() && statusItems().length > 0}>
-                      <span style={{ fg: themeV2.text.subdued }}> · </span>
-                    </Show>
-                    <Show when={statusItems().length > 0}>
-                      <span style={{ fg: themeV2.text.subdued }}>{statusItems().join(" · ")}</span>
-                    </Show>
-                  </text>
-                </Match>
-                <Match when={true}>
-                  <text fg={themeV2.text.default} flexShrink={0}>
-                    {agentShortcut()} <span style={{ fg: themeV2.text.subdued }}>agents</span>
-                  </text>
-                </Match>
-              </Switch>
-              <text fg={themeV2.text.default} flexShrink={0}>
-                {paletteShortcut()} <span style={{ fg: themeV2.text.subdued }}>commands</span>
-              </text>
-            </Match>
-            <Match when={store.mode === "shell"}>
-              <text fg={themeV2.text.default} flexShrink={0}>
-                esc <span style={{ fg: themeV2.text.subdued }}>exit shell mode</span>
-              </text>
-            </Match>
-          </Switch>
+          <PluginSlot
+            name="prompt.footer.end"
+            input={{ sessionID: props.sessionID, mode: store.mode }}
+            mode="replace"
+          />
         </box>
       </box>
       <Autocomplete
@@ -1665,6 +1724,8 @@ export function Prompt(props: PromptProps) {
         value={store.prompt.text}
         fileStyleId={fileStyleId}
         agentStyleId={agentStyleId}
+        skillStyleId={skillStyleId}
+        hasSkill={(id) => store.prompt.skills?.some((skill) => skill.id === id) ?? false}
         promptPartTypeId={() => promptPartTypeId}
       />
     </>

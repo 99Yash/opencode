@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { ImageInput, LLM, LLMClient, Provider } from "@opencode-ai/ai"
+import { AIError, ImageInput, LanguageModel, LLM, LLMClient, Provider } from "@opencode-ai/ai"
 import { Route, Protocol } from "@opencode-ai/ai/route"
 import { Provider as ProviderSubpath } from "@opencode-ai/ai/provider"
 import {
@@ -19,15 +19,19 @@ import {
   OpenResponses,
 } from "@opencode-ai/ai/protocols"
 import * as AnthropicMessages from "@opencode-ai/ai/protocols/anthropic-messages"
+import { TestLLM } from "@opencode-ai/ai/testing"
 
 describe("public exports", () => {
   test("root exposes app-facing runtime APIs", () => {
     expect(LLM.request).toBeFunction()
     expect(LLMClient.Service).toBeFunction()
     expect(LLMClient.layer).toBeDefined()
+    expect(AIError).toBeFunction()
+    expect(LanguageModel.make).toBeFunction()
     expect(ImageInput.bytes).toBeFunction()
     expect(Provider.make).toBeFunction()
     expect(ProviderSubpath.make).toBe(Provider.make)
+    expect(TestLLM.layer).toBeFunction()
   })
 
   test("route barrel exposes route-authoring APIs", () => {
@@ -51,9 +55,7 @@ describe("public exports", () => {
     expect(CloudflareWorkersAI.configure).toBeFunction()
     expect(CloudflareWorkersAI.configure({ accountId: "fixture", apiKey: "fixture" }).model).toBeFunction()
     expect(OpenRouter.model).toBeFunction()
-    expect(OpenRouter.provider.model).toBe(OpenRouter.model)
     expect(XAI.model).toBeFunction()
-    expect(XAI.provider.model).toBe(XAI.model)
     expect(XAI.provider.responses).toBe(XAI.responses)
     expect(XAI.provider.chat).toBe(XAI.chat)
     expect(XAI.configure({ apiKey: "fixture" }).responses("grok-4.3").route.id).toBe("openai-responses")

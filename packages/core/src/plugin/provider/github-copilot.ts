@@ -1,4 +1,5 @@
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/effect/integration"
+import { shouldUseResponsesApi } from "@opencode-ai/ai/providers/github-copilot"
 import { Effect, Option, Schema, Semaphore, Stream } from "effect"
 import { Catalog } from "../../catalog"
 import { Credential } from "../../credential"
@@ -39,114 +40,107 @@ const decodeUser = Schema.decodeUnknownOption(User)
 const JsonBody = Schema.UnknownFromJsonString
 const decodeBody = Schema.decodeUnknownOption(JsonBody)
 
-const oauth = (app: App.Info) => ({
-  integrationID: Integration.ID.make("github-copilot"),
-  method: {
-    id: methodID,
-    type: "oauth",
-    label: "Login with GitHub Copilot",
-    prompts: [
-      {
-        type: "select",
-        key: "deploymentType",
-        message: "Select GitHub deployment type",
-        options: [
-          { label: "GitHub.com", value: "github.com", hint: "Public" },
-          { label: "GitHub Enterprise", value: "enterprise", hint: "Data residency or self-hosted" },
-        ],
-      },
-      {
-        type: "text",
-        key: "enterpriseUrl",
-        message: "Enter your GitHub Enterprise URL or domain",
-        placeholder: "company.ghe.com or https://company.ghe.com",
-        when: { key: "deploymentType", op: "eq", value: "enterprise" },
-      },
-    ],
-  },
-  authorize: (inputs) =>
-    Effect.gen(function* () {
-      const enterprise = inputs.deploymentType === "enterprise"
-      if (enterprise && !inputs.enterpriseUrl) return yield* Effect.fail(new Error("Enterprise URL is required"))
-      const domain = enterprise ? normalizeDomain(inputs.enterpriseUrl ?? "") : "github.com"
-      const urls = oauthURLs(domain)
-      const device = yield* request(urls.device, {
-        method: "POST",
-        headers: headers(app),
-        body: JSON.stringify({ client_id: clientID, scope: "read:user" }),
-      }).pipe(Effect.map(Schema.decodeUnknownSync(Device)))
-      const interval = Math.max(device.interval, 1) * 1000
-
-      const poll = (wait: number): Effect.Effect<Credential.OAuth, unknown> =>
-        request(urls.token, {
+const oauth = (app: App.Info) =>
+  ({
+    integrationID: Integration.ID.make("github-copilot"),
+    method: {
+      id: methodID,
+      type: "oauth",
+      label: "Login with GitHub Copilot",
+      prompts: [
+        {
+          type: "select",
+          key: "deploymentType",
+          message: "Select GitHub deployment type",
+          options: [
+            { label: "GitHub.com", value: "github.com", hint: "Public" },
+            { label: "GitHub Enterprise", value: "enterprise", hint: "Data residency or self-hosted" },
+          ],
+        },
+        {
+          type: "text",
+          key: "enterpriseUrl",
+          message: "Enter your GitHub Enterprise URL or domain",
+          placeholder: "company.ghe.com or https://company.ghe.com",
+          when: { key: "deploymentType", op: "eq", value: "enterprise" },
+        },
+      ],
+    },
+    authorize: (inputs) =>
+      Effect.gen(function* () {
+        const enterprise = inputs.deploymentType === "enterprise"
+        if (enterprise && !inputs.enterpriseUrl) return yield* Effect.fail(new Error("Enterprise URL is required"))
+        const domain = enterprise ? normalizeDomain(inputs.enterpriseUrl ?? "") : "github.com"
+        const urls = oauthURLs(domain)
+        const device = yield* request(urls.device, {
           method: "POST",
           headers: headers(app),
-          body: JSON.stringify({
-            client_id: clientID,
-            device_code: device.device_code,
-            grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          }),
-        }).pipe(
-          Effect.map(Schema.decodeUnknownSync(Token)),
-          Effect.flatMap((token) => {
-            if (token.access_token) {
-              const access = token.access_token
-              return request(
-                `${domain === "github.com" ? "https://api.github.com" : `https://api.${domain}`}/copilot_internal/user`,
-                {
-                  headers: {
-                    Accept: "application/json",
-                    Authorization: `Bearer ${access}`,
-                    "User-Agent": App.useragent(app),
-                    "X-GitHub-Api-Version": userApiVersion,
+          body: JSON.stringify({ client_id: clientID, scope: "read:user" }),
+        }).pipe(Effect.map(Schema.decodeUnknownSync(Device)))
+        const interval = Math.max(device.interval, 1) * 1000
+
+        const poll = (wait: number): Effect.Effect<Credential.OAuth, unknown> =>
+          request(urls.token, {
+            method: "POST",
+            headers: headers(app),
+            body: JSON.stringify({
+              client_id: clientID,
+              device_code: device.device_code,
+              grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+            }),
+          }).pipe(
+            Effect.map(Schema.decodeUnknownSync(Token)),
+            Effect.flatMap((token) => {
+              if (token.access_token) {
+                const access = token.access_token
+                return request(
+                  `${domain === "github.com" ? "https://api.github.com" : `https://api.${domain}`}/copilot_internal/user`,
+                  {
+                    headers: {
+                      Accept: "application/json",
+                      Authorization: `Bearer ${access}`,
+                      "User-Agent": App.useragent(app),
+                      "X-GitHub-Api-Version": userApiVersion,
+                    },
                   },
-                },
-              ).pipe(
-                Effect.map((user) => Option.getOrUndefined(decodeUser(user))?.endpoints?.api?.replace(/\/+$/, "")),
-                Effect.catch(() => Effect.succeed(undefined)),
-                Effect.map((apiEndpoint) =>
-                  Credential.OAuth.make({
-                    type: "oauth",
-                    methodID,
-                    refresh: access,
-                    access,
-                    expires: 0,
-                    ...((enterprise || apiEndpoint) && {
-                      metadata: {
-                        ...(enterprise ? { enterpriseUrl: domain } : {}),
-                        ...(apiEndpoint ? { apiEndpoint } : {}),
-                      },
+                ).pipe(
+                  Effect.map((user) => Option.getOrUndefined(decodeUser(user))?.endpoints?.api?.replace(/\/+$/, "")),
+                  Effect.catch(() => Effect.succeed(undefined)),
+                  Effect.map((apiEndpoint) =>
+                    Credential.OAuth.make({
+                      type: "oauth",
+                      methodID,
+                      refresh: access,
+                      access,
+                      expires: 0,
+                      ...((enterprise || apiEndpoint) && {
+                        metadata: {
+                          ...(enterprise ? { enterpriseUrl: domain } : {}),
+                          ...(apiEndpoint ? { apiEndpoint } : {}),
+                        },
+                      }),
                     }),
-                  }),
-                ),
-              )
-            }
-            if (token.error === "authorization_pending")
-              return Effect.sleep(wait + pollingSafetyMargin).pipe(Effect.andThen(poll(wait)))
-            if (token.error === "slow_down") {
-              const next = token.interval && token.interval > 0 ? token.interval * 1000 : wait + 5000
-              return Effect.sleep(next + pollingSafetyMargin).pipe(Effect.andThen(poll(next)))
-            }
-            return Effect.fail(new Error(`Device authorization failed${token.error ? `: ${token.error}` : ""}`))
-          }),
-        )
+                  ),
+                )
+              }
+              if (token.error === "authorization_pending")
+                return Effect.sleep(wait + pollingSafetyMargin).pipe(Effect.andThen(poll(wait)))
+              if (token.error === "slow_down") {
+                const next = token.interval && token.interval > 0 ? token.interval * 1000 : wait + 5000
+                return Effect.sleep(next + pollingSafetyMargin).pipe(Effect.andThen(poll(next)))
+              }
+              return Effect.fail(new Error(`Device authorization failed${token.error ? `: ${token.error}` : ""}`))
+            }),
+          )
 
-      return {
-        mode: "auto" as const,
-        url: device.verification_uri,
-        instructions: `Enter code: ${device.user_code}`,
-        callback: poll(interval),
-      }
-    }),
-}) satisfies IntegrationOAuthMethodRegistration
-
-function shouldUseResponses(modelID: string) {
-  // Copilot supports Responses for GPT-5 class models, except mini variants
-  // which still need the chat-completions endpoint.
-  const match = /^gpt-(\d+)/.exec(modelID)
-  if (!match) return false
-  return Number(match[1]) >= 5 && !modelID.startsWith("gpt-5-mini")
-}
+        return {
+          mode: "auto" as const,
+          url: device.verification_uri,
+          instructions: `Enter code: ${device.user_code}`,
+          callback: poll(interval),
+        }
+      }),
+  }) satisfies IntegrationOAuthMethodRegistration
 
 export const GithubCopilotPlugin = define({
   id: "opencode.provider.github-copilot",
@@ -269,7 +263,7 @@ export const GithubCopilotPlugin = define({
           return
         }
         const id = evt.model.modelID ?? evt.model.id
-        evt.language = shouldUseResponses(id) ? evt.sdk.responses(id) : evt.sdk.chat(id)
+        evt.language = shouldUseResponsesApi(id) ? evt.sdk.responses(id) : evt.sdk.chat(id)
       }),
     )
   }),

@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test"
+import {
+  DEFAULT_CATEGORICAL,
+  DEFAULT_THEME,
+  migrateV1,
+  resolveThemeDocument,
+  selectThemeMode,
+  themeModes,
+} from "@opencode-ai/theme/tui"
 import { DEFAULT_THEMES, resolveTheme as resolveV1 } from "../../../src/theme"
-import { resolveThemeDocument } from "../../../src/theme/v2/resolve"
-import { selectThemeMode, themeModes } from "../../../src/theme/v2/select"
-import { migrateV1 } from "../../../src/theme/v2/v1-migrate"
-import { DEFAULT_CATEGORICAL, DEFAULT_THEME } from "../../../src/theme/v2/defaults"
 
 test("migrates resolved V1 modes into V2 tokens", () => {
   const migrated = migrateV1(DEFAULT_THEMES.opencode)
@@ -39,11 +43,11 @@ test("migrates resolved V1 modes into V2 tokens", () => {
   expect(resolved.background.action.primary.selected.toInts()).toEqual([0, 0, 0, 0])
   expect(resolved.text.action.primary.selected.toInts()).toEqual(legacy.primary.toInts())
   expect(resolved.background.feedback.error.default.toInts()).toEqual(legacy.background.toInts())
-  expect(resolved.contexts["@context:elevated"]?.background.default.toInts()).toEqual(legacy.backgroundPanel.toInts())
-  expect(resolved.contexts["@context:elevated"]?.background.action.primary.default.toInts()).toEqual([0, 0, 0, 0])
-  expect(resolved.contexts["@context:elevated"]?.text.action.primary.default.toInts()).toEqual(legacy.text.toInts())
-  expect(resolved.contexts["@context:overlay"]?.background.default.toInts()).toEqual(legacy.backgroundMenu.toInts())
-  expect(resolved.contexts["@context:overlay"]?.background.action.primary.default.toInts()).toEqual([0, 0, 0, 0])
+  expect(resolved.contextual.elevated.background.default.toInts()).toEqual(legacy.backgroundPanel.toInts())
+  expect(resolved.contextual.elevated.background.action.primary.default.toInts()).toEqual([0, 0, 0, 0])
+  expect(resolved.contextual.elevated.text.action.primary.default.toInts()).toEqual(legacy.text.toInts())
+  expect(resolved.contextual.overlay.background.default.toInts()).toEqual(legacy.backgroundMenu.toInts())
+  expect(resolved.contextual.overlay.background.action.primary.default.toInts()).toEqual([0, 0, 0, 0])
 })
 
 test("references generated hues from matching token colors", () => {

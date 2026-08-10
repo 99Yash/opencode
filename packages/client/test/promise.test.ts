@@ -32,7 +32,9 @@ test("exposes every standard HTTP API group", () => {
     "projectCopy",
     "vcs",
     "debug",
+    "migration",
     "websearch",
+    "config",
   ])
   expect(Object.keys(client.debug)).toEqual(["location"])
   expect(Object.keys(client.debug.location)).toEqual(["list", "evict"])
@@ -44,10 +46,38 @@ test("exposes every standard HTTP API group", () => {
   expect(Object.keys(client.integration.command)).toEqual(["connect", "status", "cancel"])
   expect(Object.keys(client.websearch)).toEqual(["providers", "query"])
   expect(Object.keys(client.file)).toEqual(["read", "list", "find"])
-  expect(Object.keys(client.vcs)).toEqual(["status", "diff"])
+  expect(Object.keys(client.vcs)).toEqual(["get", "status", "diff"])
   expect(Object.keys(client.pty)).toEqual(["list", "create", "get", "update", "remove"])
   expect(Object.keys(client.shell)).toEqual(["list", "create", "get", "timeout", "output", "remove"])
   expect(Object.keys(client.project)).toEqual(["list", "current", "directories"])
+})
+
+test("config.get returns ordered config entries for a location", async () => {
+  let request: Request | undefined
+  const entries = [
+    {
+      type: "document" as const,
+      path: "/tmp/project/opencode.json",
+      info: {
+        permissions: [
+          { action: "shell", resource: "*", effect: "ask" as const },
+          { action: "shell", resource: "git status", effect: "allow" as const },
+        ],
+      },
+    },
+    { type: "file" as const, path: "/tmp/project/opencode.json" },
+  ]
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input) => {
+      request = input instanceof Request ? input : new Request(input)
+      return Response.json(entries)
+    },
+  })
+
+  expect(await client.config.get({ location: { directory: "/tmp/project" } })).toEqual(entries)
+  expect(request?.method).toBe("GET")
+  expect(request?.url).toBe("http://localhost:3000/api/config?location%5Bdirectory%5D=%2Ftmp%2Fproject")
 })
 
 test("websearch.query uses the public HTTP contract", async () => {
@@ -304,7 +334,6 @@ test("session.pending.list uses the public HTTP contract", async () => {
   const requests: Array<{ method: string; url: string }> = []
   const pending = [
     {
-      admittedSeq: 3,
       id: "msg_pending",
       sessionID: "ses_test",
       timeCreated: 1_717_171_717_000,
@@ -326,6 +355,28 @@ test("session.pending.list uses the public HTTP contract", async () => {
 
   expect(result).toEqual(pending)
   expect(requests).toEqual([{ method: "GET", url: "http://localhost:3000/api/session/ses_test/pending" }])
+})
+
+test("session.pending mutations use the public HTTP contract", async () => {
+  const requests: Array<{ method: string; url: string }> = []
+  const client = OpenCode.make({
+    baseUrl: "http://localhost:3000",
+    fetch: async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init)
+      requests.push({ method: request.method, url: request.url })
+      return new Response(null, { status: 204 })
+    },
+  })
+
+  await client.session.pending.cancel({ sessionID: "ses_test", inputID: "msg_cancel" })
+  await client.session.pending.steer({ sessionID: "ses_test", inputID: "msg_steer" })
+  await client.session.pending.queue({ sessionID: "ses_test", inputID: "msg_queue" })
+
+  expect(requests).toEqual([
+    { method: "DELETE", url: "http://localhost:3000/api/session/ses_test/pending/msg_cancel" },
+    { method: "POST", url: "http://localhost:3000/api/session/ses_test/pending/msg_steer/steer" },
+    { method: "POST", url: "http://localhost:3000/api/session/ses_test/pending/msg_queue/queue" },
+  ])
 })
 
 test("event.subscribe exposes the Promise event stream wire projection", async () => {
@@ -549,7 +600,6 @@ const session = {
 
 const admission = {
   data: {
-    admittedSeq: 0,
     id: "msg_test",
     sessionID: "ses_test",
     type: "user",
@@ -561,7 +611,6 @@ const admission = {
 
 const syntheticAdmission = {
   data: {
-    admittedSeq: 1,
     id: "msg_synthetic",
     sessionID: "ses_test",
     type: "synthetic",
@@ -574,7 +623,6 @@ const syntheticAdmission = {
 const compactionAdmission = {
   data: {
     type: "compaction",
-    admittedSeq: 1,
     id: "msg_compaction",
     sessionID: "ses_test",
     timeCreated: 1_717_171_717_000,

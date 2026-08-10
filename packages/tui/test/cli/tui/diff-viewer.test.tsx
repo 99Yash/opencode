@@ -11,7 +11,7 @@ import type {
   Route,
   Slot,
 } from "@opencode-ai/plugin/tui/context"
-import { ThemeProvider } from "../../../src/context/theme"
+import { ThemeProvider, useThemes } from "../../../src/context/theme"
 import { ConfigProvider } from "../../../src/config"
 import { TuiKeybind } from "../../../src/config/keybind"
 import { Keymap } from "../../../src/context/keymap"
@@ -103,6 +103,8 @@ test("brackets navigate diff hunks", async () => {
     await viewer.app.waitForFrame((frame) => frame.includes("const first"))
     await viewer.app.waitFor(() => Boolean(findScrollBox(viewer.app.renderer.root)))
     await viewer.app.flush()
+    expect(viewer.app.captureCharFrame()).toContain("@@ -20,3 +20,3 @@")
+    expect(countDiffs(viewer.app.renderer.root)).toBe(3)
     const scroll = findScrollBox(viewer.app.renderer.root)!
     const initial = scroll.scrollTop
 
@@ -145,24 +147,28 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
   const config = createTuiResolvedConfig()
   const transport = createFetch((url) => {
     if (url.pathname !== "/api/vcs/diff") return
-    if (fail) return json({ message: "boom" }, { status: 500 })
     vcsDiffInput = {
       location: { directory: url.searchParams.get("location[directory]") },
       mode: url.searchParams.get("mode"),
       context: url.searchParams.get("context"),
     }
+    if (fail) return json({ message: "boom" }, { status: 500 })
     return json({
       location: { directory: "/repo/session", project: { id: "project-1", directory: "/repo/session" } },
       data: vcsDiff,
     })
   }, createEventStream())
   function Harness() {
+    let theme: ReturnType<ReturnType<typeof useThemes>["currentTokens"]>
     const context = {
       options: {},
       client: createApi(transport.fetch),
       data: {
         session: { get: () => session },
         location: { default: () => ({ directory: "/repo/default" }) },
+      },
+      get theme() {
+        return theme
       },
       keymap: {
         layer(input: () => KeymapLayer) {
@@ -202,6 +208,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
 
     void diffViewerPlugin.setup(context)
     function Content() {
+      theme = useThemes().currentTokens()
       const commandView = renderCommands?.({})
       if (current.type !== "plugin") commands.get("diff.open")?.run()
       return (
@@ -231,6 +238,7 @@ async function renderDiffViewer(vcsDiff: unknown[], height = 20, initialRoute?: 
 
   const app = await testRender(() => <Harness />, { width: 80, height })
   await waitForCommand(app, commands, "diff.close")
+  await app.waitFor(() => vcsDiffInput !== undefined)
   return {
     app,
     commands,
@@ -249,6 +257,12 @@ function findScrollBox(root: Renderable): ScrollBoxRenderable | undefined {
 function containsDiff(root: Renderable): boolean {
   if (root instanceof DiffRenderable) return true
   return root.getChildren().some(containsDiff)
+}
+
+function countDiffs(root: Renderable): number {
+  return (
+    (root instanceof DiffRenderable ? 1 : 0) + root.getChildren().reduce((total, child) => total + countDiffs(child), 0)
+  )
 }
 
 const session = {

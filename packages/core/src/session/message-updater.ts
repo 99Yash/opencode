@@ -1,11 +1,7 @@
 import { castDraft, produce, type WritableDraft } from "immer"
-import { DateTime, Effect } from "effect"
+import { DateTime, Effect, Match, pipe } from "effect"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
-
-export type MemoryState = {
-  messages: SessionMessage.Info[]
-}
 
 export interface Adapter {
   readonly getModel: () => Effect.Effect<SessionMessage.ModelSelected["model"] | undefined, never, never>
@@ -23,97 +19,15 @@ export interface Adapter {
   readonly appendMessage: (message: SessionMessage.Info) => Effect.Effect<void, never, never>
 }
 
-export function memory(state: MemoryState): Adapter {
-  const assistantIndex = (messageID: SessionMessage.ID) =>
-    state.messages.findLastIndex((message) => message.id === messageID)
-  const shellIndex = (messageID: SessionMessage.ID) =>
-    state.messages.findLastIndex((message) => message.id === messageID)
-  const compactionIndex = () =>
-    state.messages.findLastIndex((message) => message.type === "compaction" && message.status === "running")
-  // A newer step supersedes stale incomplete rows; never resume an older assistant projection.
-  const latestAssistantIndex = () => state.messages.findLastIndex((message) => message.type === "assistant")
-
-  return {
-    getModel() {
-      return Effect.sync(
-        () =>
-          state.messages.findLast(
-            (message): message is SessionMessage.ModelSelected | SessionMessage.Assistant =>
-              message.type === "model-switched" || message.type === "assistant",
-          )?.model,
-      )
-    },
-    getCurrentAssistant() {
-      return Effect.sync(() => {
-        const index = latestAssistantIndex()
-        if (index < 0) return
-        const assistant = state.messages[index]
-        return assistant?.type === "assistant" && !assistant.time.completed ? assistant : undefined
-      })
-    },
-    getAssistant(messageID) {
-      return Effect.sync(() => {
-        const index = assistantIndex(messageID)
-        if (index < 0) return
-        const assistant = state.messages[index]
-        return assistant?.type === "assistant" ? assistant : undefined
-      })
-    },
-    getShell(shellID) {
-      return Effect.sync(() => {
-        return state.messages.find((message): message is SessionMessage.Shell => {
-          return message.type === "shell" && message.shellID === shellID
-        })
-      })
-    },
-    getCompaction() {
-      return Effect.sync(() => {
-        const index = compactionIndex()
-        const message = state.messages[index]
-        return message?.type === "compaction" ? message : undefined
-      })
-    },
-    updateAssistant(assistant) {
-      return Effect.sync(() => {
-        const index = assistantIndex(assistant.id)
-        if (index < 0) return
-        const current = state.messages[index]
-        if (current?.type !== "assistant") return
-        state.messages[index] = assistant
-      })
-    },
-    updateShell(shell) {
-      return Effect.sync(() => {
-        const index = shellIndex(shell.id)
-        if (index < 0) return
-        const current = state.messages[index]
-        if (current?.type !== "shell") return
-        state.messages[index] = shell
-      })
-    },
-    updateCompaction(compaction) {
-      return Effect.sync(() => {
-        const index = state.messages.findLastIndex((message) => message.id === compaction.id)
-        if (index >= 0) state.messages[index] = compaction
-      })
-    },
-    appendMessage(message) {
-      return Effect.sync(() => {
-        state.messages.push(message)
-      })
-    },
-  }
-}
-
-export function update(adapter: Adapter, event: SessionEvent.Event) {
+export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
   type DraftAssistant = WritableDraft<SessionMessage.Assistant>
   type DraftTool = WritableDraft<SessionMessage.AssistantTool>
   type DraftText = WritableDraft<SessionMessage.AssistantText>
   type DraftReasoning = WritableDraft<SessionMessage.AssistantReasoning>
 
-  const latestTool = (assistant: DraftAssistant | undefined, callID?: string) =>
+  const latestTool = (assistant: DraftAssistant | undefined, id?: string) =>
     assistant?.content.findLast(
-      (item): item is DraftTool => item.type === "tool" && (callID === undefined || item.id === callID),
+      (item): item is DraftTool => item.type === "tool" && (id === undefined || item.id === id),
     )
 
   const latestText = (assistant: DraftAssistant | undefined) =>
@@ -139,9 +53,10 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
     }
   })
 
-  return Effect.gen(function* () {
-    yield* SessionEvent.All.match(event, {
-      "session.usage.updated": () => Effect.void,
+  const project = pipe(
+    Match.type<SessionEvent.DurableEvent>(),
+    Match.discriminatorsExhaustive("type")({
+      "session.created": () => Effect.void,
       "session.usage.recorded": () => Effect.void,
       "session.agent.selected": (event) => {
         return adapter.appendMessage(
@@ -176,11 +91,25 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.forked": () => Effect.void,
       "session.input.promoted": () => Effect.void,
       "session.input.admitted": () => Effect.void,
+      "session.input.cancelled": () => Effect.void,
+      "session.input.steered": () => Effect.void,
+      "session.input.queued": () => Effect.void,
       "session.execution.started": () => Effect.void,
       "session.execution.succeeded": () => clearCurrentRetry,
       "session.execution.failed": () => clearCurrentRetry,
       "session.execution.interrupted": () => clearCurrentRetry,
-      "session.instructions.updated": () => Effect.void,
+      "session.instructions.updated": (event) => {
+        if (event.data.text === undefined) return Effect.void
+        return adapter.appendMessage(
+          SessionMessage.System.make({
+            id: SessionMessage.ID.fromEvent(event.id),
+            type: "system",
+            text: event.data.text,
+            metadata: event.metadata,
+            time: { created: event.created },
+          }),
+        )
+      },
       "session.synthetic": (event) => {
         return adapter.appendMessage(
           SessionMessage.Synthetic.make({
@@ -311,12 +240,6 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           draft.content.push(castDraft(SessionMessage.AssistantText.make({ type: "text", text: "" })))
         })
       },
-      "session.text.delta": (event) => {
-        return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestText(draft)
-          if (match) match.text += event.data.delta
-        })
-      },
       "session.text.ended": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
           const match = latestText(draft)
@@ -332,7 +255,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             castDraft(
               SessionMessage.AssistantTool.make({
                 type: "tool",
-                id: event.data.callID,
+                id: event.data.id,
                 name: event.data.name,
                 time: { created: event.created },
                 state: SessionMessage.ToolStateStreaming.make({ status: "streaming", input: "" }),
@@ -341,16 +264,15 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           )
         })
       },
-      "session.tool.input.delta": () => Effect.void,
       "session.tool.input.ended": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestTool(draft, event.data.callID)
+          const match = latestTool(draft, event.data.id)
           if (match && match.state.status === "streaming") match.state.input = event.data.text
         })
       },
       "session.tool.called": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestTool(draft, event.data.callID)
+          const match = latestTool(draft, event.data.id)
           if (match) {
             match.executed = event.data.executed
             match.providerState = event.data.state
@@ -365,19 +287,11 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
           }
         })
       },
-      "session.tool.progress": (event) => {
-        return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestTool(draft, event.data.callID)
-          if (match && match.state.status === "running") {
-            match.state.metadata = event.data.metadata
-          }
-        })
-      },
       // Terminal tool events are self-contained; projection is a direct copy and
       // never reaches into ephemeral progress history.
       "session.tool.success": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestTool(draft, event.data.callID)
+          const match = latestTool(draft, event.data.id)
           if (match && match.state.status === "running") {
             match.executed = event.data.executed || match.executed === true
             match.providerResultState = event.data.resultState
@@ -395,7 +309,7 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       },
       "session.tool.failed": (event) => {
         return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestTool(draft, event.data.callID)
+          const match = latestTool(draft, event.data.id)
           if (match && (match.state.status === "streaming" || match.state.status === "running")) {
             match.executed = event.data.executed || match.executed === true
             match.providerResultState = event.data.resultState
@@ -424,12 +338,6 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
               }),
             ),
           )
-        })
-      },
-      "session.reasoning.delta": (event) => {
-        return updateOwnedAssistant(event.data.assistantMessageID, (draft) => {
-          const match = latestReasoning(draft)
-          if (match) match.text += event.data.delta
         })
       },
       "session.reasoning.ended": (event) => {
@@ -465,12 +373,6 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
             time: { created: event.created },
           }),
         ),
-      "session.compaction.delta": (event) =>
-        Effect.gen(function* () {
-          const current = yield* adapter.getCompaction()
-          if (current?.status !== "running") return
-          yield* adapter.updateCompaction({ ...current, summary: current.summary + event.data.text })
-        }),
       "session.compaction.ended": (event) => {
         return Effect.gen(function* () {
           const current = yield* adapter.getCompaction()
@@ -516,8 +418,9 @@ export function update(adapter: Adapter, event: SessionEvent.Event) {
       "session.revert.staged": () => Effect.void,
       "session.revert.cleared": () => Effect.void,
       "session.revert.committed": () => Effect.void,
-    })
-  })
+    }),
+  )
+  return project(event)
 }
 
 export * as SessionMessageUpdater from "./message-updater"

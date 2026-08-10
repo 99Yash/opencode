@@ -12,12 +12,15 @@ export const ServerOptions = Schema.Struct({
     }),
   ),
   hostname: Schema.optional(Schema.String),
-  port: Schema.optional(
-    Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(65_535)),
-  ),
+  port: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(65_535))),
   password: Schema.optional(Schema.String),
   simulation: Schema.optional(Schema.Boolean),
   database: Schema.optional(Database.Options),
+  events: Schema.optional(
+    Schema.Struct({
+      persist: Schema.optional(Schema.Boolean),
+    }),
+  ),
   models: Schema.optional(ModelsDev.Options),
   observability: Schema.optional(Observability.Options),
   config: Schema.optional(

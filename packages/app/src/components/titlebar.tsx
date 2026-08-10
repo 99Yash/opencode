@@ -27,7 +27,6 @@ import { tabKey, useTabs } from "@/context/tabs"
 import type { PromptSession } from "@/context/prompt"
 import "./titlebar.css"
 import { newTabTooltipKeybind } from "./command-tooltip-keybind"
-import { normalizeSessionInfo } from "@/utils/session"
 
 const legacyTitlebarHeight = 40
 const v2TitlebarHeight = 36
@@ -191,11 +190,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   .find((item) => ServerConnection.key(item) === (route.server ?? server.key))
                 return conn ? { route, sdk: global.ensureServerCtx(conn).sdk } : undefined
               },
-              ({ route, sdk }) =>
-                sdk.api.session
-                  .get({ sessionID: route.sessionId })
-                  .then(normalizeSessionInfo)
-                  .catch(() => {}),
+              ({ route, sdk }) => sdk.api.session.get({ sessionID: route.sessionId }).catch(() => {}),
             )
 
             const matchRoute = (route: LayoutRoute) => {
@@ -256,7 +251,7 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   sessionId: activeSession.id,
                 }
                 const model = tabs.stateValue<PromptSession>(sessionTab, "prompt")?.model.current()
-                tabs.newDraft({ server: sessionTab.server, directory: activeSession.directory }, "", model)
+                tabs.newDraft({ server: sessionTab.server, directory: activeSession.location.directory }, "", model)
                 return
               }
 
@@ -395,27 +390,25 @@ export function Titlebar(props: { update?: TitlebarUpdate; debugTools?: { visibl
                   }}
                   onReorder={(keys) => tabsStoreActions.reorder(keys)}
                 />
-                <Show when={!creating()}>
-                  <TooltipV2
-                    placement="bottom"
-                    value={
-                      <>
-                        {language.t("command.session.new")}
-                        <KeybindV2 keys={newTabTooltipKeybind(command)} variant="neutral" />
-                      </>
-                    }
-                  >
-                    <IconButtonV2
-                      type="button"
-                      variant="ghost-muted"
-                      size="large"
-                      class="shrink-0"
-                      icon={<IconV2 name="plus" />}
-                      onClick={openNewTab}
-                      aria-label={language.t("command.session.new")}
-                    />
-                  </TooltipV2>
-                </Show>
+                <TooltipV2
+                  placement="bottom"
+                  value={
+                    <>
+                      {language.t("command.session.new")}
+                      <KeybindV2 keys={newTabTooltipKeybind(command)} variant="neutral" />
+                    </>
+                  }
+                >
+                  <IconButtonV2
+                    type="button"
+                    variant="ghost-muted"
+                    size="large"
+                    class="shrink-0"
+                    icon={<IconV2 name="plus" />}
+                    onClick={openNewTab}
+                    aria-label={language.t("command.session.new")}
+                  />
+                </TooltipV2>
                 <div class="flex-1" />
                 <TitlebarV2Right state={v2RightState()} />
               </div>

@@ -9,7 +9,7 @@ import { useLanguage } from "@/context/language"
 import { useSettings } from "@/context/settings"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { decode64 } from "@/utils/base64"
-import { EventSessionError } from "@opencode-ai/sdk/v2"
+import type { EventSessionError } from "@/types"
 import { Persist, persisted } from "@/utils/persist"
 import { playSoundById } from "@/utils/sound"
 import { useGlobal } from "./global"
@@ -360,7 +360,7 @@ function createServerNotificationState(input: {
 
   const handleSessionError = (
     directory: string,
-    event: { properties: { sessionID?: string; error?: EventSessionError["properties"]["error"] } },
+    event: { properties: EventSessionError["properties"] },
     time: number,
   ) => {
     const sessionID = event.properties.sessionID
@@ -372,7 +372,7 @@ function createServerNotificationState(input: {
         void playSoundById(settings.sounds.errors())
       }
 
-      const error = "error" in event.properties ? event.properties.error : undefined
+      const error = event.properties.error
       append({
         directory,
         time,
@@ -393,7 +393,7 @@ function createServerNotificationState(input: {
 
   const unsub = serverSDK().event.listen((e) => {
     const event = e.details
-    if (event.type !== "session.idle" && event.type !== "session.error") return
+    if (event.type !== "session.idle" && event.type !== "session.execution.failed") return
 
     const directory = e.name
     const time = Date.now()

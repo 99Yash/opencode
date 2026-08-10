@@ -86,6 +86,9 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       transform: () => Effect.die("unused skill.transform"),
       reload: () => Effect.die("unused skill.reload"),
     },
+    shell: overrides.shell ?? {
+      hook: () => Effect.die("unused shell.hook"),
+    },
     tool: overrides.tool ?? {
       transform: () => Effect.die("unused tool.transform"),
       hook: () => Effect.die("unused tool.hook"),
@@ -103,8 +106,10 @@ export function host(overrides: Overrides = {}): Plugin.Context {
       prompt: overrides.session?.prompt ?? (() => Effect.die("unused session.prompt")),
       generate: overrides.session?.generate ?? (() => Effect.die("unused session.generate")),
       command: overrides.session?.command ?? (() => Effect.die("unused session.command")),
+      rename: overrides.session?.rename ?? (() => Effect.die("unused session.rename")),
       synthetic: overrides.session?.synthetic ?? (() => Effect.die("unused session.synthetic")),
       interrupt: overrides.session?.interrupt ?? (() => Effect.die("unused session.interrupt")),
+      wait: overrides.session?.wait ?? (() => Effect.die("unused session.wait")),
     },
   }
 }
@@ -118,7 +123,11 @@ export function agentHost(agent: Agent.Interface): Plugin.Context["agent"] {
             ? Effect.succeed({
                 location: new Location.Info({
                   directory: AbsolutePath.make("/"),
-                  project: { id: Project.ID.make("test"), directory: AbsolutePath.make("/") },
+                  project: {
+                    id: Project.ID.make("test"),
+                    directory: AbsolutePath.make("/"),
+                    canonical: AbsolutePath.make("/"),
+                  },
                 }),
                 data: agentInfo(value),
               })
@@ -160,7 +169,11 @@ export function catalogHost(catalog: Catalog.Interface): Plugin.Context["catalog
           Effect.map((data) => ({
             location: new Location.Info({
               directory: AbsolutePath.make("/"),
-              project: { id: Project.ID.make("test"), directory: AbsolutePath.make("/") },
+              project: {
+                id: Project.ID.make("test"),
+                directory: AbsolutePath.make("/"),
+                canonical: AbsolutePath.make("/"),
+              },
             }),
             data: data.map(modelInfo),
           })),
@@ -213,8 +226,7 @@ export function catalogHost(catalog: Catalog.Interface): Plugin.Context["catalog
                   })),
                 })
               }),
-            remove: (providerID, modelID) =>
-              draft.model.remove(Provider.ID.make(providerID), Model.ID.make(modelID)),
+            remove: (providerID, modelID) => draft.model.remove(Provider.ID.make(providerID), Model.ID.make(modelID)),
             default: {
               get: () => {
                 const value = draft.model.default.get()
@@ -354,7 +366,11 @@ export function integrationHost(integration: Integration.Interface): Plugin.Cont
 export function webSearchHost(websearch: WebSearch.Interface): Plugin.Context["websearch"] {
   const location = Location.Info.make({
     directory: AbsolutePath.make("/tmp/websearch-test"),
-    project: { id: Project.ID.make("websearch-test"), directory: AbsolutePath.make("/tmp/websearch-test") },
+    project: {
+      id: Project.ID.make("websearch-test"),
+      directory: AbsolutePath.make("/tmp/websearch-test"),
+      canonical: AbsolutePath.make("/tmp/websearch-test"),
+    },
   })
   return {
     providers: () => websearch.providers().pipe(Effect.map((data) => ({ location, data }))),
@@ -400,9 +416,7 @@ function method(value: Integration.Method) {
   }
 }
 
-function internalMethod(
-  value: IntegrationMethodRegistration["method"],
-): Integration.Method {
+function internalMethod(value: IntegrationMethodRegistration["method"]): Integration.Method {
   if (value.type === "env") return value
   if (value.type === "key") return value
   if (value.type === "command") {

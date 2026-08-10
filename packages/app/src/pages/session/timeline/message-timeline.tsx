@@ -45,13 +45,7 @@ import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
 import { TextField } from "@opencode-ai/ui/text-field"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
 import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
-import type {
-  AssistantMessage,
-  Message as MessageType,
-  Part as PartType,
-  ToolPart,
-  UserMessage,
-} from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, Message as MessageType, Part as PartType, ToolPart, UserMessage } from "@/types"
 import { showToast } from "@/utils/toast"
 import { getDirectory, getFilename } from "@opencode-ai/core/util/path"
 import { Popover as KobaltePopover } from "@kobalte/core/popover"
@@ -298,8 +292,10 @@ export function MessageTimeline(props: {
   })
   const titleValue = createMemo(() => info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()))
-  const shareUrl = createMemo(() => info()?.share?.url)
-  const shareEnabled = createMemo(() => sync().data.config.share !== "disabled")
+  const shareUrl = (): string | undefined => undefined
+  // TODO: Restore these actions when the V2 client exposes session sharing.
+  // const shareEnabled = createMemo(() => sync().data.config.share !== "disabled")
+  const shareEnabled = () => false
   const parentID = createMemo(() => info()?.parentID)
   const parent = createMemo(() => {
     const id = parentID()
@@ -659,14 +655,16 @@ export function MessageTimeline(props: {
   }
 
   const shareMutation = useMutation(() => ({
-    mutationFn: (id: string) => serverSDK().client.session.share({ sessionID: id }),
+    // TODO: Restore sharing when the V2 client exposes a session sharing API.
+    mutationFn: async (_id: string) => Promise.reject(new Error("Session sharing is unavailable")),
     onError: (err) => {
       console.error("Failed to share session", err)
     },
   }))
 
   const unshareMutation = useMutation(() => ({
-    mutationFn: (id: string) => serverSDK().client.session.unshare({ sessionID: id }),
+    // TODO: Restore unsharing when the V2 client exposes a session sharing API.
+    mutationFn: async (_id: string) => Promise.reject(new Error("Session sharing is unavailable")),
     onError: (err) => {
       console.error("Failed to unshare session", err)
     },
@@ -812,14 +810,12 @@ export function MessageTimeline(props: {
   const archiveSession = async (sessionID: string) => {
     const session = sync().session.get(sessionID)
     if (!session) return
-    if ((await sdk().protocol) !== "v1") return
-
     const sessions = sync().data.session ?? []
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await sdk()
-      .client.session.update({ sessionID, directory: sdk().directory, time: { archived: Date.now() } })
+    // TODO: Restore archiving when the V2 client exposes a session archive API.
+    await Promise.reject(new Error("Session archiving is unavailable"))
       .then(() => {
         sync().set(
           produce((draft) => {
@@ -1567,9 +1563,7 @@ export function MessageTimeline(props: {
                                     </DropdownMenu.ItemLabel>
                                   </DropdownMenu.Item>
                                 </Show>
-                                <DropdownMenu.Item onSelect={() => void archiveSession(id)}>
-                                  <DropdownMenu.ItemLabel>{language.t("common.archive")}</DropdownMenu.ItemLabel>
-                                </DropdownMenu.Item>
+                                {/* TODO: Restore archive when the V2 client exposes session archive. */}
                                 <DropdownMenu.Separator />
                                 <DropdownMenu.Item
                                   onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}
@@ -1638,9 +1632,7 @@ export function MessageTimeline(props: {
                                   {language.t("session.share.action.share")}...
                                 </MenuV2.Item>
                               </Show>
-                              <MenuV2.Item onSelect={() => void archiveSession(id)}>
-                                {language.t("common.archive")}
-                              </MenuV2.Item>
+                              {/* TODO: Restore archive when the V2 client exposes session archive. */}
                               <MenuV2.Separator />
                               <MenuV2.Item onSelect={() => dialog.show(() => <DialogDeleteSession sessionID={id} />)}>
                                 {language.t("common.delete")}...

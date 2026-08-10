@@ -2,9 +2,8 @@ import { createStore } from "solid-js/store"
 import { createMemo, For, Match, Show, Switch } from "solid-js"
 import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
-import { useTheme } from "../../context/theme"
-import type { PermissionRequest } from "@opencode-ai/client"
-import { useClient } from "../../context/client"
+import { useTheme, useThemes } from "../../context/theme"
+import type { PermissionReply, PermissionRequest } from "@opencode-ai/client"
 import { SplitBorder } from "../../ui/border"
 import { useData } from "../../context/data"
 import { filetype } from "../../util/filetype"
@@ -14,13 +13,15 @@ import { useConfig } from "../../config"
 import { Keymap } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { SimulationSemantics } from "../../simulation/semantics"
+import { PatchDiff } from "../../component/patch-diff"
+import { useToast } from "../../ui/toast"
 
 type PermissionStage = "permission" | "always" | "reject"
 
 function EditBody(props: { file?: string; diff?: string; patch?: string }) {
-  const themeState = useTheme()
-  const themeV2 = themeState.themeV2
-  const syntax = themeState.syntax
+  const theme = useTheme()
+  const themes = useThemes()
+  const syntax = themes.currentSyntax
   const config = useConfig().data
   const dimensions = useTerminalDimensions()
 
@@ -45,29 +46,30 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
           scrollAcceleration={scrollAcceleration()}
           verticalScrollbarOptions={{
             trackOptions: {
-              backgroundColor: themeV2.background.default,
-              foregroundColor: themeV2.scrollbar.default,
+              backgroundColor: theme.background.default,
+              foregroundColor: theme.scrollbar.default,
             },
           }}
         >
-          <diff
+          <PatchDiff
             diff={diff()}
+            hunkFg={theme.diff.text.hunkHeader}
             view={view()}
             filetype={ft()}
             syntaxStyle={syntax()}
             showLineNumbers={true}
             width="100%"
             wrapMode="word"
-            fg={themeV2.text.default}
-            addedBg={themeV2.diff.background.added}
-            removedBg={themeV2.diff.background.removed}
-            contextBg={themeV2.diff.background.context}
-            addedSignColor={themeV2.diff.highlight.added}
-            removedSignColor={themeV2.diff.highlight.removed}
-            lineNumberFg={themeV2.diff.lineNumber.text}
-            lineNumberBg={themeV2.diff.background.context}
-            addedLineNumberBg={themeV2.diff.lineNumber.background.added}
-            removedLineNumberBg={themeV2.diff.lineNumber.background.removed}
+            fg={theme.text.default}
+            addedBg={theme.diff.background.added}
+            removedBg={theme.diff.background.removed}
+            contextBg={theme.diff.background.context}
+            addedSignColor={theme.diff.highlight.added}
+            removedSignColor={theme.diff.highlight.removed}
+            lineNumberFg={theme.diff.lineNumber.text}
+            lineNumberBg={theme.diff.background.context}
+            addedLineNumberBg={theme.diff.lineNumber.background.added}
+            removedLineNumberBg={theme.diff.lineNumber.background.removed}
           />
         </scrollbox>
       </Show>
@@ -76,7 +78,7 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
           when={props.patch}
           fallback={
             <box paddingLeft={1}>
-              <text fg={themeV2.text.subdued}>No diff provided</text>
+              <text fg={theme.text.subdued}>No diff provided</text>
             </box>
           }
         >
@@ -86,8 +88,8 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
               scrollAcceleration={scrollAcceleration()}
               verticalScrollbarOptions={{
                 trackOptions: {
-                  backgroundColor: themeV2.background.default,
-                  foregroundColor: themeV2.scrollbar.default,
+                  backgroundColor: theme.background.default,
+                  foregroundColor: theme.scrollbar.default,
                 },
               }}
             >
@@ -97,7 +99,7 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
                 streaming={true}
                 syntaxStyle={syntax()}
                 content={patch()}
-                fg={themeV2.text.subdued}
+                fg={theme.text.subdued}
               />
             </scrollbox>
           )}
@@ -108,8 +110,8 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
 }
 
 export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
-  const client = useClient()
   const data = useData()
+  const toast = useToast()
   const [store, setStore] = createStore({
     stage: "permission" as PermissionStage,
   })
@@ -121,14 +123,20 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     if (!tool) return { input: undefined, metadata: undefined }
     const message = data.session.message.get(props.request.sessionID, tool.messageID)
     if (message?.type !== "assistant") return { input: undefined, metadata: undefined }
-    const part = message.content.find((part) => part.type === "tool" && part.id === tool.callID)
+    const part = message.content.find((part) => part.type === "tool" && part.id === tool.id)
     if (part?.type === "tool" && part.state.status !== "streaming") {
       return { input: part.state.input, metadata: part.state.metadata }
     }
     return { input: undefined, metadata: undefined }
   })
 
-  const { themeV2 } = useTheme()
+  const theme = useTheme()
+
+  function reply(value: PermissionReply, message?: string) {
+    void data.session.permission
+      .reply({ sessionID: props.request.sessionID, requestID: props.request.id, reply: value, message })
+      .catch((error: unknown) => toast.error(error))
+  }
 
   return (
     <Switch>
@@ -140,7 +148,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           body={
             <box paddingLeft={1} gap={1}>
               <For each={permissionAlwaysLines(props.request)}>
-                {(line, index) => <text fg={index() === 0 ? themeV2.text.subdued : themeV2.text.default}>{line}</text>}
+                {(line, index) => <text fg={index() === 0 ? theme.text.subdued : theme.text.default}>{line}</text>}
               </For>
             </box>
           }
@@ -149,11 +157,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           onSelect={(option) => {
             setStore("stage", "permission")
             if (option === "cancel") return
-            void client.api.permission.reply({
-              sessionID: props.request.sessionID,
-              reply: "always",
-              requestID: props.request.id,
-            })
+            reply("always")
           }}
         />
       </Match>
@@ -162,12 +166,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           action={props.request.action}
           instance={props.request.id}
           onConfirm={(message) => {
-            void client.api.permission.reply({
-              sessionID: props.request.sessionID,
-              reply: "reject",
-              requestID: props.request.id,
-              message: message || undefined,
-            })
+            reply("reject", message || undefined)
           }}
           onCancel={() => {
             setStore("stage", "permission")
@@ -192,9 +191,9 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             ) : props.request.action === "external_directory" ? (
               <Show when={current.lines.length > 0}>
                 <box paddingLeft={1} gap={1}>
-                  <text fg={themeV2.text.subdued}>Patterns</text>
+                  <text fg={theme.text.subdued}>Patterns</text>
                   <box>
-                    <For each={current.lines}>{(line) => <text fg={themeV2.text.default}>{line}</text>}</For>
+                    <For each={current.lines}>{(line) => <text fg={theme.text.default}>{line}</text>}</For>
                   </box>
                 </box>
               </Show>
@@ -207,8 +206,8 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                         props.request.action === "shell" ||
                         props.request.action === "subagent" ||
                         props.request.action === "task"
-                          ? themeV2.text.default
-                          : themeV2.text.subdued
+                          ? theme.text.default
+                          : theme.text.subdued
                       }
                     >
                       {line}
@@ -221,15 +220,15 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           const header = () => (
             <box flexDirection="column" gap={0}>
               <box flexDirection="row" gap={1} flexShrink={0}>
-                <text fg={themeV2.text.feedback.warning.default}>{"△"}</text>
-                <text fg={themeV2.text.default}>Permission required</text>
+                <text fg={theme.text.feedback.warning.default}>{"△"}</text>
+                <text fg={theme.text.default}>Permission required</text>
               </box>
               <Show when={props.request.action !== "shell" && current.title}>
                 <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
-                  <text fg={themeV2.text.subdued} flexShrink={0}>
+                  <text fg={theme.text.subdued} flexShrink={0}>
                     {current.icon}
                   </text>
-                  <text fg={themeV2.text.default}>{current.title}</text>
+                  <text fg={theme.text.default}>{current.title}</text>
                 </box>
               </Show>
             </box>
@@ -263,18 +262,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
                     setStore("stage", "reject")
                     return
                   }
-                  void client.api.permission.reply({
-                    sessionID: props.request.sessionID,
-                    reply: "reject",
-                    requestID: props.request.id,
-                  })
+                  reply("reject")
                   return
                 }
-                void client.api.permission.reply({
-                  sessionID: props.request.sessionID,
-                  reply: "once",
-                  requestID: props.request.id,
-                })
+                reply("once")
               }}
             />
           )
@@ -297,7 +288,7 @@ function RejectPrompt(props: {
   onCancel: () => void
 }) {
   let input: TextareaRenderable
-  const { themeV2 } = useTheme().contextual("elevated")
+  const theme = useTheme("elevated")
   const dimensions = useTerminalDimensions()
   const narrow = createMemo(() => dimensions().width < 80)
   Keymap.createLayer(() => ({
@@ -329,18 +320,18 @@ function RejectPrompt(props: {
         role: "dialog",
         label: `Reject permission: ${props.action}`,
       }))}
-      backgroundColor={themeV2.background.default}
+      backgroundColor={theme.background.default}
       border={["left"]}
-      borderColor={themeV2.text.feedback.error.default}
+      borderColor={theme.text.feedback.error.default}
       customBorderChars={SplitBorder.customBorderChars}
     >
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <box flexDirection="row" gap={1} paddingLeft={1}>
-          <text fg={themeV2.text.feedback.error.default}>{"△"}</text>
-          <text fg={themeV2.text.default}>Reject permission</text>
+          <text fg={theme.text.feedback.error.default}>{"△"}</text>
+          <text fg={theme.text.default}>Reject permission</text>
         </box>
         <box paddingLeft={1}>
-          <text fg={themeV2.text.subdued}>Tell OpenCode what to do differently</text>
+          <text fg={theme.text.subdued}>Tell OpenCode what to do differently</text>
         </box>
       </box>
       <box
@@ -350,7 +341,7 @@ function RejectPrompt(props: {
         paddingLeft={2}
         paddingRight={3}
         paddingBottom={1}
-        backgroundColor={themeV2.raise(themeV2.background.default)}
+        backgroundColor={theme.raise(theme.background.default)}
         justifyContent={narrow() ? "flex-start" : "space-between"}
         alignItems={narrow() ? "flex-start" : "center"}
         gap={1}
@@ -369,9 +360,9 @@ function RejectPrompt(props: {
             val.traits = { status: "REJECT" }
           }}
           focused
-          textColor={themeV2.text.default}
-          focusedTextColor={themeV2.text.default}
-          cursorColor={themeV2.text.default}
+          textColor={theme.text.default}
+          focusedTextColor={theme.text.default}
+          cursorColor={theme.text.default}
         />
         <box
           id="session.permission.reject.actions"
@@ -394,8 +385,8 @@ function RejectPrompt(props: {
             }))}
             onMouseUp={() => props.onConfirm(input.plainText)}
           >
-            <text fg={themeV2.text.default}>
-              enter <span style={{ fg: themeV2.text.subdued }}>confirm</span>
+            <text fg={theme.text.default}>
+              enter <span style={{ fg: theme.text.subdued }}>confirm</span>
             </text>
           </box>
           <box
@@ -408,8 +399,8 @@ function RejectPrompt(props: {
             }))}
             onMouseUp={props.onCancel}
           >
-            <text fg={themeV2.text.default}>
-              esc <span style={{ fg: themeV2.text.subdued }}>cancel</span>
+            <text fg={theme.text.default}>
+              esc <span style={{ fg: theme.text.subdued }}>cancel</span>
             </text>
           </box>
         </box>
@@ -429,7 +420,7 @@ function Prompt<const T extends Record<string, string>>(props: {
   fullscreen?: boolean
   onSelect: (option: keyof T) => void
 }) {
-  const { themeV2 } = useTheme().contextual("elevated")
+  const theme = useTheme("elevated")
   const dimensions = useTerminalDimensions()
   const keys = Object.keys(props.options) as (keyof T)[]
   const [store, setStore] = createStore({
@@ -534,9 +525,9 @@ function Prompt<const T extends Record<string, string>>(props: {
         label: props.semanticLabel ?? props.title,
         expanded: store.expanded,
       }))}
-      backgroundColor={themeV2.background.default}
+      backgroundColor={theme.background.default}
       border={["left"]}
-      borderColor={themeV2.background.action.primary.focused}
+      borderColor={theme.background.action.primary.focused}
       customBorderChars={SplitBorder.customBorderChars}
       {...(store.expanded
         ? { top: dimensions().height * -1 + 1, bottom: 1, left: 2, right: 2, position: "absolute" }
@@ -554,8 +545,8 @@ function Prompt<const T extends Record<string, string>>(props: {
           when={props.header}
           fallback={
             <box flexDirection="row" gap={1} paddingLeft={1} flexShrink={0}>
-              <text fg={themeV2.text.feedback.warning.default}>{"△"}</text>
-              <text fg={themeV2.text.default}>{props.title}</text>
+              <text fg={theme.text.feedback.warning.default}>{"△"}</text>
+              <text fg={theme.text.default}>{props.title}</text>
             </box>
           }
         >
@@ -573,7 +564,7 @@ function Prompt<const T extends Record<string, string>>(props: {
         paddingLeft={2}
         paddingRight={3}
         paddingBottom={1}
-        backgroundColor={themeV2.raise(themeV2.background.default)}
+        backgroundColor={theme.raise(theme.background.default)}
         justifyContent={narrow() ? "flex-start" : "space-between"}
         alignItems={narrow() ? "flex-start" : "center"}
       >
@@ -604,8 +595,8 @@ function Prompt<const T extends Record<string, string>>(props: {
                 paddingRight={1}
                 backgroundColor={
                   option === store.selected
-                    ? themeV2.background.action.primary.focused
-                    : themeV2.background.action.primary.default
+                    ? theme.background.action.primary.focused
+                    : theme.background.action.primary.default
                 }
                 onMouseOver={() => setStore("selected", option)}
                 onMouseUp={() => {
@@ -614,11 +605,7 @@ function Prompt<const T extends Record<string, string>>(props: {
                 }}
               >
                 <text
-                  fg={
-                    option === store.selected
-                      ? themeV2.text.action.primary.focused
-                      : themeV2.text.action.primary.default
-                  }
+                  fg={option === store.selected ? theme.text.action.primary.focused : theme.text.action.primary.default}
                 >
                   {props.options[option]}
                 </text>
@@ -628,15 +615,15 @@ function Prompt<const T extends Record<string, string>>(props: {
         </box>
         <box flexDirection="row" gap={2} flexShrink={0}>
           <Show when={props.fullscreen}>
-            <text fg={themeV2.text.default}>
-              {shortcuts.get("permission.prompt.fullscreen")} <span style={{ fg: themeV2.text.subdued }}>{hint()}</span>
+            <text fg={theme.text.default}>
+              {shortcuts.get("permission.prompt.fullscreen")} <span style={{ fg: theme.text.subdued }}>{hint()}</span>
             </text>
           </Show>
-          <text fg={themeV2.text.default}>
-            {"⇆"} <span style={{ fg: themeV2.text.subdued }}>select</span>
+          <text fg={theme.text.default}>
+            {"⇆"} <span style={{ fg: theme.text.subdued }}>select</span>
           </text>
-          <text fg={themeV2.text.default}>
-            enter <span style={{ fg: themeV2.text.subdued }}>confirm</span>
+          <text fg={theme.text.default}>
+            enter <span style={{ fg: theme.text.subdued }}>confirm</span>
           </text>
         </box>
       </box>
