@@ -642,6 +642,7 @@ function App(props: { pair?: DialogPairCredentials }) {
         category: "Session",
         slash: { name: "new", aliases: ["clear"] },
         run: () => {
+          const selection = local.model.selection()
           route.navigate({
             type: "home",
             location:
@@ -649,6 +650,10 @@ function App(props: { pair?: DialogPairCredentials }) {
                 ? (data.session.get(route.data.sessionID)?.location ?? location.ref)
                 : undefined,
           })
+          if (selection) {
+            local.model.set(selection)
+            local.model.variant.set(selection.variant)
+          }
           dialog.clear()
         },
       },
