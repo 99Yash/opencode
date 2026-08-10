@@ -4,7 +4,6 @@ import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Context, Effect, Layer, Stream } from "effect"
 import { FileSystem } from "@opencode-ai/schema/filesystem"
 import { Document } from "@opencode-ai/schema/config"
-import path from "path"
 import { Config } from "../config"
 import { Bus } from "../bus"
 import { FSUtil } from "@opencode-ai/util/fs-util"
@@ -36,22 +35,29 @@ const layer = Layer.effect(
         .filter((entry): entry is Document => entry.type === "document")
         .flatMap((item) => item.info.watcher?.ignore ?? [])
 
+      const watch = (dir: string, keep: readonly string[]) =>
+        Effect.gen(function* () {
+          const ignore = (yield* fs.readDirectoryEntries(dir).pipe(Effect.catch(() => Effect.succeed([])))).flatMap(
+            (entry) => (keep.includes(entry.name) ? [] : [entry.name]),
+          )
+          const updates = yield* watcher.subscribe({ path: dir, type: "directory", ignore })
+          yield* updates.pipe(Stream.runForEach(publish), Effect.forkScoped)
+        })
+
       if (location.vcs?.type === "git") {
         const resolved = (yield* git.repo.discover(location.directory))?.gitDirectory
         const vcs = resolved
           ? yield* fs.realPath(resolved).pipe(Effect.catch(() => Effect.succeed(resolved)))
           : undefined
         if (vcs && !config.includes(".git") && !config.includes(vcs) && (!resolved || !config.includes(resolved))) {
-          const updates = yield* watcher.subscribe({ path: path.join(vcs, "HEAD"), type: "file" })
-          yield* updates.pipe(Stream.runForEach(publish), Effect.forkScoped)
+          yield* watch(vcs, ["HEAD", "HEAD.lock"])
         }
       }
       if (location.vcs?.type === "hg") {
         const store = location.vcs.store
         const vcs = yield* fs.realPath(store).pipe(Effect.catch(() => Effect.succeed(store)))
         if (!config.includes(".hg") && !config.includes(vcs)) {
-          const updates = yield* watcher.subscribe({ path: path.join(vcs, "branch"), type: "file" })
-          yield* updates.pipe(Stream.runForEach(publish), Effect.forkScoped)
+          yield* watch(vcs, ["branch"])
         }
       }
     }).pipe(

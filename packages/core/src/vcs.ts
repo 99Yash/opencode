@@ -52,7 +52,10 @@ const layer = Layer.effect(
       const store = yield* fs.realPath(vcs.store).pipe(Effect.catch(() => Effect.succeed(vcs.store)))
       const isBranchMetadata =
         vcs.type === "git"
-          ? (file: string) => path.basename(file) === "HEAD" && FSUtil.contains(store, file)
+          ? (file: string) => {
+              const name = path.basename(file)
+              return (name === "HEAD" || name === "HEAD.lock") && FSUtil.contains(store, file)
+            }
           : (file: string) => path.resolve(file) === path.join(store, "branch")
       yield* bus.subscribe(FileSystem.Event.Changed).pipe(
         Stream.filter((event) => isBranchMetadata(event.data.file)),

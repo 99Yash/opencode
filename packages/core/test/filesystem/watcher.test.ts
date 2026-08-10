@@ -195,7 +195,12 @@ describe("LocationWatcher subscriptions", () => {
             Effect.retry(Schedule.spaced("10 millis")),
           )
           yield* Effect.sleep("10 millis")
-          expect(subscriptions).toEqual([{ path: path.join(directory, ".git", "HEAD"), type: "file" }])
+          expect(subscriptions).toHaveLength(1)
+          const git = subscriptions[0]
+          if (git?.type !== "directory") throw new Error("expected a directory watch")
+          expect(git.path).toBe(path.join(directory, ".git"))
+          expect(git.ignore ?? []).not.toContain("HEAD")
+          expect(git.ignore ?? []).toContain("objects")
         }),
       { vcs: "git", watcher },
     )
@@ -218,7 +223,7 @@ describe("LocationWatcher subscriptions", () => {
             Effect.retry(Schedule.spaced("10 millis")),
           )
           yield* Effect.sleep("10 millis")
-          expect(subscriptions).toEqual([{ path: path.join(directory, ".hg", "branch"), type: "file" }])
+          expect(subscriptions).toMatchObject([{ path: path.join(directory, ".hg"), type: "directory" }])
         }),
       { vcs: "hg", watcher },
     )
@@ -346,6 +351,23 @@ describeNative("LocationWatcher", () => {
           expect(
             yield* nextUpdate((event) => event.file === head, fs.writeFileString(head, `ref: refs/heads/${branch}\n`)),
           ).toEqual({ file: head, event: "change" })
+        }),
+      { vcs: "git" },
+    ),
+  )
+
+  it.live("publishes .git/HEAD events from git checkout", () =>
+    withTmp(
+      (directory) =>
+        Effect.gen(function* () {
+          const head = path.join(directory, ".git", "HEAD")
+          const branch = `watch-${Math.random().toString(36).slice(2)}`
+          yield* ready(head)
+          const event = yield* nextUpdate(
+            (item) => path.basename(item.file) === "HEAD" || path.basename(item.file) === "HEAD.lock",
+            Effect.promise(() => $`git checkout -q -b ${branch}`.cwd(directory).quiet()),
+          )
+          expect(["HEAD", "HEAD.lock"]).toContain(path.basename(event.file))
         }),
       { vcs: "git" },
     ),

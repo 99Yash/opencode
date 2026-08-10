@@ -112,7 +112,10 @@ describe("Vcs", () => {
         yield* bus.publish(FileSystem.Event.Changed, { file: path.join(directory, "HEAD"), event: "change" })
         expect(yield* vcs.info()).toEqual({ branch: { current: "main", default: undefined } })
 
-        yield* bus.publish(FileSystem.Event.Changed, { file: path.join(directory, ".git", "HEAD"), event: "change" })
+        yield* bus.publish(FileSystem.Event.Changed, {
+          file: path.join(directory, ".git", "HEAD.lock"),
+          event: "change",
+        })
         expect(yield* Fiber.join(updated)).toMatchObject({
           _tag: "Some",
           value: { location: { directory }, data: { branch: "feature" } },
