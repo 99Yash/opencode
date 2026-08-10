@@ -1,10 +1,9 @@
 import { AISDK } from "@opencode-ai/core/aisdk"
 import { describe, expect } from "bun:test"
-import { Effect, Fiber, Stream } from "effect"
-import { TestClock } from "effect/testing"
-import { Bus } from "@opencode-ai/core/bus"
+import { Effect } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
+import { ModelResolver } from "@opencode-ai/core/model-resolver"
 import { Model } from "@opencode-ai/core/model"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
@@ -19,7 +18,6 @@ const it = testEffect(PluginTestLayer)
 
 const addPlugin = Effect.fn(function* () {
   const plugin = yield* Plugin.Service
-  const aisdk = yield* AISDK.Service
   const host = yield* PluginHost.make(plugin)
   yield* CloudflareWorkersAIPlugin.effect(host)
 })
@@ -106,15 +104,13 @@ describe("CloudflareWorkersAIPlugin", () => {
     ),
   )
 
-  it.effect("maps account ID to endpoint URL and creates an OpenAI-compatible SDK", () =>
+  it.effect("maps the environment account ID to the native endpoint", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_KEY: "key" }, () =>
       Effect.gen(function* () {
-        const plugin = yield* Plugin.Service
-        const aisdk = yield* AISDK.Service
         const catalog = yield* Catalog.Service
         yield* catalog.transform((catalog) =>
           catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
-            provider.package = Provider.aisdk("test-provider")
+            provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
           }),
         )
         yield* addPlugin()
@@ -122,21 +118,10 @@ describe("CloudflareWorkersAIPlugin", () => {
           (yield* (yield* Integration.Service).get(Integration.ID.make("cloudflare-workers-ai")))?.methods,
         ).toContainEqual({ type: "key", label: "API key" })
         const provider = required(yield* catalog.provider.get(Provider.ID.make("cloudflare-workers-ai")))
-        const sdk = yield* aisdk.runSDK({
-          model: Model.Info.make({
-            ...Model.Info.default(Provider.ID.make("cloudflare-workers-ai"), Model.ID.make("@cf/model")),
-            modelID: Model.ID.make("@cf/model"),
-            package: provider.package,
-            settings: provider.settings,
-          }),
-          package: "@ai-sdk/openai-compatible",
-          options: { name: "cloudflare-workers-ai", headers: { custom: "header" } },
-        })
         expect(provider).toMatchObject({
-          package: "aisdk:test-provider",
+          package: "@opencode-ai/ai/providers/cloudflare-workers-ai",
           settings: { baseURL: "https://api.cloudflare.com/client/v4/accounts/acct/ai/v1" },
         })
-        expect(sdk.sdk).toBeDefined()
       }),
     ),
   )
@@ -196,30 +181,32 @@ describe("CloudflareWorkersAIPlugin", () => {
         const catalog = yield* Catalog.Service
         yield* catalog.transform((catalog) =>
           catalog.provider.update(Provider.ID.make("cloudflare-workers-ai"), (provider) => {
-            provider.package = Provider.aisdk("test-provider")
+            provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
             provider.settings = { ...provider.settings, accountId: "configured-acct" }
           }),
         )
         yield* addPlugin()
         expect(required(yield* catalog.provider.get(Provider.ID.make("cloudflare-workers-ai")))).toMatchObject({
-          package: "aisdk:test-provider",
-          settings: { baseURL: "https://api.cloudflare.com/client/v4/accounts/env-acct/ai/v1" },
+          package: "@opencode-ai/ai/providers/cloudflare-workers-ai",
+          settings: {
+            accountId: "configured-acct",
+            baseURL: "https://api.cloudflare.com/client/v4/accounts/env-acct/ai/v1",
+          },
         })
       }),
     ),
   )
 
-  it.effect("reloads provider and model endpoints from a connected account ID", () =>
+  it.effect("passes the connected account ID to the native provider at runtime", () =>
     withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined }, () =>
       Effect.gen(function* () {
-        const bus = yield* Bus.Service
         const catalog = yield* Catalog.Service
-        const integrations = yield* Integration.Service
         const providerID = Provider.ID.make("cloudflare-workers-ai")
         yield* catalog.transform((draft) => {
           draft.provider.update(providerID, (provider) => {
             provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
             provider.settings = {
+              accountId: "configured-acct",
               baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
             }
           })
@@ -232,70 +219,29 @@ describe("CloudflareWorkersAIPlugin", () => {
         })
         yield* addPlugin()
 
-        const updated = yield* bus
-          .subscribe(Catalog.Event.Updated)
-          .pipe(Stream.take(1), Stream.runHead, Effect.forkScoped({ startImmediately: true }))
-        yield* Effect.yieldNow
-        yield* integrations.connection.key({
-          integrationID: Integration.ID.make(providerID),
-          key: "secret",
-          answer: { accountId: "connected-acct" },
-        })
-        yield* Effect.yieldNow
-        yield* TestClock.adjust(500)
-        yield* Fiber.join(updated)
-
-        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
-          "https://api.cloudflare.com/client/v4/accounts/connected-acct/ai/v1",
-        )
-        expect(required(yield* catalog.model.get(providerID, Model.ID.make("@cf/model"))).settings?.baseURL).toBe(
-          "https://api.cloudflare.com/client/v4/accounts/model-acct/ai/v1",
-        )
-      }),
-    ),
-  )
-
-  it.effect("loads a connected account at startup and restores the template after removal", () =>
-    withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined }, () =>
-      Effect.gen(function* () {
-        const bus = yield* Bus.Service
-        const catalog = yield* Catalog.Service
-        const credentials = yield* Credential.Service
-        const integrations = yield* Integration.Service
-        const providerID = Provider.ID.make("cloudflare-workers-ai")
-        yield* catalog.transform((draft) =>
-          draft.provider.update(providerID, (provider) => {
-            provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
-            provider.settings = {
-              baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
-            }
-          }),
-        )
-        const credential = yield* credentials.create({
-          integrationID: Integration.ID.make(providerID),
-          value: Credential.Key.make({
+        const selected = required(yield* catalog.model.get(providerID, Model.ID.make("@cf/model")))
+        const { model } = yield* Effect.promise(() => import("@opencode-ai/ai/providers/cloudflare-workers-ai"))
+        const resolved = yield* ModelResolver.fromCatalogModel(
+          selected,
+          Credential.Key.make({
             type: "key",
             key: "secret",
-            configuration: { accountId: "startup-acct" },
+            configuration: { accountId: "connected-acct" },
           }),
-        })
-        yield* addPlugin()
-
-        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
-          "https://api.cloudflare.com/client/v4/accounts/startup-acct/ai/v1",
+          { loadPackage: () => Effect.succeed({ model }) },
         )
 
-        const updated = yield* bus
-          .subscribe(Catalog.Event.Updated)
-          .pipe(Stream.take(1), Stream.runHead, Effect.forkScoped({ startImmediately: true }))
-        yield* Effect.yieldNow
-        yield* integrations.connection.remove(credential.id)
-        yield* Effect.yieldNow
-        yield* TestClock.adjust(500)
-        yield* Fiber.join(updated)
-
-        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
-          "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+        expect(required(yield* catalog.provider.get(providerID))).toMatchObject({
+          package: "@opencode-ai/ai/providers/cloudflare-workers-ai",
+          settings: { accountId: "configured-acct" },
+        })
+        expect(selected).toMatchObject({
+          package: "@opencode-ai/ai/providers/cloudflare-workers-ai",
+          settings: { accountId: "model-acct" },
+        })
+        expect(selected.settings).not.toHaveProperty("baseURL")
+        expect(resolved.route.endpoint.baseURL).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/connected-acct/ai/v1",
         )
       }),
     ),
