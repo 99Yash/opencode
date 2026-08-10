@@ -18,10 +18,11 @@ test("validates mini replay settings", () => {
 test("validates the session tabs setting", () => {
   const decode = Schema.decodeUnknownSync(Info)
 
-  expect(decode({ tabs: { enabled: true, layout: "vertical" } })).toEqual({
-    tabs: { enabled: true, layout: "vertical" },
+  expect(decode({ tabs: { enabled: true, position: "right" } })).toEqual({
+    tabs: { enabled: true, position: "right" },
   })
-  expect(() => decode({ tabs: { layout: true } })).toThrow()
+  expect(() => decode({ tabs: { position: "vertical" } })).toThrow()
+  expect(() => decode({ tabs: { position: true } })).toThrow()
   expect(() => decode({ tabs: { enabled: "on" } })).toThrow()
 })
 
@@ -42,13 +43,15 @@ test("resolves nested config and keybind defaults", () => {
   expect(config.scroll).toEqual({ speed: 2, acceleration: true })
   expect(config.diffs).toEqual({ view: "split" })
   expect(config.debug).toEqual({ devtools: true })
-  expect(config.tabs).toEqual({ enabled: true, scope: "cwd", layout: "horizontal" })
+  expect(config.tabs).toEqual({ enabled: true, scope: "cwd", position: "top" })
 })
 
 test("shows resolved tab defaults in settings", () => {
   expect(settings.find((setting) => setting.path.join(".") === "tabs.enabled")?.default).toBe(true)
   expect(settings.find((setting) => setting.path.join(".") === "tabs.scope")?.default).toBe("cwd")
-  expect(settings.find((setting) => setting.path.join(".") === "tabs.layout")?.default).toBe("horizontal")
+  const position = settings.find((setting) => setting.path.join(".") === "tabs.position")
+  expect(position?.default).toBe("top")
+  expect(position?.values).toEqual(["top", "bottom", "left", "right"])
 })
 
 test("provides config and its host interface", async () => {

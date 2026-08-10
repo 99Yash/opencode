@@ -70,7 +70,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogOpen } from "./component/dialog-open"
 import { SessionTabs } from "./component/session-tabs"
-import { sessionTabsFitVertically } from "./ui/layout"
+import { effectiveSessionTabPosition } from "./ui/layout"
 import { ThemeErrorToast } from "./component/theme-error-toast"
 import { ThemeProvider, useTheme, useThemes } from "./context/theme"
 import { Home } from "./routes/home"
@@ -513,7 +513,7 @@ function App(props: { pair?: DialogPairCredentials }) {
   const terminalTitleEnabled = () => config.data.terminal?.title ?? true
   const copyOnSelectEnabled = () => config.data.terminal?.copy_on_select ?? process.platform !== "win32"
   const pasteSummaryEnabled = () => config.data.prompt?.paste !== "full"
-  const tabsVertical = () => config.data.tabs.layout === "vertical" && sessionTabsFitVertically(dimensions().width)
+  const tabPosition = () => effectiveSessionTabPosition(config.data.tabs.position, dimensions().width)
   const tabsVisible = () =>
     sessionTabs.enabled() && (sessionTabs.tabs().length > 0 || sessionTabs.newTab()) && route.data.type !== "plugin"
 
@@ -1198,13 +1198,13 @@ function App(props: { pair?: DialogPairCredentials }) {
       onMouseUp={copyOnSelectEnabled() ? () => Selection.copy(renderer, toast, clipboard) : undefined}
     >
       <box flexGrow={1} minHeight={0} flexDirection="row">
-        <Show when={tabsVisible() && tabsVertical()}>
+        <Show when={tabsVisible() && tabPosition() === "left"}>
           <SessionTabs orientation="vertical" />
         </Show>
         <box flexGrow={1} minWidth={0} flexDirection="column">
           <Show when={plugins.ready()}>
             <box flexGrow={1} minHeight={0} flexDirection="column">
-              <Show when={tabsVisible() && !tabsVertical()}>
+              <Show when={tabsVisible() && tabPosition() === "top"}>
                 <SessionTabs />
               </Show>
               <Switch>
@@ -1224,10 +1224,16 @@ function App(props: { pair?: DialogPairCredentials }) {
                   />
                 </Match>
               </Switch>
+              <Show when={tabsVisible() && tabPosition() === "bottom"}>
+                <SessionTabs />
+              </Show>
             </box>
             <PluginSlot name="app" input={{}} mode="all" />
           </Show>
         </box>
+        <Show when={tabsVisible() && tabPosition() === "right"}>
+          <SessionTabs orientation="vertical" />
+        </Show>
       </box>
       <Show when={devtools()}>
         <DevToolsBar />
