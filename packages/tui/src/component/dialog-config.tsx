@@ -1,5 +1,5 @@
 import { createMemo, createSignal } from "solid-js"
-import { useConfig } from "../config"
+import { TabPosition, useConfig } from "../config"
 import { useThemes } from "../context/theme"
 import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
@@ -105,7 +105,7 @@ export const settings: Setting[] = [
     category: "Tabs",
     path: ["tabs", "position"],
     default: "top",
-    values: ["top", "bottom", "left", "right"],
+    values: TabPosition.literals,
     keywords: ["sidebar", "orientation", "layout"],
   },
   {

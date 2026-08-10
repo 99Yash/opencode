@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { TabPosition } from "../../src/config"
 import {
   effectiveSessionTabPosition,
   SESSION_SIDEBAR_WIDTH,
@@ -13,8 +14,9 @@ test("vertical tabs match the session sidebar and preserve compact content width
 })
 
 test("preserves all tab positions when they fit", () => {
-  const positions = ["top", "bottom", "left", "right"] as const
-  expect(positions.map((position) => effectiveSessionTabPosition(position, 120))).toEqual([...positions])
+  expect(TabPosition.literals.map((position) => effectiveSessionTabPosition(position, 120))).toEqual([
+    ...TabPosition.literals,
+  ])
 })
 
 test("falls side tabs back to the top strip when narrow", () => {

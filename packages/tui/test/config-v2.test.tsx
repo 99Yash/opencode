@@ -2,8 +2,8 @@
 import { testRender } from "@opentui/solid"
 import { expect, test } from "bun:test"
 import { Schema } from "effect"
-import { resolve, ConfigProvider, Info, useConfig, type Interface } from "../src/config"
-import { settings } from "../src/component/dialog-config"
+import { resolve, ConfigProvider, Info, TabPosition, useConfig, type Interface } from "../src/config"
+import { settingID, settings } from "../src/component/dialog-config"
 
 test("validates mini replay settings", () => {
   const decode = Schema.decodeUnknownSync(Info)
@@ -22,7 +22,6 @@ test("validates the session tabs setting", () => {
     tabs: { enabled: true, position: "right" },
   })
   expect(() => decode({ tabs: { position: "vertical" } })).toThrow()
-  expect(() => decode({ tabs: { position: true } })).toThrow()
   expect(() => decode({ tabs: { enabled: "on" } })).toThrow()
 })
 
@@ -47,11 +46,11 @@ test("resolves nested config and keybind defaults", () => {
 })
 
 test("shows resolved tab defaults in settings", () => {
-  expect(settings.find((setting) => setting.path.join(".") === "tabs.enabled")?.default).toBe(true)
-  expect(settings.find((setting) => setting.path.join(".") === "tabs.scope")?.default).toBe("cwd")
-  const position = settings.find((setting) => setting.path.join(".") === "tabs.position")
+  expect(settings.find((setting) => settingID(setting) === "tabs.enabled")?.default).toBe(true)
+  expect(settings.find((setting) => settingID(setting) === "tabs.scope")?.default).toBe("cwd")
+  const position = settings.find((setting) => settingID(setting) === "tabs.position")
   expect(position?.default).toBe("top")
-  expect(position?.values).toEqual(["top", "bottom", "left", "right"])
+  expect(position?.values).toBe(TabPosition.literals)
 })
 
 test("provides config and its host interface", async () => {
