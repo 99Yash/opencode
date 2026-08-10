@@ -65,10 +65,11 @@ export const CloudflareWorkersAIPlugin = define({
       })
       for (const model of item.models.values()) {
         if (typeof model.settings?.baseURL !== "string") continue
+        const modelAccountId = resolveAccountId(model.settings, accountId)
         evt.model.update(item.provider.id, model.id, (draft) => {
           draft.settings = {
             ...draft.settings,
-            baseURL: expandAccountId(draft.settings?.baseURL, accountId),
+            baseURL: expandAccountId(draft.settings?.baseURL, modelAccountId),
           }
         })
       }

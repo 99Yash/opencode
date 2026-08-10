@@ -4,6 +4,7 @@ import { Effect, Fiber, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { Bus } from "@opencode-ai/core/bus"
 import { Catalog } from "@opencode-ai/core/catalog"
+import { Credential } from "@opencode-ai/core/credential"
 import { Model } from "@opencode-ai/core/model"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
@@ -224,6 +225,7 @@ describe("CloudflareWorkersAIPlugin", () => {
           })
           draft.model.update(providerID, Model.ID.make("@cf/model"), (model) => {
             model.settings = {
+              accountId: "model-acct",
               baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
             }
           })
@@ -247,7 +249,53 @@ describe("CloudflareWorkersAIPlugin", () => {
           "https://api.cloudflare.com/client/v4/accounts/connected-acct/ai/v1",
         )
         expect(required(yield* catalog.model.get(providerID, Model.ID.make("@cf/model"))).settings?.baseURL).toBe(
-          "https://api.cloudflare.com/client/v4/accounts/connected-acct/ai/v1",
+          "https://api.cloudflare.com/client/v4/accounts/model-acct/ai/v1",
+        )
+      }),
+    ),
+  )
+
+  it.effect("loads a connected account at startup and restores the template after removal", () =>
+    withEnv({ CLOUDFLARE_ACCOUNT_ID: undefined }, () =>
+      Effect.gen(function* () {
+        const bus = yield* Bus.Service
+        const catalog = yield* Catalog.Service
+        const credentials = yield* Credential.Service
+        const integrations = yield* Integration.Service
+        const providerID = Provider.ID.make("cloudflare-workers-ai")
+        yield* catalog.transform((draft) =>
+          draft.provider.update(providerID, (provider) => {
+            provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
+            provider.settings = {
+              baseURL: "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
+            }
+          }),
+        )
+        const credential = yield* credentials.create({
+          integrationID: Integration.ID.make(providerID),
+          value: Credential.Key.make({
+            type: "key",
+            key: "secret",
+            configuration: { accountId: "startup-acct" },
+          }),
+        })
+        yield* addPlugin()
+
+        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/startup-acct/ai/v1",
+        )
+
+        const updated = yield* bus
+          .subscribe(Catalog.Event.Updated)
+          .pipe(Stream.take(1), Stream.runHead, Effect.forkScoped({ startImmediately: true }))
+        yield* Effect.yieldNow
+        yield* integrations.connection.remove(credential.id)
+        yield* Effect.yieldNow
+        yield* TestClock.adjust(500)
+        yield* Fiber.join(updated)
+
+        expect(required(yield* catalog.provider.get(providerID)).settings?.baseURL).toBe(
+          "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/v1",
         )
       }),
     ),
