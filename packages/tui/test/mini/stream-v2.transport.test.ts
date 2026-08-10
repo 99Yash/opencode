@@ -1496,7 +1496,7 @@ describe("V2 mini transport", () => {
     await transport.interruptActiveTurn()
 
     expect(prompt).toHaveBeenCalled()
-    expect(interrupt).toHaveBeenCalledWith({ sessionID: "ses_1" })
+    expect(interrupt).toHaveBeenCalledWith({ sessionID: "ses_1", continue: true })
     expect(firstPrompt).not.toHaveBeenCalled()
     expect(firstInterrupt).not.toHaveBeenCalled()
     await transport.close()
@@ -2315,7 +2315,7 @@ describe("V2 mini transport", () => {
     idle.resolve()
     await turn
 
-    expect(interrupted).toHaveBeenCalledWith({ sessionID: "ses_1" })
+    expect(interrupted).toHaveBeenCalledWith({ sessionID: "ses_1", continue: true })
     await transport.close()
   })
 
