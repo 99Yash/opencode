@@ -285,9 +285,8 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
           cacheWrite: undefined,
         },
         outputTokens: {
-          total: responseBody.usage?.completion_tokens ?? undefined,
+          ...outputUsage(responseBody.usage),
           text: undefined,
-          reasoning: responseBody.usage?.completion_tokens_details?.reasoning_tokens ?? undefined,
         },
         raw: responseBody.usage ?? undefined,
       },
@@ -425,18 +424,16 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             if (value.usage != null) {
               const {
                 prompt_tokens,
-                completion_tokens,
                 total_tokens,
                 prompt_tokens_details,
                 completion_tokens_details,
               } = value.usage
 
               usage.promptTokens = prompt_tokens ?? undefined
-              usage.completionTokens = completion_tokens ?? undefined
+              const output = outputUsage(value.usage)
+              usage.completionTokens = output.total
+              usage.completionTokensDetails.reasoningTokens = output.reasoning
               usage.totalTokens = total_tokens ?? undefined
-              if (completion_tokens_details?.reasoning_tokens != null) {
-                usage.completionTokensDetails.reasoningTokens = completion_tokens_details?.reasoning_tokens
-              }
               if (completion_tokens_details?.accepted_prediction_tokens != null) {
                 usage.completionTokensDetails.acceptedPredictionTokens =
                   completion_tokens_details?.accepted_prediction_tokens
@@ -727,6 +724,7 @@ const openaiCompatibleTokenUsageSchema = z
   .object({
     prompt_tokens: z.number().nullish(),
     completion_tokens: z.number().nullish(),
+    reasoning_tokens: z.number().nullish(),
     total_tokens: z.number().nullish(),
     prompt_tokens_details: z
       .object({
@@ -742,6 +740,17 @@ const openaiCompatibleTokenUsageSchema = z
       .nullish(),
   })
   .nullish()
+
+function outputUsage(usage: z.infer<typeof openaiCompatibleTokenUsageSchema>) {
+  const nested = usage?.completion_tokens_details?.reasoning_tokens
+  return {
+    total:
+      usage?.completion_tokens == null
+        ? undefined
+        : usage.completion_tokens + (nested == null ? (usage.reasoning_tokens ?? 0) : 0),
+    reasoning: nested ?? usage?.reasoning_tokens ?? undefined,
+  }
+}
 
 // limited version of the schema, focussed on what is needed for the implementation
 // this approach limits breakages when the API changes and increases efficiency
