@@ -1039,7 +1039,7 @@ describe("V1Migration database workflow", () => {
     )
   })
 
-  test("rolls back one session atomically and resumes from the committed cursor", async () => {
+  test("deletes events only in each successfully checkpointed session transaction", async () => {
     await database(
       Effect.gen(function* () {
         const { db } = yield* Database.Service
@@ -1057,9 +1057,19 @@ describe("V1Migration database workflow", () => {
         yield* db.run(
           sql`INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES ('msg_stale_b', 'ses_b', 'user', 0, 7, 8, '{"text":"stale","time":{"created":7}}')`,
         )
-        yield* db.run(sql`INSERT INTO event_sequence (aggregate_id, seq, owner_id) VALUES ('ses_b', 7, 'owner')`)
+        yield* db.run(sql`
+          INSERT INTO event_sequence (aggregate_id, seq, owner_id) VALUES
+            ('ses_a', 7, 'owner'),
+            ('ses_b', 7, 'owner'),
+            ('ses_c', 7, 'owner'),
+            ('ses_unrelated', 7, 'owner')
+        `)
         yield* db.run(
-          sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_stale_b', 'ses_b', 7, 1, 'session.renamed.1', '{}')`,
+          sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES
+            ('event_stale_a', 'ses_a', 7, 1, 'session.renamed.1', '{}'),
+            ('event_stale_b', 'ses_b', 7, 1, 'session.renamed.1', '{}'),
+            ('event_stale_c', 'ses_c', 7, 1, 'session.renamed.1', '{}'),
+            ('event_unrelated', 'ses_unrelated', 7, 1, 'session.renamed.1', '{}')`,
         )
         yield* Layer.launch(V1Migration.layer).pipe(Effect.forkScoped)
         const failed = yield* V1Migration.status().pipe(
@@ -1091,13 +1101,14 @@ describe("V1Migration database workflow", () => {
           seq: 7,
           owner_id: "owner",
         })
-        expect(yield* db.all(sql`SELECT id FROM event WHERE aggregate_id = 'ses_b'`)).toEqual([])
+        expect(yield* db.all(sql`SELECT id FROM event ORDER BY id`)).toEqual([
+          { id: "event_stale_a" },
+          { id: "event_stale_b" },
+          { id: "event_unrelated" },
+        ])
         expect(yield* db.get(sql`SELECT value FROM kv WHERE key = 'migration.v1-v2'`)).toEqual({
           value: '{"phase":"sessions","cursor":"ses_c"}',
         })
-        yield* db.run(
-          sql`INSERT INTO event (id, aggregate_id, seq, created, type, data) VALUES ('event_after_clear', 'ses_c', 0, 2, 'session.renamed.1', '{}')`,
-        )
         yield* db.run(sql`DROP TRIGGER fail_b`)
         yield* Layer.launch(V1Migration.layer).pipe(Effect.forkScoped)
         yield* V1Migration.status().pipe(
@@ -1110,7 +1121,7 @@ describe("V1Migration database workflow", () => {
           seq: -1,
           owner_id: null,
         })
-        expect(yield* db.all(sql`SELECT id FROM event`)).toEqual([{ id: "event_after_clear" }])
+        expect(yield* db.all(sql`SELECT id FROM event`)).toEqual([{ id: "event_unrelated" }])
       }),
     )
   })

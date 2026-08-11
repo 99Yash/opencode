@@ -440,7 +440,7 @@ export function status(): Effect.Effect<Status, never, Database.Service> {
 
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
-    runtimeState = { status: "running", progress: { label: "Clearing old events" } }
+    runtimeState = { status: "running", progress: { label: "Migrating sessions" } }
     yield* run().pipe(
       Effect.matchCauseEffect({
         onFailure: (cause) =>
@@ -485,7 +485,6 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
           yield* db
             .transaction((tx) =>
               Effect.gen(function* () {
-                yield* tx.delete(EventTable).run()
                 yield* tx
                   .insert(KVTable)
                   .values({ key: MIGRATION_STATE_KEY, value: { phase: "sessions" } })
@@ -567,6 +566,7 @@ export function run(options: Options = {}): Effect.Effect<RunResult, never, Data
                 yield* Effect.forEach(transformed.warnings, (warning) =>
                   Effect.logWarning("Skipped V1 migration row", warning),
                 )
+                yield* tx.delete(EventTable).where(eq(EventTable.aggregate_id, next.id)).run()
                 yield* tx.delete(SessionMessageTable).where(eq(SessionMessageTable.session_id, next.id)).run()
                 yield* Effect.forEach(transformed.messages, (message) =>
                   tx.run(sql`
