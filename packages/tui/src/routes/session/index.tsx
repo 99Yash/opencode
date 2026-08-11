@@ -2240,41 +2240,53 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
   const theme = useTheme()
   const { currentSyntax: syntax } = useThemes()
   const plugins = usePlugin()
-  const segments = createMemo(() => markdownLanes(props.part.text.trim()))
+  const constrained = () => (ctx.config.session?.max_width ?? "auto") !== "auto"
+
+  function Content(input: { content: string }) {
+    return (
+      <box paddingLeft={3} flexShrink={0}>
+        <markdown
+          syntaxStyle={syntax()}
+          streaming={true}
+          internalBlockMode="top-level"
+          content={input.content.trim()}
+          tableOptions={{ style: "grid" }}
+          conceal={ctx.markdownMode() === "rendered"}
+          fg={theme.markdown.text}
+          bg={theme.background.default}
+          renderNode={plugins.markdown()}
+        />
+      </box>
+    )
+  }
+
   return (
     <Show when={props.part.text.trim()}>
-      <Index each={segments()}>
-        {(segment, index) => {
-          const content = (
-            <box paddingLeft={3} flexShrink={0}>
-              <markdown
-                syntaxStyle={syntax()}
-                streaming={true}
-                internalBlockMode="top-level"
-                content={segment().content.trim()}
-                tableOptions={{ style: "grid" }}
-                conceal={ctx.markdownMode() === "rendered"}
-                fg={theme.markdown.text}
-                bg={theme.background.default}
-                renderNode={plugins.markdown()}
-              />
-            </box>
-          )
-          return (
-            <box width="100%" marginTop={markdownLaneMarginTop(index, segment().width)} flexShrink={0}>
-              <Switch>
-                <Match when={segment().width === "wide"}>{content}</Match>
-                <Match when={segment().width === "code"}>
-                  <SessionContentLane width="code">{content}</SessionContentLane>
-                </Match>
-                <Match when={segment().width === "readable"}>
-                  <SessionContentLane width="readable">{content}</SessionContentLane>
-                </Match>
-              </Switch>
-            </box>
-          )
-        }}
-      </Index>
+      <Switch>
+        <Match when={!constrained()}>
+          <Content content={props.part.text} />
+        </Match>
+        <Match when={constrained()}>
+          <Index each={markdownLanes(props.part.text.trim())}>
+            {(segment, index) => {
+              const content = <Content content={segment().content} />
+              return (
+                <box width="100%" marginTop={markdownLaneMarginTop(index, segment().width)} flexShrink={0}>
+                  <Switch>
+                    <Match when={segment().width === "wide"}>{content}</Match>
+                    <Match when={segment().width === "code"}>
+                      <SessionContentLane width="code">{content}</SessionContentLane>
+                    </Match>
+                    <Match when={segment().width === "readable"}>
+                      <SessionContentLane width="readable">{content}</SessionContentLane>
+                    </Match>
+                  </Switch>
+                </box>
+              )
+            }}
+          </Index>
+        </Match>
+      </Switch>
     </Show>
   )
 }
