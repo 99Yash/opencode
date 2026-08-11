@@ -205,6 +205,12 @@ describe("doStream", () => {
       usage: {
         inputTokens: { total: 19581 },
         outputTokens: { total: 187, reasoning: 134 },
+        raw: {
+          prompt_tokens: 19581,
+          completion_tokens: 53,
+          reasoning_tokens: 134,
+          total_tokens: 19768,
+        },
       },
     })
   })

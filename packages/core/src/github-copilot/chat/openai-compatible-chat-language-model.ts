@@ -356,6 +356,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         cachedTokens: number | undefined
       }
       totalTokens: number | undefined
+      raw: NonNullable<z.infer<typeof openaiCompatibleTokenUsageSchema>> | undefined
     } = {
       completionTokens: undefined,
       completionTokensDetails: {
@@ -368,6 +369,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         cachedTokens: undefined,
       },
       totalTokens: undefined,
+      raw: undefined,
     }
     let isFirstChunk = true
     const providerOptionsName = this.providerOptionsName
@@ -422,6 +424,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             }
 
             if (value.usage != null) {
+              usage.raw = value.usage
               const {
                 prompt_tokens,
                 total_tokens,
@@ -703,11 +706,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
                   text: undefined,
                   reasoning: usage.completionTokensDetails.reasoningTokens,
                 },
-                raw: {
-                  prompt_tokens: usage.promptTokens ?? null,
-                  completion_tokens: usage.completionTokens ?? null,
-                  total_tokens: usage.totalTokens ?? null,
-                },
+                raw: usage.raw,
               },
               providerMetadata,
             })
