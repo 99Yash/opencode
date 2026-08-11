@@ -356,7 +356,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         cachedTokens: number | undefined
       }
       totalTokens: number | undefined
-      raw: NonNullable<z.infer<typeof openaiCompatibleTokenUsageSchema>> | undefined
+      rawCompletionTokens: number | undefined
     } = {
       completionTokens: undefined,
       completionTokensDetails: {
@@ -369,7 +369,7 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
         cachedTokens: undefined,
       },
       totalTokens: undefined,
-      raw: undefined,
+      rawCompletionTokens: undefined,
     }
     let isFirstChunk = true
     const providerOptionsName = this.providerOptionsName
@@ -424,15 +424,16 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
             }
 
             if (value.usage != null) {
-              usage.raw = value.usage
               const {
                 prompt_tokens,
+                completion_tokens,
                 total_tokens,
                 prompt_tokens_details,
                 completion_tokens_details,
               } = value.usage
 
               usage.promptTokens = prompt_tokens ?? undefined
+              usage.rawCompletionTokens = completion_tokens ?? undefined
               const output = outputUsage(value.usage)
               usage.completionTokens = output.total
               usage.completionTokensDetails.reasoningTokens = output.reasoning
@@ -706,7 +707,11 @@ export class OpenAICompatibleChatLanguageModel implements LanguageModelV3 {
                   text: undefined,
                   reasoning: usage.completionTokensDetails.reasoningTokens,
                 },
-                raw: usage.raw,
+                raw: {
+                  prompt_tokens: usage.promptTokens ?? null,
+                  completion_tokens: usage.rawCompletionTokens ?? null,
+                  total_tokens: usage.totalTokens ?? null,
+                },
               },
               providerMetadata,
             })
