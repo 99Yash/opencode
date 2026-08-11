@@ -33,7 +33,7 @@ async function discoverLocal(options: DiscoverOptions) {
 /** Ensure a healthy, compatible local service is running. */
 export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   const deadline = Date.now() + 120_000
-  const contenders = new Set<Contender>()
+  let contender: Contender | undefined
   let timeouts: { readonly info: Info; readonly count: number } | undefined
   let announced = false
   let lastSpawn = 0
@@ -89,17 +89,16 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
       }
     } else {
       if (lastSpawn === 0 && registration.info !== undefined) lastSpawn = Date.now()
-      const finished = [...contenders].filter(contenderFinished)
-      const failure = finished.map(contenderFailure).find((error) => error !== undefined)
-      if (finished.some((item) => item.child.exitCode === 0)) {
+      const finished = contender !== undefined && contenderFinished(contender) ? contender : undefined
+      const failure = finished === undefined ? undefined : contenderFailure(finished)
+      if (finished?.child.exitCode === 0) {
         spawnDelay = Math.min(spawnDelay * 2, 30_000)
       }
-      finished.forEach((item) => contenders.delete(item))
-      if (failure !== undefined && contenders.size === 0) throw failure
-      // Keep one candidate plus one lock probe so a pre-lock stall cannot block recovery.
-      if (contenders.size < 2 && Date.now() - lastSpawn >= spawnDelay) {
+      if (finished !== undefined) contender = undefined
+      if (failure !== undefined) throw failure
+      if (contender === undefined && Date.now() - lastSpawn >= spawnDelay) {
         announce("missing")
-        contenders.add(spawnContender())
+        contender = spawnContender()
         lastSpawn = Date.now()
       }
     }
@@ -169,7 +168,7 @@ async function probeResult(info: Info, allowLegacy = false) {
         ? undefined
         : { type: "basic" as const, username: "opencode", password: info.password },
   } satisfies Endpoint
-  const signal = AbortSignal.timeout(2_000)
+  const signal = AbortSignal.timeout(10_000)
   const result = await fetch(new URL("/api/health", info.url), {
     headers: headers(endpoint),
     signal,

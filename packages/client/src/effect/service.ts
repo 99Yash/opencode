@@ -48,11 +48,11 @@ const discoverLocal = Effect.fnUntraced(function* (options: DiscoverOptions) {
 })
 
 // Idempotent ensure-running: reuses a healthy compatible server, replaces a
-// version-mismatched one, and otherwise spawns small contenders until a server
-// becomes discoverable. A contender is never killed merely for slow startup.
+// version-mismatched one, and otherwise spawns one contender until a server
+// becomes discoverable. The contender is never killed merely for slow startup.
 /** Ensure a healthy, compatible local service is running. */
 export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOptions = {}) {
-  const contenders = new Set<Contender>()
+  let contender: Contender | undefined
   let timeouts: { readonly info: Info; readonly count: number } | undefined
   let announced = false
   let lastSpawn = 0
@@ -108,17 +108,16 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       return Option.none<LocalService>()
     } else if (lastSpawn === 0 && info !== undefined) lastSpawn = Date.now()
 
-    const finished = [...contenders].filter(contenderFinished)
-    const failure = finished.map(contenderFailure).find((error): error is Error => error !== undefined)
-    if (finished.some((item) => item.child.exitCode === 0)) {
+    const finished = contender !== undefined && contenderFinished(contender) ? contender : undefined
+    const failure = finished === undefined ? undefined : contenderFailure(finished)
+    if (finished?.child.exitCode === 0) {
       spawnDelay = Math.min(spawnDelay * 2, 30_000)
     }
-    finished.forEach((item) => contenders.delete(item))
-    if (failure !== undefined && contenders.size === 0) return yield* Effect.fail(failure)
-    // Keep one candidate plus one lock probe so a pre-lock stall cannot block recovery.
-    if (contenders.size < 2 && Date.now() - lastSpawn >= spawnDelay) {
+    if (finished !== undefined) contender = undefined
+    if (failure !== undefined) return yield* Effect.fail(failure)
+    if (contender === undefined && Date.now() - lastSpawn >= spawnDelay) {
       yield* announce("missing")
-      contenders.add(yield* spawnContender)
+      contender = yield* spawnContender
       lastSpawn = Date.now()
     }
     return Option.none<LocalService>()
@@ -206,7 +205,7 @@ const probeResult = Effect.fnUntraced(function* (info: Info, allowLegacy = false
         ? undefined
         : { type: "basic" as const, username: "opencode", password: info.password },
   } satisfies Endpoint
-  const signal = AbortSignal.timeout(2_000)
+  const signal = AbortSignal.timeout(10_000)
   const result = yield* Effect.promise(() =>
     fetch(new URL("/api/health", info.url), {
       headers: headers(endpoint),
