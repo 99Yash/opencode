@@ -205,7 +205,7 @@ const probeResult = Effect.fnUntraced(function* (info: Info, allowLegacy = false
         ? undefined
         : { type: "basic" as const, username: "opencode", password: info.password },
   } satisfies Endpoint
-  const signal = AbortSignal.timeout(10_000)
+  const signal = AbortSignal.timeout(3_000)
   const result = yield* Effect.promise(() =>
     fetch(new URL("/api/health", info.url), {
       headers: headers(endpoint),

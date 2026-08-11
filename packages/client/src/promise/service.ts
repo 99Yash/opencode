@@ -168,7 +168,7 @@ async function probeResult(info: Info, allowLegacy = false) {
         ? undefined
         : { type: "basic" as const, username: "opencode", password: info.password },
   } satisfies Endpoint
-  const signal = AbortSignal.timeout(10_000)
+  const signal = AbortSignal.timeout(3_000)
   const result = await fetch(new URL("/api/health", info.url), {
     headers: headers(endpoint),
     signal,

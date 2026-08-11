@@ -76,7 +76,7 @@ test("evicts an unresponsive registered service before starting its replacement"
   expect(endpoint.url).toBe(replacement.url)
   process.kill(replacement.pid, "SIGTERM")
   await waitForExit(replacement.pid)
-}, 45_000)
+}, 30_000)
 
 test("requests graceful stop of the exact service instance", async () => {
   const registration = await setup("graceful")

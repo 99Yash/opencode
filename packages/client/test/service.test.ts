@@ -92,7 +92,7 @@ test("evicts an unresponsive registered service before starting its replacement"
   expect(endpoint.url).toBe(replacement.url)
   expect(await health(endpoint.url)).toEqual({ healthy: true, version: "test", pid: replacement.pid })
   process.kill(replacement.pid, "SIGTERM")
-}, 45_000)
+}, 30_000)
 
 test("requests graceful stop of the exact service instance", async () => {
   const directory = await temp()
