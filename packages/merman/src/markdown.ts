@@ -61,7 +61,7 @@ class StaticDiagramRenderable extends BoxRenderable {
   constructor(ctx: RenderContext, prepared: PreparedDiagram) {
     super(ctx, {
       width: "100%",
-      alignItems: "center",
+      alignItems: "flex-start",
       flexShrink: 0,
       marginTop: 1,
     })

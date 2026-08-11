@@ -68,7 +68,7 @@ import { errorMessage } from "../../util/error"
 import { useToast } from "../../ui/toast"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
-import { sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
+import { sessionLaneLayout, sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
 import { projectedPromptInput } from "../../prompt/codec"
 import { deduplicateVisibleImages } from "../../prompt/attachment"
 import { useEpilogue } from "../../context/epilogue"
@@ -115,9 +115,6 @@ addDefaultParsers(parsers.parsers)
 // Exclude temporary bottom space when measuring the real transcript height.
 const NAVIGATION_SLACK_ID = "session-navigation-slack"
 const BACKGROUND_TOOL_HINT_DELAY = 1_000
-// The assistant inset leaves 85 columns for code, matching common documentation guidance.
-const SESSION_TECHNICAL_LANE_WIDTH = 88
-
 // Tail-first transcript mounting: rows mounted with the session, then backfill cadence.
 // The tail comfortably overfills a tall viewport; backfill drains a 200-message transcript
 // in a few hundred milliseconds without a perceptible pause.
@@ -1238,17 +1235,35 @@ function SessionRowView(props: SessionRowViewProps) {
 
 function SessionContentLane(props: { children: JSX.Element; width: "readable" | "technical" }) {
   const ctx = use()
-  const maxWidth = createMemo(() => {
-    const readable = ctx.config.session?.max_width ?? "auto"
-    if (readable === "auto" || props.width === "readable") return readable
-    return Math.max(readable, SESSION_TECHNICAL_LANE_WIDTH)
+  const readable = () => ctx.config.session?.max_width ?? "auto"
+  const layout = createMemo(() => {
+    const width = readable()
+    return width === "auto" ? undefined : sessionLaneLayout(ctx.width, width)
   })
   return (
-    <Show when={maxWidth() !== "auto"} fallback={props.children}>
-      <box width="100%" alignItems="center" flexShrink={0}>
-        <box width="100%" maxWidth={maxWidth() === "auto" ? undefined : maxWidth()} flexShrink={0}>
-          {props.children}
+    <Show when={layout()} fallback={props.children}>
+      {(value) => (
+        <box width="100%" paddingLeft={value().inset} flexShrink={0}>
+          <box width={value()[props.width]} flexShrink={0}>
+            {props.children}
+          </box>
         </box>
+      )}
+    </Show>
+  )
+}
+
+function SessionBreakoutLane(props: { children: JSX.Element }) {
+  const ctx = use()
+  const readable = () => ctx.config.session?.max_width ?? "auto"
+  const inset = createMemo(() => {
+    const width = readable()
+    return width === "auto" ? undefined : sessionLaneLayout(ctx.width, width).inset
+  })
+  return (
+    <Show when={inset() !== undefined} fallback={props.children}>
+      <box width="100%" paddingLeft={inset()} flexShrink={0}>
+        {props.children}
       </box>
     </Show>
   )
@@ -2306,7 +2321,9 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
               return (
                 <box width="100%" marginTop={markdownLaneMarginTop(index, segment().width)} flexShrink={0}>
                   <Switch>
-                    <Match when={segment().width === "full"}>{content}</Match>
+                    <Match when={segment().width === "full"}>
+                      <SessionBreakoutLane>{content}</SessionBreakoutLane>
+                    </Match>
                     <Match when={segment().width === "technical"}>
                       <SessionContentLane width="technical">{content}</SessionContentLane>
                     </Match>

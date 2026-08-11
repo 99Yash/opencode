@@ -78,7 +78,7 @@ flowchart LR
   expect(markdown.getChildren()[0]?.marginTop).toBe(1)
 })
 
-test("centers a Mermaid diagram narrower than its canvas", async () => {
+test("leaves Mermaid alignment to its containing layout", async () => {
   const testRenderer = await createTestRenderer({ width: 80, height: 14 })
   renderer = testRenderer.renderer
   const markdown = new MarkdownRenderable(renderer, {
@@ -100,7 +100,7 @@ flowchart LR
     .split("\n")
     .find((value) => value.includes("Start"))
   if (!line) throw new Error("Expected the rendered diagram")
-  expect(line.indexOf("Start")).toBeGreaterThan(10)
+  expect(line.indexOf("Start")).toBeLessThan(10)
 })
 
 test("recognizes normalized Mermaid fence info strings", async () => {
