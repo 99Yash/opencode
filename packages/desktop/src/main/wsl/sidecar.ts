@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import { createServer } from "node:net"
 import { app } from "electron"
 import { checkHealth } from "../server"
-import { type WslCommandLine, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
+import { type WslCommandLine, readWslCommandVersion, resolveWslOpencode, shellEscape, wslArgs } from "./runtime"
 import { pollWslHealth } from "./startup"
 import { nativeT } from "../native-translations"
 
@@ -16,10 +16,22 @@ export type WslSidecar = {
 
 export async function spawnWslSidecar(
   distro: string,
+  version: string,
+  channel: string,
   opts: { onLine?: (line: WslCommandLine) => void; healthTimeoutMs?: number } = {},
 ): Promise<WslSidecar> {
-  const opencode = await resolveWslOpencode(distro)
+  const opencode = await resolveWslOpencode(distro, channel)
   if (!opencode) throw new Error(nativeT("desktop.wsl.error.opencodeNotInstalled", { distro }))
+  const installed = await readWslCommandVersion(opencode, distro)
+  if (installed !== version) {
+    throw new Error(
+      nativeT("desktop.wsl.error.updateVersion", {
+        distro,
+        installed: installed ?? nativeT("desktop.wsl.error.noVersion"),
+        expected: version,
+      }),
+    )
+  }
 
   const port = await allocatePort()
   const password = randomUUID()

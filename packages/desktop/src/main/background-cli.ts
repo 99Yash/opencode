@@ -37,6 +37,7 @@ export async function startBackgroundCli(logger: Logger) {
     url: service.url,
     username: service.auth.username,
     password: service.auth.password,
+    version,
   }
 }
 

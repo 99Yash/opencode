@@ -37,7 +37,7 @@ type RunningSidecar = {
   password: string
 }
 
-type SpawnSidecar = (distro: string) => Promise<RunningSidecar>
+type SpawnSidecar = (distro: string, version: string, channel: string) => Promise<RunningSidecar>
 
 type ControllerLogger = {
   log: (message: string, meta?: unknown) => void
@@ -51,6 +51,8 @@ type WslServersControllerOptions = {
   probeDistro?: typeof probeWslDistro
   resolveOpencode?: typeof resolveWslOpencode
   readCommandVersion?: typeof readWslCommandVersion
+  installOpencode?: typeof installWslOpencode
+  channel?: string
 }
 
 export type WslServersController = ReturnType<typeof createWslServersController>
@@ -60,7 +62,7 @@ export function wslServerIdForDistro(distro: string) {
 }
 
 export function createWslServersController(
-  appVersion: string,
+  initialCliVersion: string | null,
   spawnSidecar: SpawnSidecar,
   options?: WslServersControllerOptions,
 ) {
@@ -69,10 +71,17 @@ export function createWslServersController(
   const sidecars = new Map<string, RunningSidecar>()
   const startAttempts = new Map<string, number>()
   let jobAbort: AbortController | undefined
+  let cliVersion = initialCliVersion
   const logger = options?.logger
   const readServers = options?.readServers ?? readPersistedServers
   const writeServers = options?.writeServers ?? writePersistedServers
   const probeDistro = options?.probeDistro ?? probeWslDistro
+  const channel = options?.channel ?? "dev"
+
+  const expectedVersion = () => {
+    if (cliVersion) return cliVersion
+    throw new Error(nativeT("desktop.wsl.error.opencodeCannotRun"))
+  }
 
   const emit = () => {
     for (const listener of listeners) listener({ type: "state", state })
@@ -132,11 +141,12 @@ export function createWslServersController(
   }
 
   const checkOpencode = async (distro: string, opts?: { signal?: AbortSignal }) => {
-    const resolved = await (options?.resolveOpencode ?? resolveWslOpencode)(distro, opts)
-    const version = resolved
+    const version = expectedVersion()
+    const resolved = await (options?.resolveOpencode ?? resolveWslOpencode)(distro, channel, opts)
+    const installed = resolved
       ? await (options?.readCommandVersion ?? readWslCommandVersion)(resolved, distro, opts)
       : null
-    return opencodeCheck(distro, resolved, version, appVersion)
+    return opencodeCheck(distro, resolved, installed, version)
   }
 
   const refreshOpencodeCheck = async (distro: string, opts?: { signal?: AbortSignal }) => {
@@ -229,7 +239,7 @@ export function createWslServersController(
     setRuntime(id, { kind: "starting" })
     logger?.log("wsl sidecar starting", { id, distro: item.config.distro })
     try {
-      const sidecar = await spawnSidecar(item.config.distro)
+      const sidecar = await spawnSidecar(item.config.distro, expectedVersion(), channel)
       if (!isCurrentStartAttempt(id, attempt)) {
         try {
           sidecar.listener.stop()
@@ -294,6 +304,10 @@ export function createWslServersController(
   }
 
   return {
+    setCliVersion(version: string) {
+      cliVersion = version
+    },
+
     getState() {
       return state
     },
@@ -362,12 +376,15 @@ export function createWslServersController(
 
     async installOpencode(name: string) {
       await runJob({ kind: "install-opencode", distro: name, startedAt: Date.now() }, async (abort) => {
-        const result = await installWslOpencode(appVersion, name, { signal: abort.signal })
+        const version = expectedVersion()
+        const result = await (options?.installOpencode ?? installWslOpencode)(version, channel, name, {
+          signal: abort.signal,
+        })
         if (result.code !== 0) {
           throw new Error(summarize(result.stderr || result.stdout) || nativeT("desktop.wsl.error.installOpencode"))
         }
         await refreshOpencodeCheck(name, { signal: abort.signal })
-        expectOpencodeVersion(state.opencodeChecks[name]?.version ?? null, appVersion, name)
+        expectOpencodeVersion(state.opencodeChecks[name]?.version ?? null, version, name)
         const id = wslServerIdToRestart(state.servers, name)
         if (id) await startServer(id)
       })

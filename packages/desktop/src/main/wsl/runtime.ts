@@ -264,16 +264,20 @@ export async function installWslDistro(name: string, opts?: RunWslOptions) {
   )
 }
 
-export async function installWslOpencode(version: string, distro: string, opts?: RunWslOptions) {
+export async function installWslOpencode(version: string, channel: string, distro: string, opts?: RunWslOptions) {
   return runInteractiveCommand(
     resolveSystem32Command("wsl.exe"),
-    wslArgs(
-      ["bash", "-lc", `curl -fsSL https://opencode.ai/install | bash -s -- --version ${shellEscape(version)}`],
-      distro,
-    ),
+    wslArgs(["bash", "-lc", wslOpencodeInstallCommand(version, channel)], distro),
     withTimeout(opts, DEFAULT_WSL_INSTALL_TIMEOUT_MS),
     DEFAULT_WSL_INSTALL_TIMEOUT_MS,
   )
+}
+
+export function wslOpencodeInstallCommand(version: string, channel: string) {
+  if (channel === "beta") {
+    return `npm install --global --no-audit --no-fund ${shellEscape(`@opencode-ai/cli@${version}`)}`
+  }
+  return `curl -fsSL https://opencode.ai/install | bash -s -- --version ${shellEscape(version)}`
 }
 
 export async function probeWslDistro(name: string, opts?: RunWslOptions): Promise<WslDistroProbe> {
@@ -307,11 +311,22 @@ export async function probeWslDistro(name: string, opts?: RunWslOptions): Promis
   }
 }
 
-export async function resolveWslOpencode(distro: string, opts?: RunWslOptions) {
+export async function resolveWslOpencode(distro: string, channel: string, opts?: RunWslOptions) {
+  if (channel !== "beta") {
+    return firstLine(
+      (
+        await runWslSh(
+          'if [ -x "$HOME/.opencode/bin/opencode" ]; then printf "%s\\n" "$HOME/.opencode/bin/opencode"; fi',
+          distro,
+          opts,
+        )
+      ).stdout,
+    )
+  }
   return firstLine(
     (
       await runWslSh(
-        'if [ -x "$HOME/.opencode/bin/opencode" ]; then printf "%s\\n" "$HOME/.opencode/bin/opencode"; fi',
+        'PATH=$(awk -v RS=: -v ORS=: \'$0 !~ /^\\/mnt\\//\' <<<"$PATH" | sed "s/:$//"); export PATH; command -v opencode2 || true',
         distro,
         opts,
       )
@@ -321,7 +336,13 @@ export async function resolveWslOpencode(distro: string, opts?: RunWslOptions) {
 
 export async function readWslCommandVersion(command: string, distro: string, opts?: RunWslOptions) {
   const result = await runWslSh(`${shellEscape(command)} --version 2>/dev/null || true`, distro, opts)
-  return firstLine(result.stdout)
+  return parseWslOpencodeVersion(firstLine(result.stdout))
+}
+
+export function parseWslOpencodeVersion(output: string | null) {
+  if (!output) return null
+  const marker = output.lastIndexOf(" v")
+  return marker === -1 ? output : output.slice(marker + 2)
 }
 
 export function openWslTerminal(distro?: string | null) {

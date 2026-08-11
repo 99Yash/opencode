@@ -134,10 +134,10 @@ const main = Effect.gen(function* () {
   initCrashReporter()
 
   const wslServers = createWslServersController(
-    app.getVersion(),
-    async (distro) => {
+    CHANNEL === "beta" ? null : app.getVersion(),
+    async (distro, version, channel) => {
       logger.log("spawning wsl sidecar", { distro })
-      return spawnWslSidecar(distro, {
+      return spawnWslSidecar(distro, version, channel, {
         onLine: (line) => logger.log("wsl sidecar", { distro, stream: line.stream, text: line.text }),
       })
     },
@@ -146,6 +146,7 @@ const main = Effect.gen(function* () {
         log: (message, meta) => logger.log(message, meta),
         error: (message, meta) => logger.error(message, meta),
       },
+      channel: CHANNEL,
     },
   )
   const stopSidecars = async () => wslServers.stopAll()
@@ -311,6 +312,7 @@ const main = Effect.gen(function* () {
 
     logger.log("starting v2 background service")
     const sidecar = yield* Effect.promise(() => startBackgroundCli(logger))
+    if (CHANNEL === "beta") wslServers.setCliVersion(sidecar.version)
     yield* Deferred.succeed(serverReady, {
       url: sidecar.url,
       username: sidecar.username,

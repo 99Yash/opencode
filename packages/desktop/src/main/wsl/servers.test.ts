@@ -13,6 +13,10 @@ import {
   wslServerIdsToStartOnInitialize,
 } from "./startup"
 import { createWslServersController, type WslServerConfig } from "./servers"
+import {
+  parseWslOpencodeVersion,
+  wslOpencodeInstallCommand,
+} from "./runtime"
 
 let persistedServers: WslServerConfig[] = []
 let releaseOpencodeResolve: (() => void) | undefined
@@ -31,6 +35,51 @@ test("rejects an update that did not install the desktop version", () => {
   expect(() => expectOpencodeVersion("1.14.35", "1.16.2")).toThrow(
     "OpenCode update finished but Debian still reports 1.14.35; expected 1.16.2",
   )
+})
+
+test("installs the exact V2 CLI package through npm", () => {
+  const version = "0.0.0-next-17181"
+  const command = wslOpencodeInstallCommand(version, "beta")
+
+  expect(command).toBe("npm install --global --no-audit --no-fund '@opencode-ai/cli@0.0.0-next-17181'")
+  expect(command).not.toContain("@next")
+  expect(command).not.toContain("https://opencode.ai/install")
+})
+
+test("keeps the curl installer outside the beta channel", () => {
+  expect(wslOpencodeInstallCommand("1.18.16", "prod")).toBe(
+    "curl -fsSL https://opencode.ai/install | bash -s -- --version '1.18.16'",
+  )
+  expect(wslOpencodeInstallCommand("1.18.16", "dev")).toBe(
+    "curl -fsSL https://opencode.ai/install | bash -s -- --version '1.18.16'",
+  )
+})
+
+test("reads the version reported by the V2 binary", () => {
+  expect(parseWslOpencodeVersion("opencode2 v0.0.0-next-17181")).toBe("0.0.0-next-17181")
+  expect(parseWslOpencodeVersion("1.18.16")).toBe("1.18.16")
+})
+
+test("installs the bundled CLI version instead of the Desktop release version", async () => {
+  persistedServers = []
+  let requested: { version: string; channel: string; distro: string } | undefined
+  const controller = createWslServersController(null, async () => new Promise<never>(() => undefined), {
+    channel: "beta",
+    readServers: () => persistedServers,
+    writeServers: () => undefined,
+    resolveOpencode: async () => "/home/me/.npm/bin/opencode2",
+    readCommandVersion: async () => "0.0.0-next-17181",
+    installOpencode: async (version, channel, distro) => {
+      requested = { version, channel, distro }
+      return { code: 0, signal: null, stdout: "", stderr: "" }
+    },
+  })
+  controller.setCliVersion("0.0.0-next-17181")
+
+  await controller.installOpencode("Debian")
+
+  expect(requested).toEqual({ version: "0.0.0-next-17181", channel: "beta", distro: "Debian" })
+  expect(controller.getState().opencodeChecks.Debian?.matchesDesktop).toBe(true)
 })
 
 test("restarts an existing distro server after updating OpenCode", () => {
@@ -55,7 +104,7 @@ test("clears cached distro probes when removing a WSL server", () => {
       {
         Debian: {
           distro: "Debian",
-          resolvedPath: "/home/luke/.opencode/bin/opencode",
+          resolvedPath: "/home/luke/.local/share/opencode/desktop/beta/1.16.2/opencode2",
           version: "1.16.2",
           expectedVersion: "1.16.2",
           matchesDesktop: true,
@@ -164,7 +213,7 @@ test("probes addable distros in parallel before checking OpenCode", async () => 
     },
     resolveOpencode: async (distro) => {
       opencode.push(distro)
-      return "/home/me/.opencode/bin/opencode"
+      return "/home/me/.local/share/opencode/desktop/dev/1.16.2/opencode2"
     },
   })
 
@@ -195,7 +244,7 @@ test("does not check OpenCode in addable distros that cannot execute commands", 
     }),
     resolveOpencode: async (distro) => {
       opencode.push(distro)
-      return "/home/me/.opencode/bin/opencode"
+      return "/home/me/.local/share/opencode/desktop/dev/1.16.2/opencode2"
     },
   })
 
@@ -225,7 +274,7 @@ function testControllerOptions() {
       await new Promise<void>((resolve) => {
         releaseOpencodeResolve = resolve
       })
-      return "/home/me/.opencode/bin/opencode"
+      return "/home/me/.local/share/opencode/desktop/dev/1.16.2/opencode2"
     },
   }
 }
