@@ -3,6 +3,11 @@ import { appendFile, rename, writeFile } from "node:fs/promises"
 const [registration, mode, delay] = process.argv.slice(2)
 if (registration === undefined || mode === undefined) throw new Error("Missing service fixture arguments")
 if (mode === "failed") process.exit(1)
+if (mode === "failed-message") {
+  console.error("sensitive startup detail")
+  console.error("OPENCODE_SERVICE_ERROR:Managed service port is already in use")
+  process.exit(1)
+}
 if (mode === "record-start") {
   await writeFile(registration + ".started", "")
   process.exit(1)

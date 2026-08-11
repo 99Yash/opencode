@@ -197,6 +197,20 @@ test("reports a contender that fails to start", async () => {
   ).rejects.toThrow("Server process exited with code 1")
 }, 10_000)
 
+test("reports the contender's startup error", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  await expect(
+    run(
+      Service.ensure({
+        file: registration,
+        version: "test",
+        command: [process.execPath, fixture, registration, "failed-message"],
+      }),
+    ),
+  ).rejects.toThrow(/^Managed service port is already in use$/)
+}, 10_000)
+
 test("reports a contender terminated by a signal", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")

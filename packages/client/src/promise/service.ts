@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises"
-import { spawn, type ChildProcess } from "node:child_process"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import type { DiscoverOptions, Endpoint, Info, EnsureOptions, StopOptions } from "../service.js"
+import { ServiceProcess } from "../service-process.js"
 import type { ServiceHealth, ServiceStopResponse } from "./generated/types.js"
 
 export * from "../service.js"
@@ -12,11 +12,6 @@ export * from "../service.js"
 // The registration file is the complete discovery contract. This module is
 // intentionally implemented with Node APIs so Promise clients do not need
 // Effect or @effect/platform-node at runtime.
-
-type Contender = {
-  readonly child: ChildProcess
-  readonly error: () => Error | undefined
-}
 
 /** Discover a healthy, compatible local service without starting one. */
 export async function discover(options: DiscoverOptions = {}) {
@@ -33,11 +28,12 @@ async function discoverLocal(options: DiscoverOptions) {
 /** Ensure a healthy, compatible local service is running. */
 export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   const deadline = Date.now() + 120_000
-  const contenders = new Set<Contender>()
+  const contenders = new Set<ServiceProcess.Contender>()
   let timeouts: { readonly info: Info; readonly count: number } | undefined
   let announced = false
   let lastSpawn = 0
   let spawnDelay = 5_000
+  let lastFailure: Error | undefined
 
   const announce = (reason: "missing" | "version-mismatch", previousVersion?: string) => {
     if (announced) return
@@ -47,21 +43,11 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   const spawnContender = () => {
     const [command, ...args] = options.command ?? ["opencode", "serve", "--service"]
     if (command === undefined) throw new Error("Missing service command")
-    try {
-      const child = spawn(command, args, { detached: true, stdio: "ignore" })
-      let error: Error | undefined
-      child.once("error", (cause) => {
-        error = new Error("Failed to start server", { cause })
-      })
-      child.unref()
-      return { child, error: () => error }
-    } catch (cause) {
-      throw new Error("Failed to start server", { cause })
-    }
+    return ServiceProcess.start(command, args)
   }
 
   while (true) {
-    if (Date.now() >= deadline) throw new Error("Timed out waiting for the background service to start")
+    if (Date.now() >= deadline) throw lastFailure ?? new Error("Timed out waiting for the background service to start")
     const registration = await registered(options.file, true)
     if (registration.timedOut && registration.info !== undefined) {
       timeouts = {
@@ -89,8 +75,9 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
       }
     } else {
       if (lastSpawn === 0 && registration.info !== undefined) lastSpawn = Date.now()
-      const finished = [...contenders].filter(contenderFinished)
-      const failure = finished.map(contenderFailure).find((error) => error !== undefined)
+      const finished = [...contenders].filter(ServiceProcess.finished)
+      const failure = finished.map(ServiceProcess.failure).find((error) => error !== undefined)
+      if (failure !== undefined) lastFailure = failure
       if (finished.some((item) => item.child.exitCode === 0)) {
         spawnDelay = Math.min(spawnDelay * 2, 30_000)
       }
@@ -105,20 +92,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
     }
     await delay(1_000)
   }
-}
-
-function contenderFailure(contender: Contender) {
-  const error = contender.error()
-  if (error !== undefined) return error
-  if (contender.child.exitCode !== null && contender.child.exitCode !== 0)
-    return new Error(`Server process exited with code ${contender.child.exitCode}`)
-  if (contender.child.signalCode !== null)
-    return new Error(`Server process terminated by ${contender.child.signalCode}`)
-  return undefined
-}
-
-function contenderFinished(contender: Contender) {
-  return contender.error() !== undefined || contender.child.exitCode !== null || contender.child.signalCode !== null
 }
 
 /** Stop the registered local service. */

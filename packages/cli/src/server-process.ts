@@ -39,6 +39,8 @@ export const run = Effect.fnUntraced(function* (options: Options) {
 })
 
 const processEffect = Effect.fnUntraced(function* (options: Options) {
+  const serviceErrorFormat = process.env.OPENCODE_SERVICE_ERROR_FORMAT
+  delete process.env.OPENCODE_SERVICE_ERROR_FORMAT
   const global = yield* Global.Service
   if (options.mode === "service") yield* Effect.sync(() => process.chdir(global.home))
   return yield* Effect.scoped(
@@ -127,15 +129,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
           if (serviceOptions === undefined || port === undefined || !addressInUse(error)) return Effect.fail(error)
           return recognizeIncumbent(serviceOptions, hostname, port).pipe(
             Effect.flatMap((found) =>
-              found
-                ? Effect.void
-                : Effect.fail(
-                    new Error(
-                      `Managed service port ${port} on ${hostname} is already in use by another process. ` +
-                        "Configure another port with `opencode service set port <port>` and start the service again.",
-                      { cause: error },
-                    ),
-                  ),
+              found ? Effect.void : managedPortInUse(hostname, port, error, serviceErrorFormat),
             ),
           )
         }),
@@ -212,6 +206,17 @@ const recognizeIncumbent = Effect.fnUntraced(function* (options: DiscoverOptions
 
 function serviceURL(hostname: string, port: number) {
   return `http://${hostname.includes(":") ? `[${hostname}]` : hostname}:${port}`
+}
+
+function managedPortInUse(hostname: string, port: number, cause: unknown, format?: string) {
+  const message =
+    `Managed service port ${port} on ${hostname} is already in use by another process. ` +
+    "Configure another port with `opencode service set port <port>` and start the service again."
+  const failure = new Error(message, { cause })
+  if (format !== "plain") return Effect.fail(failure)
+  return Effect.sync(() => process.stderr.write(`OPENCODE_SERVICE_ERROR:${message}\n`)).pipe(
+    Effect.andThen(Effect.fail(failure)),
+  )
 }
 
 function truthy(value?: string) {

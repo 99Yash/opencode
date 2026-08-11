@@ -70,6 +70,19 @@ test("reports a failed registered service", async () => {
   )
 })
 
+test("reports the native contender's startup error", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+
+  await expect(
+    Service.ensure({
+      file: registration,
+      version: "test",
+      command: [process.execPath, fixture, registration, "failed-message"],
+    }),
+  ).rejects.toThrow(/^Managed service port is already in use$/)
+}, 10_000)
+
 test("evicts an unresponsive registered service before starting its replacement", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
