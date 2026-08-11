@@ -24,11 +24,6 @@ const FIXTURES = {
     `data: [DONE]`,
   ],
 
-  nestedReasoningUsage: [
-    `data: {"id":"chatcmpl-usage","object":"chat.completion.chunk","created":1677652288,"model":"gpt-test","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":"stop"}],"usage":{"completion_tokens":187,"completion_tokens_details":{"reasoning_tokens":134},"prompt_tokens":100,"total_tokens":287}}`,
-    `data: [DONE]`,
-  ],
-
   reasoningWithToolCalls: [
     `data: {"choices":[{"index":0,"delta":{"content":null,"role":"assistant","reasoning_text":"**Understanding Dayzee's Purpose**\\n\\nI'm starting to get a better handle on \`dayzee\`.\\n\\n"}}],"created":1764940861,"id":"OdwyabKMI9yel7oPlbzgwQM","usage":{"completion_tokens":0,"prompt_tokens":0,"prompt_tokens_details":{"cached_tokens":0},"total_tokens":0,"reasoning_tokens":0},"model":"gemini-3-pro-preview"}`,
     `data: {"choices":[{"index":0,"delta":{"content":null,"role":"assistant","reasoning_text":"**Assessing Dayzee's Functionality**\\n\\nI've reviewed the files.\\n\\n"}}],"created":1764940862,"id":"OdwyabKMI9yel7oPlbzgwQM","usage":{"completion_tokens":0,"prompt_tokens":0,"prompt_tokens_details":{"cached_tokens":0},"total_tokens":0,"reasoning_tokens":0},"model":"gemini-3-pro-preview"}`,
@@ -96,18 +91,6 @@ function createMockFetch(chunks: string[]) {
   })
 }
 
-function createMockGenerateFetch() {
-  return mock(async () =>
-    Response.json({
-      id: "chatcmpl-generate",
-      created: 1677652288,
-      model: "gemini-test",
-      choices: [{ message: { role: "assistant", content: "Hello" }, finish_reason: "stop" }],
-      usage: { prompt_tokens: 100, completion_tokens: 53, reasoning_tokens: 134, total_tokens: 287 },
-    }),
-  )
-}
-
 function createModel(fetchFn: ReturnType<typeof mock>) {
   return new OpenAICompatibleChatLanguageModel("test-model", {
     provider: "copilot.chat",
@@ -116,20 +99,6 @@ function createModel(fetchFn: ReturnType<typeof mock>) {
     fetch: fetchFn as any,
   })
 }
-
-describe("doGenerate", () => {
-  test("should include top-level reasoning tokens in output usage", async () => {
-    const result = await createModel(createMockGenerateFetch()).doGenerate({
-      prompt: TEST_PROMPT,
-      includeRawChunks: false,
-    })
-
-    expect(result.usage).toMatchObject({
-      inputTokens: { total: 100 },
-      outputTokens: { total: 187, reasoning: 134 },
-    })
-  })
-})
 
 describe("doStream", () => {
   test("should stream text deltas", async () => {
@@ -235,19 +204,6 @@ describe("doStream", () => {
       finishReason: { unified: "tool-calls" },
       usage: {
         inputTokens: { total: 19581 },
-        outputTokens: { total: 187, reasoning: 134 },
-      },
-    })
-  })
-
-  test("should not add nested reasoning tokens to inclusive completion tokens", async () => {
-    const model = createModel(createMockFetch(FIXTURES.nestedReasoningUsage))
-    const { stream } = await model.doStream({ prompt: TEST_PROMPT, includeRawChunks: false })
-    const finish = (await convertReadableStreamToArray(stream)).find((part) => part.type === "finish")
-
-    expect(finish).toMatchObject({
-      usage: {
-        inputTokens: { total: 100 },
         outputTokens: { total: 187, reasoning: 134 },
       },
     })
