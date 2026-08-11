@@ -1,5 +1,6 @@
 import {
   TextRenderable,
+  BoxRenderable,
   RenderableEvents,
   createMarkdownCodeBlockRenderer,
   parseColor,
@@ -33,6 +34,7 @@ interface PreparedDiagram {
   readonly source: string
   readonly text: StyledText
   readonly height: number
+  readonly width: number
 }
 
 export interface MermaidMarkdownRendererOptions {
@@ -55,16 +57,23 @@ function color(value: ColorInput | undefined): RGBA | undefined {
   return value === undefined ? undefined : parseColor(value)
 }
 
-class StaticDiagramRenderable extends TextRenderable {
+class StaticDiagramRenderable extends BoxRenderable {
   constructor(ctx: RenderContext, prepared: PreparedDiagram) {
     super(ctx, {
-      content: prepared.text,
       width: "100%",
+      alignItems: "center",
+      flexShrink: 0,
+      marginTop: 1,
+    })
+    const diagram = new TextRenderable(ctx, {
+      content: prepared.text,
+      width: prepared.width,
+      maxWidth: "100%",
       height: prepared.height,
       wrapMode: "none",
       selectable: false,
-      marginTop: 1,
     })
+    this.add(diagram)
     let dragX: number | undefined
     this.onMouseDown = (event: MouseEvent) => {
       if (event.button !== 0) return
@@ -79,7 +88,7 @@ class StaticDiagramRenderable extends TextRenderable {
       if (dragX === undefined) return
       const dx = event.x - dragX
       dragX = event.x
-      if (dx) this.scrollX -= dx
+      if (dx) diagram.scrollX -= dx
     }
     this.onMouseDragEnd = (event: MouseEvent) => {
       dragX = undefined
@@ -121,6 +130,7 @@ function prepareDiagram(kind: DiagramKind, source: string, options: MermaidMarkd
           }),
         ),
         height: size.height,
+        width: size.width,
       }
     }
     case "sequence": {
@@ -144,6 +154,7 @@ function prepareDiagram(kind: DiagramKind, source: string, options: MermaidMarkd
           }),
         ),
         height: size.height,
+        width: size.width,
       }
     }
     case "state": {
@@ -168,6 +179,7 @@ function prepareDiagram(kind: DiagramKind, source: string, options: MermaidMarkd
           }),
         ),
         height: size.height,
+        width: size.width,
       }
     }
   }

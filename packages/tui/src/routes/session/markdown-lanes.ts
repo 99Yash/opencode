@@ -38,3 +38,8 @@ export function markdownLanes(content: string): MarkdownLane[] {
 
   return result
 }
+
+export function markdownLaneMarginTop(index: number, width: MarkdownLane["width"]) {
+  if (index === 0 || width === "wide") return 0
+  return 1
+}

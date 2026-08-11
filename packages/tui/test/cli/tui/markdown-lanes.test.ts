@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { markdownLanes } from "../../../src/routes/session/markdown-lanes"
+import { markdownLaneMarginTop, markdownLanes } from "../../../src/routes/session/markdown-lanes"
 
 test("keeps prose in the readable lane", () => {
   expect(markdownLanes("Before\n\nAfter")).toEqual([{ content: "Before\n\nAfter", width: "readable" }])
@@ -46,4 +46,11 @@ test("gives ordinary fenced code an intermediate lane", () => {
   expect(markdownLanes("```ts\nexport const value = true\n```")).toEqual([
     { content: "```ts\nexport const value = true\n```", width: "code" },
   ])
+})
+
+test("restores spacing between separately rendered blocks", () => {
+  expect(markdownLaneMarginTop(0, "readable")).toBe(0)
+  expect(markdownLaneMarginTop(1, "code")).toBe(1)
+  expect(markdownLaneMarginTop(2, "readable")).toBe(1)
+  expect(markdownLaneMarginTop(1, "wide")).toBe(0)
 })

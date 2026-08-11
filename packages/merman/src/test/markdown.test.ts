@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CodeRenderable, MarkdownRenderable, RGBA, SyntaxStyle, TreeSitterClient } from "@opentui/core"
+import { CodeRenderable, MarkdownRenderable, RGBA, SyntaxStyle, TextRenderable, TreeSitterClient } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { createMermaidMarkdownRenderer } from "../markdown.js"
 
@@ -76,6 +76,31 @@ flowchart LR
   expect(frame).toContain("Done")
   expect(frame).not.toContain("flowchart LR")
   expect(markdown.getChildren()[0]?.marginTop).toBe(1)
+})
+
+test("centers a Mermaid diagram narrower than its canvas", async () => {
+  const testRenderer = await createTestRenderer({ width: 80, height: 14 })
+  renderer = testRenderer.renderer
+  const markdown = new MarkdownRenderable(renderer, {
+    id: "markdown-centered-mermaid",
+    content: `\`\`\`mermaid
+flowchart LR
+  A[Start] --> B[Done]
+\`\`\``,
+    syntaxStyle,
+    treeSitterClient,
+    renderNode: createMermaidMarkdownRenderer(renderer),
+  })
+
+  renderer.root.add(markdown)
+  await renderMarkdown(markdown, testRenderer.renderOnce)
+
+  const line = testRenderer
+    .captureCharFrame()
+    .split("\n")
+    .find((value) => value.includes("Start"))
+  if (!line) throw new Error("Expected the rendered diagram")
+  expect(line.indexOf("Start")).toBeGreaterThan(10)
 })
 
 test("recognizes normalized Mermaid fence info strings", async () => {
@@ -235,17 +260,19 @@ sequenceDiagram
   renderer.root.add(markdown)
   await renderMarkdown(markdown, testRenderer.renderOnce)
 
-  const diagram = markdown.getChildren()[0] as CodeRenderable
+  const wrapper = markdown.getChildren()[0]
+  if (!wrapper) throw new Error("Expected the rendered diagram wrapper")
+  const diagram = wrapper.getChildren()[0] as TextRenderable
   expect(diagram.scrollWidth).toBeGreaterThan(diagram.width)
   expect(diagram.scrollX).toBe(0)
 
-  await testRenderer.mockMouse.drag(diagram.x + 20, diagram.y + 2, diagram.x + 5, diagram.y + 2)
+  await testRenderer.mockMouse.drag(wrapper.x + 20, wrapper.y + 2, wrapper.x + 5, wrapper.y + 2)
   await testRenderer.renderOnce()
   expect(diagram.scrollX).toBeGreaterThan(0)
   expect(diagram.hasSelection()).toBe(false)
 
   diagram.scrollX = 0
-  await testRenderer.mockMouse.scroll(diagram.x + 20, diagram.y + 2, "right")
+  await testRenderer.mockMouse.scroll(wrapper.x + 20, wrapper.y + 2, "right")
   await testRenderer.renderOnce()
   expect(diagram.scrollX).toBeGreaterThan(0)
 })

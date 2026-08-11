@@ -108,7 +108,7 @@ import { createSingleFlight } from "../../util/single-flight"
 import type { SessionPending } from "@opencode-ai/schema/session-pending"
 import { generateThinkingSyntax } from "./thinking-syntax"
 import { createDelayedPresence } from "../../util/delayed-presence"
-import { markdownLanes } from "./markdown-lanes"
+import { markdownLaneMarginTop, markdownLanes } from "./markdown-lanes"
 
 addDefaultParsers(parsers.parsers)
 
@@ -2244,7 +2244,7 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
   return (
     <Show when={props.part.text.trim()}>
       <Index each={segments()}>
-        {(segment) => {
+        {(segment, index) => {
           const content = (
             <box paddingLeft={3} flexShrink={0}>
               <markdown
@@ -2261,15 +2261,17 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
             </box>
           )
           return (
-            <Switch>
-              <Match when={segment().width === "wide"}>{content}</Match>
-              <Match when={segment().width === "code"}>
-                <SessionContentLane width="code">{content}</SessionContentLane>
-              </Match>
-              <Match when={segment().width === "readable"}>
-                <SessionContentLane width="readable">{content}</SessionContentLane>
-              </Match>
-            </Switch>
+            <box width="100%" marginTop={markdownLaneMarginTop(index, segment().width)} flexShrink={0}>
+              <Switch>
+                <Match when={segment().width === "wide"}>{content}</Match>
+                <Match when={segment().width === "code"}>
+                  <SessionContentLane width="code">{content}</SessionContentLane>
+                </Match>
+                <Match when={segment().width === "readable"}>
+                  <SessionContentLane width="readable">{content}</SessionContentLane>
+                </Match>
+              </Switch>
+            </box>
           )
         }}
       </Index>
