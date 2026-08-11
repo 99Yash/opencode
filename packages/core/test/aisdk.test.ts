@@ -275,7 +275,7 @@ it.effect("projects replay metadata onto AI SDK prompt parts", () =>
   }),
 )
 
-it.effect("preserves tool result content in AI SDK prompts", () =>
+it.effect("moves tool result images and PDFs into an AI SDK user message", () =>
   Effect.gen(function* () {
     const aisdk = yield* AISDK.Service
     yield* aisdk.hook.sdk((event) => {
@@ -323,21 +323,96 @@ it.effect("preserves tool result content in AI SDK prompts", () =>
               type: "content",
               value: [
                 { type: "text", text: "attachments" },
-                { type: "image-data", data: "AAAA", mediaType: "image/png" },
-                {
-                  type: "file-data",
-                  data: "JVBERg==",
-                  mediaType: "application/pdf",
-                  filename: "document.pdf",
-                },
                 { type: "file-data", data: "SUQz", mediaType: "audio/mpeg", filename: "clip.mp3" },
-                { type: "image-url", url: "https://example.com/pixel.png" },
-                { type: "file-url", url: "https://example.com/document.pdf" },
               ],
             },
           },
         ],
       },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Attached media from tool result:" },
+          { type: "file", mediaType: "image/png", data: "data:image/png;base64,AAAA", filename: "pixel.png" },
+          {
+            type: "file",
+            mediaType: "application/pdf",
+            data: "data:application/pdf;charset=utf-8;base64,JVBERg==",
+            filename: "document.pdf",
+          },
+          { type: "file", mediaType: "image/png", data: "https://example.com/pixel.png" },
+          { type: "file", mediaType: "application/pdf", data: "https://example.com/document.pdf" },
+        ],
+      },
+    ])
+  }),
+)
+
+it.effect("groups consecutive AI SDK tool media and keeps file-only results non-empty", () =>
+  Effect.gen(function* () {
+    const aisdk = yield* AISDK.Service
+    yield* aisdk.hook.sdk((event) => {
+      event.sdk = { languageModel: () => ({ provider: event.model.providerID }) }
+    })
+
+    const resolved = yield* aisdk.model(model("test-ai-sdk"))
+    const prepared = yield* compileRequest(
+      LLM.request({
+        model: resolved,
+        messages: [
+          Message.tool({
+            id: "call_1",
+            name: "read",
+            result: {
+              type: "content",
+              value: [{ type: "file", uri: "data:image/png;base64,AAAA", mime: "image/png", name: "one.png" }],
+            },
+          }),
+          Message.tool({
+            id: "call_2",
+            name: "read",
+            result: {
+              type: "content",
+              value: [{ type: "file", uri: "data:image/png;base64,BBBB", mime: "image/png", name: "two.png" }],
+            },
+          }),
+          Message.assistant("Images received"),
+        ],
+      }),
+    )
+
+    expect(prepared.body.prompt).toEqual([
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_1",
+            toolName: "read",
+            output: { type: "text", value: "Media attached in following user message." },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call_2",
+            toolName: "read",
+            output: { type: "text", value: "Media attached in following user message." },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Attached media from tool result:" },
+          { type: "file", mediaType: "image/png", data: "data:image/png;base64,AAAA", filename: "one.png" },
+          { type: "file", mediaType: "image/png", data: "data:image/png;base64,BBBB", filename: "two.png" },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "Images received" }] },
     ])
   }),
 )

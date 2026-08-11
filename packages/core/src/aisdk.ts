@@ -33,6 +33,7 @@ import {
 } from "@opencode-ai/ai"
 import { Auth, Endpoint, RequestExecutor, type AnyRoute } from "@opencode-ai/ai/route"
 import { ProviderShared } from "@opencode-ai/ai/protocols/shared"
+import type { Content } from "@opencode-ai/schema/tool"
 import { Cause, Context, Effect, Layer, Option, Schema, Scope, Stream } from "effect"
 import type { ID, Info } from "./model"
 import { Provider } from "./provider"
@@ -40,8 +41,14 @@ import { State } from "./state"
 
 type SDK = any
 type UserContent = Extract<LanguageModelV3Message, { role: "user" }>["content"]
+type UserFileContent = Extract<UserContent[number], { type: "file" }>
 type AssistantContent = Extract<LanguageModelV3Message, { role: "assistant" }>["content"]
 type ToolResultContent = Extract<AssistantContent[number], { type: "tool-result" }>
+
+const SYNTHETIC_ATTACHMENT_PROMPT = "Attached media from tool result:"
+const TOOL_RESULT_ATTACHMENT_TEXT = "Media attached in following user message."
+const isToolResultMedia = (item: Content): item is Extract<Content, { type: "file" }> =>
+  item.type === "file" && (item.mime.toLowerCase().startsWith("image/") || item.mime === "application/pdf")
 
 export interface SDKEvent {
   readonly model: Info
@@ -435,21 +442,34 @@ function prompt(request: LLMRequest): LanguageModelV3Prompt {
     .map((part) => part.text)
     .filter(Boolean)
     .join("\n\n")
-  const messages = request.messages.flatMap(message)
+  const messages: LanguageModelV3Message[] = []
+  const media: UserFileContent[] = []
+  const flushMedia = () => {
+    if (media.length === 0) return
+    messages.push({
+      role: "user",
+      content: [{ type: "text", text: SYNTHETIC_ATTACHMENT_PROMPT }, ...media.splice(0)],
+    })
+  }
+  for (const input of request.messages) {
+    if (input.role !== "tool") flushMedia()
+    messages.push(...message(input, media))
+  }
+  flushMedia()
   if (!system.length) return messages
   return [{ role: "system", content: system }, ...messages]
 }
 
-function message(input: LLMRequest["messages"][number]): LanguageModelV3Message[] {
+function message(input: LLMRequest["messages"][number], media: UserFileContent[]): LanguageModelV3Message[] {
   switch (input.role) {
     case "system":
       return [{ role: "system", content: input.content.flatMap(text).join("\n\n") }]
     case "user":
       return [{ role: "user", content: input.content.flatMap(userPart) }]
     case "assistant":
-      return [{ role: "assistant", content: input.content.flatMap(assistantPart) }]
+      return [{ role: "assistant", content: input.content.flatMap((part) => assistantPart(part, media)) }]
     case "tool": {
-      const content = input.content.flatMap(toolResultPart)
+      const content = input.content.flatMap((part) => toolResultPart(part, media))
       return content.length ? [{ role: "tool", content }] : []
     }
   }
@@ -466,7 +486,7 @@ function userPart(part: ContentPart): UserContent {
   return []
 }
 
-function assistantPart(part: ContentPart): AssistantContent {
+function assistantPart(part: ContentPart, media: UserFileContent[]): AssistantContent {
   switch (part.type) {
     case "text":
       return [{ type: "text", text: part.text }]
@@ -486,18 +506,34 @@ function assistantPart(part: ContentPart): AssistantContent {
         },
       ]
     case "tool-result":
-      return toolResultPart(part)
+      return toolResultPart(part, media)
   }
 }
 
-function toolResultPart(part: ContentPart): ToolResultContent[] {
+function toolResultPart(part: ContentPart, media: UserFileContent[]): ToolResultContent[] {
   if (part.type !== "tool-result") return []
+  const result = (() => {
+    if (part.result.type !== "content") return part.result
+    const extracted = part.result.value.filter(isToolResultMedia)
+    if (extracted.length === 0) return part.result
+    media.push(
+      ...extracted.map((item) => ({
+        type: "file" as const,
+        mediaType: item.mime,
+        data: item.uri,
+        filename: item.name,
+      })),
+    )
+    const content = part.result.value.filter((item) => !isToolResultMedia(item))
+    if (content.length === 0) return { type: "text" as const, value: TOOL_RESULT_ATTACHMENT_TEXT }
+    return { type: "content" as const, value: content }
+  })()
   return [
     {
       type: "tool-result",
       toolCallId: part.id,
       toolName: part.name,
-      output: toolOutput(part.result),
+      output: toolOutput(result),
       providerOptions: providerOptions(part.providerMetadata),
     },
   ]
