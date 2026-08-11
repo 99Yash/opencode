@@ -68,7 +68,7 @@ import { errorMessage } from "../../util/error"
 import { useToast } from "../../ui/toast"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
-import { sessionContentWidth, sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
+import { sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
 import { projectedPromptInput } from "../../prompt/codec"
 import { deduplicateVisibleImages } from "../../prompt/attachment"
 import { useEpilogue } from "../../context/epilogue"
@@ -108,12 +108,15 @@ import { createSingleFlight } from "../../util/single-flight"
 import type { SessionPending } from "@opencode-ai/schema/session-pending"
 import { generateThinkingSyntax } from "./thinking-syntax"
 import { createDelayedPresence } from "../../util/delayed-presence"
+import { markdownLanes } from "./markdown-lanes"
 
 addDefaultParsers(parsers.parsers)
 
 // Exclude temporary bottom space when measuring the real transcript height.
 const NAVIGATION_SLACK_ID = "session-navigation-slack"
 const BACKGROUND_TOOL_HINT_DELAY = 1_000
+// The assistant inset leaves 85 columns for code, matching common documentation guidance.
+const SESSION_CODE_LANE_WIDTH = 88
 
 // Tail-first transcript mounting: rows mounted with the session, then backfill cadence.
 // The tail comfortably overfills a tall viewport; backfill drains a 200-message transcript
@@ -225,7 +228,6 @@ export function Session() {
   const thinkingMode = createMemo<ThinkingMode>(() => config.session?.thinking ?? "hide")
   const showThinking = createMemo(() => true)
   const showScrollbar = createMemo(() => config.session?.scrollbar ?? false)
-  const maxWidth = createMemo(() => config.session?.max_width ?? "auto")
   const markdownMode = createMemo(() => config.session?.markdown ?? "rendered")
   const diffWrapMode = createMemo(() => config.diffs?.wrap ?? "word")
   const groupExploration = createMemo(() => config.session?.grouping !== "none")
@@ -244,7 +246,7 @@ export function Session() {
     if (sidebar() === "auto" && wide()) return true
     return false
   })
-  const contentWidth = createMemo(() => sessionContentWidth(availableWidth(), sidebarVisible(), maxWidth()))
+  const contentWidth = createMemo(() => availableWidth() - (sidebarVisible() ? 42 : 0) - 4)
   const models = createMemo(() => data.location.model.list(location()) ?? [])
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
@@ -1038,56 +1040,54 @@ export function Session() {
       }}
     >
       <box flexDirection="row" flexGrow={1} minHeight={0}>
-        <box flexGrow={1} minHeight={0} alignItems="center">
-          <box
-            width="100%"
-            maxWidth={maxWidth() === "auto" ? undefined : maxWidth()}
-            flexGrow={1}
-            minHeight={0}
-            paddingBottom={1}
-            paddingLeft={dimensions().width < 44 ? 1 : 2}
-            paddingRight={dimensions().width < 44 ? 1 : 2}
-            gap={1}
-          >
-            <Show when={session()}>
-              <scrollbox
-                ref={(r) => (scroll = r)}
-                viewportOptions={{
-                  paddingRight: showScrollbar() ? 1 : 0,
-                }}
-                verticalScrollbarOptions={{
-                  paddingLeft: 1,
-                  visible: showScrollbar(),
-                  trackOptions: {
-                    backgroundColor: theme.raise(theme.background.surface.offset),
-                    foregroundColor: theme.border.default,
-                  },
-                }}
-                stickyScroll={!navigationMessage()}
-                stickyStart="bottom"
-                flexGrow={1}
-                scrollAcceleration={scrollAcceleration()}
-              >
-                <For each={visibleRows()}>
-                  {(row, index) => (
-                    <SessionRowView
-                      row={row}
-                      message={(messageID) => data.session.message.get(route.sessionID, messageID)}
-                      boundaryID={boundaries()[index() + hidden()]}
-                    />
-                  )}
-                </For>
-                <BackgroundToolHint messages={messages()} />
-                <Show when={session()?.revert?.messageID}>
-                  <RevertMessage
-                    count={messagesFromRevert().filter((message) => message.type === "user").length}
-                    files={session()!.revert!.files ?? []}
+        <box
+          flexGrow={1}
+          minHeight={0}
+          paddingBottom={1}
+          paddingLeft={dimensions().width < 44 ? 1 : 2}
+          paddingRight={dimensions().width < 44 ? 1 : 2}
+          gap={1}
+        >
+          <Show when={session()}>
+            <scrollbox
+              ref={(r) => (scroll = r)}
+              viewportOptions={{
+                paddingRight: showScrollbar() ? 1 : 0,
+              }}
+              verticalScrollbarOptions={{
+                paddingLeft: 1,
+                visible: showScrollbar(),
+                trackOptions: {
+                  backgroundColor: theme.raise(theme.background.surface.offset),
+                  foregroundColor: theme.border.default,
+                },
+              }}
+              stickyScroll={!navigationMessage()}
+              stickyStart="bottom"
+              flexGrow={1}
+              scrollAcceleration={scrollAcceleration()}
+            >
+              <For each={visibleRows()}>
+                {(row, index) => (
+                  <SessionRowView
+                    row={row}
+                    message={(messageID) => data.session.message.get(route.sessionID, messageID)}
+                    boundaryID={boundaries()[index() + hidden()]}
                   />
-                </Show>
-                <Show when={navigationSlack()}>
-                  {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
-                </Show>
-              </scrollbox>
+                )}
+              </For>
+              <BackgroundToolHint messages={messages()} />
+              <Show when={session()?.revert?.messageID}>
+                <RevertMessage
+                  count={messagesFromRevert().filter((message) => message.type === "user").length}
+                  files={session()!.revert!.files ?? []}
+                />
+              </Show>
+              <Show when={navigationSlack()}>
+                {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
+              </Show>
+            </scrollbox>
+            <SessionContentLane width="readable">
               <box flexShrink={0}>
                 <Show when={!composer.open && !disabled() && queuedPrompts().length > 0}>
                   <QueuedPromptDock prompts={queuedPrompts()} onOpen={openQueuedPrompts} />
@@ -1137,8 +1137,8 @@ export function Session() {
                   </Match>
                 </Switch>
               </box>
-            </Show>
-          </box>
+            </SessionContentLane>
+          </Show>
         </box>
         <Show when={sidebarVisible()}>
           <Switch>
@@ -1204,7 +1204,9 @@ function SessionRowView(props: SessionRowViewProps) {
             <Show when={props.message(row().messageID)}>
               {(message) => (
                 <Show when={message().type === "assistant"}>
-                  <AssistantFooter message={message() as SessionMessageAssistant} />
+                  <SessionContentLane width="readable">
+                    <AssistantFooter message={message() as SessionMessageAssistant} />
+                  </SessionContentLane>
                 </Show>
               )}
             </Show>
@@ -1216,6 +1218,22 @@ function SessionRowView(props: SessionRowViewProps) {
           )}
         </Match>
       </Switch>
+    </box>
+  )
+}
+
+function SessionContentLane(props: { children: JSX.Element; width: "readable" | "code" }) {
+  const ctx = use()
+  const maxWidth = createMemo(() => {
+    const readable = ctx.config.session?.max_width ?? "auto"
+    if (readable === "auto" || props.width === "readable") return readable
+    return Math.max(readable, SESSION_CODE_LANE_WIDTH)
+  })
+  return (
+    <box width="100%" alignItems="center" flexShrink={0}>
+      <box width="100%" maxWidth={maxWidth() === "auto" ? undefined : maxWidth()} flexShrink={0}>
+        {props.children}
+      </box>
     </box>
   )
 }
@@ -1943,79 +1961,56 @@ function UserMessage(props: { message: SessionMessageUser }) {
 
   return (
     <Show when={props.message.text.trim() || files().length || skills().length}>
-      <box
-        border={["left"]}
-        borderColor={delivery() ? theme.border.default : color()}
-        customBorderChars={SplitBorder.customBorderChars}
-      >
-        <SessionImages images={images()} paddingLeft={2} />
+      <SessionContentLane width="readable">
         <box
-          onMouseOver={() => {
-            setHover(true)
-          }}
-          onMouseOut={() => {
-            setHover(false)
-          }}
-          onMouseUp={() => {
-            if (renderer.getSelection()?.getSelectedText()) return
-            if (delivery() === "steer") {
+          border={["left"]}
+          borderColor={delivery() ? theme.border.default : color()}
+          customBorderChars={SplitBorder.customBorderChars}
+        >
+          <SessionImages images={images()} paddingLeft={2} />
+          <box
+            onMouseOver={() => {
+              setHover(true)
+            }}
+            onMouseOut={() => {
+              setHover(false)
+            }}
+            onMouseUp={() => {
+              if (renderer.getSelection()?.getSelectedText()) return
+              if (delivery() === "steer") {
+                dialog.replace(() => (
+                  <DialogSelect
+                    title="Pending steer"
+                    options={[
+                      { title: "Move to queue", value: "queue" as const },
+                      { title: "Delete", value: "cancel" as const },
+                    ]}
+                    onSelect={(option) => {
+                      void updatePendingSteer(option.value)
+                    }}
+                  />
+                ))
+                return
+              }
               dialog.replace(() => (
-                <DialogSelect
-                  title="Pending steer"
-                  options={[
-                    { title: "Move to queue", value: "queue" as const },
-                    { title: "Delete", value: "cancel" as const },
-                  ]}
-                  onSelect={(option) => {
-                    void updatePendingSteer(option.value)
-                  }}
+                <DialogMessage
+                  messageID={props.message.id}
+                  sessionID={ctx.sessionID}
+                  setPrompt={(value) => promptRef.current?.set(value)}
                 />
               ))
-              return
-            }
-            dialog.replace(() => (
-              <DialogMessage
-                messageID={props.message.id}
-                sessionID={ctx.sessionID}
-                setPrompt={(value) => promptRef.current?.set(value)}
-              />
-            ))
-          }}
-          paddingTop={1}
-          paddingBottom={1}
-          paddingLeft={2}
-          backgroundColor={hover() ? theme.raise(theme.background.default) : theme.background.default}
-          flexShrink={0}
-        >
-          <text fg={theme.text.default}>{props.message.text}</text>
-          <Show when={skills().length}>
-            <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
-              <For each={skills()}>
-                {(skill) => (
-                  <text fg={theme.text.default}>
-                    <span
-                      style={{
-                        bg: theme.hue.accent[mode() === "light" ? 700 : 200],
-                        fg: theme.background.default,
-                        bold: true,
-                      }}
-                    >
-                      {" skill "}
-                    </span>
-                    <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}>
-                      {` ${skill.name} `}
-                    </span>
-                  </text>
-                )}
-              </For>
-            </box>
-          </Show>
-          <Show when={files().length}>
-            <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
-              <For each={files()}>
-                {(file) => {
-                  const label = file.mime === "application/x-directory" ? "dir" : "file"
-                  return (
+            }}
+            paddingTop={1}
+            paddingBottom={1}
+            paddingLeft={2}
+            backgroundColor={hover() ? theme.raise(theme.background.default) : theme.background.default}
+            flexShrink={0}
+          >
+            <text fg={theme.text.default}>{props.message.text}</text>
+            <Show when={skills().length}>
+              <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
+                <For each={skills()}>
+                  {(skill) => (
                     <text fg={theme.text.default}>
                       <span
                         style={{
@@ -2024,20 +2019,45 @@ function UserMessage(props: { message: SessionMessageUser }) {
                           bold: true,
                         }}
                       >
-                        {` ${label} `}
+                        {" skill "}
                       </span>
                       <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}>
-                        {" "}
-                        {file.name ?? (file.source.type === "uri" ? file.source.uri : "attachment")}{" "}
+                        {` ${skill.name} `}
                       </span>
                     </text>
-                  )
-                }}
-              </For>
-            </box>
-          </Show>
+                  )}
+                </For>
+              </box>
+            </Show>
+            <Show when={files().length}>
+              <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
+                <For each={files()}>
+                  {(file) => {
+                    const label = file.mime === "application/x-directory" ? "dir" : "file"
+                    return (
+                      <text fg={theme.text.default}>
+                        <span
+                          style={{
+                            bg: theme.hue.accent[mode() === "light" ? 700 : 200],
+                            fg: theme.background.default,
+                            bold: true,
+                          }}
+                        >
+                          {` ${label} `}
+                        </span>
+                        <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}>
+                          {" "}
+                          {file.name ?? (file.source.type === "uri" ? file.source.uri : "attachment")}{" "}
+                        </span>
+                      </text>
+                    )
+                  }}
+                </For>
+              </box>
+            </Show>
+          </box>
         </box>
-      </box>
+      </SessionContentLane>
     </Show>
   )
 }
@@ -2220,21 +2240,39 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
   const theme = useTheme()
   const { currentSyntax: syntax } = useThemes()
   const plugins = usePlugin()
+  const segments = createMemo(() => markdownLanes(props.part.text.trim()))
   return (
     <Show when={props.part.text.trim()}>
-      <box paddingLeft={3} flexShrink={0}>
-        <markdown
-          syntaxStyle={syntax()}
-          streaming={true}
-          internalBlockMode="top-level"
-          content={props.part.text.trim()}
-          tableOptions={{ style: "grid" }}
-          conceal={ctx.markdownMode() === "rendered"}
-          fg={theme.markdown.text}
-          bg={theme.background.default}
-          renderNode={plugins.markdown()}
-        />
-      </box>
+      <Index each={segments()}>
+        {(segment) => {
+          const content = (
+            <box paddingLeft={3} flexShrink={0}>
+              <markdown
+                syntaxStyle={syntax()}
+                streaming={true}
+                internalBlockMode="top-level"
+                content={segment().content.trim()}
+                tableOptions={{ style: "grid" }}
+                conceal={ctx.markdownMode() === "rendered"}
+                fg={theme.markdown.text}
+                bg={theme.background.default}
+                renderNode={plugins.markdown()}
+              />
+            </box>
+          )
+          return (
+            <Switch>
+              <Match when={segment().width === "wide"}>{content}</Match>
+              <Match when={segment().width === "code"}>
+                <SessionContentLane width="code">{content}</SessionContentLane>
+              </Match>
+              <Match when={segment().width === "readable"}>
+                <SessionContentLane width="readable">{content}</SessionContentLane>
+              </Match>
+            </Switch>
+          )
+        }}
+      </Index>
     </Show>
   )
 }

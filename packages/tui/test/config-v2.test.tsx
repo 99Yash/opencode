@@ -62,11 +62,11 @@ test("shows resolved tab defaults in settings", () => {
   expect(settings.find((setting) => setting.path.join(".") === "tabs.layout")?.default).toBe("horizontal")
 })
 
-test("shows session max width presets in settings", () => {
+test("shows session reading width presets in settings", () => {
   const setting = settings.find((setting) => setting.path.join(".") === "session.max_width")
 
   expect(setting?.default).toBe("auto")
-  expect(setting?.values).toEqual(["auto", 80, 100, 120])
+  expect(setting?.values).toEqual(["auto", 66, 72, 80])
 })
 
 test("provides config and its host interface", async () => {
