@@ -27,6 +27,15 @@ test("validates the session tabs setting", () => {
   expect(decode({ session: { image_preview: true } })).toEqual({ session: { image_preview: true } })
 })
 
+test("validates the session max width setting", () => {
+  const decode = Schema.decodeUnknownSync(Info)
+
+  expect(decode({ session: { max_width: "auto" } })).toEqual({ session: { max_width: "auto" } })
+  expect(decode({ session: { max_width: 100 } })).toEqual({ session: { max_width: 100 } })
+  expect(() => decode({ session: { max_width: 4 } })).toThrow()
+  expect(() => decode({ session: { max_width: 100.5 } })).toThrow()
+})
+
 test("resolves nested config and keybind defaults", () => {
   const config = resolve(
     {
@@ -51,6 +60,13 @@ test("shows resolved tab defaults in settings", () => {
   expect(settings.find((setting) => setting.path.join(".") === "tabs.enabled")?.default).toBe(true)
   expect(settings.find((setting) => setting.path.join(".") === "tabs.scope")?.default).toBe("cwd")
   expect(settings.find((setting) => setting.path.join(".") === "tabs.layout")?.default).toBe("horizontal")
+})
+
+test("shows session max width presets in settings", () => {
+  const setting = settings.find((setting) => setting.path.join(".") === "session.max_width")
+
+  expect(setting?.default).toBe("auto")
+  expect(setting?.values).toEqual(["auto", 80, 100, 120])
 })
 
 test("provides config and its host interface", async () => {

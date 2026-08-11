@@ -68,7 +68,7 @@ import { errorMessage } from "../../util/error"
 import { useToast } from "../../ui/toast"
 import stripAnsi from "strip-ansi"
 import { usePromptRef } from "../../context/prompt"
-import { sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
+import { sessionContentWidth, sessionTabsFitVertically, SESSION_SIDEBAR_WIDTH } from "../../ui/layout"
 import { projectedPromptInput } from "../../prompt/codec"
 import { deduplicateVisibleImages } from "../../prompt/attachment"
 import { useEpilogue } from "../../context/epilogue"
@@ -225,6 +225,7 @@ export function Session() {
   const thinkingMode = createMemo<ThinkingMode>(() => config.session?.thinking ?? "hide")
   const showThinking = createMemo(() => true)
   const showScrollbar = createMemo(() => config.session?.scrollbar ?? false)
+  const maxWidth = createMemo(() => config.session?.max_width ?? "auto")
   const markdownMode = createMemo(() => config.session?.markdown ?? "rendered")
   const diffWrapMode = createMemo(() => config.diffs?.wrap ?? "word")
   const groupExploration = createMemo(() => config.session?.grouping !== "none")
@@ -243,7 +244,7 @@ export function Session() {
     if (sidebar() === "auto" && wide()) return true
     return false
   })
-  const contentWidth = createMemo(() => availableWidth() - (sidebarVisible() ? 42 : 0) - 4)
+  const contentWidth = createMemo(() => sessionContentWidth(availableWidth(), sidebarVisible(), maxWidth()))
   const models = createMemo(() => data.location.model.list(location()) ?? [])
 
   const scrollAcceleration = createMemo(() => getScrollAcceleration(config))
@@ -1037,103 +1038,107 @@ export function Session() {
       }}
     >
       <box flexDirection="row" flexGrow={1} minHeight={0}>
-        <box
-          flexGrow={1}
-          minHeight={0}
-          paddingBottom={1}
-          paddingLeft={dimensions().width < 44 ? 1 : 2}
-          paddingRight={dimensions().width < 44 ? 1 : 2}
-          gap={1}
-        >
-          <Show when={session()}>
-            <scrollbox
-              ref={(r) => (scroll = r)}
-              viewportOptions={{
-                paddingRight: showScrollbar() ? 1 : 0,
-              }}
-              verticalScrollbarOptions={{
-                paddingLeft: 1,
-                visible: showScrollbar(),
-                trackOptions: {
-                  backgroundColor: theme.raise(theme.background.surface.offset),
-                  foregroundColor: theme.border.default,
-                },
-              }}
-              stickyScroll={!navigationMessage()}
-              stickyStart="bottom"
-              flexGrow={1}
-              scrollAcceleration={scrollAcceleration()}
-            >
-              <For each={visibleRows()}>
-                {(row, index) => (
-                  <SessionRowView
-                    row={row}
-                    message={(messageID) => data.session.message.get(route.sessionID, messageID)}
-                    boundaryID={boundaries()[index() + hidden()]}
+        <box flexGrow={1} minHeight={0} alignItems="center">
+          <box
+            width="100%"
+            maxWidth={maxWidth() === "auto" ? undefined : maxWidth()}
+            flexGrow={1}
+            minHeight={0}
+            paddingBottom={1}
+            paddingLeft={dimensions().width < 44 ? 1 : 2}
+            paddingRight={dimensions().width < 44 ? 1 : 2}
+            gap={1}
+          >
+            <Show when={session()}>
+              <scrollbox
+                ref={(r) => (scroll = r)}
+                viewportOptions={{
+                  paddingRight: showScrollbar() ? 1 : 0,
+                }}
+                verticalScrollbarOptions={{
+                  paddingLeft: 1,
+                  visible: showScrollbar(),
+                  trackOptions: {
+                    backgroundColor: theme.raise(theme.background.surface.offset),
+                    foregroundColor: theme.border.default,
+                  },
+                }}
+                stickyScroll={!navigationMessage()}
+                stickyStart="bottom"
+                flexGrow={1}
+                scrollAcceleration={scrollAcceleration()}
+              >
+                <For each={visibleRows()}>
+                  {(row, index) => (
+                    <SessionRowView
+                      row={row}
+                      message={(messageID) => data.session.message.get(route.sessionID, messageID)}
+                      boundaryID={boundaries()[index() + hidden()]}
+                    />
+                  )}
+                </For>
+                <BackgroundToolHint messages={messages()} />
+                <Show when={session()?.revert?.messageID}>
+                  <RevertMessage
+                    count={messagesFromRevert().filter((message) => message.type === "user").length}
+                    files={session()!.revert!.files ?? []}
                   />
-                )}
-              </For>
-              <BackgroundToolHint messages={messages()} />
-              <Show when={session()?.revert?.messageID}>
-                <RevertMessage
-                  count={messagesFromRevert().filter((message) => message.type === "user").length}
-                  files={session()!.revert!.files ?? []}
+                </Show>
+                <Show when={navigationSlack()}>
+                  {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
+                </Show>
+              </scrollbox>
+              <box flexShrink={0}>
+                <Show when={!composer.open && !disabled() && queuedPrompts().length > 0}>
+                  <QueuedPromptDock prompts={queuedPrompts()} onOpen={openQueuedPrompts} />
+                </Show>
+                <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} mode="all" />
+                <Composer
+                  sessionID={route.sessionID}
+                  open={composer.open || (!!session()?.parentID && forms().length === 0)}
+                  defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
+                  onClose={() => setComposer("open", false)}
                 />
-              </Show>
-              <Show when={navigationSlack()}>
-                {(height) => <box id={NAVIGATION_SLACK_ID} height={height()} flexShrink={0} />}
-              </Show>
-            </scrollbox>
-            <box flexShrink={0}>
-              <Show when={!composer.open && !disabled() && queuedPrompts().length > 0}>
-                <QueuedPromptDock prompts={queuedPrompts()} onOpen={openQueuedPrompts} />
-              </Show>
-              <PluginSlot name="session.composer.top" input={{ sessionID: route.sessionID }} mode="all" />
-              <Composer
-                sessionID={route.sessionID}
-                open={composer.open || (!!session()?.parentID && forms().length === 0)}
-                defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
-                onClose={() => setComposer("open", false)}
-              />
-              <Switch>
-                <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
-                <Match when={promptedPermissions().length > 0}>
-                  <Show when={promptedPermissions()[0]?.id} keyed>
-                    {(_) => {
-                      const request = promptedPermissions()[0]
-                      return request ? (
-                        <PermissionPrompt request={request} directory={session()?.location.directory} />
-                      ) : null
-                    }}
-                  </Show>
-                </Match>
-                <Match when={forms().length > 0}>
-                  <Show when={forms()[0]?.id} keyed>
-                    {(_) => {
-                      const form = forms()[0]
-                      return form ? <FormPrompt form={form} /> : null
-                    }}
-                  </Show>
-                </Match>
-                <Match when={!disabled()}>
-                  <Prompt
-                    visible={true}
-                    ref={bind}
-                    disabled={false}
-                    onSubmit={() => {
-                      toBottom()
-                    }}
-                    onEmptySubmit={async () => {
-                      const next = queuedPrompts()[0]
-                      if (!next) return false
-                      return mutatePending("steer", next.id)
-                    }}
-                    sessionID={route.sessionID}
-                  />
-                </Match>
-              </Switch>
-            </box>
-          </Show>
+                <Switch>
+                  <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
+                  <Match when={promptedPermissions().length > 0}>
+                    <Show when={promptedPermissions()[0]?.id} keyed>
+                      {(_) => {
+                        const request = promptedPermissions()[0]
+                        return request ? (
+                          <PermissionPrompt request={request} directory={session()?.location.directory} />
+                        ) : null
+                      }}
+                    </Show>
+                  </Match>
+                  <Match when={forms().length > 0}>
+                    <Show when={forms()[0]?.id} keyed>
+                      {(_) => {
+                        const form = forms()[0]
+                        return form ? <FormPrompt form={form} /> : null
+                      }}
+                    </Show>
+                  </Match>
+                  <Match when={!disabled()}>
+                    <Prompt
+                      visible={true}
+                      ref={bind}
+                      disabled={false}
+                      onSubmit={() => {
+                        toBottom()
+                      }}
+                      onEmptySubmit={async () => {
+                        const next = queuedPrompts()[0]
+                        if (!next) return false
+                        return mutatePending("steer", next.id)
+                      }}
+                      sessionID={route.sessionID}
+                    />
+                  </Match>
+                </Switch>
+              </box>
+            </Show>
+          </box>
         </box>
         <Show when={sidebarVisible()}>
           <Switch>

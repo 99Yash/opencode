@@ -125,6 +125,11 @@ export const Info = Schema.Struct({
         description: "Session sidebar visibility; 'auto' shows it when space permits",
       }),
       scrollbar: Schema.optional(Schema.Boolean).annotate({ description: "Show the session transcript scrollbar" }),
+      max_width: Schema.optional(
+        Schema.Union([Schema.Int.check(Schema.isGreaterThan(4)), Schema.Literal("auto")]),
+      ).annotate({
+        description: "Session transcript and composer max width, or 'auto' to use the available width",
+      }),
       thinking: Schema.optional(Schema.Literals(["show", "hide"])).annotate({
         description: "Show or hide model reasoning by default",
       }),

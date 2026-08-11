@@ -61,6 +61,15 @@ export const settings: Setting[] = [
     keywords: ["scroll bar"],
   },
   {
+    title: "Max width",
+    category: "Session",
+    path: ["session", "max_width"],
+    default: "auto",
+    values: ["auto", 80, 100, 120],
+    labels: ["auto", "80 columns", "100 columns", "120 columns"],
+    keywords: ["transcript", "composer", "centered", "reading width"],
+  },
+  {
     title: "Thinking",
     category: "Session",
     path: ["session", "thinking"],
