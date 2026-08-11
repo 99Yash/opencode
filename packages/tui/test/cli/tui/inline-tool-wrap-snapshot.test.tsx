@@ -10,6 +10,7 @@ import {
   parseQuestionAnswers,
   parseQuestions,
   toolDisplay,
+  toolLane,
 } from "../../../src/routes/session"
 
 let testSetup: Awaited<ReturnType<typeof testRender>> | undefined
@@ -131,6 +132,11 @@ describe("TUI inline tool wrapping", () => {
     expect(toolDisplay("apply_patch")).toBe("patch")
     expect(toolDisplay("patch")).toBe("patch")
     expect(toolDisplay("plugin_tool")).toBe("generic")
+    expect(toolLane("glob")).toBe("readable")
+    expect(toolLane("webfetch")).toBe("readable")
+    expect(toolLane("shell")).toBe("technical")
+    expect(toolLane("apply_patch")).toBe("technical")
+    expect(toolLane("plugin_tool")).toBe("technical")
   })
 
   test("replaces pending copy when a tool fails before completion", async () => {

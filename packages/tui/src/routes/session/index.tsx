@@ -116,7 +116,7 @@ addDefaultParsers(parsers.parsers)
 const NAVIGATION_SLACK_ID = "session-navigation-slack"
 const BACKGROUND_TOOL_HINT_DELAY = 1_000
 // The assistant inset leaves 85 columns for code, matching common documentation guidance.
-const SESSION_CODE_LANE_WIDTH = 88
+const SESSION_TECHNICAL_LANE_WIDTH = 88
 
 // Tail-first transcript mounting: rows mounted with the session, then backfill cadence.
 // The tail comfortably overfills a tall viewport; backfill drains a 200-message transcript
@@ -1181,22 +1181,30 @@ function SessionRowView(props: SessionRowViewProps) {
           )}
         </Match>
         <Match when={props.row.type === "compaction-queued"}>
-          <CompactionQueued />
+          <SessionContentLane width="readable">
+            <CompactionQueued />
+          </SessionContentLane>
         </Match>
         <Match when={props.row.type === "part" ? props.row : undefined}>
           {(row) => <SessionPartView partRef={row().ref} message={props.message} />}
         </Match>
         <Match when={props.row.type === "group" && props.row.kind === "reasoning" ? props.row : undefined}>
-          {(row) => <SessionReasoningGroupView refs={row().refs} completed={row().completed} message={props.message} />}
+          {(row) => (
+            <SessionContentLane width="readable">
+              <SessionReasoningGroupView refs={row().refs} completed={row().completed} message={props.message} />
+            </SessionContentLane>
+          )}
         </Match>
         <Match when={props.row.type === "group" && props.row.kind === "exploration" ? props.row : undefined}>
           {(row) => (
-            <SessionGroupView
-              refs={row().refs}
-              pending={row().pending}
-              completed={row().completed}
-              message={props.message}
-            />
+            <SessionContentLane width="readable">
+              <SessionGroupView
+                refs={row().refs}
+                pending={row().pending}
+                completed={row().completed}
+                message={props.message}
+              />
+            </SessionContentLane>
           )}
         </Match>
         <Match when={props.row.type === "assistant-footer" ? props.row : undefined}>
@@ -1214,7 +1222,13 @@ function SessionRowView(props: SessionRowViewProps) {
         </Match>
         <Match when={props.row.type === "turn-usage" ? props.row : undefined}>
           {(row) => (
-            <TurnTokenUsage messageIDs={row().messageIDs} previousCache={row().previousCache} message={props.message} />
+            <SessionContentLane width="technical">
+              <TurnTokenUsage
+                messageIDs={row().messageIDs}
+                previousCache={row().previousCache}
+                message={props.message}
+              />
+            </SessionContentLane>
           )}
         </Match>
       </Switch>
@@ -1222,19 +1236,21 @@ function SessionRowView(props: SessionRowViewProps) {
   )
 }
 
-function SessionContentLane(props: { children: JSX.Element; width: "readable" | "code" }) {
+function SessionContentLane(props: { children: JSX.Element; width: "readable" | "technical" }) {
   const ctx = use()
   const maxWidth = createMemo(() => {
     const readable = ctx.config.session?.max_width ?? "auto"
     if (readable === "auto" || props.width === "readable") return readable
-    return Math.max(readable, SESSION_CODE_LANE_WIDTH)
+    return Math.max(readable, SESSION_TECHNICAL_LANE_WIDTH)
   })
   return (
-    <box width="100%" alignItems="center" flexShrink={0}>
-      <box width="100%" maxWidth={maxWidth() === "auto" ? undefined : maxWidth()} flexShrink={0}>
-        {props.children}
+    <Show when={maxWidth() !== "auto"} fallback={props.children}>
+      <box width="100%" alignItems="center" flexShrink={0}>
+        <box width="100%" maxWidth={maxWidth() === "auto" ? undefined : maxWidth()} flexShrink={0}>
+          {props.children}
+        </box>
       </box>
-    </box>
+    </Show>
   )
 }
 
@@ -1400,20 +1416,35 @@ function SessionMessageView(props: { message: SessionMessageInfo }) {
         <UserMessage message={props.message as SessionMessageUser} />
       </Match>
       <Match when={props.message.type === "shell"}>
-        <ShellMessage message={props.message as Extract<SessionMessageInfo, { type: "shell" }>} />
+        <SessionContentLane width="technical">
+          <ShellMessage message={props.message as Extract<SessionMessageInfo, { type: "shell" }>} />
+        </SessionContentLane>
       </Match>
       <Match when={props.message.type === "agent-switched" || props.message.type === "model-switched"}>
-        <SessionSwitchMessageV2 message={props.message} />
+        <SessionContentLane width="readable">
+          <SessionSwitchMessageV2 message={props.message} />
+        </SessionContentLane>
       </Match>
       <Match
         when={props.message.type === "system" || props.message.type === "synthetic" || props.message.type === "skill"}
       >
-        <Show when={props.message.type === "skill"} fallback={<SessionNoticeMessageV2 message={props.message} />}>
-          <SessionSkillMessage message={props.message as Extract<SessionMessageInfo, { type: "skill" }>} />
+        <Show
+          when={props.message.type === "skill"}
+          fallback={
+            <SessionContentLane width="readable">
+              <SessionNoticeMessageV2 message={props.message} />
+            </SessionContentLane>
+          }
+        >
+          <SessionContentLane width="readable">
+            <SessionSkillMessage message={props.message as Extract<SessionMessageInfo, { type: "skill" }>} />
+          </SessionContentLane>
         </Show>
       </Match>
       <Match when={props.message.type === "compaction"}>
-        <CompactionMessage message={props.message as Extract<SessionMessageInfo, { type: "compaction" }>} />
+        <SessionContentLane width="readable">
+          <CompactionMessage message={props.message as Extract<SessionMessageInfo, { type: "compaction" }>} />
+        </SessionContentLane>
       </Match>
     </Switch>
   )
@@ -1434,11 +1465,13 @@ function SessionPartView(props: { partRef: PartRef; message: (messageID: string)
             <TextPart part={item() as SessionMessageAssistantText} last={false} />
           </Match>
           <Match when={item().type === "reasoning"}>
-            <ReasoningPart
-              part={item() as SessionMessageAssistantReasoning}
-              message={message() as SessionMessageAssistant}
-              last={false}
-            />
+            <SessionContentLane width="readable">
+              <ReasoningPart
+                part={item() as SessionMessageAssistantReasoning}
+                message={message() as SessionMessageAssistant}
+                last={false}
+              />
+            </SessionContentLane>
           </Match>
           <Match when={item().type === "tool"}>
             <ToolPart part={item() as SessionMessageAssistantTool} />
@@ -2273,9 +2306,9 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
               return (
                 <box width="100%" marginTop={markdownLaneMarginTop(index, segment().width)} flexShrink={0}>
                   <Switch>
-                    <Match when={segment().width === "wide"}>{content}</Match>
-                    <Match when={segment().width === "code"}>
-                      <SessionContentLane width="code">{content}</SessionContentLane>
+                    <Match when={segment().width === "full"}>{content}</Match>
+                    <Match when={segment().width === "technical"}>
+                      <SessionContentLane width="technical">{content}</SessionContentLane>
                     </Match>
                     <Match when={segment().width === "readable"}>
                       <SessionContentLane width="readable">{content}</SessionContentLane>
@@ -2295,6 +2328,7 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText }) {
 
 function ToolPart(props: { part: SessionMessageAssistantTool; images?: boolean }) {
   const display = createMemo(() => toolDisplay(props.part.name))
+  const width = createMemo(() => toolLane(props.part.name))
 
   const toolprops = {
     get metadata() {
@@ -2364,10 +2398,12 @@ function ToolPart(props: { part: SessionMessageAssistantTool; images?: boolean }
     </Switch>
   )
   return [
-    content,
-    <Show when={props.images !== false}>
-      <ToolImages parts={[props.part]} />
-    </Show>,
+    <SessionContentLane width={width()}>{content}</SessionContentLane>,
+    <SessionContentLane width="readable">
+      <Show when={props.images !== false}>
+        <ToolImages parts={[props.part]} />
+      </Show>
+    </SessionContentLane>,
   ]
 }
 
@@ -3201,7 +3237,7 @@ function Edit(props: ToolProps) {
     const diffView = ctx.config.diffs?.view
     if (diffView === "unified") return "unified"
     if (diffView === "split") return "split"
-    // Default to "auto" behavior
+    if ((ctx.config.session?.max_width ?? "auto") !== "auto") return "unified"
     return ctx.width > 120 ? "split" : "unified"
   })
 
@@ -3279,6 +3315,7 @@ function ApplyPatch(props: ToolProps) {
   const view = createMemo(() => {
     if (ctx.config.diffs?.view === "unified") return "unified"
     if (ctx.config.diffs?.view === "split") return "split"
+    if ((ctx.config.session?.max_width ?? "auto") !== "auto") return "unified"
     return ctx.width > 120 ? "split" : "unified"
   })
 
@@ -3464,9 +3501,15 @@ const toolDisplays = new Set([
   "skill",
 ])
 
+const technicalToolDisplays = new Set(["shell", "write", "edit", "execute", "patch", "generic"])
+
 export function toolDisplay(tool: string) {
   const normalized = canonicalToolName(tool)
   return toolDisplays.has(normalized) ? normalized : "generic"
+}
+
+export function toolLane(tool: string): "readable" | "technical" {
+  return technicalToolDisplays.has(toolDisplay(tool)) ? "technical" : "readable"
 }
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
