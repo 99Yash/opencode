@@ -402,6 +402,7 @@ export function usePromptInputV2Controller(props: PromptInputV2ControllerProps):
       },
       submit: {
         stopping,
+        pending: submission.stopping,
         working,
         onSubmit: () => void submission.handleSubmit(new Event("submit")),
         onStop: () => void submission.abort(),

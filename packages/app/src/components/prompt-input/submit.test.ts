@@ -46,6 +46,9 @@ let selected = "/repo/worktree-a"
 let variant: string | undefined
 let permissionServer = "server-a"
 let createSessionGate: Promise<void> | undefined
+let interruptGate: Promise<void> | undefined
+let interruptCalls = 0
+let interruptFailure = false
 
 let promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 const [promptStore, setPromptStore] = createStore<PromptStore>({
@@ -120,6 +123,11 @@ const clientFor = (directory: string) => {
         },
         shell: async (input: { sessionID: string; id?: string; command: string }) => {
           sentShell.push(input)
+        },
+        interrupt: async () => {
+          interruptCalls++
+          await interruptGate
+          if (interruptFailure) throw new Error("interrupt failed")
         },
       },
     },
@@ -310,11 +318,74 @@ beforeEach(() => {
   variant = undefined
   permissionServer = "server-a"
   createSessionGate = undefined
+  interruptGate = undefined
+  interruptCalls = 0
+  interruptFailure = false
   serverSessionSyncs = 0
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
 
 describe("prompt submit worktree selection", () => {
+  test("reports stopping immediately and suppresses duplicate interrupts", async () => {
+    params = { id: "session-1" }
+    let release = () => {}
+    interruptGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let working = true
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => working,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => 0,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+
+    const first = submit.abort()
+    const second = submit.abort()
+
+    expect(submit.stopping()).toBe(true)
+    expect(interruptCalls).toBe(1)
+    release()
+    await Promise.all([first, second])
+    working = false
+    expect(submit.stopping()).toBe(false)
+  })
+
+  test("clears stopping when the interrupt request fails", async () => {
+    params = { id: "session-1" }
+    interruptFailure = true
+    const submit = createPromptSubmit({
+      prompt,
+      info: () => ({ id: "session-1" }),
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => true,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: () => 0,
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+    })
+
+    await submit.abort()
+
+    expect(submit.stopping()).toBe(false)
+  })
+
   test("reads the latest worktree accessor value per submit", async () => {
     const submit = createPromptSubmit({
       prompt,

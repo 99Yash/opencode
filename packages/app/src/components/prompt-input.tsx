@@ -261,6 +261,9 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     () => prompt.capture(),
     Math.floor(Math.random() * EXAMPLES.length),
   )
+  createEffect(() => {
+    if (!working()) setStore("stopping", false)
+  })
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
   const motion = (value: number) => ({
     opacity: value,
@@ -283,9 +286,10 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       .join("")
     return text.trim().length === 0 && imageAttachments().length === 0 && commentCount() === 0
   })
-  const stopping = createMemo(() => working() && blank())
+  const stopAction = createMemo(() => working() && blank())
   const tip = () => {
-    if (stopping()) {
+    if (store.stopping) return <span>{language.t("prompt.action.stop")}...</span>
+    if (stopAction()) {
       return (
         <div class="flex items-center gap-2">
           <span>{language.t("prompt.action.stop")}</span>
@@ -1198,36 +1202,46 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     return permission.isAutoAccepting(id, sdk().directory)
   })
 
-  const { abort, handleSubmit } =
-    props.submission ??
-    createPromptSubmit({
-      prompt,
-      info,
-      imageAttachments,
-      commentCount,
-      autoAccept: () => accepting(),
-      mode: () => store.mode,
-      working,
-      editor: () => editorRef,
-      queueScroll,
-      promptLength,
-      addToHistory,
-      resetHistoryNavigation: () => {
-        resetHistoryNavigation(true)
-      },
-      setMode: (mode) => setStore("mode", mode),
-      setPopover: (popover) => {
-        if (!popover) return closePopover()
-        setStore({ popover, slashMenu: false, slashMenuQuery: "" })
-      },
-      newSessionWorktree: () => props.newSessionWorktree,
-      onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
-      shouldQueue: props.shouldQueue,
-      onQueue: props.onQueue,
-      onAbort: props.onAbort,
-      onSubmit: props.onSubmit,
-      model: props.controls.model.selection,
+  const {
+    abort: requestAbort,
+    handleSubmit,
+    stopping: requestStopping,
+  } = props.submission ??
+  createPromptSubmit({
+    prompt,
+    info,
+    imageAttachments,
+    commentCount,
+    autoAccept: () => accepting(),
+    mode: () => store.mode,
+    working,
+    editor: () => editorRef,
+    queueScroll,
+    promptLength,
+    addToHistory,
+    resetHistoryNavigation: () => {
+      resetHistoryNavigation(true)
+    },
+    setMode: (mode) => setStore("mode", mode),
+    setPopover: (popover) => {
+      if (!popover) return closePopover()
+      setStore({ popover, slashMenu: false, slashMenuQuery: "" })
+    },
+    newSessionWorktree: () => props.newSessionWorktree,
+    onNewSessionWorktreeReset: props.onNewSessionWorktreeReset,
+    shouldQueue: props.shouldQueue,
+    onQueue: props.onQueue,
+    onAbort: props.onAbort,
+    onSubmit: props.onSubmit,
+    model: props.controls.model.selection,
+  })
+  const abort = () => {
+    if (store.stopping || requestStopping?.()) return Promise.resolve()
+    setStore("stopping", true)
+    return Promise.resolve(requestAbort()).finally(() => {
+      if (working()) setStore("stopping", false)
     })
+  }
 
   const handleKeyDown = (event: KeyboardEvent) => {
     if ((event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "u") {
@@ -1579,12 +1593,12 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 <IconButton
                   data-action="prompt-submit"
                   type="submit"
-                  disabled={!working() && blank()}
+                  disabled={store.stopping || (!working() && blank())}
                   tabIndex={store.mode === "normal" ? undefined : -1}
-                  icon={stopping() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
+                  icon={stopAction() ? "stop" : store.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
                   variant="primary"
                   class="size-8"
-                  aria-label={stopping() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
+                  aria-label={stopAction() ? language.t("prompt.action.stop") : language.t("prompt.action.send")}
                 />
               </Tooltip>
             </div>

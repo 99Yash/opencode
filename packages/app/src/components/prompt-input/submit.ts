@@ -4,7 +4,7 @@ import { showToast } from "@/utils/toast"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { Binary } from "@opencode-ai/core/util/binary"
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
-import { batch, startTransition, type Accessor } from "solid-js"
+import { batch, createSignal, startTransition, type Accessor } from "solid-js"
 import { useTabs } from "@/context/tabs"
 import { useServerSync, type ServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -263,6 +263,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const params = useParams()
   const [search] = useSearchParams<{ draftId?: string }>()
   const tabs = useTabs()
+  const [stopping, setStopping] = createSignal(false)
+  const isStopping = () => {
+    if (input.working()) return stopping()
+    setStopping(false)
+    return false
+  }
   const pendingKey = (sessionID: string) => ScopedKey.from(sdk().scope, sessionID)
 
   const errorMessage = (err: unknown) => {
@@ -276,8 +282,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   }
 
   const abort = async () => {
+    if (isStopping()) return
     const sessionID = params.id
     if (!sessionID) return Promise.resolve()
+    setStopping(true)
 
     serverSync().session.set("todo", sessionID, [])
 
@@ -289,11 +297,12 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       queued.abort.abort()
       queued.cleanup()
       pending.delete(key)
+      setStopping(false)
       return Promise.resolve()
     }
     return sdk()
       .api.session.interrupt({ sessionID })
-      .catch(() => {})
+      .catch(() => setStopping(false))
   }
 
   const restoreCommentItems = (
@@ -649,5 +658,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   return {
     abort,
     handleSubmit,
+    stopping: isStopping,
   }
 }

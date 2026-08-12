@@ -167,6 +167,16 @@ export function Prompt(props: PromptProps) {
   const dialog = useDialog()
   const toast = useToast()
   const status = createMemo(() => data.session.status(props.sessionID ?? ""))
+  const [stoppingSession, setStoppingSession] = createSignal<string>()
+  const stopping = createMemo(() => stoppingSession() === props.sessionID && status() === "running")
+  createEffect(
+    on(
+      () => [props.sessionID, status()] as const,
+      ([, current]) => {
+        if (current === "idle") setStoppingSession(undefined)
+      },
+    ),
+  )
   const history = usePromptHistory()
   const stash = usePromptStash()
   const keymap = Keymap.use()
@@ -466,7 +476,7 @@ export function Prompt(props: PromptProps) {
         name: "session.interrupt",
         category: "Session",
         palette: undefined,
-        enabled: status() === "running",
+        enabled: status() === "running" && !stopping(),
         run: () => {
           if (auto()?.visible) return
           if (!input.focused) return
@@ -484,9 +494,12 @@ export function Prompt(props: PromptProps) {
           }, 5000)
 
           if (store.interrupt >= 2) {
-            void client.api.session.interrupt({
-              sessionID: props.sessionID,
-            })
+            setStoppingSession(props.sessionID)
+            void client.api.session
+              .interrupt({
+                sessionID: props.sessionID,
+              })
+              .catch(() => setStoppingSession(undefined))
             setStore("interrupt", 0)
           }
           dialog.clear()
@@ -1797,6 +1810,16 @@ export function Prompt(props: PromptProps) {
             <Slot path="prompt.footer.status" input={footerInput()}>
               <box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Switch>
+                  <Match when={stopping()}>
+                    <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-start">
+                      <box marginLeft={1}>
+                        <Show when={config.animations ?? true} fallback={<text fg={theme.text.subdued}>[⋯]</text>}>
+                          <spinner color={spinnerDef().color} frames={spinnerDef().frames} interval={40} />
+                        </Show>
+                      </box>
+                      <text fg={theme.text.subdued}>Stopping...</text>
+                    </box>
+                  </Match>
                   <Match when={status() === "running"}>
                     <box flexDirection="row" gap={1} flexGrow={1} justifyContent="flex-start">
                       <box marginLeft={1}>

@@ -257,6 +257,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
           <PromptInputV2SubmitButton
             mode={state.mode}
             stopping={view.submit.stopping()}
+            pending={view.submit.pending?.() ?? false}
             disabled={!props.controller.canSubmit()}
             sendLabel={i18n.t("ui.promptInput.send")}
             stopLabel={i18n.t("ui.promptInput.stop")}
@@ -672,6 +673,7 @@ export function PromptInputV2Popover(props: {
 export function PromptInputV2SubmitButton(props: {
   mode: PromptInputV2Mode
   stopping: boolean
+  pending: boolean
   disabled: boolean
   sendLabel: string
   stopLabel: string
@@ -682,12 +684,12 @@ export function PromptInputV2SubmitButton(props: {
     <TooltipV2
       placement="top"
       inactive={!props.stopping && props.disabled}
-      value={props.stopping ? props.stopLabel : props.sendLabel}
+      value={props.pending ? `${props.stopLabel}...` : props.stopping ? props.stopLabel : props.sendLabel}
     >
       <IconButton
         data-action="prompt-submit"
         type="button"
-        disabled={!props.stopping && props.disabled}
+        disabled={props.pending || (!props.stopping && props.disabled)}
         tabIndex={props.mode === "normal" ? undefined : -1}
         icon={props.stopping ? "stop" : props.mode === "shell" ? "arrow-undo-down" : "arrow-up"}
         variant="primary"

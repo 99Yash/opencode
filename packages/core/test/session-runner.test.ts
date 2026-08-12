@@ -28,7 +28,7 @@ import { EventTable } from "@opencode-ai/core/event/sql"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { Form } from "@opencode-ai/core/form"
-import { AbsolutePath } from "@opencode-ai/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { SessionEvent } from "@opencode-ai/core/session/event"
@@ -355,6 +355,18 @@ const pluginSupervisor = Layer.succeed(
     flush: Effect.suspend(() => pluginFlushHook),
   }),
 )
+let snapshotCaptureHook: () => Effect.Effect<Snapshot.ID | undefined> = () => Effect.succeed(undefined)
+let snapshotFilesHook: (input: Snapshot.CompareInput) => Effect.Effect<readonly RelativePath[], Snapshot.Error> = () =>
+  Effect.succeed([])
+const snapshots = Layer.succeed(
+  Snapshot.Service,
+  Snapshot.Service.of({
+    capture: () => snapshotCaptureHook(),
+    files: (input) => snapshotFilesHook(input),
+    diff: () => Effect.succeed([]),
+    restore: () => Effect.void,
+  }),
+)
 const promptCatalog = Layer.mock(Catalog.Service, {
   provider: {
     get: () => Effect.succeed(undefined),
@@ -370,7 +382,7 @@ const promptCatalog = Layer.mock(Catalog.Service, {
   },
 })
 const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
-  [Snapshot.node, Snapshot.noopLayer],
+  [Snapshot.node, snapshots],
   [LayerNodePlatform.llmClient, client],
   [SessionRunnerModel.node, models],
   [InstructionBuiltIns.node, systemContext],
@@ -437,7 +449,7 @@ const it = testEffect(
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
       [SkillInstructions.node, skillInstructions],
       [ReferenceInstructions.node, referenceInstructions],
-      [Snapshot.node, Snapshot.noopLayer],
+      [Snapshot.node, snapshots],
       [SessionExecution.node, execution],
       [Config.node, config],
       [PluginSupervisor.node, pluginSupervisor],
@@ -493,6 +505,8 @@ const setup = Effect.gen(function* () {
   systemLoadHook = Effect.void
   modelResolveHook = Effect.void
   pluginFlushHook = Effect.void
+  snapshotCaptureHook = () => Effect.succeed(undefined)
+  snapshotFilesHook = () => Effect.succeed([])
   currentModel = model
   skillBaselines.clear()
   toolBarrier = undefined
@@ -3738,6 +3752,89 @@ describe("SessionRunnerLLM", () => {
       ])
       expect(yield* recordedEventTypes(sessionID)).toContain("session.step.failed.1")
       yield* session.interrupt(sessionID)
+    }),
+  )
+
+  it.effect("waits for the end snapshot before interrupted settlement", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const endCaptureStarted = yield* Deferred.make<void>()
+      const releaseEndCapture = yield* Deferred.make<void>()
+      const runSettled = yield* Deferred.make<void>()
+      const interruptSettled = yield* Deferred.make<void>()
+      let captures = 0
+      snapshotCaptureHook = () => {
+        captures++
+        if (captures === 1) return Effect.succeed(Snapshot.ID.make("snapshot-start"))
+        return Deferred.succeed(endCaptureStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseEndCapture)),
+          Effect.as(Snapshot.ID.make("snapshot-end")),
+        )
+      }
+      snapshotFilesHook = () => Effect.succeed([RelativePath.make("changed.txt")])
+      yield* admit(session, "Interrupt during end snapshot")
+      const stream = yield* TestLLM.gate
+
+      const run = yield* session
+        .resume(sessionID)
+        .pipe(Effect.ensuring(Deferred.succeed(runSettled, undefined)), Effect.forkChild)
+      yield* stream.started
+      const interrupt = yield* session
+        .interrupt(sessionID)
+        .pipe(Effect.ensuring(Deferred.succeed(interruptSettled, undefined)), Effect.forkChild)
+      yield* Deferred.await(endCaptureStarted)
+
+      expect(yield* Deferred.isDone(interruptSettled)).toBe(false)
+      expect(yield* Deferred.isDone(runSettled)).toBe(false)
+
+      yield* Deferred.succeed(releaseEndCapture, undefined)
+      yield* Fiber.join(interrupt)
+      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      expect(requireAssistant(yield* session.context(sessionID))).toMatchObject({
+        finish: "error",
+        error: { type: "aborted", message: "Step interrupted" },
+        snapshot: {
+          start: "snapshot-start",
+          end: "snapshot-end",
+          files: ["changed.txt"],
+        },
+      })
+    }),
+  )
+
+  it.effect("waits for unrelated database transactions before interrupted settlement", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const { db } = yield* Database.Service
+      const transactionStarted = yield* Deferred.make<void>()
+      const releaseTransaction = yield* Deferred.make<void>()
+      const interruptSettled = yield* Deferred.make<void>()
+      yield* admit(session, "Interrupt during database contention")
+      const stream = yield* TestLLM.gate
+
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* stream.started
+      const transaction = yield* db
+        .transaction(() =>
+          Deferred.succeed(transactionStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseTransaction))),
+        )
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(transactionStarted)
+      const interrupt = yield* session
+        .interrupt(sessionID)
+        .pipe(Effect.ensuring(Deferred.succeed(interruptSettled, undefined)), Effect.forkChild)
+      yield* Effect.yieldNow
+
+      expect(yield* Deferred.isDone(interruptSettled)).toBe(false)
+
+      yield* Deferred.succeed(releaseTransaction, undefined)
+      yield* Fiber.join(transaction)
+      yield* Fiber.join(interrupt)
+      expect(yield* Fiber.await(run)).toMatchObject({ _tag: "Failure" })
+      expect(requireAssistant(yield* session.context(sessionID))).toMatchObject({
+        finish: "error",
+        error: { type: "aborted", message: "Step interrupted" },
+      })
     }),
   )
 
