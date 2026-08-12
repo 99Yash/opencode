@@ -1,18 +1,20 @@
 import { test, expect, describe, afterEach, beforeEach, spyOn } from "bun:test"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
-import { Cause, Effect, Exit, Layer } from "effect"
+import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
+import { Cause, Effect, Exit, Layer, Option } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
-import { NodeFileSystem, NodePath } from "@effect/platform-node"
 import { Config } from "@/config/config"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
-import { EffectFlock } from "@opencode-ai/core/util/effect-flock"
+import { Npm } from "@opencode-ai/core/npm"
 
 import { InstanceRef } from "../../src/effect/instance-ref"
 import type { InstanceContext } from "../../src/project/instance-context"
 import { Auth } from "../../src/auth"
 import { Account } from "../../src/account/account"
+import { AccessToken, AccountID, OrgID } from "../../src/account/schema"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Env } from "../../src/env"
 import {
@@ -39,13 +41,6 @@ import { ConfigPluginV1 } from "@opencode-ai/core/v1/config/plugin"
 import { AccountTest } from "../fake/account"
 import { AuthTest } from "../fake/auth"
 import { NpmTest } from "../fake/npm"
-
-/** Infra layer that provides FileSystem, Path, ChildProcessSpawner for test fixtures */
-const infra = CrossSpawnSpawner.defaultLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)),
-)
-
-const testFlock = EffectFlock.defaultLayer
 
 const unexpectedHttp = HttpClient.make((request) =>
   Effect.die(`unexpected http request: ${request.method} ${request.url}`),
@@ -103,16 +98,12 @@ const configLayer = (
     client?: HttpClient.HttpClient
   } = {},
 ) =>
-  Config.layer.pipe(
-    Layer.provide(testFlock),
-    Layer.provide(Env.defaultLayer),
-    Layer.provide(options.auth ?? AuthTest.empty),
-    Layer.provide(options.account ?? AccountTest.empty),
-    Layer.provideMerge(infra),
-    Layer.provide(NpmTest.noop),
-    Layer.provide(Layer.succeed(HttpClient.HttpClient, options.client ?? unexpectedHttp)),
-    Layer.provideMerge(FSUtil.defaultLayer),
-  )
+  LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
+    [Auth.node, options.auth ?? AuthTest.empty],
+    [Account.node, options.account ?? AccountTest.empty],
+    [Npm.node, NpmTest.noop],
+    [httpClient, Layer.succeed(HttpClient.HttpClient, options.client ?? unexpectedHttp)],
+  ])
 
 const layer = configLayer()
 
@@ -140,6 +131,7 @@ const clear = (wait = false) => Effect.runPromise(clearEffect(wait))
 // Get managed config directory from environment (set in preload.ts)
 const managedConfigDir = process.env.OPENCODE_TEST_MANAGED_CONFIG_DIR!
 const originalTestToken = process.env.TEST_TOKEN
+const originalConsoleToken = process.env.OPENCODE_CONSOLE_TOKEN
 
 beforeEach(async () => {
   await clear(true)
@@ -149,6 +141,8 @@ afterEach(async () => {
   await fs.rm(managedConfigDir, { force: true, recursive: true }).catch(() => {})
   if (originalTestToken === undefined) delete process.env.TEST_TOKEN
   else process.env.TEST_TOKEN = originalTestToken
+  if (originalConsoleToken === undefined) delete process.env.OPENCODE_CONSOLE_TOKEN
+  else process.env.OPENCODE_CONSOLE_TOKEN = originalConsoleToken
   await clear(true)
 })
 
@@ -167,7 +161,7 @@ const withInstanceDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =
     Effect.provideService(TestInstance, { directory: dir }),
     provideInstanceEffect(dir),
     Effect.provide(testInstanceStoreLayer),
-    Effect.provide(CrossSpawnSpawner.defaultLayer),
+    Effect.provide(LayerNode.compile(CrossSpawnSpawner.node)),
   )
 
 const withGlobalConfigDir = <A, E, R>(dir: string, effect: Effect.Effect<A, E, R>) =>
@@ -321,7 +315,7 @@ it.effect("creates global jsonc config with schema when no global configs exist"
 
       const content = yield* FSUtil.use.readFileString(path.join(dir, "opencode.jsonc"))
       expect(content).toContain('"$schema": "https://opencode.ai/config.json"')
-    }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+    }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
   ),
 )
 
@@ -336,7 +330,7 @@ it.effect("does not create global config when OPENCODE_CONFIG_DIR is set", () =>
           yield* Config.use.get().pipe(provideInstanceEffect(dir))
 
           expect(yield* FSUtil.use.existsSafe(path.join(dir, "opencode.jsonc"))).toBe(false)
-        }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+        }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
       ),
     )
   }),
@@ -560,12 +554,55 @@ it.instance("handles file inclusion with replacement tokens", () =>
   }),
 )
 
-it.instance("validates config schema and throws on invalid fields", () =>
+const accountTokenIt = configIt({
+  account: Layer.mock(Account.Service)({
+    active: () =>
+      Effect.succeed(
+        Option.some({
+          id: AccountID.make("account-1"),
+          email: "user@example.com",
+          url: "https://control.example.com",
+          active_org_id: OrgID.make("org-1"),
+        }),
+      ),
+    activeOrg: () =>
+      Effect.succeed(
+        Option.some({
+          account: {
+            id: AccountID.make("account-1"),
+            email: "user@example.com",
+            url: "https://control.example.com",
+            active_org_id: OrgID.make("org-1"),
+          },
+          org: {
+            id: OrgID.make("org-1"),
+            name: "Example Org",
+          },
+        }),
+      ),
+    config: () =>
+      Effect.succeed(
+        Option.some({
+          provider: { opencode: { options: { apiKey: "{env:OPENCODE_CONSOLE_TOKEN}" } } },
+        }),
+      ),
+    token: () => Effect.succeed(Option.some(AccessToken.make("st_test_token"))),
+  }),
+})
+
+accountTokenIt.instance("resolves env templates in account config with account token", () =>
+  Effect.gen(function* () {
+    const config = yield* Config.use.get()
+    expect(config.provider?.["opencode"]?.options?.apiKey).toBe("st_test_token")
+  }),
+)
+
+it.instance("validates config schema and throws on invalid values", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     yield* writeConfigEffect(test.directory, {
       $schema: "https://opencode.ai/config.json",
-      invalid_field: "should cause error",
+      model: 42,
     })
     const exit = yield* Config.use.get().pipe(Effect.exit)
     expect(Exit.isFailure(exit)).toBe(true)
@@ -883,7 +920,32 @@ it.effect("does not try to install dependencies in read-only OPENCODE_CONFIG_DIR
     yield* Effect.addFinalizer(() => FSUtil.use.chmod(readonly, 0o755).pipe(Effect.ignore))
 
     yield* withProcessEnv("OPENCODE_CONFIG_DIR", readonly, Config.use.get().pipe(provideInstanceEffect(dir)))
-  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.effect("ignores an inaccessible OPENCODE_CONFIG_DIR", () =>
+  Effect.gen(function* () {
+    if (process.platform === "win32") return
+
+    const dir = yield* tmpdirScoped()
+    const configDir = path.join(dir, "inaccessible")
+    yield* FSUtil.use.ensureDir(configDir)
+    yield* FSUtil.use.chmod(configDir, 0o000)
+    yield* Effect.addFinalizer(() => FSUtil.use.chmod(configDir, 0o755).pipe(Effect.ignore))
+
+    yield* withProcessEnv("OPENCODE_CONFIG_DIR", configDir, Config.use.get().pipe(provideInstanceEffect(dir)))
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
+)
+
+it.effect("creates a missing OPENCODE_CONFIG_DIR", () =>
+  Effect.gen(function* () {
+    const dir = yield* tmpdirScoped()
+    const configDir = path.join(dir, "configdir")
+
+    yield* withProcessEnv("OPENCODE_CONFIG_DIR", configDir, Config.use.get().pipe(provideInstanceEffect(dir)))
+
+    expect(yield* FSUtil.use.readFileString(path.join(configDir, ".gitignore"))).toContain("node_modules")
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
 )
 
 it.effect("installs dependencies in writable OPENCODE_CONFIG_DIR", () =>
@@ -901,7 +963,7 @@ it.effect("installs dependencies in writable OPENCODE_CONFIG_DIR", () =>
     )
 
     expect(yield* FSUtil.use.readFileString(path.join(configDir, ".gitignore"))).toContain("package-lock.json")
-  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+  }).pipe(Effect.provide(testInstanceStoreLayer), Effect.provide(LayerNode.compile(CrossSpawnSpawner.node))),
 )
 
 // Note: deduplication and serialization of npm installs is now handled by the
@@ -1269,7 +1331,7 @@ it.instance("permission config preserves user key order", () =>
   }),
 )
 
-test("config parser preserves permission order while rejecting unknown top-level keys", () => {
+test("config parser preserves permission order while ignoring unknown top-level keys", () => {
   const config = ConfigParse.schema(
     ConfigV1.Info,
     {
@@ -1278,18 +1340,13 @@ test("config parser preserves permission order while rejecting unknown top-level
         "*": "deny",
         edit: "ask",
       },
+      plugins: ["example"],
     },
     "test",
   )
 
   expect(Object.keys(config.permission!)).toEqual(["bash", "*", "edit"])
-  try {
-    ConfigParse.schema(ConfigV1.Info, { invalid_field: true }, "test")
-    throw new Error("expected config parse to fail")
-  } catch (err) {
-    const error = err as { data?: { issues?: Array<{ code?: string; keys?: string[]; path?: string[] }> } }
-    expect(error.data?.issues?.[0]).toMatchObject({ code: "unrecognized_keys", keys: ["invalid_field"], path: [] })
-  }
+  expect(config).not.toHaveProperty("plugins")
 })
 
 // MCP config merging tests
@@ -1486,16 +1543,12 @@ test("remote well-known config can use FetchHttpClient layer", async () => {
       Effect.scoped,
       Effect.provide(
         Layer.mergeAll(
-          Config.layer.pipe(
-            Layer.provide(testFlock),
-            Layer.provide(FSUtil.defaultLayer),
-            Layer.provide(Env.defaultLayer),
-            Layer.provide(wellKnownAuth(server.url.origin)),
-            Layer.provide(AccountTest.empty),
-            Layer.provideMerge(infra),
-            Layer.provide(NpmTest.noop),
-            Layer.provide(FetchHttpClient.layer),
-          ),
+          LayerNode.compile(LayerNode.group([Config.node, FSUtil.node, Env.node, CrossSpawnSpawner.node]), [
+            [Auth.node, wellKnownAuth(server.url.origin)],
+            [Account.node, AccountTest.empty],
+            [Npm.node, NpmTest.noop],
+            [httpClient, FetchHttpClient.layer],
+          ]),
           testInstanceStoreLayer,
         ),
       ),

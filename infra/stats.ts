@@ -42,11 +42,12 @@ const inferenceEventTable = new aws.s3tables.Table(
             { name: "request", type: "string", required: false },
             { name: "client", type: "string", required: false },
             { name: "user_agent", type: "string", required: false },
+            { name: "model", type: "string", required: false },
+            { name: "model_tier", type: "string", required: false },
             { name: "model_variant", type: "string", required: false },
             { name: "source", type: "string", required: false },
             { name: "provider", type: "string", required: false },
             { name: "provider_model", type: "string", required: false },
-            { name: "model", type: "string", required: false },
             { name: "llm_error_code", type: "int", required: false },
             { name: "llm_error_message", type: "string", required: false },
             { name: "error_response", type: "string", required: false },
@@ -184,7 +185,9 @@ export const statSync = new sst.aws.Service("StatsSyncService", {
   cluster: lakeCluster,
   architecture: "arm64",
   cpu: "0.25 vCPU",
-  memory: "0.5 GB",
+  // 0.5 GB caused an OOM crash loop: every restart immediately re-ran the 4 Athena
+  // stats queries (~$5/pass) every ~5 minutes instead of hourly.
+  memory: "2 GB",
   image: {
     context: ".",
     dockerfile: "packages/stats/server/Dockerfile",
