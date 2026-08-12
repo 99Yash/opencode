@@ -9,7 +9,7 @@ import {
   spawnServiceContender,
 } from "../service-contender.js"
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
-import { matchesVersion } from "../service-version.js"
+import { isServiceVersionCompatible, matchesVersion } from "../service-version.js"
 import type { ServiceHealth, ServiceStopResponse } from "./generated/types.js"
 
 export * from "../service.js"
@@ -278,4 +278,4 @@ function delay(milliseconds: number) {
 }
 
 /** Promise-based local service lifecycle operations. */
-export const Service = { discover, ensure, stop, headers }
+export const Service = { discover, ensure, stop, headers, isServiceVersionCompatible }

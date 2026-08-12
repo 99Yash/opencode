@@ -1,3 +1,5 @@
+export { isServiceVersionCompatible } from "./service-version.js"
+
 /** Connection details for a local OpenCode service. */
 export type Endpoint = {
   /** Base URL of the service. */

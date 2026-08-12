@@ -68,6 +68,30 @@ test("reuses a compatible registered service", async () => {
   expect(existing.exitCode).toBe(null)
 })
 
+test("a stale client reuses a newer registered service", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const existing = spawn(registration, "newer")
+  await waitForFile(registration)
+  const original = await Bun.file(registration).json()
+
+  const starts: EnsureReason[] = []
+  const endpoint = await run(
+    ensure({
+      file: registration,
+      version: (version) => Service.isServiceVersionCompatible(version, "0.0.0-next-17271"),
+      command: [process.execPath, fixture, registration, "record-start"],
+      onStart: (reason) => starts.push(reason),
+    }),
+  )
+
+  expect(endpoint.url).toBe(original.url)
+  expect(starts).toEqual([])
+  expect(existing.exitCode).toBe(null)
+  expect(await Bun.file(registration).json()).toEqual(original)
+  expect(await Bun.file(registration + ".started").exists()).toBe(false)
+})
+
 test("replaces an incompatible registered service", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")

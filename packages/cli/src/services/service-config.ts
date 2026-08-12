@@ -103,7 +103,9 @@ export const options = Effect.fnUntraced(function* (input: { readonly checkVersi
   yield* Effect.forEach(legacyRegistrationFiles, (legacy) => migrateRegistration(legacy, file))
   return {
     file,
-    version: input.checkVersion ? OPENCODE_VERSION : undefined,
+    version: input.checkVersion
+      ? (version: string) => Service.isServiceVersionCompatible(version, OPENCODE_VERSION)
+      : undefined,
     command: [...selfCommand(), "serve", "--service"],
   }
 })

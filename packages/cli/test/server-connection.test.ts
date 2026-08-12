@@ -64,7 +64,11 @@ test("service options only require a matching version when requested", async () 
 
   try {
     expect((await runPromise(ServiceConfig.options())).version).toBeUndefined()
-    expect((await runPromise(ServiceConfig.options({ checkVersion: true }))).version).toBe(OPENCODE_VERSION)
+    const version = (await runPromise(ServiceConfig.options({ checkVersion: true }))).version
+    expect(version).toBeFunction()
+    if (typeof version !== "function") throw new Error("Expected a service version predicate")
+    expect(version(OPENCODE_VERSION)).toBe(true)
+    expect(version("999.0.0")).toBe(true)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }

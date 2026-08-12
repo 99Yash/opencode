@@ -29,7 +29,7 @@ export async function startBackgroundCli(logger: Logger) {
       isolated && process.env.OPENCODE_DESKTOP_SERVER_CHANNEL === "local"
         ? join(app.getPath("userData"), "opencode", "service-local.json")
         : undefined,
-    version,
+    version: (serverVersion) => Service.isServiceVersionCompatible(serverVersion, version),
     command: [binary, "serve", "--service"],
     onStart: (reason, previousVersion) => logger.log("v2 CLI background service starting", { reason, previousVersion }),
   })

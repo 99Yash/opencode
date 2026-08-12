@@ -10,7 +10,7 @@ import {
   spawnServiceContender,
 } from "../service-contender.js"
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
-import { matchesVersion } from "../service-version.js"
+import { isServiceVersionCompatible, matchesVersion } from "../service-version.js"
 
 export * from "../service.js"
 /** Contents of the local service registration file. */
@@ -325,4 +325,4 @@ const requestStop = Effect.fnUntraced(function* (service: LocalService, timeout 
 })
 
 /** Effect-based local service lifecycle operations. */
-export const Service = { discover, incumbent, ensure, stop, headers, Info }
+export const Service = { discover, incumbent, ensure, stop, headers, isServiceVersionCompatible, Info }
