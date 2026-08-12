@@ -38,6 +38,50 @@ test("discovers a compatible registered service", async () => {
   expect(await Service.discover({ file: registration, version: (version) => version.startsWith("3.") })).toBeUndefined()
 })
 
+test("rejects malformed registrations without probing or signaling", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const malformed = [
+    null,
+    [],
+    {},
+    { url: "http://127.0.0.1:1" },
+    { url: "http://127.0.0.1:1", pid: 0 },
+    { url: "http://127.0.0.1:1", pid: -1 },
+    { url: "http://127.0.0.1:1", pid: 1.5 },
+    { url: "http://127.0.0.1:1", pid: "1" },
+    { url: "http://127.0.0.1:1", pid: 1, id: 1 },
+  ]
+
+  for (const value of malformed) {
+    await Bun.write(registration, JSON.stringify(value))
+    expect(await Service.discover({ file: registration })).toBeUndefined()
+  }
+})
+
+test("rejects primitive and partial modern health responses", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const bodies = [
+    null,
+    1,
+    "healthy",
+    [],
+    {},
+    { healthy: false, version: "test", pid: process.pid },
+    { healthy: true, version: null, pid: process.pid },
+    { healthy: true, version: "test", pid: "1" },
+    { healthy: true, version: "test" },
+    { healthy: true, pid: process.pid },
+  ]
+
+  for (const body of bodies) {
+    using server = Bun.serve({ port: 0, fetch: () => Response.json(body) })
+    await Bun.write(registration, JSON.stringify({ url: server.url.toString(), pid: process.pid }))
+    expect(await Service.discover({ file: registration })).toBeUndefined()
+  }
+})
+
 test("ensures a missing service with native promises", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
@@ -100,7 +144,7 @@ test("reports a bounded contender stderr tail with native promises", async () =>
   expect(error.message.length).toBeLessThan(9_000)
 }, 10_000)
 
-test("evicts an unresponsive registered service before starting its replacement", async () => {
+test("never evicts an unresponsive registered service automatically", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
   const existing = Bun.spawn([process.execPath, fixture, registration, "hanging"], {
@@ -111,19 +155,46 @@ test("evicts an unresponsive registered service before starting its replacement"
   await waitForFile(registration)
   const original = await Bun.file(registration).json()
 
-  const endpoint = await ensure({
+  const options = {
     file: registration,
     version: "test",
-    command: [process.execPath, fixture, registration, "delayed", "10"],
-  })
-  const replacement = await Bun.file(registration).json()
+    command: [process.execPath, fixture, registration, "record-start"],
+  }
+  const result = ensure(options)
+  await waitForLines(registration + ".requests", 3)
 
-  expect((await Bun.file(registration + ".requests").text()).trim().split("\n")).toHaveLength(3)
-  expect(await existing.exited).toBe(0)
-  expect(replacement.pid).not.toBe(original.pid)
-  expect(endpoint.url).toBe(replacement.url)
-  process.kill(replacement.pid, "SIGTERM")
-  await waitForExit(replacement.pid)
+  expect(existing.exitCode).toBe(null)
+  expect(await Bun.file(registration).json()).toEqual(original)
+  await expect(result).rejects.toThrow()
+})
+
+test("explicit native stop refuses to signal an unidentified unresponsive PID", async () => {
+  const registration = await setup("hanging")
+  const info = await Bun.file(registration).json()
+
+  await expect(Service.stop({ file: registration })).rejects.toThrow("stop its process manually")
+
+  expect(process.kill(info.pid, 0)).toBe(true)
+})
+
+test("a stale native client refuses to replace a newer service", async () => {
+  const registration = await setup("graceful")
+  const directory = await temp()
+  const contender = join(directory, "contender.json")
+  const info = await Bun.file(registration).json()
+
+  await expect(
+    ensure({
+      file: registration,
+      version: "old",
+      canReplace: () => false,
+      command: [process.execPath, fixture, contender, "record-start"],
+    }),
+  ).rejects.toThrow("Run `opencode2 service restart` to activate this installed version")
+
+  expect(await Bun.file(contender + ".started").exists()).toBe(false)
+  expect(process.kill(info.pid, 0)).toBe(true)
+  expect(await Bun.file(registration).json()).toEqual(info)
 })
 
 test("requests graceful stop of the exact service instance", async () => {
@@ -155,4 +226,15 @@ async function waitForFile(file: string) {
     await Bun.sleep(5)
   }
   throw new Error(`Timed out waiting for ${file}`)
+}
+
+async function waitForLines(file: string, count: number) {
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const text = await Bun.file(file)
+      .text()
+      .catch(() => "")
+    if (text.trim().split("\n").length >= count) return
+    await Bun.sleep(5)
+  }
+  throw new Error(`Timed out waiting for ${count} lines in ${file}`)
 }

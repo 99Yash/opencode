@@ -28,7 +28,7 @@ if (mode === "delayed" || mode === "delayed-failed" || mode === "coordinated" ||
 
 let requests = 0
 let version = "test"
-if (mode === "old" || mode === "reject-stop") version = "old"
+if (mode === "old" || mode === "reject-stop" || mode === "stop-hanging") version = "old"
 if (mode === "incompatible") version = "1.9.0"
 if (mode === "compatible" || mode === "delayed-compatible") version = "2.1.0-next.1"
 const id = crypto.randomUUID()
@@ -40,7 +40,11 @@ const server = Bun.serve({
       await appendFile(registration + ".stop-attempts", process.pid + "\n")
       return Response.json({ accepted: false })
     }
-    if (pathname === "/api/service/stop" && mode === "graceful") {
+    if (pathname === "/api/service/stop" && mode === "stop-hanging") {
+      await appendFile(registration + ".stop-attempts", process.pid + "\n")
+      return new Promise<Response>(() => {})
+    }
+    if (pathname === "/api/service/stop" && (mode === "graceful" || mode === "old")) {
       const body = await request.json()
       if (typeof body !== "object" || body === null || body.instanceID !== id) return Response.json({ accepted: false })
       await writeFile(registration + ".stop", JSON.stringify(body))
@@ -63,7 +67,7 @@ const server = Bun.serve({
     if (mode === "starting" && !(await Bun.file(registration + ".release").exists()))
       return Response.json({ healthy: true, version, pid: process.pid }, { status: 503 })
     if (mode === "failed-owner") return Response.json({ healthy: true, version, pid: process.pid }, { status: 500 })
-    if (mode === "starting" || mode === "graceful" || mode === "reject-stop")
+    if (mode === "starting" || mode === "graceful" || mode === "reject-stop" || mode === "stop-hanging")
       return Response.json({ healthy: true, version, pid: process.pid })
     return Response.json({ healthy: true, version, pid: process.pid })
   },

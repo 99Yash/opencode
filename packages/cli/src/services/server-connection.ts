@@ -57,7 +57,7 @@ function managedService(options: EnsureOptions) {
     restart: () =>
       Effect.gen(function* () {
         yield* Service.stop(options)
-        yield* Service.ensure(reconnectOptions)
+        yield* Service.ensure(options)
       }),
   }
 }

@@ -118,29 +118,39 @@ test("reports a failed registered service without spawning", async () => {
   expect(process.exitCode).toBe(null)
 })
 
-test("evicts an unresponsive registered service before starting its replacement", async () => {
+test("never evicts an unresponsive registered service automatically", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
   const existing = spawn(registration, "hanging")
   await waitForFile(registration)
   const original = await Bun.file(registration).json()
 
-  const endpoint = await run(
+  const controller = new AbortController()
+  const result = Effect.runPromise(
     ensure({
       file: registration,
       version: "test",
-      command: [process.execPath, fixture, registration, "delayed", "10"],
-    }),
+      command: [process.execPath, fixture, registration, "record-start"],
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+    { signal: controller.signal },
   )
-  const replacement = await Bun.file(registration).json()
+  await waitForLines(registration + ".requests", 3)
+  controller.abort()
+  await result.catch(() => undefined)
 
-  expect((await Bun.file(registration + ".requests").text()).trim().split("\n")).toHaveLength(3)
-  expect(await existing.exited).toBe(0)
-  expect(replacement.pid).not.toBe(original.pid)
-  expect(endpoint.url).toBe(replacement.url)
-  expect(await health(endpoint.url)).toEqual({ healthy: true, version: "test", pid: replacement.pid })
-  process.kill(replacement.pid, "SIGTERM")
-  await waitForExit(replacement.pid)
+  expect(existing.exitCode).toBe(null)
+  expect(await Bun.file(registration).json()).toEqual(original)
+})
+
+test("explicit stop refuses to signal an unidentified unresponsive PID", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const existing = spawn(registration, "hanging")
+  await waitForFile(registration)
+
+  await expect(run(Service.stop({ file: registration }))).rejects.toThrow("stop its process manually")
+
+  expect(existing.exitCode).toBe(null)
 })
 
 test("requests graceful stop of the exact service instance", async () => {
@@ -161,25 +171,108 @@ test("does not spawn contenders while an incompatible service rejects replacemen
   const contender = join(directory, "contender.json")
   const existing = spawn(registration, "reject-stop")
   await waitForFile(registration)
-  const controller = new AbortController()
-  const starting = Effect.runPromise(
+  const starting = run(
     ensure({
       file: registration,
       version: "test",
       command: [process.execPath, fixture, contender, "record-start"],
-    }).pipe(Effect.provide(NodeFileSystem.layer)),
-    { signal: controller.signal },
+    }),
   )
 
-  await waitForLines(registration + ".stop-attempts", 2)
-  controller.abort()
-  await starting.catch(() => undefined)
+  await expect(starting).rejects.toThrow("Background service rejected the stop request")
 
   expect(await Bun.file(contender + ".started").exists()).toBe(false)
+  expect((await Bun.file(registration + ".stop-attempts").text()).trim().split("\n")).toHaveLength(1)
   expect(existing.exitCode).toBe(null)
 })
 
-test("a legacy health response is still replaced", async () => {
+test("does not signal a modern service when its stop request times out", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const contender = join(directory, "contender.json")
+  const existing = spawn(registration, "stop-hanging")
+  await waitForFile(registration)
+  const starting = run(
+    ensure({
+      file: registration,
+      version: "test",
+      command: [process.execPath, fixture, contender, "record-start"],
+    }),
+  )
+
+  await expect(starting).rejects.toThrow("Background service rejected the stop request")
+
+  expect(await Bun.file(contender + ".started").exists()).toBe(false)
+  expect((await Bun.file(registration + ".stop-attempts").text()).trim().split("\n")).toHaveLength(1)
+  expect(existing.exitCode).toBe(null)
+})
+
+test("explicit stop refuses to signal when a modern stop request times out", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const existing = spawn(registration, "stop-hanging")
+  await waitForFile(registration)
+
+  await expect(run(Service.stop({ file: registration }))).rejects.toThrow("Background service rejected the stop request")
+
+  expect(existing.exitCode).toBe(null)
+})
+
+test("a stale client refuses to replace a newer service", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const contender = join(directory, "contender.json")
+  const existing = spawn(registration, "graceful")
+  await waitForFile(registration)
+  const info = await Bun.file(registration).json()
+
+  await expect(
+    run(
+      ensure({
+        file: registration,
+        version: "old",
+        canReplace: () => false,
+        command: [process.execPath, fixture, contender, "record-start"],
+      }),
+    ),
+  ).rejects.toThrow("Run `opencode2 service restart` to activate this installed version")
+
+  expect(await Bun.file(contender + ".started").exists()).toBe(false)
+  expect(existing.exitCode).toBe(null)
+  expect(await Bun.file(registration).json()).toEqual(info)
+})
+
+test("explicit restart can activate an installed downgrade", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const current = spawn(registration, "graceful")
+  await waitForFile(registration)
+  const before = await Bun.file(registration).json()
+  const options = {
+    file: registration,
+    version: "old",
+    canReplace: () => false,
+    command: [process.execPath, fixture, registration, "old"],
+  }
+
+  await expect(run(ensure(options))).rejects.toThrow("Run `opencode2 service restart`")
+  expect(current.exitCode).toBe(null)
+
+  await run(Service.stop({ file: registration }))
+  const endpoint = await run(ensure(options))
+  const after = await Bun.file(registration).json()
+
+  try {
+    expect(after.pid).not.toBe(before.pid)
+    expect(after.version).toBe("old")
+    expect(endpoint.url).toBe(after.url)
+  } finally {
+    process.kill(after.pid, "SIGTERM")
+    await waitForExit(after.pid)
+  }
+})
+
+test("refuses to signal a legacy service without authenticated stop", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
   const existing = spawn(registration, "legacy")
@@ -188,9 +281,9 @@ test("a legacy health response is still replaced", async () => {
   const starts: EnsureReason[] = []
   const result = run(ensure({ file: registration, command: [], onStart: (reason) => starts.push(reason) }))
 
-  await expect(result).rejects.toThrow("Missing service command")
+  await expect(result).rejects.toThrow("does not support authenticated stop requests")
   expect(starts).toEqual(["version-mismatch"])
-  await existing.exited
+  expect(existing.exitCode).toBe(null)
 })
 
 test("waits for a slow winner while bounding lock probes", async () => {
@@ -311,6 +404,36 @@ test("replaces an incompatible owner that appears during startup", async () => {
     expect(endpoint.url).toBe(info.url)
     expect(info.version).toBe("test")
     await old.exited
+  } finally {
+    process.kill(info.pid, "SIGTERM")
+    await waitForExit(info.pid)
+  }
+})
+
+test("concurrent current-version launchers converge on one replacement", async () => {
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const old = spawn(registration, "old")
+  await waitForFile(registration)
+
+  const endpoints = await Promise.all(
+    Array.from({ length: 20 }, (_, index) => {
+      const options = {
+        file: registration,
+        version: "test",
+        command: [process.execPath, fixture, registration, "coordinated"],
+        canReplace: (version: string | undefined) => version === "old",
+      }
+      return index % 2 === 0 ? run(ensure(options)) : import("../src/promise/service").then((mod) => mod.Service.ensure(options))
+    }),
+  )
+  const info = await Bun.file(registration).json()
+
+  try {
+    expect(new Set(endpoints.map((endpoint) => endpoint.url))).toEqual(new Set([info.url]))
+    expect(info.version).toBe("test")
+    expect(old.exitCode).not.toBe(null)
+    expect(await health(info.url)).toEqual({ healthy: true, version: "test", pid: info.pid })
   } finally {
     process.kill(info.pid, "SIGTERM")
     await waitForExit(info.pid)

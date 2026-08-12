@@ -47,6 +47,35 @@ test("service filenames share release channels and identify preview channels", (
   expect(ServiceConfig.versionBelongsToChannel("1.2.3", "preview-a")).toBe(false)
 })
 
+test("only newer clients replace managed service versions", () => {
+  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17271", "0.0.0-next-17272")).toBe(true)
+  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17271")).toBe(false)
+  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17272")).toBe(false)
+  expect(ServiceConfig.canReplaceVersion(undefined, "0.0.0-next-17272")).toBe(false)
+  expect(ServiceConfig.canReplaceVersion("development-a", "development-b")).toBe(false)
+  expect(ServiceConfig.canReplaceVersion("development-b", "development-a")).toBe(false)
+})
+
+test("managed version replacement can never be mutual", () => {
+  const versions = [
+    undefined,
+    "1.0.0",
+    "1.0.1",
+    "0.0.0-next-9999",
+    "0.0.0-next-15000",
+    "0.0.0-next-15000.1",
+    "0.0.0-next-15000.2",
+    "development-a",
+    "development-b",
+  ]
+  for (const left of versions) {
+    for (const right of versions) {
+      if (left === undefined || right === undefined) continue
+      expect(ServiceConfig.canReplaceVersion(left, right) && ServiceConfig.canReplaceVersion(right, left)).toBe(false)
+    }
+  }
+})
+
 test("service config migrates from the hashed channel filename", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-service-config-migration-"))
   const legacy = path.join(root, ServiceConfig.legacyFilename("preview-a")!)
