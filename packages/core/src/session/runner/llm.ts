@@ -143,6 +143,7 @@ const layer = Layer.effect(
       let promotable: SessionPending.Promotable = "input"
       let step = 1
       while (true) {
+        if (yield* SessionPending.move(db, sessionID)) return
         const result = yield* runStep(sessionID, promotable, step)
         if (step === 1) yield* startTitle(sessionID)
         yield* runPendingCompaction(sessionID)
@@ -236,6 +237,8 @@ const layer = Layer.effect(
       // a blocked first step leaves pending inputs untouched.
       yield* InstructionState.prepare(db, bus, selected.instructions, selected.session.id)
       const promoted = promotable ? yield* SessionPending.promote(db, bus, selected.session.id, promotable) : 0
+      if (promotable && promoted === 0 && (yield* SessionPending.move(db, sessionID)))
+        return CallOutcome.Completed({ needsContinuation: false, step })
       // Promoted input opens a fresh step allowance.
       const currentStep = promoted > 0 ? 1 : step
       const loaded = yield* context.load(selected)
@@ -482,6 +485,7 @@ const layer = Layer.effect(
     const runPendingCompaction = Effect.fn("SessionRunner.runPendingCompaction")(function* (
       sessionID: SessionSchema.ID,
     ) {
+      if (yield* SessionPending.move(db, sessionID)) return
       const pending = yield* SessionPending.compaction(db, sessionID)
       if (!pending) return
       const session = yield* getSession(sessionID)

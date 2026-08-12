@@ -308,7 +308,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
         OpenApi.annotations({
           identifier: "v2.session.move",
           summary: "Move session",
-          description: "Move a session to another project directory, optionally transferring local changes.",
+          description: "Move a session to another project directory after any active execution settles.",
         }),
       ),
     )

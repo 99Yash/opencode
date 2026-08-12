@@ -8,7 +8,7 @@ import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { AbsolutePath } from "@opencode-ai/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
@@ -17,11 +17,16 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionRunner } from "@opencode-ai/core/session/runner"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionPending } from "@opencode-ai/core/session/pending"
+import { Location } from "@opencode-ai/core/location"
 import { Context, Deferred, Effect, Exit, Fiber, Layer, LayerMap, Scope } from "effect"
 import { eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 
-const it = testEffect(AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SessionStore.node])))
+const it = testEffect(
+  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node])),
+)
 
 describe("SessionExecution lifecycle", () => {
   test("classifies success and typed failure terminals", () => {
@@ -130,6 +135,104 @@ describe("SessionExecution lifecycle", () => {
       yield* execution.interrupt(sessionID)
       yield* execution.awaitIdle(sessionID)
       expect((yield* claims(database))[sessionID]).toBe(false)
+    }),
+  )
+
+  it.effect("applies a deferred move only after the active execution settles", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const store = yield* SessionStore.Service
+      const sessionID = Session.ID.make("ses_deferred_move")
+      yield* seedSessions(database, [sessionID])
+
+      const draining = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, () =>
+        Deferred.succeed(draining, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+      yield* execution.resume(sessionID).pipe(Effect.forkIn(scope))
+      yield* Deferred.await(draining)
+
+      yield* bus.publish(SessionEvent.MoveAdmitted, {
+        sessionID,
+        move: {
+          location: Location.Ref.make({ directory: AbsolutePath.make("/destination") }),
+          projectID: Project.ID.global,
+          subpath: RelativePath.make(""),
+        },
+      })
+      expect((yield* store.get(sessionID))?.location.directory).toBe(AbsolutePath.make("/project"))
+      expect((yield* SessionPending.move(database.db, sessionID))?.data.location.directory).toBe(
+        AbsolutePath.make("/destination"),
+      )
+
+      yield* Deferred.succeed(release, undefined)
+      yield* execution.awaitIdle(sessionID)
+
+      expect((yield* store.get(sessionID))?.location.directory).toBe(AbsolutePath.make("/destination"))
+      expect(yield* SessionPending.move(database.db, sessionID)).toBeUndefined()
+    }),
+  )
+
+  it.effect("settling one move preserves a newer admitted destination", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const store = yield* SessionStore.Service
+      const sessionID = Session.ID.make("ses_move_replacement")
+      yield* seedSessions(database, [sessionID])
+      const first = {
+        location: Location.Ref.make({ directory: AbsolutePath.make("/first") }),
+        projectID: Project.ID.global,
+        subpath: RelativePath.make("first"),
+      }
+      const second = {
+        location: Location.Ref.make({ directory: AbsolutePath.make("/second") }),
+        projectID: Project.ID.global,
+        subpath: RelativePath.make("second"),
+      }
+
+      const admittedFirst = yield* bus.publish(SessionEvent.MoveAdmitted, { sessionID, move: first })
+      const admittedSecond = yield* bus.publish(SessionEvent.MoveAdmitted, { sessionID, move: second })
+      yield* bus.publish(SessionEvent.Moved, { sessionID, moveID: admittedFirst.id, ...first })
+
+      expect((yield* store.get(sessionID))?.location.directory).toBe(first.location.directory)
+      expect((yield* SessionPending.move(database.db, sessionID))?.id).toBe(admittedSecond.id)
+
+      yield* bus.publish(SessionEvent.Moved, { sessionID, moveID: admittedSecond.id, ...second })
+      expect((yield* store.get(sessionID))?.location.directory).toBe(second.location.directory)
+      expect(yield* SessionPending.move(database.db, sessionID)).toBeUndefined()
+    }),
+  )
+
+  it.effect("recovers an unclaimed deferred move on startup", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      const store = yield* SessionStore.Service
+      const sessionID = Session.ID.make("ses_move_recovery")
+      yield* seedSessions(database, [sessionID])
+      yield* bus.publish(SessionEvent.MoveAdmitted, {
+        sessionID,
+        move: {
+          location: Location.Ref.make({ directory: AbsolutePath.make("/recovered") }),
+          projectID: Project.ID.global,
+        },
+      })
+
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, () => Effect.void)
+      const execution = Context.get(context, SessionExecution.Service)
+      yield* Context.get(context, SessionRestart.Service).resumeSuspendedSessions
+      yield* execution.awaitIdle(sessionID)
+
+      expect((yield* store.get(sessionID))?.location.directory).toBe(AbsolutePath.make("/recovered"))
+      expect(yield* SessionPending.move(database.db, sessionID)).toBeUndefined()
     }),
   )
 

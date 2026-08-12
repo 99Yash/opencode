@@ -7,6 +7,8 @@ import { SessionEvent } from "../event.js"
 import { SessionExecution } from "../execution.js"
 import { SessionSchema } from "../schema.js"
 import { SessionStore } from "../store.js"
+import { Database } from "../../database/database.js"
+import { SessionPending } from "../pending.js"
 
 const CONTINUE_AFTER_SERVER_RESTART =
   "The server restarted while you were working. Continue from where you left off without repeating completed work."
@@ -62,6 +64,7 @@ export const layer = (options?: Options) =>
       const store = yield* SessionStore.Service
       const execution = yield* SessionExecution.Service
       const bus = yield* Bus.Service
+      const db = (yield* Database.Service).db
       const scope = yield* Effect.scope
       const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
 
@@ -103,6 +106,14 @@ export const layer = (options?: Options) =>
           // them would only inject a stray continuation into a live turn.
           const orphaned = (yield* store.listSuspended()).filter((sessionID) => !active.has(sessionID))
           yield* Effect.forEach(orphaned, resumeOne, { concurrency: "unbounded", discard: true })
+          const claimed = new Set(orphaned)
+          yield* Effect.forEach(
+            (yield* SessionPending.moveSessions(db)).filter(
+              (sessionID) => !active.has(sessionID) && !claimed.has(sessionID),
+            ),
+            execution.wake,
+            { concurrency: "unbounded", discard: true },
+          )
         }),
       })
     }),
@@ -111,5 +122,5 @@ export const layer = (options?: Options) =>
 export const node = makeGlobalNode({
   service: Service,
   layer: layer(),
-  deps: [SessionStore.node, SessionExecution.node, Bus.node],
+  deps: [SessionStore.node, SessionExecution.node, Bus.node, Database.node],
 })

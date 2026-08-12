@@ -433,6 +433,8 @@ const layer = Layer.effectDiscard(
           .run()
           .pipe(Effect.orDie)
         yield* InstructionState.reset(db, event.data.sessionID)
+        if (event.data.moveID)
+          yield* SessionPending.settleMove(db, { sessionID: event.data.sessionID, id: event.data.moveID })
       }),
     )
     yield* bus.project(SessionEvent.Deleted, (event) =>
@@ -520,6 +522,19 @@ const layer = Layer.effectDiscard(
           .where(eq(SessionTable.id, event.data.sessionID))
           .run()
           .pipe(Effect.orDie)
+      }),
+    )
+    yield* bus.project(SessionEvent.MoveAdmitted, (event) =>
+      Effect.gen(function* () {
+        if (event.durable === undefined)
+          return yield* Effect.die(new Error("Durable Session event is missing aggregate sequence"))
+        yield* SessionPending.projectMoveAdmitted(db, {
+          admittedSeq: event.durable.seq,
+          id: event.id,
+          sessionID: event.data.sessionID,
+          data: event.data.move,
+          timeCreated: event.created,
+        })
       }),
     )
     yield* bus.project(SessionEvent.InputCancelled, (event) =>

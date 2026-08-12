@@ -185,8 +185,8 @@ export interface Interface {
   ) => Effect.Effect<SessionMessage.Info[], NotFoundError | MessageDecodeError>
   /**
    * Durable admitted session work not yet visible in projected history,
-   * ordered by admission. Includes unpromoted user and synthetic inputs and
-   * unhandled compaction barriers.
+   * ordered by admission. Includes unpromoted user and synthetic inputs,
+   * unhandled compaction barriers, and deferred moves.
    */
   readonly pending: (sessionID: SessionSchema.ID) => Effect.Effect<SessionPending.Info[], NotFoundError>
   readonly cancelPending: (input: PendingInputRef) => Effect.Effect<void, NotFoundError | PendingInputConflictError>
@@ -738,23 +738,21 @@ const layer = Layer.effect(
         const info = yield* fs.stat(directory).pipe(Effect.catch(() => Effect.succeed(undefined)))
         if (!info) return yield* new DestinationNotFoundError({ directory })
         if (info.type !== "Directory") return yield* new DestinationNotDirectoryError({ directory })
-        if (current.location.directory === directory && current.location.workspaceID === input.workspaceID) return
+        const pending = yield* SessionPending.move(db, input.sessionID)
+        if (!pending && current.location.directory === directory && current.location.workspaceID === input.workspaceID)
+          return
         const project = yield* projects.resolve(directory)
         yield* persistProject(project)
-        if ((yield* execution.active).has(input.sessionID)) {
-          yield* execution.interrupt(input.sessionID)
-          yield* execution.awaitIdle(input.sessionID)
-        }
-        yield* bus.publish(
-          SessionEvent.Moved,
-          {
-            sessionID: input.sessionID,
+        yield* SessionPending.admitMove(db, bus, {
+          sessionID: input.sessionID,
+          source: current.location,
+          data: {
             location: Location.Ref.make({ directory, workspaceID: input.workspaceID }),
             projectID: project.id,
             subpath: RelativePath.make(path.relative(project.directory, directory).replaceAll("\\", "/")),
           },
-          { location: current.location },
-        )
+        })
+        yield* execution.wake(input.sessionID)
       }),
       compact: Effect.fn("Session.compact")(function* (input) {
         yield* result.get(input.sessionID)

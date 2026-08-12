@@ -90,12 +90,23 @@ export const Moved = Event.durable({
   ...options,
   schema: {
     ...Base,
+    moveID: Event.ID.pipe(optional),
     location: Location.Ref,
     projectID: Project.ID.pipe(optional),
     subpath: RelativePath.pipe(optional),
   },
 })
 export type Moved = typeof Moved.Type
+
+export const MoveAdmitted = Event.durable({
+  type: "session.move.admitted",
+  ...options,
+  schema: {
+    ...Base,
+    move: SessionPending.MoveData,
+  },
+})
+export type MoveAdmitted = typeof MoveAdmitted.Type
 
 export const Renamed = Event.durable({
   type: "session.renamed",
@@ -597,6 +608,7 @@ export const Definitions = Event.inventory(
   Created,
   AgentSelected,
   ModelSelected,
+  MoveAdmitted,
   Moved,
   Renamed,
   UsageUpdated,

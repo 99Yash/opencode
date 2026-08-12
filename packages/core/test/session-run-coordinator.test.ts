@@ -143,19 +143,26 @@ describe("SessionRunCoordinator", () => {
   it.effect("cleans active executions when its scope closes", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
+      let runs = 0
       const coordinator = yield* Effect.scoped(
         Effect.gen(function* () {
           const coordinator = yield* SessionRunCoordinator.make({
-            drain: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+            drain: () =>
+              Effect.sync(() => runs++).pipe(
+                Effect.andThen(Deferred.succeed(started, undefined)),
+                Effect.andThen(Effect.never),
+              ),
           })
           yield* coordinator.wake("session")
           yield* Deferred.await(started)
+          yield* coordinator.wake("session")
           expect(Array.from(yield* coordinator.active)).toEqual(["session"])
           return coordinator
         }),
       )
 
       expect(Array.from(yield* coordinator.active)).toEqual([])
+      expect(runs).toBe(1)
     }),
   )
 
@@ -513,6 +520,31 @@ describe("SessionRunCoordinator", () => {
           true,
         )
         expect(yield* coordinator.active).toEqual(new Set())
+      }),
+    ),
+  )
+
+  it.effect("starts one successor when settlement requests it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const successor = yield* Deferred.make<void>()
+        let drains = 0
+        let settlements = 0
+        const coordinator = yield* SessionRunCoordinator.make<string, never>({
+          drain: () =>
+            Effect.sync(() => {
+              drains++
+              if (drains === 2) Deferred.doneUnsafe(successor, Effect.void)
+            }),
+          settled: () => Effect.sync(() => ++settlements === 1),
+        })
+
+        yield* coordinator.wake("session")
+        yield* Deferred.await(successor)
+        yield* coordinator.awaitIdle("session")
+
+        expect(drains).toBe(2)
+        expect(settlements).toBe(2)
       }),
     ),
   )

@@ -106,6 +106,7 @@ export function update(adapter: Adapter, event: SessionEvent.DurableEvent) {
           )
         })
       },
+      "session.move.admitted": () => Effect.void,
       "session.renamed": () => Effect.void,
       "session.deleted": () => Effect.void,
       "session.forked": () => Effect.void,

@@ -7,6 +7,10 @@ import { DateTimeUtcFromMillis } from "./schema.js"
 import { SessionDelivery } from "./session-delivery.js"
 import { SessionID } from "./session-id.js"
 import { SessionMessage } from "./session-message.js"
+import { Event } from "./event.js"
+import { Location } from "./location.js"
+import { Project } from "./project.js"
+import { RelativePath } from "./schema.js"
 
 export const Delivery = SessionDelivery.Delivery
 export type Delivery = SessionDelivery.Delivery
@@ -68,7 +72,23 @@ export const Compaction = Schema.Struct({
   type: Schema.tag("compaction"),
 }).annotate({ identifier: "SessionPending.Compaction" })
 
-export const Info = Schema.Union([User, Synthetic, Compaction]).pipe(
+export interface MoveData extends Schema.Schema.Type<typeof MoveData> {}
+export const MoveData = Schema.Struct({
+  location: Location.Ref,
+  projectID: Project.ID,
+  subpath: RelativePath.pipe(optional),
+}).annotate({ identifier: "SessionPending.MoveData" })
+
+export interface Move extends Schema.Schema.Type<typeof Move> {}
+export const Move = Schema.Struct({
+  id: Event.ID,
+  sessionID: SessionID,
+  timeCreated: DateTimeUtcFromMillis,
+  type: Schema.tag("move"),
+  data: MoveData,
+}).annotate({ identifier: "SessionPending.Move" })
+
+export const Info = Schema.Union([User, Synthetic, Compaction, Move]).pipe(
   Schema.toTaggedUnion("type"),
   Schema.annotate({ identifier: "SessionPending.Info" }),
 )

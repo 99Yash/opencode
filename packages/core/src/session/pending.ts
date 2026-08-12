@@ -7,6 +7,8 @@ import {
   Delivery,
   Info,
   Message,
+  Move,
+  MoveData,
   Synthetic,
   SyntheticData,
   User,
@@ -19,10 +21,11 @@ import { SessionEvent } from "./event.js"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
 import { SessionMessageTable, SessionPendingTable } from "./sql.js"
+import { Event } from "@opencode-ai/schema/event"
 
 type DatabaseService = Database.Interface["db"]
 
-export { Compaction, Delivery, Info, Message, Synthetic, SyntheticData, User, UserData }
+export { Compaction, Delivery, Info, Message, Move, MoveData, Synthetic, SyntheticData, User, UserData }
 
 /**
  * Which pending input `promote` may consume: "steer" promotes steers only (a step
@@ -35,6 +38,8 @@ const decodeUser = Schema.decodeUnknownSync(UserData)
 const encodeUser = Schema.encodeSync(UserData)
 const decodeSynthetic = Schema.decodeUnknownSync(SyntheticData)
 const encodeSynthetic = Schema.encodeSync(SyntheticData)
+const decodeMove = Schema.decodeUnknownSync(MoveData)
+const encodeMove = Schema.encodeSync(MoveData)
 const decodeMessage = Schema.decodeUnknownSync(SessionMessage.Info)
 const inboxLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
 type PendingRef = { readonly id: SessionMessage.ID; readonly sessionID: SessionSchema.ID }
@@ -42,21 +47,24 @@ type PendingRef = { readonly id: SessionMessage.ID; readonly sessionID: SessionS
 export class LifecycleConflict extends Schema.TaggedErrorClass<LifecycleConflict>()(
   "SessionPending.LifecycleConflict",
   {
-    id: SessionMessage.ID,
+    id: Schema.Union([SessionMessage.ID, Event.ID]),
   },
 ) {}
 
 const fromRow = (row: typeof SessionPendingTable.$inferSelect): Info => {
   const base = {
-    id: SessionMessage.ID.make(row.id),
     sessionID: SessionSchema.ID.make(row.session_id),
     timeCreated: DateTime.makeUnsafe(row.time_created),
   }
-  if (row.type === "compaction") return Compaction.make({ ...base, type: "compaction" })
-  if (!row.delivery) throw new LifecycleConflict({ id: base.id })
+  if (row.type === "move")
+    return Move.make({ ...base, id: Event.ID.make(row.id), type: "move", data: decodeMove(row.data) })
+  const id = SessionMessage.ID.make(row.id)
+  if (row.type === "compaction") return Compaction.make({ ...base, id, type: "compaction" })
+  if (!row.delivery) throw new LifecycleConflict({ id })
   if (row.type === "user")
     return User.make({
       ...base,
+      id,
       type: "user",
       data: decodeUser(row.data),
       delivery: row.delivery,
@@ -64,11 +72,12 @@ const fromRow = (row: typeof SessionPendingTable.$inferSelect): Info => {
   if (row.type === "synthetic")
     return Synthetic.make({
       ...base,
+      id,
       type: "synthetic",
       data: decodeSynthetic(row.data),
       delivery: row.delivery,
     })
-  throw new LifecycleConflict({ id: base.id })
+  throw new LifecycleConflict({ id })
 }
 
 export const find = Effect.fn("SessionPending.find")(function* (db: DatabaseService, id: SessionMessage.ID) {
@@ -96,6 +105,44 @@ export const compaction = Effect.fn("SessionPending.compaction")(function* (
   if (!row) return
   const entry = fromRow(row)
   return entry.type === "compaction" ? entry : undefined
+})
+
+export const move = Effect.fn("SessionPending.move")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+  const row = yield* db
+    .select()
+    .from(SessionPendingTable)
+    .where(and(eq(SessionPendingTable.session_id, sessionID), eq(SessionPendingTable.type, "move")))
+    .orderBy(asc(SessionPendingTable.admitted_seq))
+    .limit(1)
+    .get()
+    .pipe(Effect.orDie)
+  if (!row) return
+  const entry = fromRow(row)
+  return entry.type === "move" ? entry : undefined
+})
+
+export const admitMove = Effect.fn("SessionPending.admitMove")(function* (
+  db: DatabaseService,
+  bus: Bus.Interface,
+  input: { readonly sessionID: SessionSchema.ID; readonly data: MoveData; readonly source: MoveData["location"] },
+) {
+  return yield* inboxLocks.withLock(input.sessionID)(
+    Effect.gen(function* () {
+      const pending = yield* move(db, input.sessionID)
+      if (pending && JSON.stringify(encodeMove(pending.data)) === JSON.stringify(encodeMove(input.data))) return pending
+      const event = yield* bus.publish(
+        SessionEvent.MoveAdmitted,
+        {
+          sessionID: input.sessionID,
+          move: input.data,
+        },
+        { location: input.source },
+      )
+      const stored = yield* move(db, input.sessionID)
+      if (stored) return stored
+      return yield* Effect.die(new LifecycleConflict({ id: event.id }))
+    }),
+  )
 })
 
 const promotedFromMessage = Effect.fn("SessionPending.promotedFromMessage")(function* (
@@ -288,6 +335,35 @@ export const projectCompactionAdmitted = Effect.fn("SessionPending.projectCompac
   return yield* Effect.die(new LifecycleConflict({ id: input.id }))
 })
 
+export const projectMoveAdmitted = Effect.fn("SessionPending.projectMoveAdmitted")(function* (
+  db: DatabaseService,
+  input: {
+    readonly admittedSeq: number
+    readonly id: Event.ID
+    readonly sessionID: SessionSchema.ID
+    readonly data: MoveData
+    readonly timeCreated: DateTime.Utc
+  },
+) {
+  yield* db
+    .delete(SessionPendingTable)
+    .where(and(eq(SessionPendingTable.session_id, input.sessionID), eq(SessionPendingTable.type, "move")))
+    .run()
+    .pipe(Effect.orDie)
+  yield* db
+    .insert(SessionPendingTable)
+    .values({
+      id: input.id,
+      session_id: input.sessionID,
+      type: "move",
+      data: input.data,
+      admitted_seq: input.admittedSeq,
+      time_created: DateTime.toEpochMillis(input.timeCreated),
+    })
+    .run()
+    .pipe(Effect.orDie)
+})
+
 /**
  * Consume one pending row at promotion. The row's content feeds the projected
  * message insert inside the same event transaction; the deleted row is what
@@ -297,7 +373,8 @@ export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(funct
   db: DatabaseService,
   input: PendingRef,
 ) {
-  if (yield* compaction(db, input.sessionID)) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  if ((yield* compaction(db, input.sessionID)) || (yield* move(db, input.sessionID)))
+    return yield* Effect.die(new LifecycleConflict({ id: input.id }))
   const deleted = yield* db
     .delete(SessionPendingTable)
     .where(and(eq(SessionPendingTable.id, input.id), eq(SessionPendingTable.session_id, input.sessionID)))
@@ -306,7 +383,8 @@ export const projectPromoted = Effect.fn("SessionPending.projectPromoted")(funct
     .pipe(Effect.orDie)
   if (!deleted) return yield* Effect.die(new LifecycleConflict({ id: input.id }))
   const stored = fromRow(deleted)
-  if (stored.type === "compaction") return yield* Effect.die(new LifecycleConflict({ id: input.id }))
+  if (stored.type === "compaction" || stored.type === "move")
+    return yield* Effect.die(new LifecycleConflict({ id: input.id }))
   return stored
 })
 
@@ -374,6 +452,33 @@ export const settleCompaction = Effect.fn("SessionPending.settleCompaction")(fun
   return undefined
 })
 
+export const settleMove = Effect.fn("SessionPending.settleMove")(function* (
+  db: DatabaseService,
+  input: { readonly sessionID: SessionSchema.ID; readonly id: Event.ID },
+) {
+  yield* db
+    .delete(SessionPendingTable)
+    .where(
+      and(
+        eq(SessionPendingTable.id, input.id),
+        eq(SessionPendingTable.session_id, input.sessionID),
+        eq(SessionPendingTable.type, "move"),
+      ),
+    )
+    .run()
+    .pipe(Effect.orDie)
+})
+
+export const moveSessions = Effect.fn("SessionPending.moveSessions")(function* (db: DatabaseService) {
+  const rows = yield* db
+    .select({ sessionID: SessionPendingTable.session_id })
+    .from(SessionPendingTable)
+    .where(eq(SessionPendingTable.type, "move"))
+    .all()
+    .pipe(Effect.orDie)
+  return [...new Set(rows.map((row) => row.sessionID))]
+})
+
 export const list = Effect.fn("SessionPending.list")(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
   const rows = yield* db
     .select()
@@ -397,7 +502,7 @@ export const has = Effect.fn("SessionPending.has")(function* (
   sessionID: SessionSchema.ID,
   scope: Scope,
 ) {
-  if (scope !== "any" && (yield* compaction(db, sessionID))) return false
+  if (scope !== "any" && ((yield* compaction(db, sessionID)) || (yield* move(db, sessionID)))) return false
   const row = yield* db
     .select({ id: SessionPendingTable.id })
     .from(SessionPendingTable)
@@ -473,12 +578,13 @@ const publish = Effect.fn("SessionPending.publish")(function* (
   sessionID: SessionSchema.ID,
   rows: ReadonlyArray<typeof SessionPendingTable.$inferSelect>,
 ) {
-  if (yield* compaction(db, sessionID)) return 0
+  if ((yield* compaction(db, sessionID)) || (yield* move(db, sessionID))) return 0
   yield* Effect.forEach(
     rows,
     (row) => {
       const entry = fromRow(row)
-      if (entry.type === "compaction") return Effect.die(new LifecycleConflict({ id: entry.id }))
+      if (entry.type === "compaction" || entry.type === "move")
+        return Effect.die(new LifecycleConflict({ id: entry.id }))
       return bus
         .publish(SessionEvent.InputPromoted, {
           sessionID,
@@ -512,7 +618,7 @@ export const promote = Effect.fn("SessionPending.promote")(function* (
 ) {
   return yield* inboxLocks.withLock(sessionID)(
     Effect.gen(function* () {
-      if (yield* compaction(db, sessionID)) return 0
+      if ((yield* compaction(db, sessionID)) || (yield* move(db, sessionID))) return 0
       const steers = yield* db
         .select()
         .from(SessionPendingTable)

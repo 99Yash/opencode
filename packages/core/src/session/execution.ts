@@ -11,6 +11,8 @@ import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
 import { toSessionError } from "./to-session-error.js"
 import { UserInterruptedError } from "./error.js"
+import { Database } from "../database/database.js"
+import { SessionPending } from "./pending.js"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
@@ -45,6 +47,7 @@ export const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const bus = yield* Bus.Service
+    const db = (yield* Database.Service).db
     const reportLifecycle = <A>(sessionID: SessionSchema.ID, effect: Effect.Effect<A>) =>
       effect.pipe(
         Effect.tapCause((cause) =>
@@ -54,7 +57,6 @@ export const layer = Layer.effect(
                 Effect.annotateLogs({ sessionID }),
               ),
         ),
-        Effect.asVoid,
       )
     // Write-ahead claim: starting records the durable intent that a turn is in flight, in the same
     // transaction as the started event. Terminals release it — except shutdown interruption, which
@@ -72,7 +74,7 @@ export const layer = Layer.effect(
         reportLifecycle(
           sessionID,
           bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
-        ),
+        ).pipe(Effect.asVoid),
       drain: Effect.fnUntraced(function* (sessionID: SessionSchema.ID, force) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
@@ -91,11 +93,9 @@ export const layer = Layer.effect(
           sessionID,
           Effect.gen(function* () {
             const outcome = terminal(exit, reason)
-            if (outcome.type === "succeeded") {
+            if (outcome.type === "succeeded")
               yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID }, releaseOnCommit(sessionID))
-              return
-            }
-            if (outcome.type === "interrupted") {
+            if (outcome.type === "interrupted")
               // A user cancel (or a superseding execution) releases the claim: the turn must not
               // resurrect at the next boot. Shutdown interruption keeps it for restart continuity.
               yield* bus.publish(
@@ -103,16 +103,27 @@ export const layer = Layer.effect(
                 { sessionID, reason: outcome.reason },
                 outcome.reason === "shutdown" ? undefined : releaseOnCommit(sessionID),
               )
-              return
-            }
+            if (outcome.type === "failed")
+              yield* bus.publish(
+                SessionEvent.Execution.Failed,
+                {
+                  sessionID,
+                  error: outcome.error,
+                },
+                releaseOnCommit(sessionID),
+              )
+
+            if (outcome.type === "interrupted" && outcome.reason === "shutdown") return false
+            const pending = yield* SessionPending.move(db, sessionID)
+            if (!pending) return false
+            const session = yield* store.get(sessionID)
+            if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
             yield* bus.publish(
-              SessionEvent.Execution.Failed,
-              {
-                sessionID,
-                error: outcome.error,
-              },
-              releaseOnCommit(sessionID),
+              SessionEvent.Moved,
+              { sessionID, moveID: pending.id, ...pending.data },
+              { location: session.location },
             )
+            return yield* SessionPending.has(db, sessionID, "any")
           }),
         ),
     })
@@ -130,7 +141,7 @@ export const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, Bus.node],
+  deps: [SessionStore.node, LocationServiceMap.node, Bus.node, Database.node],
 })
 
 /** Low-level compatibility layer for callers that only need durable Session recording. */

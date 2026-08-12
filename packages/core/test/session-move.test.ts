@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
+import fs from "fs/promises"
 import { Effect, Layer } from "effect"
 import { Bus } from "@opencode-ai/core/bus"
 import { Database } from "@opencode-ai/core/database/database"
@@ -34,7 +35,7 @@ const it = testEffect(
 )
 
 describe("Session.move", () => {
-  it.effect("moves a session whose source directory no longer exists", () =>
+  it.effect("durably admits a move when the source directory no longer exists", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -49,24 +50,26 @@ describe("Session.move", () => {
 
           yield* session.move({ sessionID: created.id, directory: destination })
 
-          expect((yield* session.get(created.id)).location.directory).toBe(destination)
-          const messages = yield* session.messages({ sessionID: created.id, order: "asc" })
-          expect(messages).toEqual([
-            expect.objectContaining({
-              type: "location-switched",
-              location: { directory: destination },
-              projectID: Project.ID.global,
-              previous: {
-                location: { directory: path.join(tmp.path, "deleted") },
-                projectID: Project.ID.global,
-                subpath: "",
-              },
-              subpath: "",
-            }),
+          expect((yield* session.get(created.id)).location.directory).toBe(
+            AbsolutePath.make(path.join(tmp.path, "deleted")),
+          )
+          expect(yield* session.pending(created.id)).toMatchObject([
+            {
+              type: "move",
+              data: { location: { directory: destination }, projectID: Project.ID.global },
+            },
           ])
 
-          yield* session.move({ sessionID: created.id, directory: destination })
-          expect(yield* session.messages({ sessionID: created.id, order: "asc" })).toEqual(messages)
+          const replacement = AbsolutePath.make(path.join(tmp.path, "replacement"))
+          yield* Effect.promise(() => fs.mkdir(replacement))
+          yield* session.move({ sessionID: created.id, directory: replacement })
+
+          expect(yield* session.pending(created.id)).toMatchObject([
+            {
+              type: "move",
+              data: { location: { directory: replacement }, projectID: Project.ID.global },
+            },
+          ])
         }),
       ),
     ),

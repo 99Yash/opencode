@@ -90,6 +90,16 @@ describe("contract hygiene", () => {
     })
   })
 
+  test("pending moves omit absent placement details", () => {
+    expect(
+      Schema.encodeSync(SessionPending.MoveData)({
+        location: { directory: AbsolutePath.make("/project"), workspaceID: undefined },
+        projectID: Project.ID.global,
+        subpath: undefined,
+      }),
+    ).toEqual({ location: { directory: "/project" }, projectID: "global" })
+  })
+
   test("forms require at least one field", () => {
     expect(() =>
       Schema.decodeUnknownSync(Form.Info)({

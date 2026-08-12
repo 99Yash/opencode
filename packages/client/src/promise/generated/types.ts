@@ -420,6 +420,8 @@ export type SessionMessageLocationSwitched = {
   previous?: { location: LocationRef; projectID?: string; subpath?: string }
 }
 
+export type SessionPendingMoveData = { location: LocationRef; projectID: string; subpath?: string }
+
 export type SessionCreated = {
   id: string
   created: number
@@ -468,7 +470,7 @@ export type SessionMoved = {
   type: "session.moved"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; location: LocationRef; projectID?: string; subpath?: string }
+  data: { sessionID: string; moveID?: string; location: LocationRef; projectID?: string; subpath?: string }
 }
 
 export type SessionRenamed = {
@@ -1527,6 +1529,24 @@ export type VcsInfo = { branch: VcsBranch }
 
 export type PermissionRuleset = Array<PermissionRule>
 
+export type SessionPendingMove = {
+  id: string
+  sessionID: string
+  timeCreated: number
+  type: "move"
+  data: SessionPendingMoveData
+}
+
+export type SessionMoveAdmitted = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.move.admitted"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string; move: SessionPendingMoveData }
+}
+
 export type SessionInfo = {
   id: string
   parentID?: string
@@ -1914,7 +1934,11 @@ export type FormFields = [FormField, ...Array<FormField>]
 
 export type FormFields3 = [FormField1, ...Array<FormField1>]
 
-export type SessionPendingInfo = SessionPendingUser | SessionPendingSynthetic | SessionPendingCompaction
+export type SessionPendingInfo =
+  | SessionPendingUser
+  | SessionPendingSynthetic
+  | SessionPendingCompaction
+  | SessionPendingMove
 
 export type SessionPendingMessage = SessionPendingUserMessage | SessionPendingSyntheticMessage
 
@@ -1983,6 +2007,7 @@ export type SessionEventDurable =
   | SessionCreated
   | SessionAgentSelected
   | SessionModelSelected
+  | SessionMoveAdmitted
   | SessionMoved
   | SessionRenamed
   | SessionDeleted
@@ -2046,6 +2071,7 @@ export type V2Event =
   | SessionCreated
   | SessionAgentSelected
   | SessionModelSelected
+  | SessionMoveAdmitted
   | SessionMoved
   | SessionRenamed
   | SessionUsageUpdated

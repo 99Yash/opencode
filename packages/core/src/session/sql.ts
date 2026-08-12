@@ -96,13 +96,15 @@ export const SessionMessageTable = sqliteTable(
 export const SessionPendingTable = sqliteTable(
   "session_pending",
   {
-    id: text().$type<SessionMessage.ID>().primaryKey(),
+    id: text().$type<SessionPending.Info["id"]>().primaryKey(),
     session_id: text()
       .$type<SessionSchema.ID>()
       .notNull()
       .references(() => SessionTable.id, { onDelete: "cascade" }),
     type: text().$type<SessionPending.Info["type"]>().notNull(),
-    data: text({ mode: "json" }).$type<UserData | SyntheticData | Record<string, never>>().notNull(),
+    data: text({ mode: "json" })
+      .$type<UserData | SyntheticData | SessionPending.MoveData | Record<string, never>>()
+      .notNull(),
     delivery: text().$type<SessionPending.Delivery>(),
     admitted_seq: integer().notNull(),
     time_created: integer()

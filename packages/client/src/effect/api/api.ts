@@ -362,11 +362,21 @@ export type Endpoint5_31Output =
           readonly id: Event.ID
           readonly created: DateTime.Utc
           readonly metadata?: { readonly [x: string]: unknown } | undefined
+          readonly type: "session.move.admitted"
+          readonly durable: { readonly aggregateID: string; readonly seq: Event.Seq; readonly version: Event.Version }
+          readonly location?: Location.Ref | undefined
+          readonly data: { readonly sessionID: Session.ID; readonly move: SessionPending.MoveData }
+        }
+      | {
+          readonly id: Event.ID
+          readonly created: DateTime.Utc
+          readonly metadata?: { readonly [x: string]: unknown } | undefined
           readonly type: "session.moved"
           readonly durable: { readonly aggregateID: string; readonly seq: Event.Seq; readonly version: Event.Version }
           readonly location?: Location.Ref | undefined
           readonly data: {
             readonly sessionID: Session.ID
+            readonly moveID?: Event.ID | undefined
             readonly location: Location.Ref
             readonly projectID?: Project.ID | undefined
             readonly subpath?: RelativePath | undefined

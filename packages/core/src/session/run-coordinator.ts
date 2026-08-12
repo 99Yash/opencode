@@ -1,6 +1,6 @@
 export * as SessionRunCoordinator from "./run-coordinator.js"
 
-import { Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, FiberSet, Scope } from "effect"
 
 /** Serializes execution for each key while allowing different keys to run concurrently. */
 export interface Coordinator<Key, E, Reason = never> {
@@ -50,11 +50,17 @@ export const make = <Key, E, Reason = never>(options: {
    * Runs in the execution fiber for every exit, including interruption, after the final
    * drain and before the execution settles (waiters resolve after it completes).
    */
-  readonly settled?: (key: Key, exit: Exit.Exit<void, E>, reason?: Reason) => Effect.Effect<void>
+  readonly settled?: (key: Key, exit: Exit.Exit<void, E>, reason?: Reason) => Effect.Effect<boolean | void>
 }): Effect.Effect<Coordinator<Key, E, Reason>, never, Scope.Scope> =>
   Effect.gen(function* () {
     const executions = new Map<Key, Execution<E, Reason>>()
     const fork = yield* FiberSet.makeRuntime<never, void, never>()
+    const closing = { value: false }
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        closing.value = true
+      }),
+    )
 
     const loop = (key: Key, execution: Execution<E, Reason>, force: boolean): Effect.Effect<void, E> =>
       Effect.suspend(() => options.drain(key, force)).pipe(
@@ -85,7 +91,22 @@ export const make = <Key, E, Reason = never>(options: {
           Effect.onExit((exit) =>
             Effect.sync(() => {
               execution.owner = undefined
-            }).pipe(Effect.andThen(options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void)),
+              if (closing.value && Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)) {
+                execution.stopping = true
+                execution.pendingWake = false
+              }
+            }).pipe(
+              Effect.andThen(options.settled?.(key, exit, execution.interruptionReason) ?? Effect.void),
+              Effect.map(Boolean),
+              Effect.tap((restart) =>
+                restart && !execution.stopping
+                  ? Effect.sync(() => {
+                      execution.pendingWake = true
+                    })
+                  : Effect.void,
+              ),
+              Effect.asVoid,
+            ),
           ),
           Effect.onExit((exit) => Effect.sync(() => settle(key, execution, exit))),
           Effect.exit,
