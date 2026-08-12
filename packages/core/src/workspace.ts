@@ -10,7 +10,7 @@ import type { Driver as EnvironmentDriver } from "./environment/driver.js"
 import { Database } from "./database/database.js"
 import { KeyedMutex } from "./effect/keyed-mutex.js"
 import { WorkspaceDriver } from "./workspace/driver.js"
-import { WorkspaceTable } from "./worktree/sql.js"
+import { WorkspaceTable } from "./workspace/sql.js"
 
 export const ID = Workspace.ID
 export type ID = Workspace.ID
