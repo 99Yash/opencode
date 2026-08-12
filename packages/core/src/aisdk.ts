@@ -428,6 +428,7 @@ function callOptions(request: LLMRequest): LanguageModelV3CallOptions {
     toolChoice: toolChoice(request.toolChoice),
     headers: request.http?.headers,
     providerOptions: providerOptions(request.providerOptions),
+    includeRawChunks: request.model.provider === ProviderID.make(Provider.ID.githubCopilot),
   }
 }
 
