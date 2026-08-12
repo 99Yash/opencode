@@ -25,10 +25,10 @@ const makeHost = Effect.gen(function* () {
   return yield* PluginHost.make(plugins)
 })
 
-const context = (id: string, system = fallback): SessionHooks["context"] => ({
+const context = (id: string, system = fallback, providerID = "test"): SessionHooks["context"] => ({
   sessionID: Session.ID.make("ses_system_prompt"),
   agent: Agent.ID.make("build"),
-  model: Model.Ref.make({ providerID: Provider.ID.make("test"), id: Model.ID.make(id) }),
+  model: Model.Ref.make({ providerID: Provider.ID.make(providerID), id: Model.ID.make(id) }),
   system: [SystemPart.make(system)],
   messages: [],
   tools: {},
@@ -117,6 +117,19 @@ describe("SystemPromptPlugin", () => {
         },
         { discard: true },
       )
+    }),
+  )
+
+  it.effect("selects the Kimi prompt through the official provider", () =>
+    Effect.gen(function* () {
+      const hooks = yield* PluginHooks.Service
+      const pluginHost = yield* makeHost
+      yield* SystemPromptPlugin.KimiPlugin.effect(pluginHost)
+      const event = context("k3", fallback, "kimi-for-coding")
+
+      yield* hooks.trigger("session", "context", event)
+
+      expect(event.system[0]?.text).toContain("# Prompt and Tool Use")
     }),
   )
 

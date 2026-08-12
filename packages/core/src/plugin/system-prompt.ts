@@ -21,7 +21,9 @@ export const OpenAIPlugin = make("openai", (id) => {
 
 export const GooglePlugin = make("google", (id) => (id.includes("gemini-") ? PROMPT_GEMINI : undefined))
 export const AnthropicPlugin = make("anthropic", (id) => (id.includes("claude") ? PROMPT_ANTHROPIC : undefined))
-export const KimiPlugin = make("kimi", (id) => (id.includes("kimi") ? PROMPT_KIMI : undefined))
+export const KimiPlugin = make("kimi", (id, providerID) =>
+  id.includes("kimi") || providerID.includes("kimi") ? PROMPT_KIMI : undefined,
+)
 export const ArceePlugin = make("arcee", (id) => (id.includes("trinity") ? PROMPT_TRINITY : undefined))
 export const MetaPlugin = make("meta", (id) => {
   if (!id.includes("muse")) return
@@ -31,7 +33,7 @@ export const MetaPlugin = make("meta", (id) => {
 
 export const Plugins = [OpenAIPlugin, GooglePlugin, AnthropicPlugin, KimiPlugin, ArceePlugin, MetaPlugin] as const
 
-function make(id: string, select: (modelID: string) => string | undefined) {
+function make(id: string, select: (modelID: string, providerID: string) => string | undefined) {
   return define({
     id: `opencode.system-prompt.${id}`,
     effect: Effect.fn(`SystemPromptPlugin.${id}`)(function* (ctx) {
@@ -43,7 +45,10 @@ function make(id: string, select: (modelID: string) => string | undefined) {
           const model = (yield* ctx.catalog.model.list()).data.find(
             (model) => model.providerID === event.model.providerID && model.id === event.model.id,
           )
-          const prompt = select(`${model?.modelID ?? event.model.id} ${model?.family ?? ""}`.toLowerCase())
+          const prompt = select(
+            `${model?.modelID ?? event.model.id} ${model?.family ?? ""}`.toLowerCase(),
+            event.model.providerID.toLowerCase(),
+          )
           if (!prompt) return
           event.system[0] = { ...system, text: prompt }
         }).pipe(Effect.catch(() => Effect.void)),
