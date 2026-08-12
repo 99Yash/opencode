@@ -982,7 +982,12 @@ test("updates and removes queued inputs from durable lifecycle events", async ()
     await wait(() =>
       data.session.pending
         .list(sessionID)
-        .some((item) => item.id === "message-queued" && item.type !== "compaction" && item.delivery === "steer"),
+        .some(
+          (item) =>
+            item.id === "message-queued" &&
+            (item.type === "user" || item.type === "synthetic") &&
+            item.delivery === "steer",
+        ),
     )
     expect(rows).toContainEqual({ type: "message", messageID: "message-queued" })
 
@@ -996,7 +1001,12 @@ test("updates and removes queued inputs from durable lifecycle events", async ()
     await wait(() =>
       data.session.pending
         .list(sessionID)
-        .some((item) => item.id === "message-queued" && item.type !== "compaction" && item.delivery === "queue"),
+        .some(
+          (item) =>
+            item.id === "message-queued" &&
+            (item.type === "user" || item.type === "synthetic") &&
+            item.delivery === "queue",
+        ),
     )
     expect(rows).not.toContainEqual({ type: "message", messageID: "message-queued" })
 

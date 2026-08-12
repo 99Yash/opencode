@@ -201,7 +201,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
     function updatePending(sessionID: string, inputID: string, delivery: SessionPending.Delivery) {
       const index = store.session.pending[sessionID]?.findIndex((item) => item.id === inputID) ?? -1
       const item = store.session.pending[sessionID]?.[index]
-      if (index < 0 || !item || item.type === "compaction" || item.delivery === delivery) return
+      if (index < 0 || !item || (item.type !== "user" && item.type !== "synthetic") || item.delivery === delivery)
+        return
       setStore("session", "pending", sessionID, index, { ...item, delivery })
     }
 
