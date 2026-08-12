@@ -147,15 +147,42 @@ const layer = Layer.effect(
       )
     })
 
-    const configured = Effect.fn("Permission.configured")(function* (sessionID: SessionSchema.ID, agentID?: Agent.ID) {
-      const session = yield* sessions.get(sessionID)
-      if (!session) return yield* new SessionErrors.NotFoundError({ sessionID })
-      const agent = yield* agents.resolve(agentID ?? session.agent)
-      return agent?.permissions ?? missingAgentPermissions
-    })
+    const configured = Effect.fn("Permission.configured")(configuredPermissions)
 
-    function denied(input: AssertInput, rules: Permission.Ruleset) {
-      return input.resources.some((resource) => evaluate(input.action, resource, rules).effect === "deny")
+    function configuredPermissions(
+      sessionID: SessionSchema.ID,
+      agentID?: Agent.ID,
+    ): Effect.Effect<ReadonlyArray<Permission.Ruleset>, SessionErrors.NotFoundError> {
+      return Effect.gen(function* () {
+        const session = yield* sessions.get(sessionID)
+        if (!session) return yield* new SessionErrors.NotFoundError({ sessionID })
+        const agent = yield* agents.resolve(agentID ?? session.agent)
+        const own = agent?.permissions ?? missingAgentPermissions
+        if (!session.parentID) return [own]
+        return [...(yield* configuredPermissions(session.parentID)), own]
+      })
+    }
+
+    function evaluateResource(
+      input: AssertInput,
+      resource: string,
+      rulesets: ReadonlyArray<Permission.Ruleset>,
+      remembered: Permission.Ruleset,
+    ) {
+      const configured = rulesets.map((rules) => evaluate(input.action, resource, rules).effect)
+      if (configured.includes("deny")) return "deny"
+      const effective = rulesets.map((rules) => evaluate(input.action, resource, rules, remembered).effect)
+      return effective.includes("ask") ? "ask" : "allow"
+    }
+
+    function evaluateRules(
+      input: AssertInput,
+      rulesets: ReadonlyArray<Permission.Ruleset>,
+      remembered: Permission.Ruleset,
+    ) {
+      const effects = input.resources.map((resource) => evaluateResource(input, resource, rulesets, remembered))
+      const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
+      return effect
     }
 
     function relevant(input: AssertInput, rules: Permission.Ruleset) {
@@ -163,12 +190,16 @@ const layer = Layer.effect(
     }
 
     const evaluateInput = Effect.fnUntraced(function* (input: AssertInput) {
-      const rules = yield* configured(input.sessionID, input.agent)
-      if (denied(input, rules)) return { effect: "deny" as const, rules }
-      const all = [...rules, ...(yield* savedRules())]
-      const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
-      const effect: Permission.Effect = effects.includes("deny") ? "deny" : effects.includes("ask") ? "ask" : "allow"
-      return { effect, rules: all }
+      const rulesets = yield* configured(input.sessionID, input.agent)
+      const remembered = yield* savedRules()
+      const effect = evaluateRules(input, rulesets, remembered)
+      const denied = input.resources
+        .filter((resource) => evaluateResource(input, resource, rulesets, remembered) === "deny")
+        .map((resource): Permission.Rule => ({ action: input.action, resource, effect: "deny" }))
+      return {
+        effect,
+        rules: effect === "deny" ? [...rulesets.flat(), ...denied] : [...rulesets.flat(), ...remembered],
+      }
     })
 
     function request(input: AssertInput): Request {
@@ -283,14 +314,7 @@ const layer = Layer.effect(
               Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)),
             )
             if (!rules) continue
-            if (denied(input, rules)) continue
-            const effective = [...rules, ...rememberedRules]
-            if (
-              !item.request.resources.every(
-                (resource) => evaluate(item.request.action, resource, effective).effect === "allow",
-              )
-            )
-              continue
+            if (evaluateRules(input, rules, rememberedRules) !== "allow") continue
             yield* bus.publish(Permission.Event.Replied, {
               sessionID: item.request.sessionID,
               requestID: item.request.id,

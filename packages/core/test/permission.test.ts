@@ -135,6 +135,69 @@ describe("Permission", () => {
     }),
   )
 
+  it.effect("intersects subagent permissions with every ancestor", () =>
+    Effect.gen(function* () {
+      yield* setup([{ action: "read", resource: "*", effect: "allow" }])
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(SessionTable)
+        .values([
+          {
+            id: Session.ID.make("ses_child"),
+            project_id: Project.ID.global,
+            parent_id: Session.ID.make("ses_test"),
+            slug: "child",
+            directory: "/project",
+            title: "child",
+            version: "test",
+            agent: "child",
+          },
+          {
+            id: Session.ID.make("ses_grandchild"),
+            project_id: Project.ID.global,
+            parent_id: Session.ID.make("ses_child"),
+            slug: "grandchild",
+            directory: "/project",
+            title: "grandchild",
+            version: "test",
+            agent: "grandchild",
+          },
+        ])
+        .run()
+        .pipe(Effect.orDie)
+      const agents = yield* Agent.Service
+      yield* agents.transform((editor) => {
+        editor.update(Agent.ID.make("child"), (agent) => {
+          agent.permissions = [{ action: "read", resource: "*", effect: "allow" }]
+        })
+        editor.update(Agent.ID.make("grandchild"), (agent) => {
+          agent.permissions = [{ action: "read", resource: "*", effect: "allow" }]
+        })
+      })
+      const service = yield* Permission.Service
+      const child = assertion({ sessionID: Session.ID.make("ses_grandchild") })
+
+      expect(yield* service.ask(child)).toMatchObject({ effect: "allow" })
+      yield* setRules([{ action: "read", resource: "*", effect: "deny" }])
+      expect(yield* service.ask(child)).toMatchObject({ effect: "deny" })
+      yield* setRules([{ action: "read", resource: "*", effect: "allow" }])
+      yield* agents.transform((editor) =>
+        editor.update(Agent.ID.make("child"), (agent) => {
+          agent.permissions = []
+        }),
+      )
+      expect(yield* service.ask(child)).toMatchObject({ effect: "ask" })
+      const saved = yield* PermissionSaved.Service
+      yield* saved.add({ projectID: Project.ID.global, action: "read", resources: ["src/index.ts"] })
+      expect(yield* service.ask(child)).toMatchObject({ effect: "allow" })
+      yield* setRules([{ action: "read", resource: "*", effect: "deny" }])
+      const denied = yield* service.assert(child).pipe(Effect.flip)
+      expect(denied).toBeInstanceOf(Permission.BlockedError)
+      if (denied instanceof Permission.BlockedError)
+        expect(Permission.evaluate("read", "src/index.ts", denied.rules).effect).toBe("deny")
+    }),
+  )
+
   it.effect("allows and denies from explicit rules without asking", () =>
     Effect.gen(function* () {
       yield* setup([{ action: "read", resource: "*", effect: "allow" }])
