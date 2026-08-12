@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import {
+  canReplaceVersion,
   VersionMismatchError,
   type DiscoverOptions,
   type Endpoint,
@@ -17,7 +18,7 @@ import {
 } from "../service-contender.js"
 import { defaultEnsureTiming, ensureTiming, type EnsureTiming } from "../service-timing.js"
 import { matchesVersion } from "../service-version.js"
-import type { ServiceHealth, ServiceStopResponse } from "./generated/types.js"
+import type { ServiceStopResponse } from "./generated/types.js"
 
 export * from "../service.js"
 
@@ -74,10 +75,10 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
         if (compatible && service.state === "ready") return service.endpoint
         if (compatible && service.state === "failed") throw new Error("Background service failed to start")
         if (!compatible) {
-          if (!service.legacy && options.canReplace?.(service.version) === false)
-            throw new VersionMismatchError(options.version, service.version)
+          if (options.canReplace?.(service.version) !== true)
+            throw new VersionMismatchError(typeof options.version === "string" ? options.version : undefined, service.version)
+          await kill(service, timing)
           announce("version-mismatch", service.version)
-          await kill(service, options, timing)
           lastSpawn = 0
         }
       } else {
@@ -106,7 +107,7 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
 /** Stop the registered local service. */
 export async function stop(options: StopOptions = {}) {
   const existing = await find(options)
-  if (existing !== undefined) await kill(existing, options, defaultEnsureTiming)
+  if (existing !== undefined) await kill(existing, defaultEnsureTiming)
   if (existing === undefined && (await read(options.file)) !== undefined)
     throw new Error("Background service is not responding; stop its process manually and try again")
 }
@@ -149,10 +150,6 @@ type LocalService = {
   readonly legacy: boolean
 }
 
-async function probe(info: Info, allowLegacy = false): Promise<LocalService | undefined> {
-  return (await probeResult(info, allowLegacy)).service
-}
-
 async function probeResult(info: Info, allowLegacy = false, timeout = defaultEnsureTiming.requestTimeout) {
   const endpoint = {
     url: info.url,
@@ -168,13 +165,13 @@ async function probeResult(info: Info, allowLegacy = false, timeout = defaultEns
   })
     .then(async (response) => ({
       response,
-      body: (await response.json()) as ServiceHealth | { readonly healthy: true },
+      body: (await response.json()) as unknown,
     }))
     .then(
       (value) => ({ value }),
       (cause: unknown) => ({ cause }),
     )
-  if ("cause" in result) return { service: undefined, timedOut: signal.aborted }
+  if ("cause" in result) return undefined
   const response = result.value.response
   const body = result.value.body
   if (
@@ -189,18 +186,15 @@ async function probeResult(info: Info, allowLegacy = false, timeout = defaultEns
     Number.isInteger(body.pid) &&
     body.pid > 0
   ) {
-    if (body.pid !== info.pid) return { service: undefined, timedOut: false }
-    if (info.version !== undefined && body.version !== info.version) return { service: undefined, timedOut: false }
+    if (body.pid !== info.pid) return undefined
+    if (info.version !== undefined && body.version !== info.version) return undefined
     return {
-      service: {
-        info,
-        endpoint,
-        version: body.version,
-        state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
-        legacy: false,
-      } satisfies LocalService,
-      timedOut: false,
-    }
+      info,
+      endpoint,
+      version: body.version,
+      state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
+      legacy: false,
+    } satisfies LocalService
   }
   if (
     !allowLegacy ||
@@ -211,17 +205,14 @@ async function probeResult(info: Info, allowLegacy = false, timeout = defaultEns
     "version" in body ||
     "pid" in body
   )
-    return { service: undefined, timedOut: false }
-  return {
-    service: { info, endpoint, state: "ready", legacy: true } satisfies LocalService,
-    timedOut: false,
-  }
+    return undefined
+  return { info, endpoint, state: "ready", legacy: true } satisfies LocalService
 }
 
 async function registered(file?: string, allowLegacy = false, timeout?: number) {
   const info = await read(file)
-  if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
-  return { info, ...(await probeResult(info, allowLegacy, timeout)) }
+  if (info === undefined) return { info: undefined, service: undefined }
+  return { info, service: await probeResult(info, allowLegacy, timeout) }
 }
 
 async function find(options: { readonly file?: string }) {
@@ -245,21 +236,7 @@ async function waitUntilStopped(pid: number, timing: EnsureTiming) {
   return false
 }
 
-function same(left: Info, right: Info) {
-  return (
-    left.id === right.id &&
-    left.version === right.version &&
-    left.url === right.url &&
-    left.pid === right.pid &&
-    left.password === right.password
-  )
-}
-
-async function kill(
-  service: LocalService,
-  _options: { readonly file?: string },
-  timing: EnsureTiming,
-) {
+async function kill(service: LocalService, timing: EnsureTiming) {
   const requested = await requestStop(service, timing.requestTimeout)
   if (requested === "rejected") throw new Error("Background service rejected the stop request")
   if (requested === "unsupported") throw new Error("Background service does not support authenticated stop requests")
@@ -287,4 +264,4 @@ function delay(milliseconds: number) {
 }
 
 /** Promise-based local service lifecycle operations. */
-export const Service = { discover, ensure, stop, headers }
+export const Service = { discover, ensure, stop, headers, canReplaceVersion }

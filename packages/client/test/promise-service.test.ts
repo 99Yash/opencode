@@ -187,10 +187,9 @@ test("a stale native client refuses to replace a newer service", async () => {
     ensure({
       file: registration,
       version: "old",
-      canReplace: () => false,
       command: [process.execPath, fixture, contender, "record-start"],
     }),
-  ).rejects.toThrow("Run `opencode2 service restart` to activate this installed version")
+  ).rejects.toThrow("Background service test does not match client old")
 
   expect(await Bun.file(contender + ".started").exists()).toBe(false)
   expect(process.kill(info.pid, 0)).toBe(true)

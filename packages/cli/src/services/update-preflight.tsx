@@ -28,7 +28,9 @@ const transitionDuration = 420
 const completionHold = 650
 
 export type Handle = {
+  readonly active: () => boolean
   readonly begin: (from?: string) => boolean
+  readonly confirmDowngrade: (from: string) => Promise<boolean>
   readonly loading: () => void
   readonly finish: () => Promise<Handoff | undefined>
   readonly fail: (message: string) => Promise<void>
@@ -44,6 +46,7 @@ export type Handoff = {
 export const make = (): Handle => {
   let session: Promise<Session | undefined> | undefined
   return {
+    active: () => session !== undefined,
     begin: (from) => {
       if (!process.stdout.isTTY || !process.stdin.isTTY) return false
       session ??= open(from).catch(() => {
@@ -52,6 +55,7 @@ export const make = (): Handle => {
       })
       return true
     },
+    confirmDowngrade: (from) => confirmDowngrade(from),
     loading: () => {
       void session?.then((active) => active?.loading())
     },
@@ -195,6 +199,40 @@ async function open(from?: string): Promise<Session> {
       }),
     close,
   }
+}
+
+async function confirmDowngrade(from: string) {
+  if (!process.stdout.isTTY || !process.stdin.isTTY) return false
+  const renderer = await createCliRenderer({
+    stdin: process.stdin,
+    useMouse: false,
+    autoFocus: true,
+    openConsoleOnError: false,
+    exitOnCtrlC: false,
+    screenMode: "split-footer",
+    footerHeight: 4,
+    targetFps: 30,
+    useKittyKeyboard: {},
+    externalOutputMode: "capture-stdout",
+    consoleMode: "disabled",
+  })
+  const result = Promise.withResolvers<boolean>()
+  const onKeypress = (event: { readonly name: string; readonly ctrl: boolean }) => {
+    if (event.name === "return") return finish(true)
+    if (event.name === "escape" || (event.ctrl && event.name === "c")) finish(false)
+  }
+  const finish = (confirmed: boolean) => {
+    renderer.keyInput.off("keypress", onKeypress)
+    if (!renderer.isDestroyed) renderer.destroy()
+    result.resolve(confirmed)
+  }
+  renderer.keyInput.on("keypress", onKeypress)
+  await render(() => <DowngradeFooter from={from} />, renderer).catch((error) => {
+    renderer.keyInput.off("keypress", onKeypress)
+    if (!renderer.isDestroyed) renderer.destroy()
+    throw error
+  })
+  return result.promise
 }
 
 const colors = {
@@ -447,7 +485,7 @@ function UpdateFooter(props: {
   })
 
   return (
-    <box width="100%" height={4} flexDirection="row" gap={1} live={props.animating()}>
+    <box width="100%" height={4} flexDirection="row" gap={1} paddingLeft={1} live={props.animating()}>
       <Monogram ink={monogramInk} />
       <box flexDirection="column" flexGrow={1} overflow="hidden">
         <CellLine cells={header()} />
@@ -467,6 +505,20 @@ function UpdateFooter(props: {
           </text>
         </box>
       </box>
+    </box>
+  )
+}
+
+function DowngradeFooter(props: { from: string }) {
+  return (
+    <box width="100%" height={4} flexDirection="column" paddingLeft={1}>
+      <text fg={colors.text}>
+        <span style={{ fg: colors.muted }}>Background service </span>
+        <span style={{ fg: colors.accent }}>{props.from}</span>
+        <span style={{ fg: colors.muted }}> is newer than installed </span>
+        <span style={{ fg: colors.accent }}>{OPENCODE_VERSION}</span>
+      </text>
+      <text fg={colors.muted}>Press Enter to downgrade and restart · Esc to cancel</text>
     </box>
   )
 }

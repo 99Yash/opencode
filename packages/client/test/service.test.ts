@@ -175,6 +175,7 @@ test("does not spawn contenders while an incompatible service rejects replacemen
     ensure({
       file: registration,
       version: "test",
+      canReplace: () => true,
       command: [process.execPath, fixture, contender, "record-start"],
     }),
   )
@@ -196,6 +197,7 @@ test("does not signal a modern service when its stop request times out", async (
     ensure({
       file: registration,
       version: "test",
+      canReplace: () => true,
       command: [process.execPath, fixture, contender, "record-start"],
     }),
   )
@@ -213,7 +215,9 @@ test("explicit stop refuses to signal when a modern stop request times out", asy
   const existing = spawn(registration, "stop-hanging")
   await waitForFile(registration)
 
-  await expect(run(Service.stop({ file: registration }))).rejects.toThrow("Background service rejected the stop request")
+  await expect(run(Service.stop({ file: registration }))).rejects.toThrow(
+    "Background service rejected the stop request",
+  )
 
   expect(existing.exitCode).toBe(null)
 })
@@ -231,11 +235,10 @@ test("a stale client refuses to replace a newer service", async () => {
       ensure({
         file: registration,
         version: "old",
-        canReplace: () => false,
         command: [process.execPath, fixture, contender, "record-start"],
       }),
     ),
-  ).rejects.toThrow("Run `opencode2 service restart` to activate this installed version")
+  ).rejects.toThrow("Background service test does not match client old")
 
   expect(await Bun.file(contender + ".started").exists()).toBe(false)
   expect(existing.exitCode).toBe(null)
@@ -255,7 +258,7 @@ test("explicit restart can activate an installed downgrade", async () => {
     command: [process.execPath, fixture, registration, "old"],
   }
 
-  await expect(run(ensure(options))).rejects.toThrow("Run `opencode2 service restart`")
+  await expect(run(ensure(options))).rejects.toThrow("Background service test does not match client old")
   expect(current.exitCode).toBe(null)
 
   await run(Service.stop({ file: registration }))
@@ -279,10 +282,12 @@ test("refuses to signal a legacy service without authenticated stop", async () =
   await waitForFile(registration)
 
   const starts: EnsureReason[] = []
-  const result = run(ensure({ file: registration, command: [], onStart: (reason) => starts.push(reason) }))
+  const result = run(
+    ensure({ file: registration, command: [], canReplace: () => true, onStart: (reason) => starts.push(reason) }),
+  )
 
   await expect(result).rejects.toThrow("does not support authenticated stop requests")
-  expect(starts).toEqual(["version-mismatch"])
+  expect(starts).toEqual([])
   expect(existing.exitCode).toBe(null)
 })
 
@@ -392,6 +397,7 @@ test("replaces an incompatible owner that appears during startup", async () => {
     ensure({
       file: registration,
       version: "test",
+      canReplace: () => true,
       command: [process.execPath, fixture, registration, "delayed", "500"],
     }),
   )
@@ -424,7 +430,9 @@ test("concurrent current-version launchers converge on one replacement", async (
         command: [process.execPath, fixture, registration, "coordinated"],
         canReplace: (version: string | undefined) => version === "old",
       }
-      return index % 2 === 0 ? run(ensure(options)) : import("../src/promise/service").then((mod) => mod.Service.ensure(options))
+      return index % 2 === 0
+        ? run(ensure(options))
+        : import("../src/promise/service").then((mod) => mod.Service.ensure(options))
     }),
   )
   const info = await Bun.file(registration).json()

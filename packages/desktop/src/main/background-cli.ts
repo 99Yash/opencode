@@ -30,6 +30,7 @@ export async function startBackgroundCli(logger: Logger) {
         ? join(app.getPath("userData"), "opencode", "service-local.json")
         : undefined,
     version,
+    canReplace: (serverVersion) => Service.canReplaceVersion(serverVersion, version),
     command: [binary, "serve", "--service"],
     onStart: (reason, previousVersion) => logger.log("v2 CLI background service starting", { reason, previousVersion }),
   })

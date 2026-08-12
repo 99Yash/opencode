@@ -2,7 +2,14 @@ import { ServiceStatus } from "@opencode-ai/protocol/groups/health"
 import { Effect, FileSystem, Option, Schedule, Schema } from "effect"
 import { homedir } from "node:os"
 import { join } from "node:path"
-import { VersionMismatchError, type DiscoverOptions, type Endpoint, type EnsureOptions, type StopOptions } from "../service.js"
+import {
+  canReplaceVersion,
+  VersionMismatchError,
+  type DiscoverOptions,
+  type Endpoint,
+  type EnsureOptions,
+  type StopOptions,
+} from "../service.js"
 import {
   contenderFailure,
   contenderFinished,
@@ -86,10 +93,12 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       if (compatible && service.state === "failed")
         return yield* Effect.fail(new Error("Background service failed to start"))
       if (compatible) return Option.none<LocalService>()
-      if (!service.legacy && options.canReplace?.(service.version) === false)
-        return yield* Effect.fail(new VersionMismatchError(options.version, service.version))
+      if (options.canReplace?.(service.version) !== true)
+        return yield* Effect.fail(
+          new VersionMismatchError(typeof options.version === "string" ? options.version : undefined, service.version),
+        )
+      yield* kill(service, timing)
       yield* announce("version-mismatch", service.version)
-      yield* kill(service, options, timing)
       lastSpawn = 0
       return Option.none<LocalService>()
     } else if (lastSpawn === 0 && info !== undefined) lastSpawn = Date.now()
@@ -123,9 +132,11 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
 /** Stop the registered local service. */
 export const stop = Effect.fn("service.stop")(function* (options: StopOptions = {}) {
   const existing = yield* find(options)
-  if (existing !== undefined) yield* kill(existing, options, defaultEnsureTiming)
+  if (existing !== undefined) yield* kill(existing, defaultEnsureTiming)
   if (existing === undefined && (yield* read(options.file)) !== undefined)
-    return yield* Effect.fail(new Error("Background service is not responding; stop its process manually and try again"))
+    return yield* Effect.fail(
+      new Error("Background service is not responding; stop its process manually and try again"),
+    )
 })
 
 function fallback() {
@@ -170,7 +181,7 @@ type LocalService = {
 }
 
 const probe = Effect.fnUntraced(function* (info: Info, allowLegacy = false) {
-  return (yield* probeResult(info, allowLegacy)).service
+  return yield* probeResult(info, allowLegacy)
 })
 
 const probeResult = Effect.fnUntraced(function* (
@@ -197,41 +208,34 @@ const probeResult = Effect.fnUntraced(function* (
         (cause: unknown) => ({ cause }),
       ),
   )
-  if ("cause" in result) return { service: undefined, timedOut: signal.aborted }
+  if ("cause" in result) return undefined
   const response = result.value.response
   const body = result.value.body
   const health = decodeHealth(body)
   if (Option.isSome(health)) {
-    if (health.value.pid !== info.pid) return { service: undefined, timedOut: false }
-    if (info.version !== undefined && health.value.version !== info.version)
-      return { service: undefined, timedOut: false }
+    if (health.value.pid !== info.pid) return undefined
+    if (info.version !== undefined && health.value.version !== info.version) return undefined
     return {
-      service: {
-        info,
-        endpoint,
-        version: health.value.version,
-        state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
-        legacy: false,
-      } satisfies LocalService,
-      timedOut: false,
-    }
+      info,
+      endpoint,
+      version: health.value.version,
+      state: response.ok ? "ready" : response.status === 500 ? "failed" : "waiting",
+      legacy: false,
+    } satisfies LocalService
   }
   if (
     !allowLegacy ||
     Option.isNone(decodeLegacyHealth(body)) ||
     (typeof body === "object" && body !== null && ("version" in body || "pid" in body))
   )
-    return { service: undefined, timedOut: false }
-  return {
-    service: { info, endpoint, state: "ready", legacy: true } satisfies LocalService,
-    timedOut: false,
-  }
+    return undefined
+  return { info, endpoint, state: "ready", legacy: true } satisfies LocalService
 })
 
 const registered = Effect.fnUntraced(function* (file?: string, allowLegacy = false, timeout?: number) {
   const info = yield* read(file)
-  if (info === undefined) return { info: undefined, service: undefined, timedOut: false }
-  return { info, ...(yield* probeResult(info, allowLegacy, timeout)) }
+  if (info === undefined) return { info: undefined, service: undefined }
+  return { info, service: yield* probeResult(info, allowLegacy, timeout) }
 })
 
 // Health-checked lookup without the version gate: lifecycle operations must be
@@ -240,8 +244,7 @@ const find = Effect.fnUntraced(function* (options: { readonly file?: string }) {
   return (yield* registered(options.file, true)).service
 })
 
-// 50ms cadence bounded at ~5s, shared by stop escalation and each ensure
-// discovery window.
+// Poll until an authenticated stop exits, bounded by the configured stop window.
 const poll = (timing: EnsureTiming) =>
   Schedule.max([Schedule.spaced(timing.stopPollInterval), Schedule.recurs(timing.stopPollAttempts)])
 
@@ -253,17 +256,7 @@ const stopped = Effect.fnUntraced(function* (pid: number) {
   return yield* Effect.fail(new Error(`Server process ${pid} is still running`))
 })
 
-function same(left: Info, right: Info) {
-  return (
-    left.id === right.id &&
-    left.version === right.version &&
-    left.url === right.url &&
-    left.pid === right.pid &&
-    left.password === right.password
-  )
-}
-
-const kill = Effect.fnUntraced(function* (service: LocalService, _options: { readonly file?: string }, timing: EnsureTiming) {
+const kill = Effect.fnUntraced(function* (service: LocalService, timing: EnsureTiming) {
   const requested = yield* requestStop(service, timing.requestTimeout)
   if (requested === "rejected") return yield* Effect.fail(new Error("Background service rejected the stop request"))
   if (requested === "unsupported") {
@@ -296,4 +289,4 @@ const requestStop = Effect.fnUntraced(function* (service: LocalService, timeout 
 })
 
 /** Effect-based local service lifecycle operations. */
-export const Service = { discover, incumbent, ensure, stop, headers, Info }
+export const Service = { discover, incumbent, ensure, stop, headers, canReplaceVersion, Info }

@@ -23,7 +23,14 @@ export default Runtime.handler(Commands, (input) =>
       server: Option.getOrUndefined(input.server),
       standalone: input.standalone,
       mismatch: "replace",
+      confirmDowngrade: (serverVersion) =>
+        Effect.promise(async () => {
+          const confirmed = await preflight.confirmDowngrade(serverVersion)
+          if (confirmed) preflight.begin(serverVersion)
+          return confirmed
+        }),
       onStart: (reason, previousVersion) => {
+        if (preflight.active()) return
         if (reason === "version-mismatch" && preflight.begin(previousVersion)) return
         process.stderr.write(
           reason === "version-mismatch"

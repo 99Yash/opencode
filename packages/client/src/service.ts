@@ -1,3 +1,5 @@
+import semver from "semver"
+
 /** Connection details for a local OpenCode service. */
 export type Endpoint = {
   /** Base URL of the service. */
@@ -28,7 +30,7 @@ export type EnsureReason = "missing" | "version-mismatch"
 export type EnsureOptions = DiscoverOptions & {
   /** Service command and arguments. Defaults to `opencode serve --service`. */
   readonly command?: ReadonlyArray<string>
-  /** Decide whether a version-mismatched service may be replaced. Defaults to true. */
+  /** Decide whether a version-mismatched service may be replaced. Defaults to false. */
   readonly canReplace?: (version: string | undefined) => boolean
   /** Called once before spawning a new service process. */
   readonly onStart?: (reason: EnsureReason, previousVersion?: string) => void
@@ -42,11 +44,18 @@ export class VersionMismatchError extends Error {
     readonly clientVersion: string | undefined,
     readonly serverVersion: string | undefined,
   ) {
-    super(
-      `Background service ${serverVersion ?? "unknown"} is newer than this client ${clientVersion ?? "unknown"}. ` +
-        "Run `opencode2 service restart` to activate this installed version.",
-    )
+    super(`Background service ${serverVersion ?? "unknown"} does not match client ${clientVersion ?? "unknown"}`)
   }
+}
+
+/** Whether a client version is strictly newer than a service version. */
+export function canReplaceVersion(serverVersion: string | undefined, clientVersion: string) {
+  if (serverVersion === undefined) return false
+  // Compare preview build numbers numerically rather than as semver prerelease strings.
+  const server = serverVersion.replace(/-(\d+)(?=(?:\.\d+)?$)/, ".$1")
+  const client = clientVersion.replace(/-(\d+)(?=(?:\.\d+)?$)/, ".$1")
+  if (!semver.valid(server) || !semver.valid(client)) return false
+  return semver.lt(server, client)
 }
 
 /** Options used to stop the local OpenCode service. */

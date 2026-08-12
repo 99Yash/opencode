@@ -17,6 +17,7 @@ export function MigrationOverlay() {
 
   onMount(async () => {
     await Bun.sleep(1_000)
+    if (abort.signal.aborted) return
     void (async () => {
       while (true) {
         const result = await client.api.migration.v1.status({ signal: abort.signal }).then(
@@ -25,7 +26,9 @@ export function MigrationOverlay() {
         )
         if ("error" in result) {
           if (result.error instanceof ClientError && result.error.reason === "Transport") {
+            if (abort.signal.aborted) return
             await Bun.sleep(1_000)
+            if (abort.signal.aborted) return
             continue
           }
           throw result.error
