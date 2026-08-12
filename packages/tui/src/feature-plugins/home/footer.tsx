@@ -1,10 +1,11 @@
 import { Plugin } from "@opencode-ai/plugin/tui"
 import { createMemo, Match, Show, Switch } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
+import { usePlugin } from "../../plugin/context"
 
 function Mcp(props: { context: Plugin.Context }) {
   const list = createMemo(() => props.context.data.location.mcp.server.list(props.context.location) ?? [])
-  const failed = createMemo(() => list().some((item) => item.status.status === "failed"))
+  const failed = createMemo(() => list().filter((item) => item.status.status === "failed").length)
   const count = createMemo(() => list().filter((item) => item.status.status === "connected").length)
 
   return (
@@ -14,6 +15,7 @@ function Mcp(props: { context: Plugin.Context }) {
           <Switch>
             <Match when={failed()}>
               <span style={{ fg: props.context.theme.text.feedback.error.default }}>⊙ </span>
+              {failed()} MCP failed
             </Match>
             <Match when={true}>
               <span
@@ -24,11 +26,28 @@ function Mcp(props: { context: Plugin.Context }) {
               >
                 ⊙{" "}
               </span>
+              {count()} MCP
             </Match>
           </Switch>
-          {count()} MCP
         </text>
-        <text fg={props.context.theme.text.subdued}>/status</text>
+        <text fg={props.context.theme.text.subdued}>/mcps</text>
+      </box>
+    </Show>
+  )
+}
+
+function Plugins(props: { context: Plugin.Context }) {
+  const plugins = usePlugin()
+  const failed = createMemo(() => plugins.list().filter((item) => item.status === "failed").length)
+
+  return (
+    <Show when={failed()}>
+      <box gap={1} flexDirection="row" flexShrink={0}>
+        <text fg={props.context.theme.text.default}>
+          <span style={{ fg: props.context.theme.text.feedback.error.default }}>⊙ </span>
+          {failed()} plugin{failed() === 1 ? "" : "s"} failed
+        </text>
+        <text fg={props.context.theme.text.subdued}>/plugins</text>
       </box>
     </Show>
   )
@@ -50,6 +69,7 @@ function View(props: { context: Plugin.Context }) {
         gap={2}
       >
         <Mcp context={props.context} />
+        <Plugins context={props.context} />
         <box flexGrow={1} />
         <box flexShrink={0}>
           <text fg={props.context.theme.text.subdued}>{props.context.app.version}</text>

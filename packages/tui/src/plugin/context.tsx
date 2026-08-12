@@ -390,7 +390,11 @@ export function PluginProvider(props: ParentProps<{ packages: PackageResolver; d
           (prev) => prev.status === "failed" && prev.target === state.target && prev.error === state.error,
         )
       )
-        host.toast.show({ variant: "error", title: "Plugin", message: `${state.target}: ${state.error}` })
+        host.toast.show({
+          variant: "error",
+          title: `Plugin failed: ${state.target}`,
+          message: "Run /plugins to view details.",
+        })
     setStore("states", reconcileStore(states))
   }
   const slotItems = new WeakMap<SlotRender, Claim<SlotRender>>()
