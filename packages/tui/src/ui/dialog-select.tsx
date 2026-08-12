@@ -51,6 +51,8 @@ export interface DialogSelectProps<T> {
   }[]
   bindings?: readonly Binding<Renderable, KeyEvent>[]
   current?: T
+  hideClose?: boolean
+  maxHeight?: number
 }
 
 export interface DialogSelectOption<T = any> {
@@ -212,7 +214,7 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
   })
 
   const dimensions = useTerminalDimensions()
-  const height = createMemo(() => Math.min(rows(), Math.floor(dimensions().height / 2) - 6))
+  const height = createMemo(() => Math.min(rows(), props.maxHeight ?? Math.floor(dimensions().height / 2) - 6))
 
   const selected = createMemo(() => flat()[store.selected])
 
@@ -565,9 +567,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
               {props.title}
             </text>
           )}
-          <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
-            esc
-          </text>
+          <Show when={!props.hideClose}>
+            <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
+              esc
+            </text>
+          </Show>
         </box>
         <Show when={props.renderFilter !== false}>
           <box paddingTop={1}>
@@ -789,7 +793,11 @@ function Option(props: {
       </text>
       <Show when={props.footer}>
         <box flexShrink={0}>
-          <text fg={props.active && !props.muted ? fg : theme.textMuted}>{props.footer}</text>
+          {typeof props.footer === "string" ? (
+            <text fg={props.active && !props.muted ? fg : theme.textMuted}>{props.footer}</text>
+          ) : (
+            props.footer
+          )}
         </box>
       </Show>
     </>

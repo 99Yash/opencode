@@ -1,10 +1,10 @@
-import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core"
+import { TextAttributes } from "@opentui/core"
 import { useTerminalDimensions } from "@opentui/solid"
-import { createMemo, createSignal, For, onMount, Show } from "solid-js"
+import { createMemo, createSignal, onMount, Show } from "solid-js"
 import { useConfig } from "../config"
 import { useTheme } from "../context/theme"
-import { useBindings } from "../keymap"
 import { useDialog } from "../ui/dialog"
+import { DialogSelect } from "../ui/dialog-select"
 import { useToast } from "../ui/toast"
 
 type Setting = {
@@ -249,9 +249,8 @@ export function DialogConfig() {
   const themeState = useTheme()
   const { theme } = themeState
   const dimensions = useTerminalDimensions()
-  const [selected, setSelected] = createSignal(0)
+  const [selected, setSelected] = createSignal(settings[0])
   const [saving, setSaving] = createSignal(false)
-  let scroll: ScrollBoxRenderable | undefined
   onMount(() => {
     dialog.setSize("xlarge")
     dialog.setCentered(true)
@@ -275,34 +274,19 @@ export function DialogConfig() {
     const index = setting.values?.indexOf(current)
     return index === undefined || index < 0 ? String(current) : (setting.labels?.[index] ?? String(current))
   }
-  const rows = createMemo(() =>
-    settings.map((setting, index) => ({
-      setting,
-      index,
-      heading: index === 0 || settings[index - 1].category !== setting.category,
+  const options = createMemo(() =>
+    settings.map((setting) => ({
+      title: setting.title,
+      category: setting.category,
+      value: setting,
+      footer: selected() === setting ? `‹ ${display(setting)} ›` : `  ${display(setting)}  `,
     })),
   )
   const split = createMemo(() => dimensions().width >= 110)
   const height = createMemo(() => Math.max(8, Math.min(36, dimensions().height - 12)))
 
-  function move(direction: number) {
-    const next = (selected() + direction + settings.length) % settings.length
-    setSelected(next)
-    queueMicrotask(() => {
-      if (!scroll) return
-      const row =
-        next +
-        settings.slice(0, next + 1).filter((setting, index) => {
-          return index === 0 || settings[index - 1].category !== setting.category
-        }).length
-      if (row < scroll.scrollTop) scroll.scrollTo(row)
-      if (row >= scroll.scrollTop + scroll.viewport.height) scroll.scrollTo(row - scroll.viewport.height + 1)
-    })
-  }
-
-  async function change(direction: number) {
+  async function change(setting: Setting, direction: number) {
     if (saving()) return
-    const setting = settings[selected()]
     const current = value(setting)
     const choices = values(setting)
     const next = choices
@@ -322,72 +306,22 @@ export function DialogConfig() {
       .finally(() => setSaving(false))
   }
 
-  useBindings(() => ({
-    bindings: [
-      {
-        key: "up",
-        desc: "Previous setting",
-        group: "Settings",
-        cmd: () => move(-1),
-      },
-      {
-        key: "down",
-        desc: "Next setting",
-        group: "Settings",
-        cmd: () => move(1),
-      },
-      { key: "left", desc: "Previous value", group: "Settings", cmd: () => void change(-1) },
-      { key: "right", desc: "Next value", group: "Settings", cmd: () => void change(1) },
-      { key: "return", desc: "Next value", group: "Settings", cmd: () => void change(1) },
-    ],
-  }))
-
   return (
     <box flexDirection="row" height={height() + 1}>
-      <box width={split() ? "54%" : "100%"} paddingLeft={4} paddingRight={split() ? 3 : 4} paddingBottom={1}>
-        <text fg={theme.text} attributes={TextAttributes.BOLD} paddingBottom={1}>
-          Settings
-        </text>
-        <scrollbox
-          ref={(element: ScrollBoxRenderable) => (scroll = element)}
-          flexGrow={1}
-          scrollbarOptions={{ visible: false }}
-        >
-          <For each={rows()}>
-            {(row) => (
-              <>
-                <Show when={row.heading}>
-                  <box paddingTop={row.index === 0 ? 0 : 1}>
-                    <text fg={theme.primary} attributes={TextAttributes.BOLD}>
-                      {row.setting.category}
-                    </text>
-                  </box>
-                </Show>
-                <box flexDirection="row" height={1}>
-                  <text
-                    width={25}
-                    fg={row.index === selected() ? theme.text : theme.textMuted}
-                    attributes={row.index === selected() ? TextAttributes.BOLD : undefined}
-                  >
-                    {row.setting.title}
-                  </text>
-                  <box flexGrow={1} flexDirection="row" justifyContent="flex-end">
-                    <box flexDirection="row">
-                      <text fg={theme.textMuted}>{row.index === selected() ? "‹ " : "  "}</text>
-                      <text
-                        fg={row.index === selected() ? theme.primary : theme.textMuted}
-                        attributes={row.index === selected() ? TextAttributes.BOLD : undefined}
-                      >
-                        {display(row.setting)}
-                      </text>
-                      <text fg={theme.textMuted}>{row.index === selected() ? " ›" : "  "}</text>
-                    </box>
-                  </box>
-                </box>
-              </>
-            )}
-          </For>
-        </scrollbox>
+      <box width={split() ? "54%" : "100%"}>
+        <DialogSelect
+          title="Settings"
+          options={options()}
+          renderFilter={false}
+          hideClose={split()}
+          maxHeight={height() - 2}
+          onMove={(option) => setSelected(option.value)}
+          onSelect={(option) => void change(option.value, 1)}
+          bindings={[
+            { key: "left", desc: "Previous value", group: "Settings", cmd: () => void change(selected(), -1) },
+            { key: "right", desc: "Next value", group: "Settings", cmd: () => void change(selected(), 1) },
+          ]}
+        />
       </box>
       <Show when={split()}>
         <box
@@ -402,7 +336,7 @@ export function DialogConfig() {
         >
           <box flexDirection="row" justifyContent="space-between">
             <text fg={theme.primary} attributes={TextAttributes.BOLD}>
-              {settings[selected()].title}
+              {selected().title}
             </text>
             <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
               esc
@@ -410,7 +344,7 @@ export function DialogConfig() {
           </box>
           <box paddingTop={1}>
             <text fg={theme.text} wrapMode="word">
-              {settings[selected()].detail ?? settings[selected()].description}
+              {selected().detail ?? selected().description}
             </text>
           </box>
         </box>
