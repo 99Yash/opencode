@@ -6,13 +6,9 @@ import { ChildProcess } from "effect/unstable/process"
 const cfg = [
   "--no-optional-locks",
   "-c",
-  "core.autocrlf=false",
-  "-c",
   "core.fsmonitor=false",
   "-c",
   "core.longpaths=true",
-  "-c",
-  "core.symlinks=true",
   "-c",
   "core.quotepath=false",
 ] as const

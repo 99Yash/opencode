@@ -115,6 +115,39 @@ describe("Git", () => {
     }),
   )
 
+  it.live("respects repository line ending configuration", () =>
+    Effect.gen(function* () {
+      const tmp = yield* scopedTmpdir({ git: true })
+      yield* Effect.promise(() => $`git config core.autocrlf true`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, "line-endings.txt"), "before\n", "utf-8"))
+      yield* Effect.promise(() => $`git add line-endings.txt`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => $`git commit --no-gpg-sign -m "add line endings"`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => fs.rm(path.join(tmp.path, "line-endings.txt")))
+      yield* Effect.promise(() => $`git checkout -- line-endings.txt`.cwd(tmp.path).quiet())
+
+      const git = yield* Git.Service
+      expect(yield* git.status(tmp.path)).toEqual([])
+      expect(yield* git.diff(tmp.path, "HEAD")).toEqual([])
+    }),
+  )
+
+  it.live("respects repository symlink configuration", () =>
+    Effect.gen(function* () {
+      const tmp = yield* scopedTmpdir({ git: true })
+      const blob = yield* Effect.promise(() => $`echo -n target.txt | git hash-object -w --stdin`.cwd(tmp.path).text())
+      yield* Effect.promise(() =>
+        $`git update-index --add --cacheinfo 120000,${blob.trim()},link.txt`.cwd(tmp.path).quiet(),
+      )
+      yield* Effect.promise(() => $`git commit --no-gpg-sign -m "add symlink"`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => $`git config core.symlinks false`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => $`git checkout-index -f link.txt`.cwd(tmp.path).quiet())
+
+      const git = yield* Git.Service
+      expect(yield* git.status(tmp.path)).toEqual([])
+      expect(yield* git.diff(tmp.path, "HEAD")).toEqual([])
+    }),
+  )
+
   it.live("patch() returns capped native patch output", () =>
     Effect.gen(function* () {
       const tmp = yield* scopedTmpdir({ git: true })

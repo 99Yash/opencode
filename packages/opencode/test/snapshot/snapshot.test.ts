@@ -5,7 +5,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Fiber, Layer } from "effect"
+import { Effect, Exit, Fiber, Layer } from "effect"
 import { Snapshot } from "../../src/snapshot"
 import {
   disposeAllInstances,
@@ -114,6 +114,68 @@ it.instance(
       expect((yield* snapshot.patch(before)).files).toContain(fwd(tmp.path, "a.txt"))
     }),
   ),
+  { git: true },
+)
+
+it.instance(
+  "uses source repository line ending semantics",
+  Effect.gen(function* () {
+    const tmp = yield* TestInstance
+    const file = path.join(tmp.directory, "line-endings.txt")
+    yield* exec(tmp.directory, ["git", "config", "core.autocrlf", "true"])
+    yield* write(file, "before\n")
+    yield* exec(tmp.directory, ["git", "add", "line-endings.txt"])
+    yield* exec(tmp.directory, ["git", "commit", "--no-gpg-sign", "-m", "add line endings"])
+    yield* rm(file)
+    yield* exec(tmp.directory, ["git", "checkout", "--", "line-endings.txt"])
+
+    const snapshot = yield* Snapshot.Service
+    const before = yield* snapshot.track()
+    yield* write(file, "before\n")
+    const after = yield* snapshot.track()
+    expect(after).toBe(before)
+
+    yield* exec(tmp.directory, ["git", "config", "core.autocrlf", "false"])
+    yield* write(file, "before\r\n")
+    expect(yield* snapshot.track()).not.toBe(before)
+
+    yield* exec(tmp.directory, ["git", "config", "core.autocrlf", "true"])
+    expect(yield* snapshot.track()).toBe(before)
+
+    yield* exec(tmp.directory, ["git", "config", "core.autocrlf", "input"])
+    yield* write(file, "changed\n")
+    yield* snapshot.restore(before!)
+    expect(yield* readText(file)).toBe("before\n")
+
+    yield* exec(tmp.directory, ["git", "config", "core.autocrlf", "true"])
+    yield* write(file, "changed\n")
+    yield* snapshot.restore(before!)
+    expect(yield* readText(file)).toBe("before\r\n")
+  }),
+  { git: true },
+)
+
+it.instance(
+  "uses source repository symlink semantics",
+  Effect.gen(function* () {
+    const tmp = yield* TestInstance
+    const blob = yield* Effect.promise(() =>
+      $`printf target.txt | git hash-object -w --stdin`.cwd(tmp.directory).text(),
+    )
+    yield* exec(tmp.directory, ["git", "update-index", "--add", "--cacheinfo", `120000,${blob.trim()},link.txt`])
+    yield* exec(tmp.directory, ["git", "commit", "--no-gpg-sign", "-m", "add symlink"])
+    yield* exec(tmp.directory, ["git", "config", "core.symlinks", "false"])
+    yield* exec(tmp.directory, ["git", "checkout-index", "-f", "link.txt"])
+
+    const snapshot = yield* Snapshot.Service
+    const before = yield* snapshot.track()
+
+    yield* exec(tmp.directory, ["git", "config", "core.symlinks", "true"])
+    expect(yield* snapshot.track()).not.toBe(before)
+
+    yield* exec(tmp.directory, ["git", "config", "core.symlinks", "false"])
+    expect(yield* snapshot.track()).toBe(before)
+  }),
   { git: true },
 )
 
@@ -282,6 +344,20 @@ it.instance(
   withTrackedSnapshot(({ tmp, snapshot, before }) =>
     Effect.gen(function* () {
       yield* snapshot.revert([{ hash: before, files: [`${tmp.path}/nonexistent.txt`] }])
+    }),
+  ),
+  { git: true },
+)
+
+it.instance(
+  "revert preserves files when snapshot lookup fails",
+  withTrackedSnapshot(({ tmp, snapshot }) =>
+    Effect.gen(function* () {
+      const file = path.join(tmp.path, "protected.txt")
+      yield* write(file, "keep")
+      const result = yield* Effect.exit(snapshot.revert([{ hash: "invalid-hash", files: [file] }]))
+      expect(Exit.isFailure(result)).toBe(true)
+      expect(yield* readText(file)).toBe("keep")
     }),
   ),
   { git: true },
