@@ -273,7 +273,7 @@ const layer = Layer.effect(
         assistantMessageID,
       })
       const stepUsage = (finish: NonNullable<StepRecord["finish"]>) => ({
-        cost: SessionUsage.calculateCost(resolved.cost, finish.tokens),
+        cost: SessionUsage.calculateCost(resolved.cost, finish.tokens, finish.cost),
         tokens: finish.tokens,
       })
 

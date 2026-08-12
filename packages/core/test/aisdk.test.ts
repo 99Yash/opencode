@@ -375,6 +375,34 @@ it.effect("emits malformed AI SDK tool input without executing it", () =>
   }),
 )
 
+it.effect("normalizes Copilot billed usage to USD", () =>
+  Effect.gen(function* () {
+    const aisdk = yield* AISDK.Service
+    yield* aisdk.hook.sdk((event) => {
+      event.sdk = {
+        languageModel: () =>
+          streamModel([
+            {
+              type: "raw",
+              rawValue: { type: "message_delta", copilot_usage: { total_nano_aiu: 4_473_525_000 } },
+            },
+            { type: "finish", finishReason: { unified: "stop", raw: "end_turn" }, usage },
+          ]),
+      }
+    })
+
+    const resolved = yield* aisdk.model({
+      ...model("@ai-sdk/github-copilot"),
+      providerID: Provider.ID.githubCopilot,
+    })
+    const response = yield* LLMClient.generate(LLM.request({ model: resolved, prompt: "Hello" })).pipe(
+      Effect.provide(client),
+    )
+
+    expect(response.usage?.cost).toBeCloseTo(0.04473525)
+  }),
+)
+
 it.effect("keeps malformed provider-executed AI SDK input terminal", () =>
   Effect.gen(function* () {
     const aisdk = yield* AISDK.Service

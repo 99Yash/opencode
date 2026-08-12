@@ -36,6 +36,7 @@ export interface StepRecord {
   readonly finish?: {
     readonly finish: Extract<LLMEvent, { type: "step-finish" }>["reason"]["normalized"]
     readonly tokens: ReturnType<typeof SessionUsage.tokens>
+    readonly cost?: number
   }
   readonly calls: ReadonlyArray<{
     readonly id: string
@@ -495,7 +496,11 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       case "step-finish":
         yield* flush()
         if (stepSettlement) return yield* Effect.die(new Error("Duplicate step finish"))
-        stepSettlement = { finish: event.reason.normalized, tokens: SessionUsage.tokens(event.usage) }
+        stepSettlement = {
+          finish: event.reason.normalized,
+          tokens: SessionUsage.tokens(event.usage),
+          cost: event.usage?.cost,
+        }
         if (event.reason.normalized === "content-filter") {
           providerFailed = true
           yield* failAssistant({ type: "provider.content-filter", message: "Provider blocked the response" })
