@@ -17,8 +17,7 @@ export const tokens = (usage: Usage | undefined): TokenUsage.Info => ({
   },
 })
 
-export function calculateCost(costs: Model.Info["cost"], usage: TokenUsage.Info, reported?: number) {
-  if (reported !== undefined && Number.isFinite(reported) && reported >= 0) return Money.USD.make(reported)
+export function calculateCost(costs: Model.Info["cost"], usage: TokenUsage.Info) {
   const context = usage.input + usage.cache.read + usage.cache.write
   const tier = costs
     .filter((cost) => cost.tier?.type === "context" && context > cost.tier.size)
@@ -38,7 +37,14 @@ export type Recorded = { readonly tokens: TokenUsage.Info; readonly cost: Money.
 
 export const record = (usage: Usage | undefined, costs: Model.Info["cost"]): Recorded => {
   const normalized = tokens(usage)
-  return { tokens: normalized, cost: calculateCost(costs, normalized, usage?.cost) }
+  const reported = usage?.cost
+  return {
+    tokens: normalized,
+    cost:
+      reported !== undefined && Number.isFinite(reported) && reported >= 0
+        ? Money.USD.make(reported)
+        : calculateCost(costs, normalized),
+  }
 }
 
 export const add = (a: Recorded, b: Recorded): Recorded => ({

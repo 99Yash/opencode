@@ -548,8 +548,15 @@ function providerOptions(input: LLMRequest["providerOptions"]): SharedV3Provider
   return Object.fromEntries(Object.entries(input).map(([key, value]) => [key, jsonObject(value)]))
 }
 
+interface StreamState {
+  step: number
+  toolNames: Record<string, string>
+  copilot: boolean
+  cost?: number
+}
+
 function streamLanguage(language: LanguageModelV3, options: LanguageModelV3CallOptions, copilot: boolean) {
-  const state = { step: 0, toolNames: {} as Record<string, string>, copilot, cost: undefined as number | undefined }
+  const state: StreamState = { step: 0, toolNames: {}, copilot }
   return Stream.concat(
     Stream.make(LLMEvent.stepStart({ index: state.step })),
     Stream.unwrap(
@@ -572,7 +579,7 @@ function streamLanguage(language: LanguageModelV3, options: LanguageModelV3CallO
 }
 
 function streamPartEvents(
-  state: { step: number; toolNames: Record<string, string>; copilot: boolean; cost: number | undefined },
+  state: StreamState,
   event: LanguageModelV3StreamPart,
 ): Effect.Effect<ReadonlyArray<LLMEvent>, AIError> {
   switch (event.type) {
