@@ -43,7 +43,7 @@ export const incumbent = Effect.fn("service.incumbent")(function* (
   options: DiscoverOptions & { readonly url: string },
 ) {
   const info = yield* read(options.file)
-  const found = info === undefined ? undefined : yield* probe({ ...info, url: options.url })
+  const found = info === undefined ? undefined : yield* probeResult({ ...info, url: options.url })
   if (found === undefined || found.legacy) return undefined
   if (!matchesVersion(found.version, options)) return undefined
   return { endpoint: found.endpoint, state: found.state }
@@ -131,9 +131,9 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
 
 /** Stop the registered local service. */
 export const stop = Effect.fn("service.stop")(function* (options: StopOptions = {}) {
-  const existing = yield* find(options)
-  if (existing !== undefined) yield* kill(existing, defaultEnsureTiming)
-  if (existing === undefined && (yield* read(options.file)) !== undefined)
+  const registration = yield* registered(options.file, true)
+  if (registration.service !== undefined) yield* kill(registration.service, defaultEnsureTiming)
+  if (registration.service === undefined && registration.info !== undefined)
     return yield* Effect.fail(
       new Error("Background service is not responding; stop its process manually and try again"),
     )
@@ -179,10 +179,6 @@ type LocalService = {
   readonly state: "ready" | "waiting" | "failed"
   readonly legacy: boolean
 }
-
-const probe = Effect.fnUntraced(function* (info: Info, allowLegacy = false) {
-  return yield* probeResult(info, allowLegacy)
-})
 
 const probeResult = Effect.fnUntraced(function* (
   info: Info,
@@ -236,12 +232,6 @@ const registered = Effect.fnUntraced(function* (file?: string, allowLegacy = fal
   const info = yield* read(file)
   if (info === undefined) return { info: undefined, service: undefined }
   return { info, service: yield* probeResult(info, allowLegacy, timeout) }
-})
-
-// Health-checked lookup without the version gate: lifecycle operations must be
-// able to see (and replace or stop) a server from a different version.
-const find = Effect.fnUntraced(function* (options: { readonly file?: string }) {
-  return (yield* registered(options.file, true)).service
 })
 
 // Poll until an authenticated stop exits, bounded by the configured stop window.

@@ -44,7 +44,7 @@ const server = Bun.serve({
       await appendFile(registration + ".stop-attempts", process.pid + "\n")
       return new Promise<Response>(() => {})
     }
-    if (pathname === "/api/service/stop" && (mode === "graceful" || mode === "old")) {
+    if (pathname === "/api/service/stop" && (mode === "graceful" || mode === "old" || mode === "incompatible")) {
       const body = await request.json()
       if (typeof body !== "object" || body === null || body.instanceID !== id) return Response.json({ accepted: false })
       await writeFile(registration + ".stop", JSON.stringify(body))
@@ -67,8 +67,6 @@ const server = Bun.serve({
     if (mode === "starting" && !(await Bun.file(registration + ".release").exists()))
       return Response.json({ healthy: true, version, pid: process.pid }, { status: 503 })
     if (mode === "failed-owner") return Response.json({ healthy: true, version, pid: process.pid }, { status: 500 })
-    if (mode === "starting" || mode === "graceful" || mode === "reject-stop" || mode === "stop-hanging")
-      return Response.json({ healthy: true, version, pid: process.pid })
     return Response.json({ healthy: true, version, pid: process.pid })
   },
 })

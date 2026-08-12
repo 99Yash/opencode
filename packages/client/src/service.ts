@@ -1,4 +1,4 @@
-import semver from "semver"
+export { canReplaceVersion } from "./service-version.js"
 
 /** Connection details for a local OpenCode service. */
 export type Endpoint = {
@@ -46,16 +46,6 @@ export class VersionMismatchError extends Error {
   ) {
     super(`Background service ${serverVersion ?? "unknown"} does not match client ${clientVersion ?? "unknown"}`)
   }
-}
-
-/** Whether a client version is strictly newer than a service version. */
-export function canReplaceVersion(serverVersion: string | undefined, clientVersion: string) {
-  if (serverVersion === undefined) return false
-  // Compare preview build numbers numerically rather than as semver prerelease strings.
-  const server = serverVersion.replace(/-(\d+)(?=(?:\.\d+)?$)/, ".$1")
-  const client = clientVersion.replace(/-(\d+)(?=(?:\.\d+)?$)/, ".$1")
-  if (!semver.valid(server) || !semver.valid(client)) return false
-  return semver.lt(server, client)
 }
 
 /** Options used to stop the local OpenCode service. */

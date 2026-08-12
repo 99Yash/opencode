@@ -1,7 +1,7 @@
 import { Service, VersionMismatchError, type Endpoint, type EnsureOptions } from "@opencode-ai/client/effect/service"
 import { ClientError, isUnauthorizedError, OpenCode } from "@opencode-ai/client/promise"
 import { OPENCODE_VERSION } from "../version"
-import { Effect, Redacted, Result } from "effect"
+import { Effect, Redacted } from "effect"
 import { Env } from "../env"
 import { ServiceConfig } from "./service-config"
 import { Standalone } from "./standalone"
@@ -11,7 +11,6 @@ export type Args = {
   readonly standalone?: boolean
   readonly mismatch?: "replace" | "ignore" | "error"
   readonly onStart?: EnsureOptions["onStart"]
-  readonly confirmDowngrade?: (serverVersion: string, clientVersion: string) => Effect.Effect<boolean>
 }
 
 export type Resolved = {
@@ -46,7 +45,7 @@ export const resolve = Effect.fn("cli.server-connection.resolve")(function* (arg
   const mismatch = args.mismatch ?? "ignore"
   const options = yield* ServiceConfig.options({ checkVersion: mismatch !== "ignore" })
   return {
-    endpoint: yield* resolveManaged({ ...options, onStart: args.onStart }, mismatch, args.confirmDowngrade),
+    endpoint: yield* resolveManaged({ ...options, onStart: args.onStart }, mismatch),
     service: managedService(options),
   } satisfies Resolved
 })
@@ -63,16 +62,17 @@ function managedService(options: EnsureOptions) {
   }
 }
 
-const resolveManaged = Effect.fnUntraced(function* (
-  options: EnsureOptions,
-  mismatch: NonNullable<Args["mismatch"]>,
-  confirmDowngrade?: Args["confirmDowngrade"],
-) {
-  if (mismatch === "replace") {
-    const result = yield* Effect.result(Service.ensure(options))
-    if (Result.isSuccess(result)) return result.success
-    return yield* confirmManagedDowngrade(options, result.failure, confirmDowngrade)
-  }
+const resolveManaged = Effect.fnUntraced(function* (options: EnsureOptions, mismatch: NonNullable<Args["mismatch"]>) {
+  if (mismatch === "replace")
+    return yield* Service.ensure(options).pipe(
+      Effect.mapError((error) =>
+        error instanceof VersionMismatchError
+          ? new Error(`${error.message}. Run \`opencode2 service restart\` to activate this installed version.`, {
+              cause: error,
+            })
+          : error,
+      ),
+    )
   if (mismatch === "ignore") return yield* Service.ensure({ ...options, version: undefined })
 
   const compatible = yield* Service.discover(options)
@@ -80,29 +80,6 @@ const resolveManaged = Effect.fnUntraced(function* (
   const existing = yield* Service.discover({ ...options, version: undefined })
   if (existing !== undefined)
     return yield* Effect.fail(new Error("Background server version does not match this client"))
-  return yield* Service.ensure(options)
-})
-
-export const confirmManagedDowngrade = Effect.fnUntraced(function* (
-  options: EnsureOptions,
-  error: unknown,
-  confirm?: Args["confirmDowngrade"],
-) {
-  if (
-    !(error instanceof VersionMismatchError) ||
-    error.serverVersion === undefined ||
-    error.clientVersion === undefined ||
-    !Service.canReplaceVersion(error.clientVersion, error.serverVersion) ||
-    confirm === undefined
-  )
-    return yield* Effect.fail(error)
-  if (!(yield* confirm(error.serverVersion, error.clientVersion)))
-    return yield* Effect.fail(
-      new Error(`${error.message}. Run \`opencode2 service restart\` to activate this installed version.`, {
-        cause: error,
-      }),
-    )
-  yield* Service.stop(options)
   return yield* Service.ensure(options)
 })
 

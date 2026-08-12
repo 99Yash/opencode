@@ -76,7 +76,10 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
         if (compatible && service.state === "failed") throw new Error("Background service failed to start")
         if (!compatible) {
           if (options.canReplace?.(service.version) !== true)
-            throw new VersionMismatchError(typeof options.version === "string" ? options.version : undefined, service.version)
+            throw new VersionMismatchError(
+              typeof options.version === "string" ? options.version : undefined,
+              service.version,
+            )
           await kill(service, timing)
           announce("version-mismatch", service.version)
           lastSpawn = 0
@@ -106,9 +109,9 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
 
 /** Stop the registered local service. */
 export async function stop(options: StopOptions = {}) {
-  const existing = await find(options)
-  if (existing !== undefined) await kill(existing, defaultEnsureTiming)
-  if (existing === undefined && (await read(options.file)) !== undefined)
+  const registration = await registered(options.file, true)
+  if (registration.service !== undefined) await kill(registration.service, defaultEnsureTiming)
+  if (registration.service === undefined && registration.info !== undefined)
     throw new Error("Background service is not responding; stop its process manually and try again")
 }
 
@@ -213,10 +216,6 @@ async function registered(file?: string, allowLegacy = false, timeout?: number) 
   const info = await read(file)
   if (info === undefined) return { info: undefined, service: undefined }
   return { info, service: await probeResult(info, allowLegacy, timeout) }
-}
-
-async function find(options: { readonly file?: string }) {
-  return (await registered(options.file, true)).service
 }
 
 function stopped(pid: number) {

@@ -109,10 +109,6 @@ export const options = Effect.fnUntraced(function* (input: { readonly checkVersi
   }
 })
 
-export function canReplaceVersion(serverVersion: string | undefined, clientVersion = OPENCODE_VERSION) {
-  return Service.canReplaceVersion(serverVersion, clientVersion)
-}
-
 export const read = Effect.fn("cli.service-config.read")(function* () {
   const { fs, configFile, legacyConfigFile } = yield* paths
   if (legacyConfigFile) yield* migrateConfig(legacyConfigFile, configFile)

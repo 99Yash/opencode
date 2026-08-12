@@ -8,7 +8,6 @@ import os from "node:os"
 import path from "node:path"
 import { ServerConnection } from "../src/services/server-connection"
 import { ServiceConfig } from "../src/services/service-config"
-import { VersionMismatchError } from "@opencode-ai/client/effect/service"
 
 test("resolution groups Effect-native lifecycle operations only for the managed service", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-server-resolution-"))
@@ -71,34 +70,33 @@ test("service options only require a matching version when requested", async () 
   }
 })
 
-test("downgrade confirmation is offered only when the running service is newer", async () => {
-  const options = { version: "0.0.0-next-17271" }
-  const offered: string[] = []
-  const confirm = (serverVersion: string) =>
-    Effect.sync(() => {
-      offered.push(serverVersion)
-      return false
-    })
+test("normal launch refuses to replace a newer managed service", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-newer-service-"))
+  const layer = Global.layerWith({ config: path.join(root, "config"), state: path.join(root, "state") })
+  const registration = path.join(root, "state", ServiceConfig.filename())
+  using server = Bun.serve({
+    port: 0,
+    fetch() {
+      return Response.json({ healthy: true, version: "999.0.0", pid: process.pid })
+    },
+  })
 
-  await expect(
-    Effect.runPromise(
-      ServerConnection.confirmManagedDowngrade(
-        options,
-        new VersionMismatchError(options.version, "0.0.0-next-17272"),
-        confirm,
-      ).pipe(Effect.provide(NodeFileSystem.layer)),
-    ),
-  ).rejects.toThrow("Run `opencode2 service restart`")
-  expect(offered).toEqual(["0.0.0-next-17272"])
-
-  await expect(
-    Effect.runPromise(
-      ServerConnection.confirmManagedDowngrade(
-        { version: "0.0.0-next-17272" },
-        new VersionMismatchError("0.0.0-next-17272", "0.0.0-next-17271"),
-        confirm,
-      ).pipe(Effect.provide(NodeFileSystem.layer)),
-    ),
-  ).rejects.toThrow("does not match")
-  expect(offered).toEqual(["0.0.0-next-17272"])
+  try {
+    await fs.mkdir(path.dirname(registration), { recursive: true })
+    await fs.writeFile(
+      registration,
+      JSON.stringify({ id: "newer-service", version: "999.0.0", url: server.url.toString(), pid: process.pid }),
+    )
+    await expect(
+      Effect.runPromise(
+        ServerConnection.resolve({ mismatch: "replace" }).pipe(
+          Effect.provide(layer),
+          Effect.provide(NodeFileSystem.layer),
+          Effect.scoped,
+        ),
+      ),
+    ).rejects.toThrow("Run `opencode2 service restart` to activate this installed version")
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })

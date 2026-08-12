@@ -79,6 +79,7 @@ test("replaces an incompatible registered service", async () => {
     ensure({
       file: registration,
       version: (version) => version.startsWith("2."),
+      canReplace: () => true,
       command: [process.execPath, fixture, registration, "delayed-compatible", "10"],
       onStart: (reason) => starts.push(reason),
     }),

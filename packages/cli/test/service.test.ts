@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { Service, type Info } from "@opencode-ai/client/effect/service"
+import { Service, canReplaceVersion, type Info } from "@opencode-ai/client/effect/service"
 import { Global } from "@opencode-ai/util/global"
 import { OPENCODE_VERSION } from "../src/version"
 import { expect, test } from "bun:test"
@@ -48,12 +48,12 @@ test("service filenames share release channels and identify preview channels", (
 })
 
 test("only newer clients replace managed service versions", () => {
-  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17271", "0.0.0-next-17272")).toBe(true)
-  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17271")).toBe(false)
-  expect(ServiceConfig.canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17272")).toBe(false)
-  expect(ServiceConfig.canReplaceVersion(undefined, "0.0.0-next-17272")).toBe(false)
-  expect(ServiceConfig.canReplaceVersion("development-a", "development-b")).toBe(false)
-  expect(ServiceConfig.canReplaceVersion("development-b", "development-a")).toBe(false)
+  expect(canReplaceVersion("0.0.0-next-17271", "0.0.0-next-17272")).toBe(true)
+  expect(canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17271")).toBe(false)
+  expect(canReplaceVersion("0.0.0-next-17272", "0.0.0-next-17272")).toBe(false)
+  expect(canReplaceVersion(undefined, "0.0.0-next-17272")).toBe(false)
+  expect(canReplaceVersion("development-a", "development-b")).toBe(false)
+  expect(canReplaceVersion("development-b", "development-a")).toBe(false)
 })
 
 test("managed version replacement can never be mutual", () => {
@@ -71,7 +71,7 @@ test("managed version replacement can never be mutual", () => {
   for (const left of versions) {
     for (const right of versions) {
       if (left === undefined || right === undefined) continue
-      expect(ServiceConfig.canReplaceVersion(left, right) && ServiceConfig.canReplaceVersion(right, left)).toBe(false)
+      expect(canReplaceVersion(left, right) && canReplaceVersion(right, left)).toBe(false)
     }
   }
 })
