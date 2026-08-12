@@ -584,6 +584,8 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               existing.retry = undefined
               existing.error = undefined
               existing.finish = undefined
+              existing.time.started = undefined
+              existing.time.generated = undefined
               existing.time.completed = undefined
               if (event.data.snapshot) existing.snapshot = { ...existing.snapshot, start: event.data.snapshot }
               return
@@ -613,6 +615,7 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
             currentAssistant.finish = event.data.finish
             currentAssistant.cost = event.data.cost
             currentAssistant.tokens = event.data.tokens
+            currentAssistant.time.generated = event.data.generated
             if (event.data.snapshot)
               currentAssistant.snapshot = { ...currentAssistant.snapshot, end: event.data.snapshot }
           })
@@ -630,11 +633,15 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
               currentAssistant.cost = event.data.cost
               currentAssistant.tokens = event.data.tokens
             }
+            currentAssistant.time.generated = event.data.generated
           })
           break
         case "session.text.started":
           message.update(event.data.sessionID, (draft, index) => {
-            message.assistant(draft, index, event.data.assistantMessageID)?.content.push({
+            const assistant = message.assistant(draft, index, event.data.assistantMessageID)
+            if (!assistant) return
+            if (assistant.time.completed === undefined) assistant.time.started ??= event.created
+            assistant.content.push({
               type: "text",
               text: "",
             })
@@ -654,7 +661,9 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           break
         case "session.tool.input.started":
           message.update(event.data.sessionID, (draft, index) => {
-            message.assistant(draft, index, event.data.assistantMessageID)?.content.push({
+            const assistant = message.assistant(draft, index, event.data.assistantMessageID)
+            if (!assistant) return
+            assistant.content.push({
               type: "tool",
               id: event.data.id,
               name: event.data.name,
@@ -743,7 +752,9 @@ export const { use: useData, provider: DataProvider } = createSimpleContext({
           break
         case "session.reasoning.started":
           message.update(event.data.sessionID, (draft, index) => {
-            message.assistant(draft, index, event.data.assistantMessageID)?.content.push({
+            const assistant = message.assistant(draft, index, event.data.assistantMessageID)
+            if (!assistant) return
+            assistant.content.push({
               type: "reasoning",
               text: "",
               state: event.data.state,

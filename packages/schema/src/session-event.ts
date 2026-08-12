@@ -6,7 +6,7 @@ import { Event } from "./event.js"
 import { FinishReason } from "./llm.js"
 import { Content } from "./tool.js"
 import { Model } from "./model.js"
-import { NonNegativeInt, PositiveInt, RelativePath } from "./schema.js"
+import { DateTimeUtcFromMillis, NonNegativeInt, PositiveInt, RelativePath } from "./schema.js"
 import { FileAttachment } from "./prompt.js"
 import { SessionID } from "./session-id.js"
 import { Location } from "./location.js"
@@ -309,6 +309,7 @@ export namespace Step {
       finish: FinishReason,
       cost: Money.USD,
       tokens: TokenUsage.Info,
+      generated: DateTimeUtcFromMillis.pipe(optional),
       snapshot: Snapshot.ID.pipe(optional),
       files: Schema.Array(RelativePath).pipe(optional),
     },
@@ -324,6 +325,7 @@ export namespace Step {
       error: SessionError.Error,
       cost: Money.USD.pipe(optional),
       tokens: TokenUsage.Info.pipe(optional),
+      generated: DateTimeUtcFromMillis.pipe(optional),
       snapshot: Snapshot.ID.pipe(optional),
       files: Schema.Array(RelativePath).pipe(optional),
     },

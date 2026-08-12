@@ -595,6 +595,7 @@ export type Endpoint5_31Output =
               readonly reasoning: number
               readonly cache: { readonly read: number; readonly write: number }
             }
+            readonly generated?: DateTime.Utc | undefined
             readonly snapshot?: (string & Brand.Brand<"Snapshot.ID">) | undefined
             readonly files?: ReadonlyArray<RelativePath> | undefined
           }
@@ -619,6 +620,7 @@ export type Endpoint5_31Output =
                   readonly cache: { readonly read: number; readonly write: number }
                 }
               | undefined
+            readonly generated?: DateTime.Utc | undefined
             readonly snapshot?: (string & Brand.Brand<"Snapshot.ID">) | undefined
             readonly files?: ReadonlyArray<RelativePath> | undefined
           }

@@ -93,6 +93,7 @@ import {
   createSessionRows,
   messageBoundaryIDs,
   resolvePart,
+  tokenThroughput,
   turnDuration,
   type CacheUsage,
   type PartRef,
@@ -1243,6 +1244,7 @@ function TurnTokenUsage(props: {
       const newTokens = total - message.tokens.cache.read
       const currentCache = { read: message.tokens.cache.read, model: message.model }
       const reuseDrop = cacheReuseDrop(previousCache, currentCache)
+      const throughput = tokenThroughput(message)
       previousCache = currentCache
       return [
         {
@@ -1252,6 +1254,7 @@ function TurnTokenUsage(props: {
           cached: message.tokens.cache.read,
           total,
           reuseDrop,
+          throughput,
         },
       ]
     })
@@ -1261,16 +1264,25 @@ function TurnTokenUsage(props: {
     newTokens: Math.max("New".length, ...steps().map((item) => item.newTokens.toLocaleString().length)),
     cached: Math.max("Cached".length, ...steps().map((item) => item.cached.toLocaleString().length)),
     total: Math.max("Total".length, ...steps().map((item) => item.total.toLocaleString().length)),
+    throughput: Math.max("Tok/s".length, ...steps().map((item) => (item.throughput?.rate.toFixed(1) ?? "-").length)),
   }))
   const summary = createMemo(() => {
     const items = steps()
     const last = items[items.length - 1]
+    const throughput = items.reduce(
+      (result, item) => ({
+        tokens: result.tokens + (item.throughput?.tokens ?? 0),
+        duration: result.duration + (item.throughput?.duration ?? 0),
+      }),
+      { tokens: 0, duration: 0 },
+    )
     return {
       count: items.length,
       newTokens: items.reduce((sum, item) => sum + item.newTokens, 0),
       cached: last?.cached ?? 0,
       total: last?.total ?? 0,
       reuseDrops: items.filter((item) => item.reuseDrop !== undefined).length,
+      throughput: throughput.duration > 0 ? (throughput.tokens * 1_000) / throughput.duration : undefined,
     }
   })
   return (
@@ -1292,6 +1304,7 @@ function TurnTokenUsage(props: {
               : {summary().count} {summary().count === 1 ? "step" : "steps"} · {summary().newTokens.toLocaleString()}{" "}
               new · {summary().cached.toLocaleString()} cached · {summary().total.toLocaleString()} total
             </span>
+            <Show when={summary().throughput}>{(value) => <span> · {value().toFixed(1)} tok/s</span>}</Show>
             <Show when={summary().reuseDrops > 0}>
               <span style={{ fg: theme.text.feedback.warning.default }}>
                 {" "}
@@ -1309,6 +1322,8 @@ function TurnTokenUsage(props: {
               {"Cached".padStart(columns().cached)}
               {"  "}
               {"Total".padStart(columns().total)}
+              {"  "}
+              {"Tok/s".padStart(columns().throughput)}
             </text>
           </box>
           <For each={steps()}>
@@ -1323,6 +1338,8 @@ function TurnTokenUsage(props: {
                   {item.cached.toLocaleString().padStart(columns().cached)}
                   {"  "}
                   {item.total.toLocaleString().padStart(columns().total)}
+                  {"  "}
+                  {(item.throughput?.rate.toFixed(1) ?? "-").padStart(columns().throughput)}
                 </text>
                 <TurnTokenToolCalls tools={item.tools} />
                 <Show when={item.reuseDrop !== undefined}>
@@ -1669,6 +1686,7 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
         ?.name ?? `${props.message.model.providerID}/${props.message.model.id}`,
   )
   const duration = createMemo(() => turnDuration(props.message, data.session.message.list(ctx.sessionID)))
+  const throughput = createMemo(() => tokenThroughput(props.message)?.rate)
   const interrupted = createMemo(() => props.message.error?.message === "Step interrupted")
   return (
     <>
@@ -1688,6 +1706,9 @@ function AssistantFooter(props: { message: SessionMessageAssistant }) {
           </Show>
           <Show when={duration() && (dimensions().width < 28 || dimensions().width >= 36)}>
             <span style={{ fg: theme.text.subdued }}> · {Locale.duration(duration())}</span>
+          </Show>
+          <Show when={dimensions().width >= 48 ? throughput() : undefined}>
+            {(value) => <span style={{ fg: theme.text.subdued }}> · {value().toFixed(1)} tok/s</span>}
           </Show>
           <Show when={interrupted()}>
             <span style={{ fg: theme.text.subdued }}> · interrupted</span>
