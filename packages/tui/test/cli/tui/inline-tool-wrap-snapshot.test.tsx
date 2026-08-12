@@ -4,7 +4,7 @@ import { testRender, type JSX } from "@opentui/solid"
 import {
   InlineToolRow,
   executeCallSummary,
-  isBackgroundSubagent,
+  isBackgroundTool,
   parseApplyPatchFiles,
   parseDiagnostics,
   parseQuestionAnswers,
@@ -214,11 +214,12 @@ describe("TUI inline tool wrapping", () => {
     ).toEqual([{ message: "valid", range: { start: { line: 2, character: 3 } } }])
   })
 
-  test("labels only detached or async subagents as background", () => {
-    expect(isBackgroundSubagent({ status: "running" }, "running")).toBeFalse()
-    expect(isBackgroundSubagent({ status: "running" }, "completed")).toBeTrue()
-    expect(isBackgroundSubagent({ status: "running" }, "error")).toBeFalse()
-    expect(isBackgroundSubagent({ status: "completed" }, "completed")).toBeFalse()
+  test("labels only detached or async tools as background", () => {
+    expect(isBackgroundTool({ status: "running" }, "running")).toBeFalse()
+    expect(isBackgroundTool({ status: "running" }, "completed")).toBeTrue()
+    expect(isBackgroundTool({ status: "running" }, "error")).toBeFalse()
+    expect(isBackgroundTool({ status: "completed" }, "completed")).toBeFalse()
+    expect(isBackgroundTool({}, "completed")).toBeFalse()
   })
 
   test("snapshots consecutive grep, glob, and read rows at a narrow width", async () => {

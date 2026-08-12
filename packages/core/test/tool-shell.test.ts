@@ -722,7 +722,7 @@ describe("ShellTool", () => {
             )
             const settled = yield* executeTool(registry, call({ command: idleCommand, timeout: 50, background: true }))
             const shellID = typeof settled.metadata?.shellID === "string" ? settled.metadata.shellID : undefined
-            expect(settled.metadata).toMatchObject({ truncated: false })
+            expect(settled.metadata).toMatchObject({ status: "running", truncated: false })
             expect(shellID).toStartWith("sh_")
 
             const shell = yield* Shell.Service
@@ -807,7 +807,7 @@ describe("ShellTool", () => {
             expect(yield* backgroundWhenReady()).toMatchObject([{ id: "call-background-signal", type: "shell" }])
             const settled = yield* Fiber.join(waiting)
             const shellID = typeof settled.metadata?.shellID === "string" ? settled.metadata.shellID : undefined
-            expect(settled.metadata).toMatchObject({ truncated: false })
+            expect(settled.metadata).toMatchObject({ status: "running", truncated: false })
             expect(settled.content?.[0]).toEqual({
               type: "text",
               text: "The command was moved to the background.",

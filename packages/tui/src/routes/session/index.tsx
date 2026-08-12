@@ -2930,7 +2930,7 @@ function Shell(props: ToolProps) {
   const permission = useToolPermission(() => props.part)
   const color = createMemo(() => (permission() ? theme.text.feedback.warning.default : theme.text.default))
   const shellID = createMemo(() => stringValue(props.metadata.shellID))
-  const background = createMemo(() => Boolean(shellID()) && props.part.state.status !== "running")
+  const background = createMemo(() => isBackgroundTool(props.metadata, props.part.state.status))
   const backgroundRunning = createMemo(() => {
     const id = shellID()
     return Boolean(id && data.shell.get(id))
@@ -3190,7 +3190,7 @@ function Subagent(props: ToolProps) {
         if (id) navigate({ type: "session", sessionID: id })
       }}
       status={
-        isBackgroundSubagent(props.metadata, props.part.state.status) ? (
+        isBackgroundTool(props.metadata, props.part.state.status) ? (
           <StatusBadge>Background</StatusBadge>
         ) : undefined
       }
@@ -3200,7 +3200,7 @@ function Subagent(props: ToolProps) {
   )
 }
 
-export function isBackgroundSubagent(
+export function isBackgroundTool(
   metadata: Record<string, unknown>,
   status: SessionMessageAssistantTool["state"]["status"],
 ) {
