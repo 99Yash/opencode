@@ -252,6 +252,7 @@ function MessageTimelineView(
   const sessionID = props.data.sessionID
   const sessionStatus = props.data.status
   const titleLabel = props.data.titleLabel
+  const projectName = props.data.projectName
   const shareUrl = props.data.shareUrl
   const shareEnabled = props.data.shareEnabled
   const parentID = props.data.parentID
@@ -1119,6 +1120,21 @@ function MessageTimelineView(
                 }}
               >
                 <div class="flex items-center min-w-0 flex-1 w-full">
+                  <Show when={projectName()} keyed>
+                    {(name) => (
+                      <>
+                        <span class="hidden min-w-0 max-w-[40%] truncate pl-2 text-[13px] font-[440] leading-4 tracking-[-0.04px] text-v2-text-text-muted md:block">
+                          {name}
+                        </span>
+                        <span
+                          class="hidden shrink-0 -translate-y-[0.5px] pl-2 pr-0.5 text-[11px] font-[530] text-v2-text-text-faint md:block"
+                          aria-hidden="true"
+                        >
+                          /
+                        </span>
+                      </>
+                    )}
+                  </Show>
                   <Show when={parentID()}>
                     <button
                       type="button"

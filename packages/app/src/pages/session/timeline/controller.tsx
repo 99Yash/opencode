@@ -21,6 +21,7 @@ import { downloadSessionExport, fetchSessionExport, sessionExportFilename } from
 import { showToast } from "@/utils/toast"
 import { timelineChildTitle, timelineRemovedSessionIDs } from "./controller-projection"
 import { createTimelineProjection } from "./projection"
+import { displayName } from "@/pages/layout/helpers"
 
 const emptyMessages: Message[] = []
 const emptyParts: Part[] = []
@@ -65,6 +66,10 @@ export function createTimelineController(input: {
   })
   const titleValue = createMemo(() => input.session.data.info()?.title)
   const titleLabel = createMemo(() => sessionTitle(titleValue()))
+  const projectName = createMemo(() => {
+    const project = sync().project
+    if (project) return displayName(project)
+  })
   const shareUrl = (): string | undefined => undefined
   const shareEnabled = () => false
   const parentMessages = createMemo(() => {
@@ -265,6 +270,7 @@ export function createTimelineController(input: {
       status: input.session.data.status,
       titleValue,
       titleLabel,
+      projectName,
       shareUrl,
       shareEnabled,
       parentID: input.session.data.parentID,
