@@ -157,8 +157,7 @@ invoked and becomes the session's active agent. If `model` is set, it overrides
 the model. Otherwise, a model configured on the command's agent takes
 precedence over the model selected at invocation.
 
-When `agent` selects a subagent-mode agent, OpenCode creates a child session,
-runs the command there in the background, and notifies the parent session when
-it completes. Commands targeting primary or all-mode agents continue to run in
-the current session. The legacy `subtask` field remains accepted but does not
-override the selected agent's mode.
+Although `subtask` is accepted in JSON and frontmatter, V2 currently ignores
+it: commands run in the current session and do not create a child session.
+Selecting an agent whose mode is `subagent` also does not turn the command into
+a subtask.
