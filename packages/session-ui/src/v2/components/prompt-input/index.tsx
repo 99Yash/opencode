@@ -113,7 +113,6 @@ export function PromptInputV2(props: PromptInputV2Props) {
         class="group/prompt-input relative min-h-[96px] w-full overflow-clip rounded-xl bg-v2-background-bg-base"
         classList={{
           "shadow-[var(--v2-elevation-raised)]": !props.borderUnderlay,
-          "border border-v2-icon-icon-info border-dashed": state.drag === "active",
         }}
         onSubmit={(event) => {
           event.preventDefault()
@@ -125,7 +124,20 @@ export function PromptInputV2(props: PromptInputV2Props) {
         onDrop={props.controller.onDrop}
       >
         <Show when={state.drag === "active"}>
-          <div class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-v2-background-bg-base/90 text-v2-text-text-base">
+          <div class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-v2-background-bg-accent/5 text-v2-text-text-base">
+            <svg class="absolute inset-0 size-full" aria-hidden="true">
+              <rect
+                x="0.25"
+                y="0.25"
+                width="calc(100% - 0.5px)"
+                height="calc(100% - 0.5px)"
+                rx="11.75"
+                fill="none"
+                stroke="var(--v2-border-border-focus)"
+                stroke-width="0.5"
+                stroke-dasharray="3 3"
+              />
+            </svg>
             {i18n.t("ui.promptInput.dropFiles")}
           </div>
         </Show>
