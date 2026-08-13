@@ -417,6 +417,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const filePath = path.join(paths.state, "session.json")
       const state = {
         pending: false,
+        scroll: new Map<string, number>(),
       }
 
       function save() {
@@ -455,6 +456,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
 
       function prune(sessionID: string) {
         batch(() => {
+          state.scroll.delete(sessionID)
           if (sessionStore.pinned.includes(sessionID)) {
             setSessionStore(
               "pinned",
@@ -495,6 +497,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!target) return
           if (route.data.type === "session" && route.data.sessionID === target) return
           route.navigate({ type: "session", sessionID: target })
+        },
+        scrollPosition(sessionID: string) {
+          return state.scroll.get(sessionID)
+        },
+        setScrollPosition(sessionID: string, position: number) {
+          state.scroll.set(sessionID, position)
         },
       }
     }

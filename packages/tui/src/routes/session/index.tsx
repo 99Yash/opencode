@@ -6,7 +6,6 @@ import {
   createSignal,
   For,
   Match,
-  on,
   onCleanup,
   onMount,
   Show,
@@ -275,6 +274,7 @@ export function Session() {
   const toast = useToast()
   const sdk = useSDK()
   const editor = useEditorContext()
+  const local = useLocal()
 
   createEffect(() => {
     const sessionID = route.sessionID
@@ -304,7 +304,10 @@ export function Session() {
       }
       editor.reconnect(result.data.directory)
       await sync.session.sync(sessionID)
-      if (route.sessionID === sessionID && scroll) scroll.scrollBy(100_000)
+      setTimeout(() => {
+        if (route.sessionID !== sessionID || !scroll || scroll.isDestroyed) return
+        scroll.scrollTo(local.session.scrollPosition(sessionID) ?? scroll.scrollHeight)
+      }, 50)
     })().catch((error) => {
       if (route.sessionID !== sessionID) return
       toast.show({
@@ -335,6 +338,10 @@ export function Session() {
 
   let seeded = false
   let scroll: ScrollBoxRenderable
+  onCleanup(() => {
+    if (!scroll || scroll.isDestroyed) return
+    local.session.setScrollPosition(route.sessionID, scroll.scrollTop)
+  })
   let prompt: PromptRef | undefined
   const bind = (r: PromptRef | undefined) => {
     prompt = r
@@ -419,8 +426,6 @@ export function Session() {
       scroll.scrollTo(scroll.scrollHeight)
     }, 50)
   }
-
-  const local = useLocal()
 
   function enterChild(sessionID: string) {
     navigate({
@@ -1138,9 +1143,6 @@ export function Session() {
       diffFiles: revertDiffFiles(),
     }
   })
-
-  // snap to bottom when session changes
-  createEffect(on(() => route.sessionID, toBottom))
 
   return (
     <LocationProvider location={location()}>
