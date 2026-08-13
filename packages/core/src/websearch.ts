@@ -1,7 +1,7 @@
 export * as WebSearch from "./websearch.js"
 
 import { WebSearch } from "@opencode-ai/schema/websearch"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Random, Schema } from "effect"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Bus } from "./bus.js"
 import { KV } from "./kv.js"
@@ -9,6 +9,8 @@ import { State } from "./state.js"
 
 export const ID = WebSearch.ID
 export type ID = WebSearch.ID
+
+export const AUTO = WebSearch.AUTO
 
 export const Provider = WebSearch.Provider
 export type Provider = WebSearch.Provider
@@ -52,7 +54,7 @@ export type Error = ProviderRequiredError | ProviderNotFoundError | DisabledErro
 
 export interface Interface extends State.Transformable<Draft> {
   readonly providers: () => Effect.Effect<readonly Provider[]>
-  readonly default: () => Effect.Effect<Provider | undefined, DisabledError>
+  readonly default: () => Effect.Effect<Provider | typeof AUTO | undefined, DisabledError>
   readonly query: (input: Input) => Effect.Effect<Response, Error>
 }
 
@@ -60,14 +62,14 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/We
 
 type Data = {
   readonly providers: Map<ID, ProviderImplementation>
-  defaultProviderID?: ID
+  defaultProviderID?: WebSearch.Selection
 }
 
 export type Draft = {
   add: (provider: ProviderImplementation) => void
   default: {
-    get: () => ID | undefined
-    set: (providerID: ID) => void
+    get: () => WebSearch.Selection | undefined
+    set: (providerID: WebSearch.Selection) => void
   }
 }
 
@@ -96,11 +98,13 @@ const layer = Layer.effect(
 
     const defaultProvider = Effect.fn("WebSearch.default")(function* () {
       const data = state.get()
+      if (data.defaultProviderID === AUTO) return AUTO
       const configured = data.defaultProviderID ? data.providers.get(data.defaultProviderID) : undefined
       if (configured) return configured
       const stored = yield* kv.get("websearch:provider")
       if (stored === false) return yield* new DisabledError()
       if (typeof stored !== "string") return
+      if (stored === AUTO) return AUTO
       return data.providers.get(ID.make(stored))
     })
 
@@ -109,7 +113,30 @@ const layer = Layer.effect(
       if (input.providerID) return yield* requireProvider(providers, input.providerID)
       const provider = yield* defaultProvider()
       if (!provider) return yield* new ProviderRequiredError()
+      if (provider === AUTO) {
+        if (!providers.size) return yield* new ProviderRequiredError()
+        return yield* Random.shuffle(providers.values())
+      }
       return provider
+    })
+
+    const execute = Effect.fn("WebSearch.execute")(function* (provider: ProviderImplementation, input: Input) {
+      const results = yield* provider.execute({ query: input.query }).pipe(
+        Effect.flatMap(decodeResults),
+        Effect.mapError((cause) => new RequestError({ providerID: provider.id, cause })),
+      )
+      return new Response({ providerID: provider.id, results })
+    })
+
+    const executeAutomatic = Effect.fn("WebSearch.executeAutomatic")(function* (
+      providers: readonly ProviderImplementation[],
+      input: Input,
+    ) {
+      const attempt = (index: number): Effect.Effect<Response, RequestError> =>
+        execute(providers[index]!, input).pipe(
+          Effect.catch((error) => (index === providers.length - 1 ? Effect.fail(error) : attempt(index + 1))),
+        )
+      return yield* attempt(0)
     })
 
     return Service.of({
@@ -123,15 +150,13 @@ const layer = Layer.effect(
       }),
       default: Effect.fn("WebSearch.defaultInfo")(function* () {
         const provider = yield* defaultProvider()
+        if (provider === AUTO) return AUTO
         return provider && { id: provider.id, name: provider.name }
       }),
       query: Effect.fn("WebSearch.query")(function* (input) {
-        const provider = yield* resolve(input)
-        const results = yield* provider.execute({ query: input.query }).pipe(
-          Effect.flatMap(decodeResults),
-          Effect.mapError((cause) => new RequestError({ providerID: provider.id, cause })),
-        )
-        return new Response({ providerID: provider.id, results })
+        const route = yield* resolve(input)
+        if (Array.isArray(route)) return yield* executeAutomatic(route, input)
+        return yield* execute(route, input)
       }),
     })
   }),

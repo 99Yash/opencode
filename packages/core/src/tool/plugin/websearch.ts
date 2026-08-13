@@ -55,7 +55,7 @@ export const Plugin = {
               const search = (): Effect.Effect<Effect.Success<ReturnType<typeof ctx.websearch.query>>, unknown> =>
                 websearch.default().pipe(
                   Effect.flatMap((provider) => {
-                    if (!provider) return ctx.websearch.query(input)
+                    if (!provider || provider === WebSearch.AUTO) return ctx.websearch.query(input)
                     return context
                       .progress({ provider: provider.id })
                       .pipe(Effect.andThen(ctx.websearch.query({ ...input, providerID: provider.id })))
@@ -67,8 +67,7 @@ export const Plugin = {
                         Effect.gen(function* () {
                           if (yield* websearch.default()) return yield* Effect.void
                           const providers = (yield* ctx.websearch.providers()).data
-                          const defaultProvider = providers[0]
-                          if (!defaultProvider) return yield* new WebSearch.ProviderRequiredError()
+                          if (!providers.length) return yield* new WebSearch.ProviderRequiredError()
                           const response = yield* forms.ask({
                             sessionID: context.sessionID,
                             title: "Web Search",
@@ -83,11 +82,11 @@ export const Plugin = {
                                 options: [
                                   {
                                     value: "allow",
-                                    label: `Allow web search via ${defaultProvider.name}`,
+                                    label: "Allow web search with automatic provider selection",
                                   },
                                   {
                                     value: "choose",
-                                    label: "Choose another provider",
+                                    label: "Choose a specific provider",
                                   },
                                   { value: "disable", label: "Disable web search" },
                                 ],
@@ -123,10 +122,10 @@ export const Plugin = {
                               : undefined
                           if (selection?.status === "cancelled")
                             return yield* Effect.fail(new Error("Web search cancelled"))
-                          const providerID = selection?.answer.provider ?? defaultProvider.id
+                          const providerID = selection?.answer.provider ?? WebSearch.AUTO
                           if (
                             typeof providerID !== "string" ||
-                            !providers.some((provider) => provider.id === providerID)
+                            (providerID !== WebSearch.AUTO && !providers.some((provider) => provider.id === providerID))
                           )
                             return yield* new WebSearch.ProviderRequiredError()
                           return yield* kv.set("websearch:provider", providerID)

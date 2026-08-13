@@ -6,8 +6,14 @@ import { ConfigMCP } from "../src/config/mcp.js"
 import { ConfigProvider } from "../src/config/provider.js"
 import { Mcp } from "../src/mcp.js"
 import { AbsolutePath } from "../src/schema.js"
+import { WebSearch } from "../src/websearch.js"
 
 describe("Config.Entry", () => {
+  test("accepts automatic web search provider selection", () => {
+    const config = new Config.Info({ websearch: { provider: WebSearch.AUTO } })
+    expect(config.websearch?.provider).toBe(WebSearch.AUTO)
+  })
+
   test("round-trips every configuration entry type", () => {
     const entries = [
       new Config.Document({

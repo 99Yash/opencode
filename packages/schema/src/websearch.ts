@@ -7,6 +7,11 @@ import { optional } from "./schema.js"
 export const ID = Schema.String.pipe(Schema.brand("WebSearch.ID"))
 export type ID = typeof ID.Type
 
+export const AUTO = "auto" as const
+
+export const Selection = Schema.Union([Schema.Literal(AUTO), ID])
+export type Selection = typeof Selection.Type
+
 export interface Provider extends Schema.Schema.Type<typeof Provider> {}
 export const Provider = Schema.Struct({
   id: ID,

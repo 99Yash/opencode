@@ -3,6 +3,7 @@ export * as ConfigWebSearchPlugin from "./websearch.js"
 import { define } from "@opencode-ai/plugin/effect/plugin"
 import { Effect, Stream } from "effect"
 import { Config } from "../../config.js"
+import { WebSearch } from "../../websearch.js"
 
 export const Plugin = define({
   id: "opencode.config.websearch",
@@ -11,7 +12,7 @@ export const Plugin = define({
     const loaded = { entries: yield* config.entries() }
     yield* ctx.websearch.transform((websearch) => {
       const providerID = Config.latest(loaded.entries, "websearch")?.provider
-      if (providerID) websearch.default.set(providerID)
+      if (providerID) websearch.default.set(providerID === WebSearch.AUTO ? providerID : WebSearch.ID.make(providerID))
     })
     yield* ctx.event.subscribe().pipe(
       Stream.filter((event) => event.type === "config.updated"),

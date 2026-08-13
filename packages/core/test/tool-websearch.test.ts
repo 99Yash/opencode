@@ -80,6 +80,7 @@ const websearch = Layer.succeed(
       Effect.gen(function* () {
         const stored = values.get("websearch:provider")
         if (stored === false) return yield* new WebSearch.DisabledError()
+        if (stored === WebSearch.AUTO) return WebSearch.AUTO
         return typeof stored === "string" ? providers.find((provider) => provider.id === stored) : undefined
       }),
     query: (input) =>
@@ -93,6 +94,7 @@ const websearch = Layer.succeed(
         }
         if (queryError) return yield* queryError
         if (providerRequired && typeof stored !== "string") return yield* new WebSearch.ProviderRequiredError()
+        if (stored === WebSearch.AUTO) return result
         if (typeof stored === "string")
           return new WebSearch.Response({ providerID: WebSearch.ID.make(stored), results: result.results })
         return result
@@ -234,7 +236,7 @@ describe("WebSearchTool registration", () => {
     }),
   )
 
-  it.effect("asks once and uses the default provider when web search is first enabled", () =>
+  it.effect("asks once and enables automatic provider selection", () =>
     Effect.gen(function* () {
       providerRequired = true
       formResponse = { status: "answered", answer: { choice: "allow" } }
@@ -247,7 +249,7 @@ describe("WebSearchTool registration", () => {
           call: { type: "tool-call", id: "call-enable", name: "websearch", input: { query: "effect" } },
         }),
       ).toMatchObject({ status: "completed", metadata: { provider: "exa" } })
-      expect(values.get("websearch:provider")).toBe("exa")
+      expect(values.get("websearch:provider")).toBe(WebSearch.AUTO)
       expect(queries).toHaveLength(2)
       expect(formRequests).toEqual([
         {
@@ -264,11 +266,11 @@ describe("WebSearchTool registration", () => {
               options: [
                 {
                   value: "allow",
-                  label: "Allow web search via Exa",
+                  label: "Allow web search with automatic provider selection",
                 },
                 {
                   value: "choose",
-                  label: "Choose another provider",
+                  label: "Choose a specific provider",
                 },
                 { value: "disable", label: "Disable web search" },
               ],
@@ -353,7 +355,7 @@ describe("WebSearchTool registration", () => {
 
       expect(results.every((item) => item.status === "completed")).toBe(true)
       expect(formRequests).toHaveLength(1)
-      expect(values.get("websearch:provider")).toBe("exa")
+      expect(values.get("websearch:provider")).toBe(WebSearch.AUTO)
     }),
   )
 
