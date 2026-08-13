@@ -2,7 +2,7 @@ export * as FileSystemSearch from "./search.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import path from "path"
-import { Context, Duration, Effect, Layer, Schema, Scope, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Schema, Stream } from "effect"
 import { Fff } from "#fff"
 import fuzzysort from "fuzzysort"
 import { FileSystem } from "../filesystem.js"
@@ -29,7 +29,6 @@ export const ripgrepLayer = Layer.effect(
     const location = yield* Location.Service
     const ripgrep = yield* Ripgrep.Service
     const watcher = yield* Watcher.Service
-    const scope = yield* Scope.Scope
     const home = Protected.isHome(location.directory)
     const scan = ripgrep
       .find({
@@ -42,22 +41,25 @@ export const ripgrepLayer = Layer.effect(
         Effect.orDie,
         Effect.map((entries) => {
           const files = entries.map((entry) => entry.path)
-          const directories = new Set<string>()
-          files.forEach((file) => {
-            const parts = file.split("/")
-            parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
-          })
-          return { files, directories }
+          return {
+            files,
+            directories: new Set(
+              files.flatMap((file) => {
+                const parts = file.split("/")
+                return parts.slice(0, -1).map((_, index) => parts.slice(0, index + 1).join("/") + path.sep)
+              }),
+            ),
+          }
         }),
       )
     const [snapshot, invalidate] = yield* Effect.cachedInvalidateWithTTL(scan, Duration.infinity)
     const updates = yield* watcher.subscribe({ path: location.directory, type: "directory" })
     yield* updates.pipe(
       Stream.runForEach(() => invalidate),
-      Effect.forkIn(scope),
+      Effect.forkScoped,
     )
     yield* Effect.yieldNow
-    yield* snapshot.pipe(Effect.forkIn(scope))
+    yield* snapshot.pipe(Effect.forkScoped)
     return Service.of({
       find: (input) =>
         Effect.gen(function* () {
