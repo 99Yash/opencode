@@ -106,7 +106,13 @@ export function normalize(input: unknown): Result {
     const migrated = ConfigMigrateV1.commands({ value })?.value
     return migrated === undefined ? undefined : canonical(ConfigCommand.Info, migrated)
   })
-  const nativeCommands = decodeMap(input.commands, ConfigCommand.Info, ["commands"], diagnostics, decodeEncoded)
+  const nativeCommands = decodeMap(
+    normalizeCommandAliases(input.commands),
+    ConfigCommand.Info,
+    ["commands"],
+    diagnostics,
+    decodeEncoded,
+  )
   mergeMap(
     encoded,
     "commands",
@@ -211,6 +217,18 @@ export function normalize(input: unknown): Result {
   if (instructions.length || Array.isArray(input.instructions)) encoded.instructions = instructions
 
   return { type: "normalized", encoded, diagnostics }
+}
+
+function normalizeCommandAliases(input: unknown) {
+  if (!isRecord(input)) return input
+  return Object.fromEntries(
+    Object.entries(input).map(([name, command]) => {
+      if (!isRecord(command) || command.subagent !== undefined || typeof command.subtask !== "boolean")
+        return [name, command]
+      const { subtask, ...rest } = command
+      return [name, { ...rest, subagent: subtask }]
+    }),
+  )
 }
 
 function normalizeSkills(input: Record<string, unknown>, encoded: Record<string, unknown>, diagnostics: Diagnostic[]) {

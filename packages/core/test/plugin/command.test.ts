@@ -44,6 +44,7 @@ describe("CommandPlugin.Plugin", () => {
       expect(yield* command.get("review")).toMatchObject({
         name: "review",
         description: "review changes [commit|branch|pr], defaults to uncommitted",
+        subagent: true,
       })
     }),
   )

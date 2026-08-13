@@ -15,7 +15,7 @@ export const Info = Schema.Struct({
   description: Schema.String.pipe(optional),
   agent: Agent.ID.pipe(optional),
   model: Model.Ref.pipe(optional),
-  subtask: Schema.Boolean.pipe(optional),
+  subagent: Schema.Boolean.pipe(optional),
 }).annotate({ identifier: "Command.Info" })
 
 export const Event = {

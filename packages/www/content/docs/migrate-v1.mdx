@@ -309,7 +309,8 @@ Rename the singular `command` map to `commands`. Join a separate model `variant`
 }
 ```
 
-`template`, `description`, `agent`, and `subtask` keep their names. Existing Markdown command definitions remain supported.
+`template`, `description`, and `agent` keep their names. Rename `subtask` to `subagent`; V2 still accepts `subtask` as an alias.
+Existing Markdown command definitions remain supported.
 See [Commands](/commands).
 
 ### References
@@ -475,7 +476,8 @@ V1 command files may use `command/` or `commands/`. V2 discovers both. The prefe
 ```
 
 Move files from `command/` to the same relative path under `commands/` to preserve command names. The Markdown body remains
-the command template, and `description`, `agent`, and `subtask` frontmatter keep the same names. If frontmatter has separate
+the command template, and `description` and `agent` frontmatter keep the same names. Rename `subtask` to `subagent`; the old
+name remains accepted as an alias. If frontmatter has separate
 `model` and `variant` fields, append the variant to the model and remove `variant`:
 
 ```yaml

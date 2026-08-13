@@ -63,7 +63,7 @@ export const Plugin = define({
                 providerID: command.model.providerID,
                 ...(command.model.variant === undefined ? {} : { variant: command.model.variant }),
               }
-            if (command.subtask !== undefined) item.subtask = command.subtask
+            if (command.subagent !== undefined) item.subagent = command.subagent
           })
         }
       }
@@ -105,7 +105,9 @@ function loadDirectory(fs: FSUtil.Interface, directory: string) {
 function decode(directory: string, filepath: string, content: string) {
   const markdown = ConfigMarkdown.parseOption(content)
   if (!markdown) return
-  const info = Option.getOrUndefined(decodeCommand({ ...markdown.data, template: markdown.content.trim() }))
+  const info = Option.getOrUndefined(
+    decodeCommand({ ...normalizeFrontmatter(markdown.data), template: markdown.content.trim() }),
+  )
   if (!info) return
   return {
     name: path
@@ -115,4 +117,10 @@ function decode(directory: string, filepath: string, content: string) {
       .replace(/\.md$/, ""),
     info,
   }
+}
+
+function normalizeFrontmatter(data: Record<string, unknown>) {
+  if (data.subagent !== undefined || typeof data.subtask !== "boolean") return data
+  const { subtask, ...rest } = data
+  return { ...rest, subagent: subtask }
 }
