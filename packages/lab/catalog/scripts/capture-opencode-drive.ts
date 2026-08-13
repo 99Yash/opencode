@@ -82,7 +82,13 @@ function captureScenarioProcess(
   preview = false,
   baseline = false,
 ) {
-  return OpenCodeDriver.use(catalogScenarioRuntime({ opencode: variant.path, theme: variant.theme }), (driver) =>
+  return OpenCodeDriver.use(
+    catalogScenarioRuntime({
+      opencode: variant.path,
+      theme: variant.theme,
+      git: scenarios.some((scenario) => scenario.id === "diff-viewer-lifecycle"),
+    }),
+    (driver) =>
     Effect.gen(function* () {
       const captures = baseline ? [...(yield* captureBaseline(driver, variant))] : []
       const shared = scenarios.filter((scenario) => scenario.clientIsolation === "shared")
@@ -173,25 +179,33 @@ const captureBaseline = (driver: OpenCodeDriver.Driver, variant: Variant) =>
     yield* driver.ui.press("p", { ctrl: true })
     yield* driver.ui.waitFor("Commands")
     yield* capture("command-palette")
+    yield* driver.ui.type("zzzz-no-catalog-results")
+    yield* driver.ui.waitFor("No results found")
+    yield* capture("command-palette-empty")
     yield* close()
 
     const dialogs = [
-      ["/models", "Select model", "model-picker"],
-      ["/agents", "Select agent", "agent-picker"],
-      ["/connect", "Connect an integration", "integration-picker"],
-      ["/themes", "Themes", "theme-picker"],
-      ["/mcps", "MCP servers", "mcp-list"],
-      ["/status", "No MCP servers", "status"],
-      ["/debug", "Debug", "debug"],
-      ["/help", "Press ctrl+p", "help"],
-      ["/pair", "Pair", "pair"],
-      ["/sessions", "Sessions", "session-picker"],
-      ["/skills", "Skills", "skill-picker"],
+      ["/models", "Select model", "model-picker", "model-picker-empty", "No results found"],
+      ["/agents", "Select agent", "agent-picker", "agent-picker-empty", "No results found"],
+      ["/connect", "Connect an integration", "integration-picker", "integration-picker-empty", "No integrations found"],
+      ["/themes", "Themes", "theme-picker", "theme-picker-empty", "No results found"],
+      ["/mcps", "MCP servers", "mcp-list", undefined, undefined],
+      ["/status", "No MCP servers", "status", undefined, undefined],
+      ["/debug", "Debug", "debug", undefined, undefined],
+      ["/help", "Press ctrl+p", "help", undefined, undefined],
+      ["/pair", "Pair", "pair", undefined, undefined],
+      ["/sessions", "Sessions", "session-picker", undefined, undefined],
+      ["/skills", "Skills", "skill-picker", "skill-picker-empty", "No skills found"],
     ] as const
 
-    for (const [slash, marker, id] of dialogs) {
+    for (const [slash, marker, id, emptyId, emptyMarker] of dialogs) {
       yield* openSlash(slash, marker)
       yield* capture(id)
+      if (emptyId && emptyMarker) {
+        yield* driver.ui.type("zzzz-no-catalog-results")
+        yield* driver.ui.waitFor(emptyMarker)
+        yield* capture(emptyId)
+      }
       yield* close()
     }
 
@@ -272,11 +286,6 @@ const captureBaseline = (driver: OpenCodeDriver.Driver, variant: Variant) =>
     yield* driver.ui.enter()
     yield* driver.ui.waitFor("Debug info copied to clipboard")
     yield* capture("toast-info")
-    yield* close()
-
-    yield* openSlash("/diff", "Diff working tree")
-    yield* driver.ui.waitFor("No changes to show")
-    yield* capture("diff-viewer")
     yield* close()
 
     return captures

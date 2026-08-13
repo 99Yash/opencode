@@ -4,10 +4,16 @@ import type { Options } from "opencode-drive/driver"
 
 export const catalogViewport = { cols: 118, rows: 34 } as const
 
-export function catalogScenarioRuntime(options: { readonly opencode: string; readonly theme?: string }): Options {
+export function catalogScenarioRuntime(options: {
+  readonly opencode: string
+  readonly theme?: string
+  readonly git?: boolean
+}): Options {
   return {
     project: {
+      git: options.git,
       files: {
+        ...(options.git ? { ".gitignore": ".opencode/\n" } : {}),
         "fixture.txt": "before\n",
         "src/ledger.ts": [
           "export const credits = [8, 13, 21]",

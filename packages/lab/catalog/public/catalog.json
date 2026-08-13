@@ -342,7 +342,13 @@
       ]
     }
   ],
-  "surfaces": ["full-screen", "inline", "modal", "panel", "toast"],
+  "surfaces": [
+    "full-screen",
+    "inline",
+    "modal",
+    "panel",
+    "toast"
+  ],
   "patterns": [
     "approval",
     "error-report",
@@ -424,12 +430,30 @@
         "session",
         "empty"
       ],
-      "screenLabels": ["start-screen", "new-session", "composer"],
-      "uiElements": ["composer", "keyboard-hints", "full-screen-view", "empty-state"],
-      "surfaces": ["full-screen"],
-      "patterns": ["landing"],
-      "features": ["system", "session"],
-      "states": ["empty"],
+      "screenLabels": [
+        "start-screen",
+        "new-session",
+        "composer"
+      ],
+      "uiElements": [
+        "composer",
+        "keyboard-hints",
+        "full-screen-view",
+        "empty-state"
+      ],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "landing"
+      ],
+      "features": [
+        "system",
+        "session"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -473,14 +497,31 @@
         "palette",
         "commands",
         "navigation",
-        "default"
+        "populated"
       ],
-      "screenLabels": ["command-navigation"],
-      "uiElements": ["command-palette", "search-field", "list", "keyboard-hints", "dialog"],
-      "surfaces": ["modal"],
-      "patterns": ["palette"],
-      "features": ["commands", "navigation"],
-      "states": ["default"],
+      "screenLabels": [
+        "command-navigation"
+      ],
+      "uiElements": [
+        "command-palette",
+        "search-field",
+        "list",
+        "keyboard-hints",
+        "dialog"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "palette"
+      ],
+      "features": [
+        "commands",
+        "navigation"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -509,6 +550,76 @@
       ]
     },
     {
+      "id": "command-palette-empty",
+      "title": "Command palette (no results)",
+      "category": "navigation",
+      "summary": "",
+      "tags": [
+        "command-navigation",
+        "command-palette",
+        "search-field",
+        "list",
+        "keyboard-hints",
+        "dialog",
+        "empty-state",
+        "modal",
+        "palette",
+        "commands",
+        "navigation",
+        "empty"
+      ],
+      "screenLabels": [
+        "command-navigation"
+      ],
+      "uiElements": [
+        "command-palette",
+        "search-field",
+        "list",
+        "keyboard-hints",
+        "dialog",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "palette"
+      ],
+      "features": [
+        "commands",
+        "navigation"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/command-palette-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/command-palette-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/command-palette-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "model-picker",
       "title": "Model picker",
       "category": "picker",
@@ -524,14 +635,31 @@
         "modal",
         "picker",
         "model",
-        "default"
+        "populated"
       ],
-      "screenLabels": ["model-selection"],
-      "uiElements": ["picker", "search-field", "single-select", "list", "dialog", "keyboard-hints"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["model"],
-      "states": ["default"],
+      "screenLabels": [
+        "model-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "model"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -560,6 +688,76 @@
       ]
     },
     {
+      "id": "model-picker-empty",
+      "title": "Model picker (no results)",
+      "category": "picker",
+      "summary": "",
+      "tags": [
+        "model-selection",
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state",
+        "modal",
+        "picker",
+        "model",
+        "empty"
+      ],
+      "screenLabels": [
+        "model-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "model"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/model-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/model-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/model-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "agent-picker",
       "title": "Agent picker",
       "category": "picker",
@@ -575,14 +773,31 @@
         "modal",
         "picker",
         "agent",
-        "default"
+        "populated"
       ],
-      "screenLabels": ["agent-selection"],
-      "uiElements": ["picker", "search-field", "single-select", "list", "dialog", "keyboard-hints"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["agent"],
-      "states": ["default"],
+      "screenLabels": [
+        "agent-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "agent"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -611,6 +826,76 @@
       ]
     },
     {
+      "id": "agent-picker-empty",
+      "title": "Agent picker (no results)",
+      "category": "picker",
+      "summary": "",
+      "tags": [
+        "agent-selection",
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state",
+        "modal",
+        "picker",
+        "agent",
+        "empty"
+      ],
+      "screenLabels": [
+        "agent-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "agent"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/agent-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/agent-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/agent-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "integration-picker",
       "title": "Integrations",
       "category": "picker",
@@ -624,14 +909,29 @@
         "modal",
         "picker",
         "integration",
-        "default"
+        "populated"
       ],
-      "screenLabels": ["integration-setup"],
-      "uiElements": ["picker", "single-select", "list", "dialog"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["integration"],
-      "states": ["default"],
+      "screenLabels": [
+        "integration-setup"
+      ],
+      "uiElements": [
+        "picker",
+        "single-select",
+        "list",
+        "dialog"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "integration"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -660,17 +960,110 @@
       ]
     },
     {
+      "id": "integration-picker-empty",
+      "title": "Integrations (no results)",
+      "category": "picker",
+      "summary": "",
+      "tags": [
+        "integration-setup",
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "empty-state",
+        "modal",
+        "picker",
+        "integration",
+        "empty"
+      ],
+      "screenLabels": [
+        "integration-setup"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "integration"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/integration-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/integration-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/integration-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "theme-picker",
       "title": "Theme picker",
       "category": "picker",
       "summary": "",
-      "tags": ["theme-selection", "picker", "single-select", "list", "dialog", "modal", "picker", "theme", "default"],
-      "screenLabels": ["theme-selection"],
-      "uiElements": ["picker", "single-select", "list", "dialog"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["theme"],
-      "states": ["default"],
+      "tags": [
+        "theme-selection",
+        "picker",
+        "single-select",
+        "list",
+        "dialog",
+        "modal",
+        "picker",
+        "theme",
+        "populated"
+      ],
+      "screenLabels": [
+        "theme-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "single-select",
+        "list",
+        "dialog"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "theme"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -699,17 +1092,108 @@
       ]
     },
     {
+      "id": "theme-picker-empty",
+      "title": "Theme picker (no results)",
+      "category": "picker",
+      "summary": "",
+      "tags": [
+        "theme-selection",
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "empty-state",
+        "modal",
+        "picker",
+        "theme",
+        "empty"
+      ],
+      "screenLabels": [
+        "theme-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "theme"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/theme-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/theme-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/theme-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "mcp-list",
       "title": "MCPs",
       "category": "status",
       "summary": "",
-      "tags": ["mcp-management", "list", "dialog", "empty-state", "modal", "list", "mcp", "empty"],
-      "screenLabels": ["mcp-management"],
-      "uiElements": ["list", "dialog", "empty-state"],
-      "surfaces": ["modal"],
-      "patterns": ["list"],
-      "features": ["mcp"],
-      "states": ["empty"],
+      "tags": [
+        "mcp-management",
+        "list",
+        "dialog",
+        "empty-state",
+        "modal",
+        "list",
+        "mcp",
+        "empty"
+      ],
+      "screenLabels": [
+        "mcp-management"
+      ],
+      "uiElements": [
+        "list",
+        "dialog",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "list"
+      ],
+      "features": [
+        "mcp"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -755,12 +1239,29 @@
         "mcp",
         "empty"
       ],
-      "screenLabels": ["system-status", "mcp-management"],
-      "uiElements": ["status-indicator", "list", "dialog", "empty-state"],
-      "surfaces": ["modal"],
-      "patterns": ["status"],
-      "features": ["system", "mcp"],
-      "states": ["empty"],
+      "screenLabels": [
+        "system-status",
+        "mcp-management"
+      ],
+      "uiElements": [
+        "status-indicator",
+        "list",
+        "dialog",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "system",
+        "mcp"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -804,12 +1305,27 @@
         "system",
         "default"
       ],
-      "screenLabels": ["debugging", "system-status"],
-      "uiElements": ["debug-information", "dialog"],
-      "surfaces": ["modal"],
-      "patterns": ["info"],
-      "features": ["debug", "system"],
-      "states": ["default"],
+      "screenLabels": [
+        "debugging",
+        "system-status"
+      ],
+      "uiElements": [
+        "debug-information",
+        "dialog"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "info"
+      ],
+      "features": [
+        "debug",
+        "system"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -855,12 +1371,29 @@
         "shortcuts",
         "default"
       ],
-      "screenLabels": ["help-reference", "command-navigation"],
-      "uiElements": ["shortcut-list", "keyboard-hints", "dialog", "list"],
-      "surfaces": ["modal"],
-      "patterns": ["info"],
-      "features": ["help", "shortcuts"],
-      "states": ["default"],
+      "screenLabels": [
+        "help-reference",
+        "command-navigation"
+      ],
+      "uiElements": [
+        "shortcut-list",
+        "keyboard-hints",
+        "dialog",
+        "list"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "info"
+      ],
+      "features": [
+        "help",
+        "shortcuts"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -893,13 +1426,36 @@
       "title": "Pair device",
       "category": "information",
       "summary": "",
-      "tags": ["device-pairing", "integration-setup", "qr-code", "dialog", "modal", "pairing", "device", "default"],
-      "screenLabels": ["device-pairing", "integration-setup"],
-      "uiElements": ["qr-code", "dialog"],
-      "surfaces": ["modal"],
-      "patterns": ["pairing"],
-      "features": ["device"],
-      "states": ["default"],
+      "tags": [
+        "device-pairing",
+        "integration-setup",
+        "qr-code",
+        "dialog",
+        "modal",
+        "pairing",
+        "device",
+        "default"
+      ],
+      "screenLabels": [
+        "device-pairing",
+        "integration-setup"
+      ],
+      "uiElements": [
+        "qr-code",
+        "dialog"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "pairing"
+      ],
+      "features": [
+        "device"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -946,12 +1502,30 @@
         "session",
         "empty"
       ],
-      "screenLabels": ["session-list"],
-      "uiElements": ["picker", "search-field", "single-select", "list", "dialog", "keyboard-hints", "empty-state"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["session"],
-      "states": ["empty"],
+      "screenLabels": [
+        "session-list"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "session"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -995,14 +1569,31 @@
         "modal",
         "picker",
         "skill",
-        "default"
+        "populated"
       ],
-      "screenLabels": ["skill-selection"],
-      "uiElements": ["picker", "search-field", "single-select", "list", "dialog", "keyboard-hints"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["skill"],
-      "states": ["default"],
+      "screenLabels": [
+        "skill-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "skill"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1031,6 +1622,76 @@
       ]
     },
     {
+      "id": "skill-picker-empty",
+      "title": "Skill picker (no results)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "skill-selection",
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state",
+        "modal",
+        "picker",
+        "skill",
+        "empty"
+      ],
+      "screenLabels": [
+        "skill-selection"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "skill"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/skill-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/skill-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/skill-picker-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "patch-input-streaming",
       "title": "Patch input streaming",
       "category": "session",
@@ -1046,12 +1707,27 @@
         "patch",
         "streaming"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "patch"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1099,7 +1775,9 @@
         "patch",
         "confirmation"
       ],
-      "screenLabels": ["tool-execution"],
+      "screenLabels": [
+        "tool-execution"
+      ],
       "uiElements": [
         "inline-prompt",
         "approval-actions",
@@ -1108,10 +1786,20 @@
         "confirmation",
         "destructive-action"
       ],
-      "surfaces": ["inline"],
-      "patterns": ["approval"],
-      "features": ["permission", "tool", "patch"],
-      "states": ["confirmation"],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "permission",
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "confirmation"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1158,12 +1846,30 @@
         "patch",
         "selected"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["inline-prompt", "approval-actions", "button-group", "keyboard-hints", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["approval"],
-      "features": ["permission", "tool", "patch"],
-      "states": ["selected"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "inline-prompt",
+        "approval-actions",
+        "button-group",
+        "keyboard-hints",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "permission",
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "selected"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1210,12 +1916,30 @@
         "patch",
         "confirmation"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["inline-prompt", "approval-actions", "button-group", "keyboard-hints", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["approval"],
-      "features": ["permission", "tool", "patch"],
-      "states": ["confirmation"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "inline-prompt",
+        "approval-actions",
+        "button-group",
+        "keyboard-hints",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "permission",
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "confirmation"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1262,12 +1986,30 @@
         "patch",
         "selected"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["inline-prompt", "approval-actions", "button-group", "keyboard-hints", "destructive-action"],
-      "surfaces": ["inline"],
-      "patterns": ["approval"],
-      "features": ["permission", "tool", "patch"],
-      "states": ["selected"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "inline-prompt",
+        "approval-actions",
+        "button-group",
+        "keyboard-hints",
+        "destructive-action"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "permission",
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "selected"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1315,7 +2057,9 @@
         "patch",
         "expanded"
       ],
-      "screenLabels": ["tool-execution"],
+      "screenLabels": [
+        "tool-execution"
+      ],
       "uiElements": [
         "inline-prompt",
         "approval-actions",
@@ -1324,10 +2068,20 @@
         "confirmation",
         "full-screen-view"
       ],
-      "surfaces": ["full-screen"],
-      "patterns": ["approval"],
-      "features": ["permission", "tool", "patch"],
-      "states": ["expanded"],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "permission",
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "expanded"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1371,12 +2125,27 @@
         "patch",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "patch"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1409,13 +2178,36 @@
       "title": "Rename session",
       "category": "session",
       "summary": "",
-      "tags": ["rename-session", "dialog", "form", "text-input", "modal", "form", "session", "default"],
-      "screenLabels": ["rename-session"],
-      "uiElements": ["dialog", "form", "text-input"],
-      "surfaces": ["modal"],
-      "patterns": ["form"],
-      "features": ["session"],
-      "states": ["default"],
+      "tags": [
+        "rename-session",
+        "dialog",
+        "form",
+        "text-input",
+        "modal",
+        "form",
+        "session",
+        "default"
+      ],
+      "screenLabels": [
+        "rename-session"
+      ],
+      "uiElements": [
+        "dialog",
+        "form",
+        "text-input"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "form"
+      ],
+      "features": [
+        "session"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1448,13 +2240,38 @@
       "title": "Fork session",
       "category": "session",
       "summary": "",
-      "tags": ["fork-session", "dialog", "picker", "single-select", "list", "modal", "picker", "session", "default"],
-      "screenLabels": ["fork-session"],
-      "uiElements": ["dialog", "picker", "single-select", "list"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["session"],
-      "states": ["default"],
+      "tags": [
+        "fork-session",
+        "dialog",
+        "picker",
+        "single-select",
+        "list",
+        "modal",
+        "picker",
+        "session",
+        "default"
+      ],
+      "screenLabels": [
+        "fork-session"
+      ],
+      "uiElements": [
+        "dialog",
+        "picker",
+        "single-select",
+        "list"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "session"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1499,12 +2316,28 @@
         "export",
         "default"
       ],
-      "screenLabels": ["export-session"],
-      "uiElements": ["dialog", "form", "single-select", "button-group"],
-      "surfaces": ["modal"],
-      "patterns": ["form"],
-      "features": ["session", "export"],
-      "states": ["default"],
+      "screenLabels": [
+        "export-session"
+      ],
+      "uiElements": [
+        "dialog",
+        "form",
+        "single-select",
+        "button-group"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "form"
+      ],
+      "features": [
+        "session",
+        "export"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1552,12 +2385,31 @@
         "tool",
         "confirmation"
       ],
-      "screenLabels": ["question-response", "tool-execution"],
-      "uiElements": ["inline-prompt", "question-prompt", "form", "single-select", "button-group", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["form"],
-      "features": ["question", "tool"],
-      "states": ["confirmation"],
+      "screenLabels": [
+        "question-response",
+        "tool-execution"
+      ],
+      "uiElements": [
+        "inline-prompt",
+        "question-prompt",
+        "form",
+        "single-select",
+        "button-group",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "form"
+      ],
+      "features": [
+        "question",
+        "tool"
+      ],
+      "states": [
+        "confirmation"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1603,12 +2455,29 @@
         "session",
         "populated"
       ],
-      "screenLabels": ["session-list"],
-      "uiElements": ["picker", "search-field", "single-select", "list", "dialog", "keyboard-hints"],
-      "surfaces": ["modal"],
-      "patterns": ["picker"],
-      "features": ["session"],
-      "states": ["populated"],
+      "screenLabels": [
+        "session-list"
+      ],
+      "uiElements": [
+        "picker",
+        "search-field",
+        "single-select",
+        "list",
+        "dialog",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "modal"
+      ],
+      "patterns": [
+        "picker"
+      ],
+      "features": [
+        "session"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1654,12 +2523,29 @@
         "notification",
         "success"
       ],
-      "screenLabels": ["export-session", "toast-success"],
-      "uiElements": ["toast", "confirmation", "transcript"],
-      "surfaces": ["toast"],
-      "patterns": ["notification"],
-      "features": ["session", "export", "notification"],
-      "states": ["success"],
+      "screenLabels": [
+        "export-session",
+        "toast-success"
+      ],
+      "uiElements": [
+        "toast",
+        "confirmation",
+        "transcript"
+      ],
+      "surfaces": [
+        "toast"
+      ],
+      "patterns": [
+        "notification"
+      ],
+      "features": [
+        "session",
+        "export",
+        "notification"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1702,12 +2588,26 @@
         "notification",
         "error"
       ],
-      "screenLabels": ["error-recovery", "toast-error"],
-      "uiElements": ["toast", "error-report"],
-      "surfaces": ["toast"],
-      "patterns": ["notification"],
-      "features": ["notification"],
-      "states": ["error"],
+      "screenLabels": [
+        "error-recovery",
+        "toast-error"
+      ],
+      "uiElements": [
+        "toast",
+        "error-report"
+      ],
+      "surfaces": [
+        "toast"
+      ],
+      "patterns": [
+        "notification"
+      ],
+      "features": [
+        "notification"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1751,12 +2651,27 @@
         "notification",
         "default"
       ],
-      "screenLabels": ["debugging", "toast-info"],
-      "uiElements": ["toast", "confirmation"],
-      "surfaces": ["toast"],
-      "patterns": ["notification"],
-      "features": ["debug", "notification"],
-      "states": ["default"],
+      "screenLabels": [
+        "debugging",
+        "toast-info"
+      ],
+      "uiElements": [
+        "toast",
+        "confirmation"
+      ],
+      "surfaces": [
+        "toast"
+      ],
+      "patterns": [
+        "notification"
+      ],
+      "features": [
+        "debug",
+        "notification"
+      ],
+      "states": [
+        "default"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1785,56 +2700,6 @@
       ]
     },
     {
-      "id": "diff-viewer",
-      "title": "Diff viewer",
-      "category": "session",
-      "summary": "",
-      "tags": [
-        "diff-review",
-        "full-screen-view",
-        "list",
-        "keyboard-hints",
-        "empty-state",
-        "full-screen",
-        "list",
-        "diff",
-        "session",
-        "empty"
-      ],
-      "screenLabels": ["diff-review"],
-      "uiElements": ["full-screen-view", "list", "keyboard-hints", "empty-state"],
-      "surfaces": ["full-screen"],
-      "patterns": ["list"],
-      "features": ["diff", "session"],
-      "states": ["empty"],
-      "dimensions": [],
-      "viewport": {
-        "cols": 118,
-        "rows": 34
-      },
-      "variations": [],
-      "frames": [
-        {
-          "variantId": "opencode",
-          "src": "captures/opencode/diff-viewer.frame.json",
-          "cols": 118,
-          "rows": 34
-        },
-        {
-          "variantId": "tokyonight",
-          "src": "captures/tokyonight/diff-viewer.frame.json",
-          "cols": 118,
-          "rows": 34
-        },
-        {
-          "variantId": "everforest",
-          "src": "captures/everforest/diff-viewer.frame.json",
-          "cols": 118,
-          "rows": 34
-        }
-      ]
-    },
-    {
       "id": "thinking-streaming",
       "title": "Thinking streaming",
       "category": "session",
@@ -1849,12 +2714,26 @@
         "shell",
         "streaming"
       ],
-      "screenLabels": ["shell-activity"],
-      "uiElements": ["transcript", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["thinking", "shell"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "shell-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "thinking",
+        "shell"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1900,12 +2779,29 @@
         "shell",
         "streaming"
       ],
-      "screenLabels": ["tool-execution", "shell-activity"],
-      "uiElements": ["transcript", "tool-card", "terminal-output", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["terminal"],
-      "features": ["tool", "shell"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "tool-execution",
+        "shell-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "terminal-output",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "terminal"
+      ],
+      "features": [
+        "tool",
+        "shell"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -1952,12 +2848,30 @@
         "running",
         "streaming"
       ],
-      "screenLabels": ["tool-execution", "shell-activity"],
-      "uiElements": ["transcript", "tool-card", "terminal-output", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["terminal"],
-      "features": ["tool", "shell"],
-      "states": ["running", "streaming"],
+      "screenLabels": [
+        "tool-execution",
+        "shell-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "terminal-output",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "terminal"
+      ],
+      "features": [
+        "tool",
+        "shell"
+      ],
+      "states": [
+        "running",
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2003,12 +2917,29 @@
         "shell",
         "success"
       ],
-      "screenLabels": ["tool-execution", "shell-activity"],
-      "uiElements": ["transcript", "tool-card", "terminal-output", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["terminal"],
-      "features": ["tool", "shell"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution",
+        "shell-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "terminal-output",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "terminal"
+      ],
+      "features": [
+        "tool",
+        "shell"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2056,12 +2987,31 @@
         "shell",
         "error"
       ],
-      "screenLabels": ["tool-execution", "shell-activity", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "terminal-output", "error-report"],
-      "surfaces": ["inline"],
-      "patterns": ["terminal", "error-report"],
-      "features": ["tool", "shell"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "shell-activity",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "terminal-output",
+        "error-report"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "terminal",
+        "error-report"
+      ],
+      "features": [
+        "tool",
+        "shell"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2105,12 +3055,27 @@
         "search",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "search"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2154,12 +3119,27 @@
         "search",
         "empty"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "empty-state"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "search"],
-      "states": ["empty"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "empty-state"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2203,12 +3183,27 @@
         "search",
         "running"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "search"],
-      "states": ["running"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "running"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2252,12 +3247,27 @@
         "search",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "search"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2301,12 +3311,27 @@
         "search",
         "empty"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "empty-state"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "search"],
-      "states": ["empty"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "empty-state"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "empty"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2351,12 +3376,28 @@
         "search",
         "error"
       ],
-      "screenLabels": ["tool-execution", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "error-report"],
-      "surfaces": ["inline"],
-      "patterns": ["error-report"],
-      "features": ["tool", "search"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "error-report"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "error-report"
+      ],
+      "features": [
+        "tool",
+        "search"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2400,12 +3441,27 @@
         "web",
         "streaming"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "web"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "web"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2449,12 +3505,27 @@
         "web",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "web"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "web"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2499,12 +3570,28 @@
         "search",
         "running"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "web", "search"],
-      "states": ["running"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "web",
+        "search"
+      ],
+      "states": [
+        "running"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2550,12 +3637,29 @@
         "search",
         "error"
       ],
-      "screenLabels": ["tool-execution", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "error-report"],
-      "surfaces": ["inline"],
-      "patterns": ["error-report"],
-      "features": ["tool", "web", "search"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "error-report"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "error-report"
+      ],
+      "features": [
+        "tool",
+        "web",
+        "search"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2598,12 +3702,26 @@
         "response",
         "success"
       ],
-      "screenLabels": ["question-response"],
-      "uiElements": ["transcript", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["assistant", "response"],
-      "states": ["success"],
+      "screenLabels": [
+        "question-response"
+      ],
+      "uiElements": [
+        "transcript",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "assistant",
+        "response"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2647,12 +3765,27 @@
         "response",
         "error"
       ],
-      "screenLabels": ["question-response", "error-recovery"],
-      "uiElements": ["transcript", "error-report"],
-      "surfaces": ["inline"],
-      "patterns": ["error-report"],
-      "features": ["assistant", "response"],
-      "states": ["error"],
+      "screenLabels": [
+        "question-response",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "error-report"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "error-report"
+      ],
+      "features": [
+        "assistant",
+        "response"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2696,12 +3829,27 @@
         "response",
         "error"
       ],
-      "screenLabels": ["question-response", "error-recovery"],
-      "uiElements": ["transcript", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["assistant", "response"],
-      "states": ["error"],
+      "screenLabels": [
+        "question-response",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "assistant",
+        "response"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2745,12 +3893,27 @@
         "question",
         "streaming"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "question"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "question"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2795,12 +3958,28 @@
         "question",
         "pending"
       ],
-      "screenLabels": ["tool-execution", "question-response"],
-      "uiElements": ["question-prompt", "button-group", "keyboard-hints"],
-      "surfaces": ["inline"],
-      "patterns": ["form"],
-      "features": ["tool", "question"],
-      "states": ["pending"],
+      "screenLabels": [
+        "tool-execution",
+        "question-response"
+      ],
+      "uiElements": [
+        "question-prompt",
+        "button-group",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "form"
+      ],
+      "features": [
+        "tool",
+        "question"
+      ],
+      "states": [
+        "pending"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2845,12 +4024,28 @@
         "question",
         "confirmation"
       ],
-      "screenLabels": ["tool-execution", "question-response"],
-      "uiElements": ["question-prompt", "confirmation", "keyboard-hints"],
-      "surfaces": ["inline"],
-      "patterns": ["form"],
-      "features": ["tool", "question"],
-      "states": ["confirmation"],
+      "screenLabels": [
+        "tool-execution",
+        "question-response"
+      ],
+      "uiElements": [
+        "question-prompt",
+        "confirmation",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "form"
+      ],
+      "features": [
+        "tool",
+        "question"
+      ],
+      "states": [
+        "confirmation"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2894,12 +4089,27 @@
         "question",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "question"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "question"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2944,12 +4154,28 @@
         "question",
         "error"
       ],
-      "screenLabels": ["tool-execution", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "destructive-action"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "question"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "destructive-action"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "question"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -2993,12 +4219,27 @@
         "read",
         "streaming"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "read"],
-      "states": ["streaming"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "read"
+      ],
+      "states": [
+        "streaming"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3044,12 +4285,29 @@
         "read",
         "confirmation"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["inline-prompt", "approval-actions", "button-group", "keyboard-hints", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["approval"],
-      "features": ["tool", "read"],
-      "states": ["confirmation"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "inline-prompt",
+        "approval-actions",
+        "button-group",
+        "keyboard-hints",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "approval"
+      ],
+      "features": [
+        "tool",
+        "read"
+      ],
+      "states": [
+        "confirmation"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3093,12 +4351,27 @@
         "read",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "read"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "read"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3143,12 +4416,28 @@
         "read",
         "error"
       ],
-      "screenLabels": ["tool-execution", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "read"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "read"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3192,12 +4481,27 @@
         "patch",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "patch"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3241,12 +4545,27 @@
         "patch",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "patch"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3290,12 +4609,27 @@
         "patch",
         "success"
       ],
-      "screenLabels": ["tool-execution"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["tool", "patch"],
-      "states": ["success"],
+      "screenLabels": [
+        "tool-execution"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3340,12 +4674,28 @@
         "patch",
         "error"
       ],
-      "screenLabels": ["tool-execution", "error-recovery"],
-      "uiElements": ["transcript", "tool-card", "error-report"],
-      "surfaces": ["inline"],
-      "patterns": ["error-report"],
-      "features": ["tool", "patch"],
-      "states": ["error"],
+      "screenLabels": [
+        "tool-execution",
+        "error-recovery"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "error-report"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "error-report"
+      ],
+      "features": [
+        "tool",
+        "patch"
+      ],
+      "states": [
+        "error"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3391,12 +4741,29 @@
         "tabs",
         "running"
       ],
-      "screenLabels": ["session-list"],
-      "uiElements": ["tabs", "full-screen-view", "status-indicator", "keyboard-hints", "transcript"],
-      "surfaces": ["full-screen"],
-      "patterns": ["navigation"],
-      "features": ["session", "tabs"],
-      "states": ["running"],
+      "screenLabels": [
+        "session-list"
+      ],
+      "uiElements": [
+        "tabs",
+        "full-screen-view",
+        "status-indicator",
+        "keyboard-hints",
+        "transcript"
+      ],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "navigation"
+      ],
+      "features": [
+        "session",
+        "tabs"
+      ],
+      "states": [
+        "running"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3441,12 +4808,28 @@
         "tabs",
         "idle"
       ],
-      "screenLabels": ["session-list"],
-      "uiElements": ["tabs", "full-screen-view", "status-indicator", "keyboard-hints"],
-      "surfaces": ["full-screen"],
-      "patterns": ["navigation"],
-      "features": ["session", "tabs"],
-      "states": ["idle"],
+      "screenLabels": [
+        "session-list"
+      ],
+      "uiElements": [
+        "tabs",
+        "full-screen-view",
+        "status-indicator",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "navigation"
+      ],
+      "features": [
+        "session",
+        "tabs"
+      ],
+      "states": [
+        "idle"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3475,6 +4858,136 @@
       ]
     },
     {
+      "id": "diff-viewer",
+      "title": "Diff viewer (empty)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "diff-review",
+        "full-screen-view",
+        "list",
+        "keyboard-hints",
+        "empty-state",
+        "full-screen",
+        "list",
+        "diff",
+        "session",
+        "empty"
+      ],
+      "screenLabels": [
+        "diff-review"
+      ],
+      "uiElements": [
+        "full-screen-view",
+        "list",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "list"
+      ],
+      "features": [
+        "diff",
+        "session"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/diff-viewer.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/diff-viewer.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/diff-viewer.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
+      "id": "diff-viewer-populated",
+      "title": "Diff viewer (populated)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "diff-review",
+        "full-screen-view",
+        "list",
+        "keyboard-hints",
+        "full-screen",
+        "list",
+        "diff",
+        "session",
+        "populated"
+      ],
+      "screenLabels": [
+        "diff-review"
+      ],
+      "uiElements": [
+        "full-screen-view",
+        "list",
+        "keyboard-hints"
+      ],
+      "surfaces": [
+        "full-screen"
+      ],
+      "patterns": [
+        "list"
+      ],
+      "features": [
+        "diff",
+        "session"
+      ],
+      "states": [
+        "populated"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/diff-viewer-populated.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/diff-viewer-populated.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/diff-viewer-populated.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "subagent-running",
       "title": "Subagent running",
       "category": "session",
@@ -3490,12 +5003,27 @@
         "subagent",
         "running"
       ],
-      "screenLabels": ["subagent-activity"],
-      "uiElements": ["transcript", "tool-card", "status-indicator"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["agent", "subagent"],
-      "states": ["running"],
+      "screenLabels": [
+        "subagent-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "agent",
+        "subagent"
+      ],
+      "states": [
+        "running"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3524,6 +5052,78 @@
       ]
     },
     {
+      "id": "subagent-panel-active",
+      "title": "Subagents panel (active)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "subagent-activity",
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "status-indicator",
+        "panel",
+        "status",
+        "agent",
+        "subagent",
+        "session",
+        "populated",
+        "running"
+      ],
+      "screenLabels": [
+        "subagent-activity"
+      ],
+      "uiElements": [
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "agent",
+        "subagent",
+        "session"
+      ],
+      "states": [
+        "populated",
+        "running"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/subagent-panel-active.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/subagent-panel-active.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/subagent-panel-active.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "subagent-completed",
       "title": "Subagent completed",
       "category": "session",
@@ -3539,12 +5139,27 @@
         "subagent",
         "success"
       ],
-      "screenLabels": ["subagent-activity"],
-      "uiElements": ["transcript", "tool-card", "confirmation"],
-      "surfaces": ["inline"],
-      "patterns": ["status"],
-      "features": ["agent", "subagent"],
-      "states": ["success"],
+      "screenLabels": [
+        "subagent-activity"
+      ],
+      "uiElements": [
+        "transcript",
+        "tool-card",
+        "confirmation"
+      ],
+      "surfaces": [
+        "inline"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "agent",
+        "subagent"
+      ],
+      "states": [
+        "success"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3573,6 +5188,216 @@
       ]
     },
     {
+      "id": "subagent-panel-inactive",
+      "title": "Subagents panel (inactive)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "subagent-activity",
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "confirmation",
+        "panel",
+        "list",
+        "agent",
+        "subagent",
+        "session",
+        "populated",
+        "success"
+      ],
+      "screenLabels": [
+        "subagent-activity"
+      ],
+      "uiElements": [
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "confirmation"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "patterns": [
+        "list"
+      ],
+      "features": [
+        "agent",
+        "subagent",
+        "session"
+      ],
+      "states": [
+        "populated",
+        "success"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/subagent-panel-inactive.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/subagent-panel-inactive.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/subagent-panel-inactive.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
+      "id": "shell-panel-empty",
+      "title": "Shell panel (empty)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "shell-activity",
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "empty-state",
+        "panel",
+        "list",
+        "shell",
+        "session",
+        "empty"
+      ],
+      "screenLabels": [
+        "shell-activity"
+      ],
+      "uiElements": [
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "empty-state"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "patterns": [
+        "list"
+      ],
+      "features": [
+        "shell",
+        "session"
+      ],
+      "states": [
+        "empty"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/shell-panel-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/shell-panel-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/shell-panel-empty.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
+      "id": "shell-panel-running",
+      "title": "Shell panel (running)",
+      "category": "session",
+      "summary": "",
+      "tags": [
+        "shell-activity",
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "status-indicator",
+        "panel",
+        "status",
+        "shell",
+        "session",
+        "populated",
+        "running"
+      ],
+      "screenLabels": [
+        "shell-activity"
+      ],
+      "uiElements": [
+        "panel",
+        "tabs",
+        "list",
+        "keyboard-hints",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "panel"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "shell",
+        "session"
+      ],
+      "states": [
+        "populated",
+        "running"
+      ],
+      "dimensions": [],
+      "viewport": {
+        "cols": 118,
+        "rows": 34
+      },
+      "variations": [],
+      "frames": [
+        {
+          "variantId": "opencode",
+          "src": "captures/opencode/shell-panel-running.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "tokyonight",
+          "src": "captures/tokyonight/shell-panel-running.frame.json",
+          "cols": 118,
+          "rows": 34
+        },
+        {
+          "variantId": "everforest",
+          "src": "captures/everforest/shell-panel-running.frame.json",
+          "cols": 118,
+          "rows": 34
+        }
+      ]
+    },
+    {
       "id": "subagent-session",
       "title": "Subagent session",
       "category": "session",
@@ -3591,12 +5416,30 @@
         "session",
         "populated"
       ],
-      "screenLabels": ["subagent-activity", "session-list"],
-      "uiElements": ["transcript", "panel", "status-indicator"],
-      "surfaces": ["full-screen", "panel"],
-      "patterns": ["status"],
-      "features": ["agent", "subagent", "session"],
-      "states": ["populated"],
+      "screenLabels": [
+        "subagent-activity",
+        "session-list"
+      ],
+      "uiElements": [
+        "transcript",
+        "panel",
+        "status-indicator"
+      ],
+      "surfaces": [
+        "full-screen",
+        "panel"
+      ],
+      "patterns": [
+        "status"
+      ],
+      "features": [
+        "agent",
+        "subagent",
+        "session"
+      ],
+      "states": [
+        "populated"
+      ],
       "dimensions": [],
       "viewport": {
         "cols": 118,
@@ -3980,8 +5823,27 @@
           "title": "Subagent runs"
         },
         {
+          "screenId": "subagent-panel-active",
+          "title": "Inspect active subagents",
+          "trigger": "Open the Subagents panel"
+        },
+        {
           "screenId": "subagent-completed",
           "title": "Subagent completes"
+        },
+        {
+          "screenId": "subagent-panel-inactive",
+          "title": "Inspect inactive subagents",
+          "trigger": "Toggle show inactive"
+        },
+        {
+          "screenId": "shell-panel-empty",
+          "title": "Inspect the empty Shell panel",
+          "trigger": "Switch to the Shell tab"
+        },
+        {
+          "screenId": "shell-panel-running",
+          "title": "Inspect a running shell command"
         },
         {
           "screenId": "subagent-session",
@@ -4058,16 +5920,21 @@
       ]
     },
     {
-      "id": "reviewing-a-diff",
-      "title": "Reviewing a diff",
+      "id": "diff-viewer-lifecycle",
+      "title": "Diff viewer",
       "group": "Review",
-      "description": "Inspect the working tree and verify whether files have changed.",
-      "replayable": false,
+      "description": "Compare the empty working-tree view with a populated file diff.",
+      "replayable": true,
       "steps": [
         {
           "screenId": "diff-viewer",
-          "title": "Open the diff viewer",
+          "title": "Open an empty diff",
           "trigger": "Run /diff"
+        },
+        {
+          "screenId": "diff-viewer-populated",
+          "title": "Inspect a changed file",
+          "trigger": "Modify a tracked file"
         }
       ]
     }

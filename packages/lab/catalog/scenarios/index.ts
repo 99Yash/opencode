@@ -11,6 +11,7 @@ import { questionLifecycleFlow } from "./tools/question-lifecycle"
 import { readLifecycleFlow } from "./tools/read-lifecycle"
 import { patchFileChangesFlow } from "./tools/patch-file-changes"
 import { sessionTabsFlow } from "./session-tabs"
+import { diffViewerFlow } from "./review/diff-viewer"
 
 export const executableScenarios = [
   executableScenario(patchSuccessFlow),
@@ -23,6 +24,7 @@ export const executableScenarios = [
   executableScenario(readLifecycleFlow, { clientIsolation: "isolated" }),
   executableScenario(patchFileChangesFlow),
   executableScenario(sessionTabsFlow, { clientIsolation: "isolated" }),
+  executableScenario(diffViewerFlow, { clientIsolation: "isolated" }),
 ] as const
 
 export const executableFlows = executableScenarios.map((scenario) => scenario.flow)
