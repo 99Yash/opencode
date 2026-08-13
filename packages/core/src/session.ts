@@ -50,12 +50,7 @@ import { Global } from "@opencode-ai/util/global"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
 import { KeyedMutex } from "./effect/keyed-mutex.js"
 import { fileURLToPath } from "url"
-
-const SUBAGENT_COMMAND_STARTED = [
-  "The command is running in a background subagent session. You will be notified automatically when it finishes.",
-  "DO NOT sleep, poll, or proactively check on its progress.",
-].join("\n")
-const SUBAGENT_COMMAND_NO_TEXT = "Subagent command completed without a text response."
+import { Subagent } from "./subagent.js"
 
 // get project -> project.locations
 //
@@ -251,7 +246,6 @@ export interface Interface {
     | PromptConflictError
     | AttachmentError
     | SkillNotFoundError
-    | SyntheticConflictError
     | Command.NotFoundError
     | Command.EvaluationError
   >
@@ -623,75 +617,24 @@ const layer = Layer.effect(
         if (subagent) {
           const childAgent = command.agent ?? Agent.ID.make("general")
           const title = command.description ?? input.command
-          const child = yield* result.create({
+          const run = yield* Subagent.run({
+            runtime: { session: result, job: jobs },
+            scope,
             parentID: input.sessionID,
-            title,
             agent: childAgent,
-            model,
-          })
-          const admitted = yield* result.prompt({
+            title,
+            prompt: evaluated.text,
             id: input.id,
-            sessionID: child.id,
-            text: evaluated.text,
+            model,
             files: input.files,
             agents: input.agents,
             skills: input.skills,
             delivery: input.delivery,
-            resume: false,
+            background: true,
+            notifyStarted: true,
+            metadata: { source: "command", command: input.command, parentID: input.sessionID },
           })
-          yield* jobs.start({
-            id: child.id,
-            type: "subagent",
-            title,
-            metadata: { source: "command", command: input.command, parentID: input.sessionID, agent: childAgent },
-            run: Effect.gen(function* () {
-              yield* result.resume(child.id)
-              const messages = yield* result.messages({ sessionID: child.id, order: "desc", limit: 20 })
-              const assistant = messages.find(
-                (message) =>
-                  message.type === "assistant" && message.time.completed !== undefined && message.error === undefined,
-              )
-              if (assistant === undefined || assistant.type !== "assistant") return SUBAGENT_COMMAND_NO_TEXT
-              const text = assistant.content
-                .filter((part): part is Extract<typeof part, { type: "text" }> => part.type === "text")
-                .map((part) => part.text)
-                .join("")
-              return text.length > 0 ? text : SUBAGENT_COMMAND_NO_TEXT
-            }).pipe(Effect.onInterrupt(() => result.interrupt(child.id))),
-          })
-          yield* jobs.background(child.id)
-          yield* result.synthetic({
-            sessionID: input.sessionID,
-            text: `<subagent id="${child.id}" state="running" description="${title}">\n${SUBAGENT_COMMAND_STARTED}\n</subagent>`,
-            description: command.description,
-            metadata: {
-              source: "command",
-              command: input.command,
-              childID: child.id,
-              agent: childAgent,
-              state: "running",
-            },
-          })
-          yield* jobs.wait({ id: child.id }).pipe(
-            Effect.flatMap((job) => {
-              const state = job.info?.status
-              const text =
-                state === "completed"
-                  ? (job.info?.output ?? SUBAGENT_COMMAND_NO_TEXT)
-                  : state === "error"
-                    ? (job.info?.error ?? "Subagent command failed")
-                    : "Subagent command cancelled"
-              if (state !== "completed" && state !== "error" && state !== "cancelled") return Effect.void
-              return result.synthetic({
-                sessionID: input.sessionID,
-                text: `<subagent id="${child.id}" state="${state}" description="${title}">\n${text}\n</subagent>`,
-                description: command.description,
-                metadata: { source: "command", command: input.command, childID: child.id, agent: childAgent, state },
-              })
-            }),
-            Effect.forkIn(scope, { startImmediately: true }),
-          )
-          return admitted
+          return run.admitted
         }
 
         const agent = command.agent ?? input.agent
