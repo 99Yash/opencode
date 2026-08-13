@@ -72,7 +72,7 @@ describe("WebSearch", () => {
       const exa = yield* register("exa", "fail")
       const parallel = yield* register("parallel")
       const websearch = yield* WebSearch.Service
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
 
       const error = yield* websearch.query({ query: "strict", providerID: exa.providerID }).pipe(Effect.flip)
 
@@ -170,7 +170,7 @@ describe("WebSearch", () => {
       const empty = yield* register("empty", "empty")
       const fallback = yield* register("fallback")
       const websearch = yield* WebSearch.Service
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
 
       const response = yield* websearch.query({ query: "empty" }).pipe(Random.withSeed("empty-first"))
 
@@ -185,7 +185,7 @@ describe("WebSearch", () => {
       const exa = yield* register("exa", "fail")
       const parallel = yield* register("parallel", "fail")
       const websearch = yield* WebSearch.Service
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
       const expected = yield* Random.shuffle([exa.providerID, parallel.providerID]).pipe(Random.withSeed("all-fail"))
 
       const error = yield* websearch.query({ query: "failure" }).pipe(Random.withSeed("all-fail"), Effect.flip)
@@ -199,7 +199,7 @@ describe("WebSearch", () => {
   it.effect("supports zero and one registered provider in automatic mode", () =>
     Effect.gen(function* () {
       const websearch = yield* WebSearch.Service
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
       expect((yield* websearch.query({ query: "zero" }).pipe(Effect.flip))._tag).toBe("WebSearch.ProviderRequired")
 
       const only = yield* register("only")
@@ -215,7 +215,7 @@ describe("WebSearch", () => {
       const websearch = yield* WebSearch.Service
       const kv = yield* KV.Service
       yield* kv.set("websearch:provider", fixed.providerID)
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
 
       expect((yield* websearch.query({ query: "config" })).providerID).toBe(fallback.providerID)
       expect(fixed.calls.length).toBeLessThanOrEqual(1)
@@ -229,7 +229,7 @@ describe("WebSearch", () => {
       const exa = yield* register("exa")
       const parallel = yield* register("parallel")
       const websearch = yield* WebSearch.Service
-      yield* websearch.transform((draft) => draft.default.set(WebSearch.ID.make(WebSearch.AUTO)))
+      yield* websearch.transform((draft) => draft.default.set(WebSearch.AUTO))
 
       const selected = yield* Effect.forEach(["a", "b", "c", "d", "e", "f"], (seed) =>
         websearch.query({ query: seed }).pipe(

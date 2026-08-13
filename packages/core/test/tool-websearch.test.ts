@@ -266,7 +266,7 @@ describe("WebSearchTool registration", () => {
               options: [
                 {
                   value: "allow",
-                  label: "Allow web search with automatic provider selection",
+                  label: "Allow web search",
                 },
                 {
                   value: "choose",

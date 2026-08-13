@@ -128,17 +128,6 @@ const layer = Layer.effect(
       return new Response({ providerID: provider.id, results })
     })
 
-    const executeAutomatic = Effect.fn("WebSearch.executeAutomatic")(function* (
-      providers: readonly ProviderImplementation[],
-      input: Input,
-    ) {
-      const attempt = (index: number): Effect.Effect<Response, RequestError> =>
-        execute(providers[index]!, input).pipe(
-          Effect.catch((error) => (index === providers.length - 1 ? Effect.fail(error) : attempt(index + 1))),
-        )
-      return yield* attempt(0)
-    })
-
     return Service.of({
       transform: state.transform,
       reload: state.reload,
@@ -155,7 +144,7 @@ const layer = Layer.effect(
       }),
       query: Effect.fn("WebSearch.query")(function* (input) {
         const route = yield* resolve(input)
-        if (Array.isArray(route)) return yield* executeAutomatic(route, input)
+        if (Array.isArray(route)) return yield* Effect.firstSuccessOf(route.map((provider) => execute(provider, input)))
         return yield* execute(route, input)
       }),
     })
