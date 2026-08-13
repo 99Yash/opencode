@@ -489,6 +489,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               ? sessionStore.pinned.filter((x) => x !== sessionID)
               : [...sessionStore.pinned, sessionID]
             setSessionStore("pinned", next)
+            if (exists) state.scroll.delete(sessionID)
             save()
           })
         },
@@ -499,9 +500,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           route.navigate({ type: "session", sessionID: target })
         },
         scrollPosition(sessionID: string) {
+          if (!slots().includes(sessionID)) return
           return state.scroll.get(sessionID)
         },
-        setScrollPosition(sessionID: string, position: number) {
+        setScrollPosition(sessionID: string, position: number | undefined) {
+          if (position === undefined || !slots().includes(sessionID)) {
+            state.scroll.delete(sessionID)
+            return
+          }
           state.scroll.set(sessionID, position)
         },
       }

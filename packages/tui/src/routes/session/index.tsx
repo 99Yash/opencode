@@ -81,6 +81,7 @@ import { getRevertDiffFiles } from "../../util/revert-diff"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { LocationProvider } from "../../context/location"
+import { Flag } from "@opencode-ai/core/flag/flag"
 
 addDefaultParsers(parsers.parsers)
 
@@ -258,6 +259,11 @@ export function Session() {
   const [diffWrapMode] = kv.signal<"word" | "none">("diff_wrap_mode", "word")
   const [_animationsEnabled, _setAnimationsEnabled] = kv.signal("animations_enabled", true)
   const [showGenericToolOutput, setShowGenericToolOutput] = kv.signal("generic_tool_output_visibility", false)
+  const [jumpBottomPosition, setJumpBottomPosition] = kv.signal<"center" | "right">(
+    "experimental_jump_bottom_position",
+    "center",
+  )
+  const [awayFromBottom, setAwayFromBottom] = createSignal(false)
 
   const wide = createMemo(() => dimensions().width > 120)
   const sidebarVisible = createMemo(() => {
@@ -306,7 +312,12 @@ export function Session() {
       await sync.session.sync(sessionID)
       setTimeout(() => {
         if (route.sessionID !== sessionID || !scroll || scroll.isDestroyed) return
-        scroll.scrollTo(local.session.scrollPosition(sessionID) ?? scroll.scrollHeight)
+        scroll.scrollTo(
+          Flag.OPENCODE_EXPERIMENTAL_TAB_SCROLL
+            ? (local.session.scrollPosition(sessionID) ?? scroll.scrollHeight)
+            : scroll.scrollHeight,
+        )
+        updateAwayFromBottom()
       }, 50)
     })().catch((error) => {
       if (route.sessionID !== sessionID) return
@@ -340,7 +351,10 @@ export function Session() {
   let scroll: ScrollBoxRenderable
   onCleanup(() => {
     if (!scroll || scroll.isDestroyed) return
-    local.session.setScrollPosition(route.sessionID, scroll.scrollTop)
+    local.session.setScrollPosition(
+      route.sessionID,
+      Flag.OPENCODE_EXPERIMENTAL_TAB_SCROLL && isAwayFromBottom() ? scroll.scrollTop : undefined,
+    )
   })
   let prompt: PromptRef | undefined
   const bind = (r: PromptRef | undefined) => {
@@ -411,16 +425,34 @@ export function Session() {
 
     if (!targetID) {
       scroll.scrollBy(direction === "next" ? scroll.height : -scroll.height)
+      updateAwayFromBottom()
       dialog.clear()
       return
     }
 
     const child = scroll.getChildren().find((c) => c.id === targetID)
     if (child) scroll.scrollBy(child.y - scroll.y - 1)
+    updateAwayFromBottom()
     dialog.clear()
   }
 
+  function isAwayFromBottom() {
+    return scroll.scrollTop < Math.max(0, scroll.scrollHeight - scroll.viewport.height) - 1
+  }
+
+  function updateAwayFromBottom() {
+    if (!Flag.OPENCODE_EXPERIMENTAL_TAB_SCROLL) return
+    setTimeout(() => {
+      if (!scroll || scroll.isDestroyed) return
+      const away = isAwayFromBottom()
+      setAwayFromBottom(away)
+      if (!away) local.session.setScrollPosition(route.sessionID, undefined)
+    })
+  }
+
   function toBottom() {
+    setAwayFromBottom(false)
+    local.session.setScrollPosition(route.sessionID, undefined)
     setTimeout(() => {
       if (!scroll || scroll.isDestroyed) return
       scroll.scrollTo(scroll.scrollHeight)
@@ -527,6 +559,7 @@ export function Session() {
                 return child.id === messageID
               })
               if (child) scroll.scrollBy(child.y - scroll.y - 1)
+              updateAwayFromBottom()
             }}
             sessionID={route.sessionID}
             setPrompt={(promptInfo) => prompt?.set(promptInfo)}
@@ -550,6 +583,7 @@ export function Session() {
                 return child.id === messageID
               })
               if (child) scroll.scrollBy(child.y - scroll.y - 1)
+              updateAwayFromBottom()
             }}
             sessionID={route.sessionID}
           />
@@ -748,12 +782,26 @@ export function Session() {
       },
     },
     {
+      title: `Move jump-to-bottom button ${jumpBottomPosition() === "center" ? "right" : "to center"}`,
+      value: "session.jump_bottom.position",
+      category: "Session",
+      hidden: !Flag.OPENCODE_EXPERIMENTAL_TAB_SCROLL,
+      slash: {
+        name: "jump-bottom-position",
+      },
+      run: () => {
+        setJumpBottomPosition((position) => (position === "center" ? "right" : "center"))
+        dialog.clear()
+      },
+    },
+    {
       title: "Page up",
       value: "session.page.up",
       category: "Session",
       hidden: true,
       run: () => {
         scroll.scrollBy(-scroll.height / 2)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -764,6 +812,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollBy(scroll.height / 2)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -774,6 +823,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollBy(-1)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -784,6 +834,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollBy(1)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -794,6 +845,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollBy(-scroll.height / 4)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -804,6 +856,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollBy(scroll.height / 4)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -814,6 +867,7 @@ export function Session() {
       hidden: true,
       run: () => {
         scroll.scrollTo(0)
+        updateAwayFromBottom()
         dialog.clear()
       },
     },
@@ -823,7 +877,7 @@ export function Session() {
       category: "Session",
       hidden: true,
       run: () => {
-        scroll.scrollTo(scroll.scrollHeight)
+        toBottom()
         dialog.clear()
       },
     },
@@ -853,6 +907,7 @@ export function Session() {
               return child.id === message.id
             })
             if (child) scroll.scrollBy(child.y - scroll.y - 1)
+            updateAwayFromBottom()
             break
           }
         }
@@ -1184,6 +1239,7 @@ export function Session() {
                 stickyStart="bottom"
                 flexGrow={1}
                 scrollAcceleration={scrollAcceleration()}
+                onMouseScroll={updateAwayFromBottom}
               >
                 <box height={1} />
                 <For each={messages()}>
@@ -1282,6 +1338,18 @@ export function Session() {
                 </For>
               </scrollbox>
               <box flexShrink={0}>
+                <Show when={Flag.OPENCODE_EXPERIMENTAL_TAB_SCROLL && awayFromBottom()}>
+                  <box
+                    height={1}
+                    flexDirection="row"
+                    justifyContent={jumpBottomPosition() === "center" ? "center" : "flex-end"}
+                    paddingRight={jumpBottomPosition() === "right" ? 1 : 0}
+                  >
+                    <text fg={theme.textMuted} onMouseUp={toBottom}>
+                      ↓ Bottom
+                    </text>
+                  </box>
+                </Show>
                 <Show when={permissions().length > 0}>
                   <PermissionPrompt
                     request={permissions()[0]}
