@@ -39,6 +39,7 @@ export type PromptInputV2Props = {
   disabled?: boolean
   readOnly?: boolean
   borderUnderlay?: boolean
+  dropLabel?: string
   class?: string
   modelControl?: JSX.Element
   variantControlVisible?: boolean
@@ -109,10 +110,10 @@ export function PromptInputV2(props: PromptInputV2Props) {
       </Show>
       <form
         data-component="prompt-input-v2"
-        data-dock-border-underlay={props.borderUnderlay ? "v2" : undefined}
+        data-dock-border-underlay={props.borderUnderlay && state.drag !== "active" ? "v2" : undefined}
         class="group/prompt-input relative min-h-[96px] w-full overflow-clip rounded-xl bg-v2-background-bg-base"
         classList={{
-          "shadow-[var(--v2-elevation-raised)]": !props.borderUnderlay,
+          "shadow-[var(--v2-elevation-raised)]": !props.borderUnderlay && state.drag !== "active",
         }}
         onSubmit={(event) => {
           event.preventDefault()
@@ -124,7 +125,7 @@ export function PromptInputV2(props: PromptInputV2Props) {
         onDrop={props.controller.onDrop}
       >
         <Show when={state.drag === "active"}>
-          <div class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-v2-background-bg-accent/5 text-v2-text-text-base">
+          <div class="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-xl bg-[color-mix(in_srgb,var(--v2-background-bg-accent)_5%,var(--v2-background-bg-base))] text-v2-text-text-muted">
             <svg class="absolute inset-0 size-full" aria-hidden="true">
               <rect
                 x="0.25"
@@ -136,9 +137,10 @@ export function PromptInputV2(props: PromptInputV2Props) {
                 stroke="var(--v2-border-border-focus)"
                 stroke-width="0.5"
                 stroke-dasharray="3 3"
+                stroke-dashoffset="1.5"
               />
             </svg>
-            {i18n.t("ui.promptInput.dropFiles")}
+            {props.dropLabel ?? i18n.t("ui.promptInput.dropFiles")}
           </div>
         </Show>
 

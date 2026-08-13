@@ -124,7 +124,10 @@ export const dict: Record<string, string> = {
 
   "ui.promptInput.noMatchingItems": "No matching items",
   "ui.promptInput.commands": "Commands",
-  "ui.promptInput.dropFiles": "Drop to attach",
+  "ui.promptInput.dropFiles": "Drop files to add",
+  "ui.promptInput.dropFiles.image": "Drop images or files to add",
+  "ui.promptInput.dropFiles.pdf": "Drop PDFs or files to add",
+  "ui.promptInput.dropFiles.imagePdf": "Drop images, PDFs, or files to add",
   "ui.promptInput.removeAttachment": "Remove attachment",
   "ui.promptInput.label": "Prompt",
   "ui.promptInput.placeholder.shell": "Enter shell command...",

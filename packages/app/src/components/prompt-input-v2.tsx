@@ -48,12 +48,20 @@ export function PromptInputV2Composer(props: PromptInputV2ComposerProps) {
   const dialog = useDialog()
   const command = useCommand()
   const language = useLanguage()
+  const dropLabel = createMemo(() => {
+    const input = props.controller.model.selection.current()?.capabilities.input
+    if (!input?.image && !input?.pdf) return language.t("ui.promptInput.dropFiles")
+    if (!input.pdf) return language.t("ui.promptInput.dropFiles.image")
+    if (!input.image) return language.t("ui.promptInput.dropFiles.pdf")
+    return language.t("ui.promptInput.dropFiles.imagePdf")
+  })
 
   return (
     <div class="flex flex-col gap-3">
       <PromptInputV2
         controller={props.controller}
         borderUnderlay={props.borderUnderlay}
+        dropLabel={dropLabel()}
         class={props.class}
         variantControlVisible={!props.controller.model.loading}
         attachKeybind={command.keybindParts("file.attach")}
