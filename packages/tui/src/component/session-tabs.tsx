@@ -47,6 +47,7 @@ const ADD_TAB_WIDTH = 3
 const MARQUEE_DELAY = 600
 const MARQUEE_INTERVAL = 100
 const CONTEXT_MENU_WIDTH = 16
+const MIDDLE_MOUSE_BUTTON = 1
 const RIGHT_MOUSE_BUTTON = 2
 
 type TabContextMenuState = {
@@ -541,6 +542,12 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                   onMouseOver={() => marquee.enter(tab.sessionID, title(), hoveredTitleWidth())}
                   onMouseOut={() => marquee.leave(tab.sessionID)}
                   onMouseDown={(event) => {
+                    if (event.button === MIDDLE_MOUSE_BUTTON) {
+                      setDragging(undefined)
+                      event.preventDefault()
+                      event.stopPropagation()
+                      return
+                    }
                     if (event.button === RIGHT_MOUSE_BUTTON) {
                       setDragging(undefined)
                       if (!rail) return
@@ -561,9 +568,16 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                   }}
                   onMouseUp={(event) => {
                     if (event.button === RIGHT_MOUSE_BUTTON) return
+                    if (event.button === MIDDLE_MOUSE_BUTTON) {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      tabs.close(tab.sessionID)
+                      return
+                    }
                     release()
                   }}
                   onMouseDrag={(event) => {
+                    if (event.button === MIDDLE_MOUSE_BUTTON) return
                     if (!rail) return
                     const target = Math.max(
                       0,
@@ -575,7 +589,10 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                     if (target !== index() && preview()?.index !== target)
                       setPreview({ sessionID: tab.sessionID, index: target })
                   }}
-                  onMouseDragEnd={release}
+                  onMouseDragEnd={(event) => {
+                    if (event.button === MIDDLE_MOUSE_BUTTON) return
+                    release()
+                  }}
                 >
                   <TabPulse
                     top={-1}
@@ -1066,6 +1083,12 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
               onMouseOver={() => marquee.enter(tab.sessionID, title(), hoveredTitleWidth())}
               onMouseOut={() => marquee.leave(tab.sessionID)}
               onMouseDown={(event) => {
+                if (event.button === MIDDLE_MOUSE_BUTTON) {
+                  setDragging(undefined)
+                  event.preventDefault()
+                  event.stopPropagation()
+                  return
+                }
                 if (event.button === RIGHT_MOUSE_BUTTON) {
                   setDragging(undefined)
                   setContextMenu({
@@ -1085,15 +1108,25 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
               }}
               onMouseUp={(event) => {
                 if (event.button === RIGHT_MOUSE_BUTTON) return
+                if (event.button === MIDDLE_MOUSE_BUTTON) {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  tabs.close(tab === NEW_SESSION_TAB ? undefined : tab.sessionID)
+                  return
+                }
                 release()
               }}
               onMouseDrag={(event) => {
+                if (event.button === MIDDLE_MOUSE_BUTTON) return
                 if (tab === NEW_SESSION_TAB) return
                 const slot = slotAt(event.x)
                 if (slot !== undefined && slot !== tabNumber() - 1)
                   setPreview({ sessionID: tab.sessionID, index: slot })
               }}
-              onMouseDragEnd={release}
+              onMouseDragEnd={(event) => {
+                if (event.button === MIDDLE_MOUSE_BUTTON) return
+                release()
+              }}
             >
               <TabPulse
                 enabled={animations()}
