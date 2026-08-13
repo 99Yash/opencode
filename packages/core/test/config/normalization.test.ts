@@ -79,20 +79,6 @@ describe("ConfigNormalize", () => {
     expect(Duration.toMillis(info.warming.duration ?? Duration.zero)).toBe(1_800_000)
   })
 
-  test("normalizes the legacy subtask command field", () => {
-    expect(
-      normalized({
-        commands: {
-          legacy: { template: "Review", subtask: true },
-          current: { template: "Review", subtask: false, subagent: true },
-        },
-      }).encoded.commands,
-    ).toEqual({
-      legacy: { template: "Review", subagent: true },
-      current: { template: "Review", subagent: true },
-    })
-  })
-
   test("preserves arbitrary JSON-round-tripped native configuration", () => {
     FastCheck.assert(
       FastCheck.property(Schema.toArbitrary(Info), (info) => {

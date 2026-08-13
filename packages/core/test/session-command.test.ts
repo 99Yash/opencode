@@ -34,8 +34,6 @@ const commands = Layer.mock(Command.Service, {
           agent: reviewer,
         }),
       )
-    if (name === "inline")
-      return Effect.succeed(Command.Info.make({ name, template: "Review this", agent: reviewer, subagent: false }))
     return Effect.succeed(undefined)
   },
   evaluate: () => Effect.succeed({ text: "Review this" }),
@@ -107,22 +105,6 @@ describe("Session.command", () => {
           payload: expect.objectContaining({ text: expect.stringContaining(children.data[0]!.id) }),
         }),
       ])
-    }),
-  )
-
-  it.effect("keeps an explicitly non-subagent command in the parent session", () =>
-    Effect.gen(function* () {
-      const sessions = yield* Session.Service
-      const parent = yield* sessions.create({ location, model })
-
-      const admitted = yield* sessions.command({
-        sessionID: parent.id,
-        command: "inline",
-        resume: false,
-      })
-
-      expect(admitted.sessionID).toBe(parent.id)
-      expect((yield* sessions.list({ parentID: parent.id })).data).toEqual([])
     }),
   )
 })

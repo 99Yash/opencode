@@ -400,7 +400,7 @@ export type CommandInfo = {
   description?: string
   agent?: string
   model?: ModelRef
-  subagent?: boolean
+  subtask?: boolean
 }
 
 export type ProviderRequest = {
@@ -1822,7 +1822,7 @@ export type ConfigEntry =
             description?: string
             agent?: string
             model?: string | { providerID: string; model: string; variant?: string }
-            subagent?: boolean
+            subtask?: boolean
           }
         }
         instructions?: Array<string>

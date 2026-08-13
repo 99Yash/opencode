@@ -53,16 +53,9 @@ describe("ConfigCommandPlugin.Plugin", () => {
 description: File review
 agent: reviewer
 model: anthropic/claude#high
-subagent: true
----
-Review files`,
-            )
-            await fs.writeFile(
-              path.join(tmp.path, "commands", "legacy.md"),
-              `---
 subtask: true
 ---
-Legacy review`,
+Review files`,
             )
             await fs.writeFile(path.join(tmp.path, "commands", "nested", "docs.md"), "Write docs")
             await fs.writeFile(path.join(tmp.path, "commands", "empty.md"), "")
@@ -104,10 +97,9 @@ Legacy review`,
                 id: Model.ID.make("claude"),
                 variant: Model.VariantID.make("high"),
               },
-              subagent: true,
+              subtask: true,
             }),
             Command.Info.make({ name: "empty", template: "" }),
-            Command.Info.make({ name: "legacy", template: "Legacy review", subagent: true }),
             Command.Info.make({ name: "nested/docs", template: "Write docs" }),
           ])
 

@@ -612,9 +612,7 @@ const layer = Layer.effect(
         const agents = yield* Agent.Service.pipe(Effect.provide(locations.get(session.location)))
         const commandAgent = command.agent ? yield* agents.get(command.agent) : undefined
         const model = command.model ?? commandAgent?.model ?? input.model ?? session.model
-        const subagent = command.subagent ?? commandAgent?.mode === "subagent"
-
-        if (subagent) {
+        if (commandAgent?.mode === "subagent") {
           const childAgent = command.agent ?? Agent.ID.make("general")
           const title = command.description ?? input.command
           const run = yield* Subagent.run({

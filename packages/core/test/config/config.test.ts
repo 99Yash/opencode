@@ -719,7 +719,7 @@ describe("Config", () => {
           description: "Review code",
           agent: "reviewer",
           model: { providerID: "anthropic", model: "claude", variant: "high" },
-          subagent: true,
+          subtask: true,
         },
       })
     }),

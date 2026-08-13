@@ -165,7 +165,7 @@ export function commands(info?: Readonly<Record<string, ConfigCommandV1.Info>>) 
         description: command.description,
         agent: command.agent,
         model: modelSelection(command.model, command.variant),
-        subagent: command.subtask,
+        subtask: command.subtask,
       },
     ]),
   )
