@@ -100,7 +100,7 @@ test("reports a bounded contender stderr tail with native promises", async () =>
   expect(error.message.length).toBeLessThan(9_000)
 }, 10_000)
 
-test("evicts an unresponsive registered service before starting its replacement", async () => {
+test("never evicts an unresponsive registered service automatically", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
   const existing = Bun.spawn([process.execPath, fixture, registration, "hanging"], {
@@ -111,19 +111,25 @@ test("evicts an unresponsive registered service before starting its replacement"
   await waitForFile(registration)
   const original = await Bun.file(registration).json()
 
-  const endpoint = await ensure({
+  const result = ensure({
     file: registration,
     version: "test",
-    command: [process.execPath, fixture, registration, "delayed", "10"],
+    command: [process.execPath, fixture, registration, "record-start"],
   })
-  const replacement = await Bun.file(registration).json()
+  await waitForLines(registration + ".requests", 3)
 
-  expect((await Bun.file(registration + ".requests").text()).trim().split("\n")).toHaveLength(3)
-  expect(await existing.exited).toBe(0)
-  expect(replacement.pid).not.toBe(original.pid)
-  expect(endpoint.url).toBe(replacement.url)
-  process.kill(replacement.pid, "SIGTERM")
-  await waitForExit(replacement.pid)
+  expect(existing.exitCode).toBe(null)
+  expect(await Bun.file(registration).json()).toEqual(original)
+  await expect(result).rejects.toThrow()
+})
+
+test("explicit native stop refuses to signal an unidentified unresponsive PID", async () => {
+  const registration = await setup("hanging")
+  const info = await Bun.file(registration).json()
+
+  await expect(Service.stop({ file: registration })).rejects.toThrow("stop its process manually")
+
+  expect(process.kill(info.pid, 0)).toBe(true)
 })
 
 test("requests graceful stop of the exact service instance", async () => {
@@ -133,6 +139,29 @@ test("requests graceful stop of the exact service instance", async () => {
   await Service.stop({ file: registration })
 
   expect(await Bun.file(registration + ".stop").json()).toEqual({ instanceID: info.id })
+})
+
+test.each([
+  ["reject-stop", "rejected the stop request"],
+  ["stop-hanging", "rejected the stop request"],
+  ["stop-accepted-hanging", "accepted the stop request but did not exit"],
+  ["legacy", "does not support authenticated stop requests"],
+])("native replacement fails closed for %s service stop", async (mode, message) => {
+  const registration = await setup(mode)
+  const directory = await temp()
+  const contender = join(directory, "contender.json")
+  const info = await Bun.file(registration).json()
+
+  await expect(
+    ensure({
+      file: registration,
+      version: "test",
+      command: [process.execPath, fixture, contender, "record-start"],
+    }),
+  ).rejects.toThrow(message)
+
+  expect(await Bun.file(contender + ".started").exists()).toBe(false)
+  expect(process.kill(info.pid, 0)).toBe(true)
 })
 
 async function setup(mode: string) {
@@ -155,4 +184,15 @@ async function waitForFile(file: string) {
     await Bun.sleep(5)
   }
   throw new Error(`Timed out waiting for ${file}`)
+}
+
+async function waitForLines(file: string, count: number) {
+  for (let attempt = 0; attempt < 600; attempt++) {
+    const text = await Bun.file(file)
+      .text()
+      .catch(() => "")
+    if (text.trim().split("\n").length >= count) return
+    await Bun.sleep(5)
+  }
+  throw new Error(`Timed out waiting for ${count} lines in ${file}`)
 }

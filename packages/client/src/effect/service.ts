@@ -56,7 +56,6 @@ const discoverLocal = Effect.fnUntraced(function* (options: DiscoverOptions) {
 export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOptions = {}) {
   const timing = ensureTiming(options)
   const contenders = new Set<ServiceContender>()
-  let timeouts: { readonly info: Info; readonly count: number } | undefined
   let announced = false
   let lastSpawn = 0
   let spawnDelay = timing.spawnDelay
@@ -80,18 +79,6 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
     const registration = yield* registered(options.file, true, timing.requestTimeout)
     const info = registration.info
     const service = registration.service
-    if (registration.timedOut && info !== undefined) {
-      timeouts = {
-        info,
-        count: timeouts !== undefined && same(timeouts.info, info) ? timeouts.count + 1 : 1,
-      }
-      if (timeouts.count >= 3) {
-        yield* announce("missing")
-        yield* evict(info, options, timing)
-        timeouts = undefined
-        lastSpawn = Date.now() - spawnDelay
-      }
-    } else timeouts = undefined
     if (service !== undefined) {
       spawnDelay = timing.spawnDelay
       const compatible = !service.legacy && matchesVersion(service.version, options)
@@ -99,8 +86,8 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
       if (compatible && service.state === "failed")
         return yield* Effect.fail(new Error("Background service failed to start"))
       if (compatible) return Option.none<LocalService>()
+      yield* kill(service, timing)
       yield* announce("version-mismatch", service.version)
-      yield* kill(service, options, timing).pipe(Effect.ignore)
       lastSpawn = 0
       return Option.none<LocalService>()
     } else if (lastSpawn === 0 && info !== undefined) lastSpawn = Date.now()
@@ -133,8 +120,12 @@ export const ensure = Effect.fn("service.ensure")(function* (options: EnsureOpti
 
 /** Stop the registered local service. */
 export const stop = Effect.fn("service.stop")(function* (options: StopOptions = {}) {
-  const existing = yield* find(options)
-  if (existing !== undefined) yield* kill(existing, options, defaultEnsureTiming)
+  const registration = yield* registered(options.file, true)
+  if (registration.service !== undefined) yield* kill(registration.service, defaultEnsureTiming)
+  if (registration.service === undefined && registration.info !== undefined)
+    return yield* Effect.fail(
+      new Error("Background service is not responding; stop its process manually and try again"),
+    )
 })
 
 function fallback() {
@@ -243,19 +234,9 @@ const registered = Effect.fnUntraced(function* (file?: string, allowLegacy = fal
   return { info, ...(yield* probeResult(info, allowLegacy, timeout)) }
 })
 
-// Health-checked lookup without the version gate: lifecycle operations must be
-// able to see (and replace or stop) a server from a different version.
-const find = Effect.fnUntraced(function* (options: { readonly file?: string }) {
-  return (yield* registered(options.file, true)).service
-})
-
-// 50ms cadence bounded at ~5s, shared by stop escalation and each ensure
-// discovery window.
+// Poll until an authenticated stop exits, bounded by the configured stop window.
 const poll = (timing: EnsureTiming) =>
   Schedule.max([Schedule.spaced(timing.stopPollInterval), Schedule.recurs(timing.stopPollAttempts)])
-
-const signal = (pid: number, name: NodeJS.Signals) =>
-  Effect.try({ try: () => process.kill(pid, name), catch: (cause) => cause }).pipe(Effect.ignore)
 
 const stopped = Effect.fnUntraced(function* (pid: number) {
   const running = yield* Effect.try({ try: () => process.kill(pid, 0), catch: () => false }).pipe(
@@ -265,44 +246,14 @@ const stopped = Effect.fnUntraced(function* (pid: number) {
   return yield* Effect.fail(new Error(`Server process ${pid} is still running`))
 })
 
-function same(left: Info, right: Info) {
-  return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid
-}
-
-const evict = Effect.fnUntraced(function* (info: Info, options: { readonly file?: string }, timing: EnsureTiming) {
-  const current = yield* read(options.file)
-  if (current === undefined || !same(current, info)) return
-  yield* signal(info.pid, "SIGTERM")
-  const done = yield* stopped(info.pid).pipe(Effect.retry(poll(timing)), Effect.option)
-  if (Option.isSome(done)) return
-
-  const latest = yield* read(options.file)
-  if (latest === undefined || !same(latest, info)) return
-  yield* signal(info.pid, "SIGKILL")
-  yield* stopped(info.pid).pipe(Effect.retry(poll(timing)))
-})
-
-const kill = Effect.fnUntraced(function* (
-  service: LocalService,
-  options: { readonly file?: string },
-  timing: EnsureTiming,
-) {
+const kill = Effect.fnUntraced(function* (service: LocalService, timing: EnsureTiming) {
   const requested = yield* requestStop(service, timing.requestTimeout)
-  if (requested === "rejected") return
-  if (requested === "unsupported") {
-    // A stale registration may point at a reused PID. Authenticate again
-    // immediately before the legacy signal fallback.
-    const current = yield* find(options)
-    if (current === undefined || !same(current.info, service.info)) return
-    yield* signal(service.info.pid, "SIGTERM")
-  }
+  if (requested === "rejected") return yield* Effect.fail(new Error("Background service rejected the stop request"))
+  if (requested === "unsupported")
+    return yield* Effect.fail(new Error("Background service does not support authenticated stop requests"))
   const done = yield* stopped(service.info.pid).pipe(Effect.retry(poll(timing)), Effect.option)
   if (Option.isSome(done)) return
-
-  const latest = yield* find(options)
-  if (latest === undefined || !same(latest.info, service.info)) return
-  yield* signal(service.info.pid, "SIGKILL")
-  yield* stopped(service.info.pid).pipe(Effect.retry(poll(timing)))
+  return yield* Effect.fail(new Error("Background service accepted the stop request but did not exit"))
 })
 
 const decodeStopResponse = Schema.decodeUnknownOption(ServiceStatus.StopResponse)
@@ -317,7 +268,8 @@ const requestStop = Effect.fnUntraced(function* (service: LocalService, timeout 
       signal: AbortSignal.timeout(timeout),
     }),
   ).pipe(Effect.option, Effect.map(Option.getOrUndefined))
-  if (response === undefined || response.status === 404 || response.status === 405) return "unsupported" as const
+  if (response === undefined) return "rejected" as const
+  if (response.status === 404 || response.status === 405) return "unsupported" as const
   const body = yield* Effect.tryPromise(() => response.json()).pipe(Effect.option, Effect.map(Option.getOrUndefined))
   const decoded = decodeStopResponse(body)
   if (!response.ok || Option.isNone(decoded) || !decoded.value.accepted) return "rejected" as const

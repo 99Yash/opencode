@@ -37,7 +37,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
   const timing = ensureTiming(options)
   const deadline = Date.now() + timing.promiseTimeout
   const contenders = new Set<ServiceContender>()
-  let timeouts: { readonly info: Info; readonly count: number } | undefined
   let announced = false
   let lastSpawn = 0
   let spawnDelay = timing.spawnDelay
@@ -61,19 +60,6 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
     while (true) {
       if (Date.now() >= deadline) throw new Error("Timed out waiting for the background service to start")
       const registration = await registered(options.file, true, timing.requestTimeout)
-      if (registration.timedOut && registration.info !== undefined) {
-        timeouts = {
-          info: registration.info,
-          count: timeouts !== undefined && same(timeouts.info, registration.info) ? timeouts.count + 1 : 1,
-        }
-        if (timeouts.count >= 3) {
-          announce("missing")
-          await evict(registration.info, options, timing)
-          timeouts = undefined
-          lastSpawn = Date.now() - spawnDelay
-        }
-      } else timeouts = undefined
-
       if (registration.service !== undefined) {
         spawnDelay = timing.spawnDelay
         const service = registration.service
@@ -81,8 +67,8 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
         if (compatible && service.state === "ready") return service.endpoint
         if (compatible && service.state === "failed") throw new Error("Background service failed to start")
         if (!compatible) {
+          await kill(service, timing)
           announce("version-mismatch", service.version)
-          await kill(service, options, timing).catch(() => undefined)
           lastSpawn = 0
         }
       } else {
@@ -110,8 +96,10 @@ export async function ensure(options: EnsureOptions = {}): Promise<Endpoint> {
 
 /** Stop the registered local service. */
 export async function stop(options: StopOptions = {}) {
-  const existing = await find(options)
-  if (existing !== undefined) await kill(existing, options, defaultEnsureTiming)
+  const registration = await registered(options.file, true)
+  if (registration.service !== undefined) await kill(registration.service, defaultEnsureTiming)
+  if (registration.service === undefined && registration.info !== undefined)
+    throw new Error("Background service is not responding; stop its process manually and try again")
 }
 
 function fallback() {
@@ -199,16 +187,6 @@ async function registered(file?: string, allowLegacy = false, timeout?: number) 
   return { info, ...(await probeResult(info, allowLegacy, timeout)) }
 }
 
-async function find(options: { readonly file?: string }) {
-  return (await registered(options.file, true)).service
-}
-
-function signal(pid: number, name: NodeJS.Signals) {
-  try {
-    process.kill(pid, name)
-  } catch {}
-}
-
 function stopped(pid: number) {
   try {
     process.kill(pid, 0)
@@ -226,37 +204,12 @@ async function waitUntilStopped(pid: number, timing: EnsureTiming) {
   return false
 }
 
-function same(left: Info, right: Info) {
-  return left.id === right.id && left.version === right.version && left.url === right.url && left.pid === right.pid
-}
-
-async function evict(info: Info, options: { readonly file?: string }, timing: EnsureTiming) {
-  const current = await read(options.file)
-  if (current === undefined || !same(current, info)) return
-  signal(info.pid, "SIGTERM")
-  if (await waitUntilStopped(info.pid, timing)) return
-
-  const latest = await read(options.file)
-  if (latest === undefined || !same(latest, info)) return
-  signal(info.pid, "SIGKILL")
-  if (!(await waitUntilStopped(info.pid, timing))) throw new Error(`Server process ${info.pid} is still running`)
-}
-
-async function kill(service: LocalService, options: { readonly file?: string }, timing: EnsureTiming) {
+async function kill(service: LocalService, timing: EnsureTiming) {
   const requested = await requestStop(service, timing.requestTimeout)
-  if (requested === "rejected") return
-  if (requested === "unsupported") {
-    const current = await find(options)
-    if (current === undefined || !same(current.info, service.info)) return
-    signal(service.info.pid, "SIGTERM")
-  }
+  if (requested === "rejected") throw new Error("Background service rejected the stop request")
+  if (requested === "unsupported") throw new Error("Background service does not support authenticated stop requests")
   if (await waitUntilStopped(service.info.pid, timing)) return
-
-  const latest = await find(options)
-  if (latest === undefined || !same(latest.info, service.info)) return
-  signal(service.info.pid, "SIGKILL")
-  if (!(await waitUntilStopped(service.info.pid, timing)))
-    throw new Error(`Server process ${service.info.pid} is still running`)
+  throw new Error("Background service accepted the stop request but did not exit")
 }
 
 async function requestStop(service: LocalService, timeout = defaultEnsureTiming.requestTimeout) {
@@ -267,7 +220,8 @@ async function requestStop(service: LocalService, timeout = defaultEnsureTiming.
     body: JSON.stringify({ instanceID: service.info.id }),
     signal: AbortSignal.timeout(timeout),
   }).catch(() => undefined)
-  if (response === undefined || response.status === 404 || response.status === 405) return "unsupported" as const
+  if (response === undefined) return "rejected" as const
+  if (response.status === 404 || response.status === 405) return "unsupported" as const
   const body = (await response.json().catch(() => undefined)) as ServiceStopResponse | undefined
   if (!response.ok || body?.accepted !== true) return "rejected" as const
   return "accepted" as const
