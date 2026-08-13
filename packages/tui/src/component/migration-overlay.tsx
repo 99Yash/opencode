@@ -1,3 +1,4 @@
+import { ClientError } from "@opencode-ai/client"
 import { createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useClient } from "../context/client"
 import { useTheme } from "../context/theme"
@@ -16,9 +17,23 @@ export function MigrationOverlay() {
 
   onMount(async () => {
     await Bun.sleep(1_000)
+    if (abort.signal.aborted) return
     void (async () => {
       while (true) {
-        const status = await client.api.migration.v1.status({ signal: abort.signal })
+        const result = await client.api.migration.v1.status({ signal: abort.signal }).then(
+          (status) => ({ status }),
+          (error: unknown) => ({ error }),
+        )
+        if ("error" in result) {
+          if (result.error instanceof ClientError && result.error.reason === "Transport") {
+            if (abort.signal.aborted) return
+            await Bun.sleep(1_000)
+            if (abort.signal.aborted) return
+            continue
+          }
+          throw result.error
+        }
+        const status = result.status
         setProgress(status.status === "running" ? status.progress : undefined)
         if (status.status === "completed") return
         if (status.status === "error") throw new Error(status.error)
