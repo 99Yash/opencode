@@ -2,7 +2,7 @@ export * as FileSystemSearch from "./search.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import path from "path"
-import { Context, Effect, Layer, Schema, Scope } from "effect"
+import { Context, Duration, Effect, Layer, Schema, Scope, Stream } from "effect"
 import { Fff } from "#fff"
 import fuzzysort from "fuzzysort"
 import { FileSystem } from "../filesystem.js"
@@ -10,6 +10,7 @@ import { Location } from "../location.js"
 import { Ripgrep } from "../ripgrep.js"
 import { RelativePath } from "../schema.js"
 import { Protected } from "./protected.js"
+import { Watcher } from "./watcher.js"
 
 export interface Interface {
   readonly find: (input: FileSystem.FindInput) => Effect.Effect<FileSystem.Entry[]>
@@ -27,33 +28,46 @@ export const ripgrepLayer = Layer.effect(
   Effect.gen(function* () {
     const location = yield* Location.Service
     const ripgrep = yield* Ripgrep.Service
+    const watcher = yield* Watcher.Service
     const scope = yield* Scope.Scope
-    const files: string[] = []
-    const directories = new Set<string>()
     const home = Protected.isHome(location.directory)
-    yield* ripgrep
+    const scan = ripgrep
       .find({
         cwd: location.directory,
         pattern: "*",
         limit: location.vcs && !home ? Number.MAX_SAFE_INTEGER : 100_000,
         exclude: home ? [...Protected.names()].map((name) => `${name}/**`) : undefined,
-        onEntry: (entry) =>
-          Effect.sync(() => {
-            files.push(entry.path)
-            const parts = entry.path.split("/")
-            parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
-          }),
       })
-      .pipe(Effect.orDie, Effect.asVoid, Effect.forkIn(scope))
+      .pipe(
+        Effect.orDie,
+        Effect.map((entries) => {
+          const files = entries.map((entry) => entry.path)
+          const directories = new Set<string>()
+          files.forEach((file) => {
+            const parts = file.split("/")
+            parts.slice(0, -1).forEach((_, index) => directories.add(parts.slice(0, index + 1).join("/") + path.sep))
+          })
+          return { files, directories }
+        }),
+      )
+    const [snapshot, invalidate] = yield* Effect.cachedInvalidateWithTTL(scan, Duration.infinity)
+    const updates = yield* watcher.subscribe({ path: location.directory, type: "directory" })
+    yield* updates.pipe(
+      Stream.runForEach(() => invalidate),
+      Effect.forkIn(scope),
+    )
+    yield* Effect.yieldNow
+    yield* snapshot.pipe(Effect.forkIn(scope))
     return Service.of({
       find: (input) =>
         Effect.gen(function* () {
+          const index = yield* snapshot
           const items =
             input.type === "file"
-              ? files
+              ? index.files
               : input.type === "directory"
-                ? Array.from(directories)
-                : [...files, ...directories]
+                ? Array.from(index.directories)
+                : [...index.files, ...index.directories]
           return fuzzysort.go(input.query, items, { limit: input.limit ?? 50 }).map((item) => {
             const relative = item.target
             const type = relative.endsWith(path.sep) ? ("directory" as const) : ("file" as const)
@@ -147,7 +161,11 @@ export const layer = (options?: Options) =>
   )
 
 export function configured(options?: Options) {
-  return makeLocationNode({ service: Service, layer: layer(options), deps: [Location.node, Ripgrep.node] })
+  return makeLocationNode({
+    service: Service,
+    layer: layer(options),
+    deps: [Location.node, Ripgrep.node, Watcher.node],
+  })
 }
 
 export const node = configured()
