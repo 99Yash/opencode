@@ -105,7 +105,7 @@ export const { use: usePaneLayout, provider: PaneLayoutProvider } = createSimple
         const group = await client.api["server.persistentPty"].group.get({ groupID: current.groupID })
         await save(sessionID, group, sessionID)
       },
-      async newTerminal(sessionID: string): Promise<PersistentPtyInfo> {
+      async newTerminal(sessionID: string, options?: { focus?: boolean }): Promise<PersistentPtyInfo> {
         const api = client.api["server.persistentPty"]
         const current = store.workspaces[sessionID]
         const existing = current
@@ -124,7 +124,7 @@ export const { use: usePaneLayout, provider: PaneLayoutProvider } = createSimple
           env: {},
         })
         const next = await api.group.get({ groupID: group.id })
-        setFocus(terminal.id)
+        if (options?.focus !== false) setFocus(terminal.id)
         await save(sessionID, next, sessionID)
         return terminal
       },
