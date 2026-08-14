@@ -4,7 +4,6 @@ import { createSignal, For, type JSX } from "solid-js"
 import { StoryFooter } from "./footer"
 import { sessionTabsStory } from "./session-tabs"
 import { sessionLocationMissingStory } from "./session-location-missing"
-import { turnSummaryStory } from "./turn-summary"
 
 /**
  * A story is a full-screen, fixture-driven simulation of a real production component. Stories own
@@ -16,7 +15,7 @@ export type Story = {
   render: (context: Plugin.Context) => JSX.Element
 }
 
-const stories: Story[] = [sessionTabsStory, turnSummaryStory, sessionLocationMissingStory]
+const stories: Story[] = [sessionTabsStory, sessionLocationMissingStory]
 
 function Commands(props: { context: Plugin.Context }) {
   props.context.keymap.layer(() => ({
