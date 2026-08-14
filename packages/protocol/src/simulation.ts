@@ -205,6 +205,7 @@ export namespace Frontend {
     "ui.click.semantic",
     "ui.resize",
     "ui.matches",
+    "ui.screenshot",
     "ui.state",
     "ui.snapshot",
     "ui.capture",
@@ -334,6 +335,9 @@ export namespace Frontend {
   export const RecordingFinish = Schema.String
   export type RecordingFinish = Schema.Schema.Type<typeof RecordingFinish>
 
+  export const Screenshot = Schema.String
+  export type Screenshot = Schema.Schema.Type<typeof Screenshot>
+
   export const Matches = Schema.Boolean
   export type Matches = Schema.Schema.Type<typeof Matches>
 
@@ -342,6 +346,9 @@ export namespace Frontend {
 
   export const MatchesParams = Schema.Struct({ text: Schema.String })
   export interface MatchesParams extends Schema.Schema.Type<typeof MatchesParams> {}
+
+  export const ScreenshotParams = Schema.Struct({ name: Schema.optional(Schema.String) })
+  export interface ScreenshotParams extends Schema.Schema.Type<typeof ScreenshotParams> {}
 
   export const PressParams = Schema.Struct({ key: Schema.String, modifiers: Schema.optional(KeyModifiers) })
   export interface PressParams extends Schema.Schema.Type<typeof PressParams> {}
@@ -377,6 +384,11 @@ export namespace Frontend {
     Schema.Struct({ ...JsonRpc.RequestFields, method: Schema.Literal("ui.click"), params: ClickParams }),
     Schema.Struct({ ...JsonRpc.RequestFields, method: Schema.Literal("ui.resize"), params: ResizeParams }),
     Schema.Struct({ ...JsonRpc.RequestFields, method: Schema.Literal("ui.matches"), params: MatchesParams }),
+    Schema.Struct({
+      ...JsonRpc.RequestFields,
+      method: Schema.Literal("ui.screenshot"),
+      params: Schema.optional(ScreenshotParams),
+    }),
     Schema.Struct({
       ...JsonRpc.RequestFields,
       method: Schema.Literals(["ui.enter", "ui.state", "ui.snapshot", "ui.recording.finish"]),
@@ -622,6 +634,7 @@ export const UiRpcs = RpcGroup.make(
   request("ui.state", { success: Frontend.State }),
   request("ui.snapshot", { success: Frontend.SemanticSnapshot }),
   request("ui.capture", { success: Frontend.CapturedFrame }),
+  request("ui.screenshot", { payload: Schema.UndefinedOr(Frontend.ScreenshotParams), success: Frontend.Screenshot }),
   request("ui.matches", { payload: Frontend.MatchesParams, success: Frontend.Matches }),
   request("ui.recording.finish", { success: Frontend.RecordingFinish }),
   request("ui.type", { payload: Frontend.TypeParams, success: Frontend.State }),

@@ -265,6 +265,9 @@ async function verifySharedControl(base: string, ptyID: string) {
     second.socket.send(inputFrame(70, 20, "from-second\n"))
     await waitForSocketOutput([first, second], "from-second")
 
+    for (const character of "printf abc | rev\n") second.socket.send(inputFrame(70, 20, character))
+    await waitForSocketOutput([first, second], "cba")
+
     second.socket.send(inputFrame(70, 20, "x".repeat(1024 * 1024)))
     second.socket.send(inputFrame(70, 20, "after-burst\n"))
     await waitForSocketOutput([first, second], "after-burst")

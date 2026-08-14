@@ -11,7 +11,7 @@ import {
   PTY_CONNECT_TOKEN_HEADER,
   PTY_CONNECT_TOKEN_HEADER_VALUE,
 } from "@opencode-ai/protocol/groups/persistent-pty"
-import { Effect, Queue } from "effect"
+import { Effect, Queue, Semaphore } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Socket } from "effect/unstable/socket"
@@ -179,6 +179,7 @@ export const PersistentPtyHandler = HttpApiBuilder.group(Api, "server.persistent
           const socket = yield* Effect.orDie(ctx.request.upgrade)
           const write = yield* socket.writer
           const outbox = yield* Queue.unbounded<string | Uint8Array | Socket.CloseEvent>()
+          const input = yield* Semaphore.make(1)
           const attachment = yield* pty
             .attach(ctx.params.ptyID, {
               cursor,
@@ -239,28 +240,32 @@ export const PersistentPtyHandler = HttpApiBuilder.group(Api, "server.persistent
 
           yield* Effect.race(
             drain,
-            socket.runRaw((message) => {
-              if (role !== "controller") return Effect.void
-              const data = typeof message === "string" ? Buffer.from(message) : message
-              if (!framedInput)
-                return pty
-                  .input(
-                    ctx.params.ptyID,
-                    attachmentID,
-                    attachment.info.size.cols,
-                    attachment.info.size.rows,
-                    data,
-                  )
-                  .pipe(Effect.ignore)
-              if (data.byteLength < 5) return Effect.void
-              const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
-              const type = data[0]
-              const cols = view.getUint16(1)
-              const rows = view.getUint16(3)
-              if ((type !== 0 && type !== 1) || cols === 0 || rows === 0) return Effect.void
-              if (type === 0) return pty.control(ctx.params.ptyID, attachmentID, cols, rows).pipe(Effect.ignore)
-              return pty.input(ctx.params.ptyID, attachmentID, cols, rows, data.subarray(5)).pipe(Effect.ignore)
-            }),
+            socket.runRaw((message) =>
+              input.withPermit(
+                Effect.suspend(() => {
+                  if (role !== "controller") return Effect.void
+                  const data = typeof message === "string" ? Buffer.from(message) : message
+                  if (!framedInput)
+                    return pty
+                      .input(
+                        ctx.params.ptyID,
+                        attachmentID,
+                        attachment.info.size.cols,
+                        attachment.info.size.rows,
+                        data,
+                      )
+                      .pipe(Effect.ignore)
+                  if (data.byteLength < 5) return Effect.void
+                  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+                  const type = data[0]
+                  const cols = view.getUint16(1)
+                  const rows = view.getUint16(3)
+                  if ((type !== 0 && type !== 1) || cols === 0 || rows === 0) return Effect.void
+                  if (type === 0) return pty.control(ctx.params.ptyID, attachmentID, cols, rows).pipe(Effect.ignore)
+                  return pty.input(ctx.params.ptyID, attachmentID, cols, rows, data.subarray(5)).pipe(Effect.ignore)
+                }),
+              ),
+            ),
           ).pipe(
             Effect.catchReason("SocketError", "SocketCloseError", () => Effect.void),
             Effect.ensuring(Effect.sync(() => attachment.detach())),

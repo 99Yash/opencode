@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os"
+import { extname, join, resolve } from "node:path"
 import type { CliRenderer, Renderable } from "@opentui/core"
 import {
   createMockKeys,
@@ -7,7 +9,7 @@ import {
   type MockInput,
   type MockMouse,
 } from "@opentui/core/testing"
-import { Effect, Schema } from "effect"
+import { Config, Effect, Schema } from "effect"
 import { SimulationProtocol } from "../protocol"
 import { SimulationRenderer } from "./renderer"
 import { SimulationSemantics } from "./semantics"
@@ -163,6 +165,26 @@ export const capture = Effect.fn("SimulationActions.capture")(function* (harness
       })),
     })),
   } satisfies SimulationProtocol.Frontend.CapturedFrame
+})
+
+export const screenshot = Effect.fn("SimulationActions.screenshot")(function* (harness: Harness, name?: string) {
+  const filename = name ?? `screenshot-${crypto.randomUUID()}`
+  if (!filename || filename.includes("/") || filename.includes("\\") || extname(filename))
+    return yield* Effect.fail(new Error("screenshot name must not contain a path or extension"))
+  yield* Effect.tryPromise(() => harness.renderOnce())
+  const { SimulationPng } = yield* Effect.promise(() => import("./png"))
+  const image = SimulationPng.screenshot(harness.renderer)
+  const directory = resolve(
+    yield* Config.string("OPENCODE_DRIVE_MEDIA_DIR").pipe(
+      Config.withDefault(join(tmpdir(), "opencode-drive", "output")),
+    ),
+  )
+  const path = join(directory, `${filename}.png`)
+  yield* Effect.promise(async () => {
+    await Bun.$`mkdir -p ${directory}`.quiet()
+    await Bun.write(path, image.data)
+  })
+  return path
 })
 
 export const execute = Effect.fn("SimulationActions.execute")(function* (harness: Harness, action: Action) {

@@ -33,6 +33,7 @@ async function renderSessionTabs(
     title?: string
     home?: boolean
     persisted?: string[]
+    active?: string
     sessionGate?: Promise<void>
     sessionDirectories?: Record<string, string>
     newLocation?: "launch" | "inherit"
@@ -49,7 +50,13 @@ async function renderSessionTabs(
       file,
       JSON.stringify({
         global: { tabs: [], unread: {} },
-        cwd: { [directory]: { tabs: options.persisted.map((sessionID) => ({ sessionID })), unread: {} } },
+        cwd: {
+          [directory]: {
+            tabs: options.persisted.map((sessionID) => ({ sessionID })),
+            unread: {},
+            active: options.active,
+          },
+        },
       }),
     )
   }
@@ -200,6 +207,35 @@ test("loads persisted tab metadata concurrently on connect", async () => {
   }
 })
 
+test("restores the last active tab from home", async () => {
+  const setup = await renderSessionTabs("first", {
+    home: true,
+    persisted: ["first", "second"],
+    active: "second",
+  })
+
+  try {
+    await wait(() => setup.route.data.type === "session" && setup.route.data.sessionID === "second")
+    expect(setup.route.data).toEqual({ type: "session", sessionID: "second" })
+  } finally {
+    await setup.destroy()
+  }
+})
+
+test("restores the last persisted tab when active state is missing", async () => {
+  const setup = await renderSessionTabs("first", {
+    home: true,
+    persisted: ["first", "second"],
+  })
+
+  try {
+    await wait(() => setup.route.data.type === "session" && setup.route.data.sessionID === "second")
+    expect(setup.route.data).toEqual({ type: "session", sessionID: "second" })
+  } finally {
+    await setup.destroy()
+  }
+})
+
 test("loads VCS metadata for each persisted tab location", async () => {
   const other = `${directory}/other-worktree`
   const setup = await renderSessionTabs("first", {
@@ -253,6 +289,7 @@ test("stores session tabs for the current working directory by default", async (
     expect(Object.keys(stored.cwd)).toEqual([directory])
     expect(stored.cwd[directory].tabs.map((tab: { sessionID: string }) => tab.sessionID)).toEqual(["first"])
     expect(stored.cwd[directory].unread).toEqual({})
+    expect(stored.cwd[directory].active).toBe("first")
   } finally {
     await setup.destroy()
   }

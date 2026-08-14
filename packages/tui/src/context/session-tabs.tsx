@@ -31,6 +31,8 @@ import {
 type TabsState = {
   tabs: SessionTab[]
   unread: Record<string, SessionTabUnread>
+  // TEMPORARY: Persist the selected tab only to restore the pane styling reproduction after Drive restarts.
+  active?: string
 }
 
 type PersistedState = {
@@ -106,18 +108,21 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
       const session = data.session.get(sessionID)
       return session?.title ?? persisted ?? fallback ?? (session ? withTimestampedFallback(session) : undefined)
     }
-    const normalize = (value: TabsState) => ({
-      tabs: value.tabs.reduce<SessionTab[]>((tabs, tab) => {
+    const normalize = (value: TabsState) => {
+      const tabs = value.tabs.reduce<SessionTab[]>((tabs, tab) => {
         if (tab.groupID) return openSessionTab(tabs, { ...tab, sessionID: tab.groupID })
         const sessionID = root(tab.sessionID)
         return openSessionTab(tabs, { sessionID, title: title(sessionID, tab.title) })
-      }, []),
-      unread: Object.entries(value.unread).reduce<Record<string, SessionTabUnread>>((result, entry) => {
+      }, [])
+      const unread = Object.entries(value.unread).reduce<Record<string, SessionTabUnread>>((result, entry) => {
         const sessionID = root(entry[0])
         result[sessionID] = result[sessionID] === "error" ? "error" : entry[1]
         return result
-      }, {}),
-    })
+      }, {})
+      const selected = value.active ? value.tabs.find((tab) => tab.sessionID === value.active) : undefined
+      const active = selected ? (selected.groupID ? selected.sessionID : root(selected.sessionID)) : undefined
+      return { tabs, unread, ...(active ? { active } : {}) }
+    }
     const current = () => {
       if (route.data.type === "session") return root(route.data.sessionID)
       if (route.data.type === "workspace") return route.data.groupID
@@ -146,6 +151,17 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
       }
     }
 
+    // TEMPORARY: Remove this startup redirect when the pane styling reproduction no longer needs fixed state.
+    let restored = false
+    createEffect(() => {
+      if (restored || !enabled()) return
+      restored = true
+      if (route.data.type !== "home") return
+      const active = state().active ?? state().tabs.at(-1)?.sessionID
+      if (!active || !state().tabs.some((tab) => tab.sessionID === active)) return
+      navigate(active)
+    })
+
     function markUnread(sessionID: string, unread: SessionTabUnread) {
       if (!enabled() || !focused()) return
       const session = root(sessionID)
@@ -161,6 +177,10 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
       if (!enabled()) return
       if (route.data.type === "workspace") {
         history = recordSessionTabHistory(history, route.data.groupID)
+        if (state().active !== route.data.groupID)
+          update((draft) => {
+            draft.active = route.data.groupID
+          })
         return
       }
       if (route.data.type !== "session" || route.data.sessionID === "dummy") return
@@ -171,12 +191,13 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         sessionID,
         title: title(sessionID, state().tabs.find((tab) => tab.sessionID === sessionID)?.title, fallback),
       })
-      if (tabs === state().tabs) return
+      if (tabs === state().tabs && state().active === sessionID) return
       update((draft) => {
         draft.tabs = openSessionTab(draft.tabs, {
           sessionID,
           title: title(sessionID, draft.tabs.find((tab) => tab.sessionID === sessionID)?.title, fallback),
         })
+        draft.active = sessionID
       })
     })
 
@@ -198,6 +219,7 @@ export const { use: useSessionTabs, provider: SessionTabsProvider } = createSimp
         const next = normalize(draft)
         draft.tabs = next.tabs
         draft.unread = next.unread
+        draft.active = next.tabs.some((tab) => tab.sessionID === next.active) ? next.active : undefined
       })
     })
 
