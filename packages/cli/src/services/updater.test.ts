@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { action, decodePolicy } from "./updater"
+import { action } from "./updater-action"
+import { decodePolicy } from "./updater"
 
 describe("updater", () => {
   test("reads autoupdate from JSONC", () => {
