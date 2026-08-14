@@ -722,7 +722,7 @@ function App(props: { pair?: DialogPairCredentials }) {
       },
       {
         name: "open.menu",
-        title: "Open session or project",
+        title: "Open session or location",
         category: "Session",
         slash: { name: "open", aliases: ["projects", "project"] },
         run: async () => {

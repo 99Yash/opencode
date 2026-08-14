@@ -75,7 +75,7 @@ test("finds and opens an exact session ID outside the recent list", async () => 
   })
 
   try {
-    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and projects"))
+    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and locations"))
     await fixture.app.mockInput.typeText(sessionID)
     await fixture.app.waitForFrame((frame) => frame.includes("TUI plugin slot API v2"))
 
@@ -158,7 +158,7 @@ test("waits for sessions before showing the populated picker", async () => {
 
   try {
     await fixture.app.renderOnce()
-    expect(fixture.app.captureCharFrame()).not.toContain("Search sessions and projects")
+    expect(fixture.app.captureCharFrame()).not.toContain("Search sessions and locations")
 
     resolveSessions(
       json({
@@ -271,6 +271,108 @@ test("option arrows stay in the only visible section", async () => {
     fixture.app.mockInput.pressEnter()
     await fixture.app.waitFor(() => fixture.route.data.type === "home")
     expect(fixture.route.data).toEqual({ type: "home", location: { directory: "/tmp/effect" } })
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+test("search keeps sessions limited to recents", async () => {
+  const fixture = await renderOpen((url) => {
+    if (url.pathname === "/api/project") return json([])
+    if (url.pathname !== "/api/session") return undefined
+    return json({
+      data: Array.from({ length: 9 }, (_, index) => ({
+        id: `ses_${index}`,
+        projectID: `proj_${index}`,
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 10 - index, updated: 10 - index },
+        title: index === 8 ? "Ancient hidden session" : `Recent session ${index}`,
+        location: { directory: `/tmp/location-${index}` },
+      })),
+      cursor: {},
+    })
+  })
+
+  try {
+    await fixture.app.waitForFrame((frame) => frame.includes("Recent sessions"))
+    await fixture.app.mockInput.typeText("Ancient hidden session")
+    await fixture.app.waitForFrame(
+      (frame) => frame.includes("No matches") && frame.split("Ancient hidden session").length === 2,
+    )
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+test("opens worktrees with right and creates a random worktree", async () => {
+  const fixture = await renderOpen((url) => {
+    if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
+    if (url.pathname !== "/api/project") return undefined
+    return json([
+      {
+        id: "proj_test",
+        canonical: "/tmp/opencode",
+        vcs: "git",
+        name: "OpenCode",
+        time: { created: 1, updated: 2 },
+        sandboxes: [],
+      },
+    ])
+  })
+
+  try {
+    await fixture.app.waitForFrame((frame) => frame.includes("OpenCode") && frame.includes("Recent locations"))
+    fixture.app.mockInput.pressArrow("right")
+    await fixture.app.waitForFrame((frame) => frame.includes("Open worktree") && frame.includes("New random worktree"))
+    fixture.app.mockInput.pressEnter()
+    await fixture.app.waitFor(() => fixture.route.data.type === "home")
+    expect(fixture.route.data).toEqual({ type: "home", location: { directory: "/tmp/opencode/created" } })
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+test("opens the folder prompt with slash", async () => {
+  const fixture = await renderOpen((url) => {
+    if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
+    if (url.pathname === "/api/project") return json([])
+    return undefined
+  })
+
+  try {
+    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and locations"))
+    await fixture.app.mockInput.typeText("/")
+    await fixture.app.waitForFrame((frame) => frame.includes("Open folder") && frame.includes("/tmp/opencode/home"))
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+test("hides disposable test projects from recent locations", async () => {
+  const fixture = await renderOpen((url) => {
+    if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
+    if (url.pathname !== "/api/project") return undefined
+    return json([
+      {
+        id: "proj_real",
+        canonical: "/workspace/opencode",
+        name: "OpenCode",
+        time: { created: 1, updated: 2 },
+        sandboxes: [],
+      },
+      {
+        id: "proj_test",
+        canonical: "/tmp/opencode-e2e-project-BX8Aug",
+        time: { created: 1, updated: 3 },
+        sandboxes: [],
+      },
+    ])
+  })
+
+  try {
+    const frame = await fixture.app.waitForFrame((value) => value.includes("OpenCode"))
+    expect(frame).not.toContain("opencode-e2e-project-BX8Aug")
   } finally {
     await fixture.dispose()
   }

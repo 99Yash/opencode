@@ -19,6 +19,7 @@ import { DialogWorkspaceFileChanges } from "./dialog-workspace-file-changes"
 import type { WorktreeListOutput } from "@opencode-ai/client"
 import { useRoute } from "../context/route"
 import { DialogWorktreeName } from "./dialog-worktree-name"
+import { Slug } from "@opencode-ai/core/util/slug"
 
 export type MoveSessionSelection =
   | { type: "directory"; directory: string; subdirectory: boolean }
@@ -27,6 +28,8 @@ type ProjectDirectory = WorktreeListOutput[number]
 
 type DialogMoveSessionProps = {
   projectID: string
+  title?: string
+  randomWorktree?: boolean
   current?: MoveSessionSelection
   onSelect: (selection: MoveSessionSelection) => void
   onCurrentChange?: (selection: MoveSessionSelection) => void
@@ -51,6 +54,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
   const [removing, setRemoving] = createSignal(props.initialRemoving)
   const [replacementCurrent, setReplacementCurrent] = createSignal<string>()
   const [loadError, setLoadError] = createSignal<unknown>()
+  const randomWorktree = Slug.create()
   onMount(() => dialog.setSize("xlarge"))
 
   function reopen(initialRemoving?: string) {
@@ -122,8 +126,6 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
       if (!a.strategy && !b.strategy) return a.directory.length - b.directory.length
       return 0
     })
-    if (roots.length === 0) return []
-
     const subdirectories = sessionData.session
       .list()
       .filter(
@@ -150,7 +152,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
     })
     const titleWidth = Math.max(1, dialogSelectContentWidth(Math.min(dialogWidth("xlarge"), dimensions().width - 2)))
 
-    return list.map((item) => {
+    const options: DialogSelectOption<MoveSessionSelection | undefined>[] = list.map((item) => {
       const title = abbreviateHome(item.location, paths.home)
       const suffix =
         item.location === item.root.directory ? undefined : path.sep + path.relative(item.root.directory, item.location)
@@ -183,6 +185,19 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
         truncateTitle: "left" as const,
       }
     })
+    if (props.randomWorktree) {
+      return [
+        {
+          title: "+ New random worktree",
+          footer: randomWorktree,
+          value: { type: "new", name: randomWorktree },
+          category: "Create",
+          titleWidth,
+        },
+        ...options,
+      ]
+    }
+    return options
   })
 
   const current = createMemo(() => {
@@ -300,11 +315,11 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
   return (
     <box minHeight={showError() ? 5 : fullHeight()}>
       <DialogSelect
-        title="Move session"
+        title={props.title ?? "Move session"}
         titleView={
           <box flexDirection="row" gap={1}>
             <text fg={theme.text.default} attributes={TextAttributes.BOLD}>
-              Move session
+              {props.title ?? "Move session"}
             </text>
             <Show when={working() || directories.loading || loadedProject.loading}>
               <Spinner />
