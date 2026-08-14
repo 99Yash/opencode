@@ -4,9 +4,8 @@ import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin
 import { ToolFailure } from "@opencode-ai/ai"
 import { Duration, Effect, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { Parser } from "htmlparser2"
 import { Permission } from "../../permission.js"
-import { convertHTMLToMarkdown, MAX_MARKDOWN_BYTES } from "../html-markdown.js"
+import { MAX_MARKDOWN_BYTES } from "../html-markdown-limit.js"
 import { collectBoundedResponseBody } from "../http-body.js"
 
 export const name = "webfetch"
@@ -103,11 +102,12 @@ const isTextualMime = (mime: string) =>
   mime.endsWith("+xml") ||
   mime === "application/javascript" ||
   mime === "application/x-javascript"
-const convert = (content: string, contentType: string, format: Format) => {
+const convert = async (content: string, contentType: string, format: Format) => {
   if (!contentType.includes("text/html")) return content
+  if (format === "html") return content
+  const { convertHTMLToMarkdown, extractTextFromHTML } = await import("./webfetch-convert.js")
   if (format === "markdown") return convertHTMLToMarkdown(content)
-  if (format === "text") return extractTextFromHTML(content)
-  return content
+  return extractTextFromHTML(content)
 }
 
 export const Plugin = {
@@ -159,7 +159,7 @@ export const Plugin = {
                 }),
               )
               const content = new TextDecoder().decode(body)
-              const output = yield* Effect.try({
+              const output = yield* Effect.tryPromise({
                 try: () => convert(content, contentType, input.format),
                 catch: (error) => error,
               })
@@ -176,24 +176,3 @@ export const Plugin = {
       .pipe(Effect.orDie)
   }),
 }
-
-export function extractTextFromHTML(html: string) {
-  let text = ""
-  let skipDepth = 0
-  const parser = new Parser({
-    onopentag(name) {
-      if (skipDepth > 0 || ["script", "style", "noscript", "iframe", "object", "embed"].includes(name)) skipDepth++
-    },
-    ontext(input) {
-      if (skipDepth === 0) text += input
-    },
-    onclosetag() {
-      if (skipDepth > 0) skipDepth--
-    },
-  })
-  parser.write(html)
-  parser.end()
-  return text.trim()
-}
-
-export { convertHTMLToMarkdown }

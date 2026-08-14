@@ -1,4 +1,7 @@
 import { Parser } from "htmlparser2"
+import { MAX_MARKDOWN_BYTES } from "./html-markdown-limit.js"
+
+export { MAX_MARKDOWN_BYTES } from "./html-markdown-limit.js"
 
 const omitted = new Set(["script", "style", "noscript", "iframe", "object", "embed", "meta", "link", "template"])
 const blocks = new Set([
@@ -47,7 +50,6 @@ type Frame = {
 
 type Chunk = string | { raw: string }
 
-export const MAX_MARKDOWN_BYTES = 5 * 1024 * 1024
 const CONTENT_BYTES = MAX_MARKDOWN_BYTES - 64 * 1024
 
 export function convertHTMLToMarkdown(html: string) {
