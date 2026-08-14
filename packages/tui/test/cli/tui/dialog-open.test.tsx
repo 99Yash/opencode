@@ -75,7 +75,7 @@ test("finds and opens an exact session ID outside the recent list", async () => 
   })
 
   try {
-    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and locations"))
+    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and worktrees"))
     await fixture.app.mockInput.typeText(sessionID)
     await fixture.app.waitForFrame((frame) => frame.includes("TUI plugin slot API v2"))
 
@@ -158,7 +158,7 @@ test("waits for sessions before showing the populated picker", async () => {
 
   try {
     await fixture.app.renderOnce()
-    expect(fixture.app.captureCharFrame()).not.toContain("Search sessions and locations")
+    expect(fixture.app.captureCharFrame()).not.toContain("Search sessions and worktrees")
 
     resolveSessions(
       json({
@@ -322,7 +322,7 @@ test("opens worktrees with right and creates a random worktree", async () => {
   })
 
   try {
-    await fixture.app.waitForFrame((frame) => frame.includes("OpenCode") && frame.includes("Recent locations"))
+    await fixture.app.waitForFrame((frame) => frame.includes("OpenCode") && frame.includes("Recent worktrees"))
     fixture.app.mockInput.pressArrow("right")
     await fixture.app.waitForFrame((frame) => frame.includes("Open worktree") && frame.includes("New random worktree"))
     fixture.app.mockInput.pressEnter()
@@ -341,7 +341,7 @@ test("opens the folder prompt with slash", async () => {
   })
 
   try {
-    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and locations"))
+    await fixture.app.waitForFrame((frame) => frame.includes("Search sessions and worktrees"))
     await fixture.app.mockInput.typeText("/")
     await fixture.app.waitForFrame((frame) => frame.includes("Open folder") && frame.includes("/tmp/opencode/home"))
   } finally {
@@ -373,6 +373,46 @@ test("hides disposable test projects from recent locations", async () => {
   try {
     const frame = await fixture.app.waitForFrame((value) => value.includes("OpenCode"))
     expect(frame).not.toContain("opencode-e2e-project-BX8Aug")
+  } finally {
+    await fixture.dispose()
+  }
+})
+
+test("shows a session checkout as a recent worktree", async () => {
+  const fixture = await renderOpen((url) => {
+    if (url.pathname === "/api/session")
+      return json({
+        data: [
+          {
+            id: "ses_worktree",
+            projectID: "proj_opencode",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 2, updated: 3 },
+            title: "Refine Open screen",
+            location: { directory: "/workspace/worktrees/open-screen" },
+          },
+        ],
+        cursor: {},
+      })
+    if (url.pathname !== "/api/project") return undefined
+    return json([
+      {
+        id: "proj_opencode",
+        canonical: "/workspace/opencode",
+        vcs: "git",
+        name: "OpenCode",
+        time: { created: 1, updated: 2 },
+        sandboxes: [],
+      },
+    ])
+  })
+
+  try {
+    const frame = await fixture.app.waitForFrame(
+      (value) => value.includes("Recent worktrees") && value.includes("OpenCode · open-screen"),
+    )
+    expect(frame).toContain("/workspace/worktrees/open-screen")
   } finally {
     await fixture.dispose()
   }

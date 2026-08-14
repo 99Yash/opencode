@@ -29,6 +29,7 @@ type ProjectDirectory = WorktreeListOutput[number]
 type DialogMoveSessionProps = {
   projectID: string
   title?: string
+  compact?: boolean
   randomWorktree?: boolean
   current?: MoveSessionSelection
   onSelect: (selection: MoveSessionSelection) => void
@@ -55,7 +56,7 @@ export function DialogMoveSession(props: DialogMoveSessionProps) {
   const [replacementCurrent, setReplacementCurrent] = createSignal<string>()
   const [loadError, setLoadError] = createSignal<unknown>()
   const randomWorktree = Slug.create()
-  onMount(() => dialog.setSize("xlarge"))
+  onMount(() => dialog.setSize(props.compact ? "large" : "xlarge"))
 
   function reopen(initialRemoving?: string) {
     dialog.replace(() => (

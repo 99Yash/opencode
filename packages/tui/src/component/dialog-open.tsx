@@ -123,7 +123,14 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
     const current = location.current
     const locations = new Map<
       string,
-      { directory: string; title: string; updated: number; projectID?: string; vcs?: "git" | "hg" }
+      {
+        directory: string
+        title: string
+        updated: number
+        category: "Recent worktrees" | "Recent folders"
+        projectID?: string
+        vcs?: "git" | "hg"
+      }
     >()
     for (const project of data.project.list()) {
       if (project.canonical === "/" || isDisposableLocation(project.canonical) || locations.has(project.canonical))
@@ -132,13 +139,16 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
         directory: project.canonical,
         title: projectName(project) ?? project.canonical,
         updated: project.time.updated,
+        category: "Recent worktrees",
         projectID: project.id,
         vcs: project.vcs,
       })
     }
     for (const session of sessions()) {
       const project = data.project.get(session.projectID)
-      const directory = project && project.canonical !== "/" ? project.canonical : session.location.directory
+      const managedProject = project && project.canonical !== "/" ? project : undefined
+      const worktree = managedProject && !session.subpath
+      const directory = worktree ? session.location.directory : (managedProject?.canonical ?? session.location.directory)
       if (isDisposableLocation(directory)) continue
       const existing = locations.get(directory)
       if (existing) {
@@ -147,10 +157,14 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
       }
       locations.set(directory, {
         directory,
-        title: projectName(project) ?? (path.basename(directory) || directory),
+        title:
+          worktree && directory !== managedProject.canonical
+            ? [projectName(managedProject), path.basename(directory)].filter(Boolean).join(" · ")
+            : (projectName(project) ?? (path.basename(directory) || directory)),
         updated: session.time.updated,
-        projectID: project?.canonical === "/" ? undefined : project?.id,
-        vcs: project?.vcs,
+        category: managedProject ? "Recent worktrees" : "Recent folders",
+        projectID: managedProject?.id,
+        vcs: managedProject?.vcs,
       })
     }
     const locationOptions = [...locations.values()]
@@ -169,7 +183,7 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
             projectID: item.projectID,
             vcs: item.vcs,
           } as OpenTarget,
-          category: "Recent locations",
+          category: item.category,
           gutter:
             item.directory === current?.directory || item.directory === current?.project.canonical
               ? () => <text fg={theme.text.formfield.selected}>●</text>
@@ -177,7 +191,11 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
         }
       })
 
-    return [...sessionOptions, ...locationOptions]
+    return [
+      ...sessionOptions,
+      ...locationOptions.filter((item) => item.category === "Recent worktrees"),
+      ...locationOptions.filter((item) => item.category === "Recent folders"),
+    ]
   })
 
   function openLocation(directory: string) {
@@ -194,6 +212,7 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
       <DialogMoveSession
         projectID={projectID}
         title="Open worktree"
+        compact={true}
         randomWorktree={true}
         onSelect={(selection) => {
           if (selection.type === "directory") {
@@ -239,7 +258,7 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
   return (
     <DialogSelect
       title="Open"
-      placeholder="Search sessions and locations…"
+      placeholder="Search sessions and worktrees…"
       options={options()}
       current={currentSessionID() ? ({ type: "session", sessionID: currentSessionID()! } as OpenTarget) : undefined}
       focusCurrent={false}
@@ -253,13 +272,13 @@ export function DialogOpen(props: { sessions: SessionInfo[] }) {
       footer={
         <text fg={theme.text.default}>
           enter <span style={{ fg: theme.text.subdued }}>open</span>
-          {"   "}→/tab <span style={{ fg: theme.text.subdued }}>worktrees</span>
+          {"   "}→ <span style={{ fg: theme.text.subdued }}>worktrees</span>
           {"   "}/ <span style={{ fg: theme.text.subdued }}>browse</span>
         </text>
       }
       bindings={[
         {
-          bind: "right,tab",
+          bind: "right",
           title: "Open worktrees",
           group: "Dialog",
           run: () => openWorktrees(selected() ?? options()[0]?.value),
