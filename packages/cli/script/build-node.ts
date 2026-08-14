@@ -65,8 +65,10 @@ const appArchive = await buildAppArchive(Script.channel)
 // text that ships inside the bundle.
 async function assertTextImportsInlined(bundlePath: string) {
   const bundle = await readFile(bundlePath, "utf8")
+  const snapshotMarker = (await readFile("../core/src/models-dev/snapshot.gz.base64.txt", "utf8")).slice(0, 64)
   const markers = [
-    { marker: '"zhipuai"', source: "models-dev snapshot" },
+    { marker: snapshotMarker, source: "compressed models-dev snapshot" },
+    { marker: '"zhipuai"', source: "uncompressed models-dev snapshot", forbidden: true },
     { marker: "/assets/snapshot", source: "models-dev snapshot inlined as asset URL", forbidden: true },
     { marker: '="/assets/', source: "text import inlined as asset URL", forbidden: true },
   ]

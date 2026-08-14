@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNodePlatform } from "@opencode-ai/util/effect/app-node-platform"
@@ -12,6 +12,16 @@ import { Provider } from "@opencode-ai/core/provider"
 import { it } from "./lib/effect"
 
 const cacheKey = "models-dev:catalog"
+
+test("compressed snapshot matches the reviewable source", async () => {
+  const source = await Bun.file(new URL("../src/models-dev/snapshot.txt", import.meta.url)).text()
+  const encoded = await Bun.file(new URL("../src/models-dev/snapshot.gz.base64.txt", import.meta.url)).text()
+  const bytes = Schema.decodeUnknownSync(Schema.Uint8ArrayFromBase64)(encoded)
+  const restored = await new Response(
+    new Blob([Uint8Array.from(bytes)]).stream().pipeThrough(new DecompressionStream("gzip")),
+  ).text()
+  expect(restored).toBe(source)
+})
 
 test("normalizes permissive interleaved values to compatibility", () => {
   expect(Model.compatibility("reasoning_text")).toEqual({ reasoningField: "reasoning_text" })

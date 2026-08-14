@@ -20,5 +20,9 @@ if (typeof parsed !== "object" || parsed === null || Object.keys(parsed).length 
   process.exit(1)
 }
 const target = new URL("../src/models-dev/snapshot.txt", import.meta.url)
-await Bun.write(target, text)
-console.log(`Wrote ${Object.keys(parsed).length} providers (${text.length} bytes) to ${Bun.fileURLToPath(target)}`)
+const compressed = new URL("../src/models-dev/snapshot.gz.base64.txt", import.meta.url)
+const gzip = Bun.gzipSync(text, { level: 9 })
+await Promise.all([Bun.write(target, text), Bun.write(compressed, gzip.toBase64())])
+console.log(
+  `Wrote ${Object.keys(parsed).length} providers (${text.length} bytes, ${gzip.length} bytes gzip) to ${Bun.fileURLToPath(target)}`,
+)

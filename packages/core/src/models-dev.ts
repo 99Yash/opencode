@@ -11,7 +11,7 @@ import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
 import { Model } from "./model.js"
 import { Provider } from "./provider.js"
 import { KV } from "./kv.js"
-import snapshotText from "./models-dev/snapshot.txt" with { type: "text" }
+import snapshotGzip from "./models-dev/snapshot.gz.base64.txt" with { type: "text" }
 
 export const CatalogModelStatus = Schema.Literals(["alpha", "beta", "deprecated"])
 export type CatalogModelStatus = typeof CatalogModelStatus.Type
@@ -544,17 +544,24 @@ const Cache = Schema.Struct({
 })
 const defaultSource = "https://models.opencode.ai"
 
-// Bundled snapshot of https://models.opencode.ai/api.json, committed at
-// packages/core/src/models-dev/snapshot.txt and refreshed via
-// `bun run script/update-models-snapshot.ts`. Decoded and normalized once per
-// isolate: the snapshot is a multi-MB module-level constant and one isolate can
-// host many runtimes (Cloudflare colocates Durable Object instances), so
-// per-runtime decoding would multiply the cost.
+// Bundled snapshot of https://models.opencode.ai/api.json, refreshed via
+// `bun run script/update-models-snapshot.ts`. Decompressed, decoded, and
+// normalized once per isolate: one isolate can host many runtimes (Cloudflare
+// colocates Durable Object instances), so per-runtime work would multiply the
+// cost.
 let bundledCache: readonly Snapshot[] | undefined
 const bundledSnapshot = Effect.suspend(() =>
   bundledCache
     ? Effect.succeed(bundledCache)
-    : decodeCatalog(snapshotText).pipe(
+    : Schema.decodeUnknownEffect(Schema.Uint8ArrayFromBase64)(snapshotGzip).pipe(
+        Effect.flatMap((bytes) =>
+          Effect.promise(() =>
+            new Response(
+              new Blob([Uint8Array.from(bytes)]).stream().pipeThrough(new DecompressionStream("gzip")),
+            ).text(),
+          ),
+        ),
+        Effect.flatMap(decodeCatalog),
         Effect.map((catalog) => {
           bundledCache = normalize(catalog)
           return bundledCache
