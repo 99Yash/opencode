@@ -32,7 +32,7 @@ import { InstructionDiscovery } from "../instruction-discovery.js"
 import { Integration } from "../integration.js"
 import { KV } from "../kv.js"
 import { Location } from "../location.js"
-import { LocationMutation } from "../location-mutation.js"
+import { LocationPath } from "../location-path.js"
 import { ModelsDev } from "../models-dev.js"
 import { Npm } from "@opencode-ai/util/npm"
 import { Permission } from "../permission.js"
@@ -92,7 +92,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
   const integration = yield* Integration.Service
   const kv = yield* KV.Service
   const location = yield* Location.Service
-  const locationMutation = yield* LocationMutation.Service
+  const locationMutation = yield* LocationPath.Service
   const models = yield* ModelsDev.Service
   const npm = yield* Npm.Service
   const permission = yield* Permission.Service
@@ -129,7 +129,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
     Context.make(Integration.Service, integration),
     Context.make(KV.Service, kv),
     Context.make(Location.Service, location),
-    Context.make(LocationMutation.Service, locationMutation),
+    Context.make(LocationPath.Service, locationMutation),
     Context.make(ModelsDev.Service, models),
     Context.make(Npm.Service, npm),
     Context.make(Permission.Service, permission),
@@ -173,7 +173,7 @@ export const requirements = LayerNode.group([
   Integration.node,
   KV.node,
   Location.node,
-  LocationMutation.node,
+  LocationPath.node,
   ModelsDev.node,
   Npm.node,
   Permission.node,
