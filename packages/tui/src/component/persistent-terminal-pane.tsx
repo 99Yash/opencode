@@ -1,9 +1,10 @@
 import { EmbeddedTerminalRenderable } from "@opentui/core"
+import type { ResolvedThemeTokens } from "@opencode-ai/theme/tui"
 import { extend, useRenderer } from "@opentui/solid"
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useClient } from "../context/client"
 import { Keymap } from "../context/keymap"
-import { useTheme } from "../context/theme"
+import { useTheme, useThemes } from "../context/theme"
 import { errorMessage } from "../util/error"
 
 declare module "@opentui/solid" {
@@ -20,10 +21,16 @@ type StreamItem =
   | { type: "resize"; size: TerminalSize; checkpoint?: Uint8Array }
   | { type: "ready" }
 
-export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boolean; onAutoFocus?: () => void }) {
+export function PersistentTerminalPane(props: {
+  ptyID: string
+  autoFocus?: boolean
+  onAutoFocus?: () => void
+  onFocusRequest?: (focus: (() => void) | undefined) => void
+}) {
   const client = useClient()
   const keymap = Keymap.use()
   const theme = useTheme()
+  const themes = useThemes()
   const renderer = useRenderer()
   const [failure, setFailure] = createSignal<string>()
   const attachmentID = crypto.randomUUID()
@@ -40,6 +47,7 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
   let canonicalSize: TerminalSize | undefined
   let terminalSize: TerminalSize | undefined
   let lastIntermediateRender = 0
+  let terminalTheme: Uint8Array | undefined
   let waitingSize: { size: TerminalSize; resolve: () => void } | undefined
 
   const setCanonicalSize = (value: TerminalSize) => {
@@ -47,6 +55,10 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
     if (!terminal) return
     terminal.width = value.cols
     terminal.height = value.rows
+  }
+
+  const applyTerminalTheme = () => {
+    if (terminalTheme) terminal?.write(terminalTheme)
   }
 
   const send = (data: Uint8Array) => {
@@ -90,8 +102,10 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
         setCanonicalSize(item.size)
         if (!sameSize(canonicalSize, terminalSize)) return
         stream.shift()
-        if (item.checkpoint)
+        if (item.checkpoint) {
           terminal.write(Buffer.concat([Buffer.from("\x1bc"), Buffer.from(item.checkpoint)]))
+          applyTerminalTheme()
+        }
         continue
       }
       stream.shift()
@@ -125,11 +139,15 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
     },
     { priority: 100 },
   )
-
   createEffect(() => {
     if (!props.autoFocus || !terminal) return
     terminal.focus()
     props.onAutoFocus?.()
+  })
+
+  createEffect(() => {
+    terminalTheme = terminalPalette(themes.currentTokens(), themes.mode())
+    applyTerminalTheme()
   })
 
   onMount(() => {
@@ -141,6 +159,7 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
     waitingSize?.resolve()
     socket?.close()
     offKeys()
+    props.onFocusRequest?.(undefined)
   })
 
   async function connect() {
@@ -152,6 +171,7 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
     await waitForTerminalSize(snapshot.info.size)
     if (disposed) return
     terminal?.write(Buffer.from(snapshot.checkpoint, "base64"))
+    applyTerminalTheme()
     const token = await client.api["server.persistentPty"].connectToken(
       { ptyID: props.ptyID },
       { headers: { "x-opencode-ticket": "1" } },
@@ -248,6 +268,7 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
       minWidth={0}
       minHeight={0}
       overflow="hidden"
+      backgroundColor={theme.background.default}
       onSizeChange={function () {
         size = { cols: this.width, rows: this.height }
         if (controller && restored) interact()
@@ -255,33 +276,40 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
       // TODO: Revisit when embedded terminal mouse handlers can compose without replacing its internal focus handler.
       onMouseDown={() => interact()}
     >
-      <Show when={!failure()} fallback={<text fg={theme.text.feedback.error.default}>{failure()}</text>}>
-        <embeddedTerminal
+      <Show when={!failure()} fallback={<text fg={theme.text.feedback.error.default}>{failure()}</text>}> 
+        <>
+          <embeddedTerminal
           ref={(value) => {
             terminal = value
-            terminalSize = { cols: 80, rows: 24 }
-            if (canonicalSize) {
-              value.width = canonicalSize.cols
-              value.height = canonicalSize.rows
-            }
-          }}
-          position="absolute"
-          left={0}
-          top={0}
-          width={80}
-          height={24}
-          onData={(data, source) => {
-            if (source === "input") sendInput(data)
-          }}
-          onTerminalResize={(cols, rows) => {
-            terminalSize = { cols, rows }
-            if (waitingSize && sameSize(waitingSize.size, terminalSize)) {
-              waitingSize.resolve()
-              waitingSize = undefined
-            }
-            processStream()
-          }}
-        />
+            props.onFocusRequest?.(() => {
+              value.focus()
+              interact()
+            })
+              terminalSize = { cols: 80, rows: 24 }
+              if (canonicalSize) {
+                value.width = canonicalSize.cols
+                value.height = canonicalSize.rows
+              }
+              applyTerminalTheme()
+            }}
+            position="absolute"
+            left={0}
+            top={0}
+            width={80}
+            height={24}
+            onData={(data, source) => {
+              if (source === "input") sendInput(data)
+            }}
+            onTerminalResize={(cols, rows) => {
+              terminalSize = { cols, rows }
+              if (waitingSize && sameSize(waitingSize.size, terminalSize)) {
+                waitingSize.resolve()
+                waitingSize = undefined
+              }
+              processStream()
+            }}
+          />
+        </>
       </Show>
     </box>
   )
@@ -289,6 +317,46 @@ export function PersistentTerminalPane(props: { ptyID: string; autoFocus?: boole
 
 function sameSize(first: TerminalSize | undefined, second: TerminalSize | undefined) {
   return !!first && !!second && first.cols === second.cols && first.rows === second.rows
+}
+
+function terminalPalette(theme: ResolvedThemeTokens, mode: "dark" | "light") {
+  const base = mode === "dark" ? 500 : 700
+  const bright = mode === "dark" ? 300 : 500
+  const colors = [
+    theme.background.default,
+    theme.text.feedback.error.default,
+    theme.text.feedback.success.default,
+    theme.text.feedback.warning.default,
+    theme.hue.blue[base],
+    theme.hue.purple[base],
+    theme.text.feedback.info.default,
+    theme.text.default,
+    theme.text.subdued,
+    theme.text.feedback.error.subdued,
+    theme.text.feedback.success.subdued,
+    theme.text.feedback.warning.subdued,
+    theme.hue.blue[bright],
+    theme.hue.purple[bright],
+    theme.hue.cyan[bright],
+    theme.hue.neutral[mode === "dark" ? 100 : 900],
+  ]
+  return Buffer.from(
+    colors
+      .map((color, index) => `\x1b]4;${index};${hex(color)}\x1b\\`)
+      .concat(
+        `\x1b]10;${hex(theme.text.default)}\x1b\\`,
+        `\x1b]11;${hex(theme.background.default)}\x1b\\`,
+      )
+      .join(""),
+  )
+}
+
+function hex(color: RGBA) {
+  return `#${color
+    .toInts()
+    .slice(0, 3)
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("")}`
 }
 
 function interactionFrame(size: { cols: number; rows: number }, data?: Uint8Array) {
