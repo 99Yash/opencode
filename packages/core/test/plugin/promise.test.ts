@@ -19,6 +19,7 @@ import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { define } from "@opencode-ai/plugin/promise/plugin"
 import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
+import type { PluginEventType } from "@opencode-ai/plugin/effect/event"
 import { Money } from "@opencode-ai/schema/money"
 import type { SessionHooks } from "@opencode-ai/plugin/effect/session"
 import { testEffect } from "../lib/effect"
@@ -31,7 +32,7 @@ describe("fromPromise", () => {
   it.effect("forwards a selected event type", () =>
     Effect.gen(function* () {
       let selected: string | undefined
-      const subscribe: EffectPlugin.Context["event"]["subscribe"] = (type?) => {
+      const subscribe: EffectPlugin.Context["event"]["subscribe"] = (type?: PluginEventType) => {
         selected = type
         return Stream.empty
       }
