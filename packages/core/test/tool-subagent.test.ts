@@ -8,6 +8,7 @@ import { Global } from "@opencode-ai/util/global"
 import { makeGlobalNode, makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Database } from "@opencode-ai/core/database/database"
 import { Bus } from "@opencode-ai/core/bus"
+import { Catalog } from "@opencode-ai/core/catalog"
 import { Config } from "@opencode-ai/core/config"
 import { Location } from "@opencode-ai/core/location"
 import { Model } from "@opencode-ai/core/model"
@@ -36,6 +37,7 @@ import { executeTool, registerToolPlugin, toolIdentity } from "./lib/tool"
 const childText = "child final response"
 const childModel = Model.Ref.make({ id: Model.ID.make("child"), providerID: Provider.ID.make("test") })
 const parentModel = Model.Ref.make({ id: Model.ID.make("parent"), providerID: Provider.ID.make("test") })
+const fastModel = Model.Ref.make({ id: Model.ID.make("gemini-flash"), providerID: Provider.ID.make("route") })
 const tokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
 
 const outputSessionID = (value: unknown) =>
@@ -100,7 +102,7 @@ const subagentPluginSupervisor = makeLocationNode({
     PluginSupervisor.Service,
     registerToolPlugin(SubagentTool.Plugin).pipe(Effect.as(PluginSupervisor.Service.of({ flush: Effect.void }))),
   ),
-  deps: [Agent.node, Config.node, Permission.node, PluginRuntime.node, Tool.node],
+  deps: [Agent.node, Catalog.node, Config.node, Permission.node, PluginRuntime.node, Tool.node],
 })
 
 const nodes = LayerNode.group([
@@ -139,6 +141,27 @@ const withSubagent = (location: Location.Ref) =>
         })
         draft.update(Agent.ID.make("primary"), (agent) => {
           agent.mode = "primary"
+        })
+      }),
+    ).pipe(Effect.provide(locations.get(location)))
+    yield* Catalog.Service.use((catalog) =>
+      catalog.transform((draft) => {
+        draft.provider.update(fastModel.providerID, (provider) => {
+          provider.activation = "enabled"
+        })
+        draft.model.update(fastModel.providerID, fastModel.id, (model) => {
+          Object.assign(model, Model.Info.default(fastModel.providerID, fastModel.id), {
+            name: "Gemini Flash",
+            family: Model.Family.make("gemini-flash"),
+            time: { released: Date.now() },
+            cost: [
+              {
+                input: Money.USDPerMillionTokens.make(0.1),
+                output: Money.USDPerMillionTokens.make(0.2),
+                cache: { read: Money.USDPerMillionTokens.zero, write: Money.USDPerMillionTokens.zero },
+              },
+            ],
+          })
         })
       }),
     ).pipe(Effect.provide(locations.get(location)))
@@ -320,6 +343,37 @@ describe("SubagentTool", () => {
           })
           const fallbackChild = yield* sessions.get(outputSessionID(fallback.metadata))
           expect(fallbackChild).toMatchObject({ parentID: parent.id, model: parentModel })
+
+          const routed = yield* executeTool(registry, {
+            sessionID: parent.id,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: "call-subagent-routed",
+              name: SubagentTool.name,
+              input: { agent: "reviewer", description: "fast", prompt: "quick check", model: "fast" },
+            },
+          })
+          expect(yield* sessions.get(outputSessionID(routed.metadata))).toMatchObject({
+            parentID: parent.id,
+            model: fastModel,
+          })
+
+          expect(
+            yield* executeTool(registry, {
+              sessionID: parent.id,
+              ...toolIdentity,
+              call: {
+                type: "tool-call",
+                id: "call-subagent-missing-model",
+                name: SubagentTool.name,
+                input: { agent: "reviewer", description: "missing", prompt: "check", model: "missing/model" },
+              },
+            }),
+          ).toEqual({
+            status: "error",
+            error: { type: "tool.execution", message: "No available model matches route: missing/model" },
+          })
         }),
       ),
     ),

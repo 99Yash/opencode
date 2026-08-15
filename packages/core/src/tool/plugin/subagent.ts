@@ -4,7 +4,9 @@ import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
 import { Effect, Schema, Scope } from "effect"
 import { Agent } from "../../agent.js"
+import { Catalog } from "../../catalog.js"
 import { Config } from "../../config.js"
+import { ModelRouting } from "../../model-routing.js"
 import { PluginRuntime } from "../../plugin/runtime.js"
 import { Permission } from "../../permission.js"
 import { SessionSchema } from "../../session/schema.js"
@@ -23,6 +25,10 @@ export const Input = Schema.Struct({
   agent: Schema.String.annotate({ description: "The type of specialized agent to use for this task" }),
   description: Schema.String.annotate({ description: "A short 3-5 word label for the task, displayed to the user" }),
   prompt: Schema.String.annotate({ description: "The task for the subagent to perform" }),
+  model: Schema.optionalKey(Schema.String).annotate({
+    description:
+      'Optional model route. Use "fast" for cheap bounded work, "smart" for difficult reasoning, "vision" for image input, or "long-context" for very large inputs. Pass an exact provider/model ID only when the user requests one. Omit this field to use the agent model or inherit the parent model.',
+  }),
   background: Schema.optionalKey(Schema.Boolean).annotate({
     description:
       "Run the subagent in the background and return immediately. You will be notified when it completes. DO NOT sleep, poll, or proactively check on its progress.",
@@ -47,6 +53,7 @@ export const Plugin = {
   effect: Effect.fn("SubagentTool.Plugin")(function* (ctx: PluginContext) {
     const runtime = yield* PluginRuntime.Service
     const agents = yield* Agent.Service
+    const catalog = yield* Catalog.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
     const scope = yield* Scope.Scope
@@ -163,8 +170,14 @@ export const Plugin = {
                 })
                 .pipe(Effect.mapError((error) => new ToolFailure({ message: `Subagent denied: ${agent.id}`, error })))
 
-              // Model selection is policy/config/session state, not an LLM-facing tool argument.
-              const model = agent.model ?? parent.model
+              const routed = input.model
+                ? ModelRouting.resolve(input.model, yield* catalog.model.available())
+                : undefined
+              if (input.model && !routed)
+                return yield* new ToolFailure({
+                  message: `No available model matches route: ${input.model}`,
+                })
+              const model = routed ?? agent.model ?? parent.model
               const child = yield* runtime.session
                 .create({
                   parentID: context.sessionID,
