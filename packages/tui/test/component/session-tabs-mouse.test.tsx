@@ -43,6 +43,7 @@ test("releasing a transcript selection over tab controls does not activate them"
   try {
     app.renderer.start()
     await app.waitForFrame((frame) => frame.includes("Second"))
+    expect(app.captureCharFrame()).not.toContain("1 First")
     await app.mockMouse.pressDown(5, 1)
     await app.mockMouse.release(40, 0)
     expect(active()).toBe("first")

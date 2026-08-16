@@ -664,7 +664,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                         selectable={false}
                         attributes={selected() ? TextAttributes.BOLD : undefined}
                       >
-                        {sessionTabShortcutLabel(index())}
+                        {config.tabs.numbers ? sessionTabShortcutLabel(index()) : ""}
                       </text>
                       <text
                         width={titleWidth()}
@@ -1145,7 +1145,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                   {" "}
                 </text>
                 <text width={numberWidth()} fg={numberColor()} selectable={false} attributes={bold()}>
-                  {tab === NEW_SESSION_TAB ? "+" : sessionTabShortcutLabel(tabNumber() - 1)}
+                  {tab === NEW_SESSION_TAB ? "+" : config.tabs.numbers ? sessionTabShortcutLabel(tabNumber() - 1) : ""}
                 </text>
                 <text
                   width={availableTitleWidth()}
