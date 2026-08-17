@@ -1,12 +1,16 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Auth } from "@opencode-ai/sdk/v2"
 import { Predicate } from "effect"
-import { foundryProjectEndpoint } from "./schema"
+import { azureResourceName, foundryProjectEndpoint } from "./schema"
 import {
   AZURE_FOUNDRY_SCOPE,
+  AZURE_DISCOVERY_TIMEOUT,
   createAzureAuth,
   deployedModels,
   listAzureDeployments,
+  listAzureResourceDeployments,
+  resolveAzureResourceID,
+  type AzureAccessToken,
   type AzureAuthPluginOptions,
   type AzureRequest,
 } from "./shared"
@@ -51,23 +55,41 @@ export function createAzureCognitiveServicesAuthHooks(options: AzureAuthPluginOp
           .find(Predicate.isString)
         if (!endpoint || !auth) return info.models
 
-        const deployments = await listAzureFoundryProjectDeployments(
+        const deployments = await listAzureFoundryDeployments(
           endpoint,
           auth,
+          shared.credential,
           shared.token,
           shared.request,
-        ).catch(() => new Set<string>())
+          AbortSignal.timeout(AZURE_DISCOVERY_TIMEOUT),
+        ).catch(() => [])
         return deployedModels(info.models, deployments)
       },
     },
   }
 }
 
+async function listAzureFoundryDeployments(
+  endpoint: string,
+  auth: Auth,
+  credential: (scope: string, signal?: AbortSignal) => Promise<AzureAccessToken>,
+  token: (scope: string, signal?: AbortSignal) => Promise<string>,
+  request: AzureRequest,
+  signal: AbortSignal,
+) {
+  const project = listAzureFoundryProjectDeployments(endpoint, auth, token, request, signal).catch(() => [])
+  if (auth.type !== "oauth") return project
+
+  const resource = listAzureFoundryResourceDeployments(endpoint, credential, token, request, signal).catch(() => [])
+  return [...(await project), ...(await resource)]
+}
+
 async function listAzureFoundryProjectDeployments(
   endpoint: string,
   auth: Auth,
-  token: (scope: string) => Promise<string>,
+  token: (scope: string, signal?: AbortSignal) => Promise<string>,
   request: AzureRequest,
+  signal: AbortSignal,
 ) {
   if (auth.type === "api") {
     return listAzureDeployments(
@@ -75,13 +97,28 @@ async function listAzureFoundryProjectDeployments(
       new Headers({ "api-key": auth.key }),
       request,
       (deployment) => deployment.type === "ModelDeployment",
+      signal,
     )
   }
-  if (auth.type !== "oauth") return new Set<string>()
+  if (auth.type !== "oauth") return []
   return listAzureDeployments(
     `${endpoint}/deployments?api-version=v1&deploymentType=ModelDeployment`,
-    new Headers({ authorization: `Bearer ${await token(AZURE_FOUNDRY_SCOPE)}` }),
+    new Headers({ authorization: `Bearer ${await token(AZURE_FOUNDRY_SCOPE, signal)}` }),
     request,
     (deployment) => deployment.type === "ModelDeployment",
+    signal,
   )
+}
+
+async function listAzureFoundryResourceDeployments(
+  endpoint: string,
+  credential: (scope: string, signal?: AbortSignal) => Promise<AzureAccessToken>,
+  token: (scope: string, signal?: AbortSignal) => Promise<string>,
+  request: AzureRequest,
+  signal: AbortSignal,
+) {
+  const resourceName = azureResourceName(endpoint)
+  if (!resourceName) return []
+  const resourceID = await resolveAzureResourceID(resourceName, credential, request, signal)
+  return listAzureResourceDeployments(resourceID, token, request, signal)
 }

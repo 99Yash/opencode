@@ -490,7 +490,7 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
 2. Deploy a model from the Foundry model catalog.
 
    :::note
-   The deployment name must exactly match the OpenCode model ID, for example `gpt-5-mini` or `claude-haiku-4-5`.
+   OpenCode matches exact deployment or Foundry model names to its model catalog; it does not rewrite model IDs. If a deployment cannot be matched automatically, use the exact OpenCode model ID as its deployment name, for example `gpt-5-mini` or `claude-haiku-4-5`.
    :::
 
 3. Run the `/connect` command and search for **Azure Cognitive Services**.

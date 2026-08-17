@@ -119,10 +119,12 @@ describe("plugin.azure", () => {
     const requests: Array<{ url: string; headers: Headers }> = []
     const hooks = createAzureCognitiveServicesAuthHooks({
       request: async (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString()
         requests.push({
-          url: input instanceof Request ? input.url : input.toString(),
+          url,
           headers: new Headers(init?.headers),
         })
+        if (url.startsWith("https://management.azure.com/")) return new Response(null, { status: 403 })
         return Response.json({
           value: [
             { name: "phi-4-mini", type: "ModelDeployment" },
@@ -144,12 +146,82 @@ describe("plugin.azure", () => {
     )
 
     expect(Object.keys(result)).toEqual(["phi-4-mini", "gpt-4.1-mini"])
-    expect(scopes).toEqual(["https://ai.azure.com/.default"])
-    expect(requests).toHaveLength(1)
-    expect(requests[0].url).toBe(
+    expect(new Set(scopes)).toEqual(new Set(["https://ai.azure.com/.default", "https://management.azure.com/.default"]))
+    expect(requests).toHaveLength(2)
+    const projectRequest = requests.find((request) => request.url.includes("/api/projects/"))
+    if (!projectRequest) throw new Error("Foundry project deployments request is missing")
+    expect(projectRequest.url).toBe(
       "https://test-resource.services.ai.azure.com/api/projects/test-project/deployments?api-version=v1&deploymentType=ModelDeployment",
     )
-    expect(requests[0].headers.get("authorization")).toBe("Bearer foundry-token")
+    expect(projectRequest.headers.get("authorization")).toBe("Bearer foundry-token")
+  })
+
+  test("maps exact Foundry ARM model metadata to OpenCode model IDs", async () => {
+    const scopes: string[] = []
+    const requests: string[] = []
+    const hooks = createAzureCognitiveServicesAuthHooks({
+      request: async (input) => {
+        const url = input instanceof Request ? input.url : input.toString()
+        requests.push(url)
+        if (url.includes("/providers/Microsoft.CognitiveServices/accounts?")) {
+          return Response.json({
+            value: [
+              {
+                id: `/subscriptions/${subscriptionID}/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource`,
+                name: "test-resource",
+              },
+            ],
+          })
+        }
+        if (url.startsWith("https://management.azure.com/")) {
+          return Response.json({
+            value: [
+              {
+                name: "production-gpt",
+                properties: {
+                  provisioningState: "Succeeded",
+                  model: { name: "gpt-5-mini", format: "OpenAI" },
+                },
+              },
+              {
+                name: "production-claude",
+                properties: {
+                  provisioningState: "Succeeded",
+                  model: { name: "claude-haiku-4-5", format: "Anthropic" },
+                },
+              },
+              {
+                name: "custom-instruct",
+                properties: {
+                  provisioningState: "Succeeded",
+                  model: { name: "custom-instruct" },
+                },
+              },
+            ],
+          })
+        }
+        return Response.json({
+          value: [{ name: "gpt-5-mini", type: "ModelDeployment", modelName: "gpt-5-mini" }],
+        })
+      },
+      tokenCommand: async (scope) => {
+        scopes.push(scope)
+        return { stdout: tokenOutput(`${scope}-token`), stderr: "", exitCode: 0 }
+      },
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    const result = await list(
+      { ...provider, models: models("gpt-5-mini", "claude-haiku-4-5", "custom") },
+      { auth: oauth },
+    )
+
+    expect(Object.keys(result)).toEqual(["gpt-5-mini", "claude-haiku-4-5"])
+    expect(result["gpt-5-mini"].api.id).toBe("production-gpt")
+    expect(result["claude-haiku-4-5"].api.id).toBe("production-claude")
+    expect(new Set(scopes)).toEqual(new Set(["https://ai.azure.com/.default", "https://management.azure.com/.default"]))
+    expect(requests).toHaveLength(3)
   })
 
   test("lists project deployments with an environment API key without invoking Azure CLI", async () => {
@@ -184,7 +256,7 @@ describe("plugin.azure", () => {
     expect(requests[0].headers.get("authorization")).toBeNull()
   })
 
-  test("lists only succeeded Azure OpenAI deployments when OAuth stores a Resource ID", async () => {
+  test("lists succeeded Azure deployments without changing their deployment IDs", async () => {
     const scopes: string[] = []
     const requests: Array<{ url: string; headers: Headers }> = []
     const hooks = createAzureAuthHooks({
@@ -197,6 +269,13 @@ describe("plugin.azure", () => {
           value: [
             { name: "gpt-5-mini", properties: { provisioningState: "Succeeded" } },
             { name: "gpt-5.6-luna", properties: { provisioningState: "Creating" } },
+            {
+              name: "DeepSeek-V4-Flash",
+              properties: {
+                provisioningState: "Succeeded",
+                model: { name: "DeepSeek-V4-Flash", format: "DeepSeek" },
+              },
+            },
           ],
         })
       },
@@ -209,7 +288,7 @@ describe("plugin.azure", () => {
     if (!list) throw new Error("Azure provider model hook is missing")
 
     const result = await list(
-      { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna", "gpt-5-nano") },
+      { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna", "gpt-5-nano", "deepseek-v4-flash") },
       {
         auth: {
           ...oauth,
@@ -219,7 +298,8 @@ describe("plugin.azure", () => {
       },
     )
 
-    expect(Object.keys(result)).toEqual(["gpt-5-mini"])
+    expect(Object.keys(result)).toEqual(["gpt-5-mini", "deepseek-v4-flash"])
+    expect(result["deepseek-v4-flash"].api.id).toBe("DeepSeek-V4-Flash")
     expect(scopes).toEqual(["https://management.azure.com/.default"])
     expect(requests).toHaveLength(1)
     expect(requests[0].url).toBe(
@@ -277,7 +357,7 @@ describe("plugin.azure", () => {
     ])
   })
 
-  test("explains how to select a subscription when Azure CLI does not return one", async () => {
+  test("keeps the app usable when Azure CLI does not return an active subscription", async () => {
     const hooks = createAzureAuthHooks({
       tokenCommand: async () => ({
         stdout: tokenOutput("management-token", Date.now() + 60 * 60 * 1000, null),
@@ -289,13 +369,11 @@ describe("plugin.azure", () => {
     if (!list) throw new Error("Azure provider model hook is missing")
 
     expect(
-      list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "test-resource" } }),
-    ).rejects.toThrow(
-      "Azure CLI did not return an active subscription. Run `az account set --subscription NAME_OR_ID` and try again.",
-    )
+      await list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "test-resource" } }),
+    ).toEqual({})
   })
 
-  test("does not fall back to the catalog when the Resource Name is absent from the active subscription", async () => {
+  test("keeps the app usable when the Resource Name is absent from the active subscription", async () => {
     const hooks = createAzureAuthHooks({
       request: async () => Response.json({ value: [] }),
       tokenCommand: async () => ({ stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }),
@@ -304,10 +382,35 @@ describe("plugin.azure", () => {
     if (!list) throw new Error("Azure provider model hook is missing")
 
     expect(
-      list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "missing-resource" } }),
-    ).rejects.toThrow(
-      'Azure resource "missing-resource" was not found in the active subscription. Run `az account set --subscription NAME_OR_ID` or reconnect using the full Resource ID.',
-    )
+      await list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "missing-resource" } }),
+    ).toEqual({})
+  })
+
+  test("keeps the app usable when the Resource ID cannot list deployments", async () => {
+    let signal: AbortSignal | null | undefined
+    const hooks = createAzureAuthHooks({
+      request: async (_input, init) => {
+        signal = init?.signal
+        return new Response(null, { status: 404 })
+      },
+      tokenCommand: async () => ({ stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }),
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    expect(
+      await list(
+        { ...provider, models: models("gpt-5-mini") },
+        {
+          auth: {
+            ...oauth,
+            accountId:
+              "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/missing-resource",
+          },
+        },
+      ),
+    ).toEqual({})
+    expect(signal).toBeInstanceOf(AbortSignal)
   })
 
   test("selects the token scope from the request route and strips API key headers", async () => {
