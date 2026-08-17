@@ -414,7 +414,7 @@ If tool calls aren't working well, pick a loaded model with strong tool-calling 
 If you encounter "I'm sorry, but I cannot assist with that request" errors, try changing the content filter from **DefaultV2** to **Default** in your Azure resource.
 :::
 
-1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need the **Resource name**; this becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`). When using Microsoft Entra ID, also copy the full **Resource ID** from the resource's **JSON View**. It contains the subscription, resource group, and resource name that OpenCode needs to list deployments.
+1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need the **Resource name**; this becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`). With Microsoft Entra ID, OpenCode uses the active Azure CLI subscription to find the resource and its deployments automatically. A full **Resource ID** is only needed as an explicit override.
 
    To find the active subscription and tenant:
 
@@ -434,11 +434,10 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    az account set --subscription SUBSCRIPTION_ID
    ```
 
-   Then list the Azure AI resources in that subscription. The output contains the resource name, resource group, and complete Resource ID; you do not need to construct the ID manually.
+   You can list the Azure AI resources in the active subscription to verify the resource name. The output also contains the resource group and complete Resource ID; you do not need to construct the ID manually.
 
    ```bash
    az cognitiveservices account list \
-     --subscription SUBSCRIPTION_ID \
      --query '[].{name:name, resourceGroup:resourceGroup, resourceId:id}' \
      --output json
    ```
@@ -447,7 +446,6 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
 
    ```bash
    az cognitiveservices account deployment list \
-     --subscription SUBSCRIPTION_ID \
      --resource-group RESOURCE_GROUP \
      --name RESOURCE_NAME \
      --query '[].{deployment:name, model:properties.model.name, state:properties.provisioningState}' \
@@ -478,30 +476,36 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    └
    ```
 
-5. Enter the full Resource ID when using Microsoft Entra ID. This lets OpenCode filter `/models` to successful deployments on that resource. A plain resource name remains supported, but cannot be used for deployment discovery. If you chose API key, enter the resource name and API key when prompted.
+5. Enter the Resource name. With Microsoft Entra ID, OpenCode resolves it to a full Resource ID through the active Azure CLI subscription and filters `/models` to successful deployments. You can still enter a full Resource ID to bypass discovery. If you chose API key, enter the resource name and API key when prompted.
 
    ```txt
-   ┌ Enter Azure Resource ID or Resource Name
+   ┌ Enter Azure Resource Name or Resource ID
    │
-   │ /subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME
+   │ RESOURCE_NAME
    └ enter
    ```
 
-6. Optional: set the Resource ID as an environment variable to skip the resource prompt during `/connect`.
+   If OpenCode cannot find the resource, use `az account set --subscription NAME_OR_ID` to select the subscription that owns it and reconnect.
+
+6. Optional: set the Resource name as an environment variable to skip the resource prompt during `/connect`.
 
    ```bash
-   AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME opencode
+   AZURE_RESOURCE_NAME=RESOURCE_NAME opencode
    ```
 
    Or add it to your bash profile:
 
    ```bash title="~/.bash_profile"
-   export AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME
+   export AZURE_RESOURCE_NAME=RESOURCE_NAME
    ```
 
-   `AZURE_RESOURCE_NAME` remains supported when deployment filtering is not required.
+   For CI, cross-subscription setups, or an explicit override, set the complete Resource ID instead:
 
-7. Run the `/models` command to select your deployed model. With Entra ID and a Resource ID, OpenCode retrieves the successful deployments through Azure Resource Manager and hides undeployed catalog entries.
+   ```bash
+   AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME opencode
+   ```
+
+7. Run the `/models` command to select your deployed model. With Entra ID, OpenCode retrieves the successful deployments through Azure Resource Manager and hides undeployed catalog entries.
 
    ```txt
    /models

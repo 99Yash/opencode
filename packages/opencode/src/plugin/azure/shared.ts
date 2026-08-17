@@ -9,11 +9,12 @@ export const AZURE_FOUNDRY_SCOPE = "https://ai.azure.com/.default"
 
 const AZURE_TOKEN_REFRESH_BUFFER = 60_000
 
-const AzureCliToken = Schema.Struct({
+class AzureCliToken extends Schema.Class<AzureCliToken>("AzureCliToken")({
   accessToken: Schema.NonEmptyString,
   expires_on: Schema.optionalKey(Schema.Number),
   expiresOn: Schema.optionalKey(Schema.String),
-})
+  subscription: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isUUID()))),
+}) {}
 const decodeAzureCliToken = Schema.decodeUnknownOption(Schema.fromJsonString(AzureCliToken))
 
 export class AzureDeployment extends Schema.Class<AzureDeployment>("AzureDeployment")({
@@ -51,6 +52,11 @@ type AzureAccountConfig = {
 
 export type AzureRequest = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
+export type AzureAccessToken = {
+  token: string
+  subscription?: string
+}
+
 export type AzureAuthPluginOptions = {
   tokenCommand?: (scope: string) => Promise<AzureCliCommandResult>
   request?: AzureRequest
@@ -58,12 +64,14 @@ export type AzureAuthPluginOptions = {
 
 type AzureAuthState = {
   auth: NonNullable<Hooks["auth"]>
+  credential: (scope: string) => Promise<AzureAccessToken>
   token: (scope: string) => Promise<string>
   request: AzureRequest
 }
 
 export function createAzureAuth(config: AzureAccountConfig, options: AzureAuthPluginOptions = {}): AzureAuthState {
-  const token = azureCliTokenProvider(options.tokenCommand ?? runAzureCliTokenCommand)
+  const credential = azureCliTokenProvider(options.tokenCommand ?? runAzureCliTokenCommand)
+  const token = async (scope: string) => (await credential(scope)).token
   const request = options.request ?? fetch
   const configuredAccount = accountFromEnvironment(config.envs)
   const prompts: NonNullable<Hooks["auth"]>["methods"][number]["prompts"] =
@@ -80,6 +88,7 @@ export function createAzureAuth(config: AzureAccountConfig, options: AzureAuthPl
         ]
 
   return {
+    credential,
     token,
     request,
     auth: {
@@ -178,20 +187,22 @@ function scopeForRequest(input: RequestInfo | URL) {
 }
 
 function azureCliTokenProvider(command: NonNullable<AzureAuthPluginOptions["tokenCommand"]>) {
-  const cached = new Map<string, { token: string; expires: number }>()
-  const pending = new Map<string, Promise<string>>()
+  type CachedToken = AzureAccessToken & { expires: number }
+
+  const cached = new Map<string, CachedToken>()
+  const pending = new Map<string, Promise<CachedToken>>()
 
   return async (scope: string) => {
     const hit = cached.get(scope)
-    if (hit && hit.expires - Date.now() > AZURE_TOKEN_REFRESH_BUFFER) return hit.token
+    if (hit && hit.expires - Date.now() > AZURE_TOKEN_REFRESH_BUFFER) return hit
 
     const existing = pending.get(scope)
     if (existing) return existing
 
     const loading = loadAzureCliToken(command, scope)
-      .then((token) => {
-        cached.set(scope, token)
-        return token.token
+      .then((credential) => {
+        cached.set(scope, credential)
+        return credential
       })
       .finally(() => pending.delete(scope))
     pending.set(scope, loading)
@@ -215,7 +226,11 @@ async function loadAzureCliToken(command: NonNullable<AzureAuthPluginOptions["to
         ? new Date(decoded.value.expiresOn).getTime()
         : Number.NaN
   if (!Number.isFinite(expires)) throw new Error("Azure CLI did not return a valid token expiry")
-  return { token: decoded.value.accessToken, expires }
+  return {
+    token: decoded.value.accessToken,
+    expires,
+    ...(decoded.value.subscription ? { subscription: decoded.value.subscription } : {}),
+  }
 }
 
 async function runAzureCliTokenCommand(scope: string) {

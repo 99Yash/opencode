@@ -22,6 +22,7 @@ const oauth: Auth = {
   expires: Date.now() + 60 * 60 * 1000,
   accountId: "https://test-resource.services.ai.azure.com/api/projects/test-project",
 }
+const subscriptionID = "00000000-1111-4222-8333-444444444444"
 
 const projectEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
 const cognitiveApiKey = process.env.AZURE_COGNITIVE_SERVICES_API_KEY
@@ -60,8 +61,12 @@ function customFetch(options: Record<string, unknown>) {
   }
 }
 
-function tokenOutput(accessToken: string, expires = Date.now() + 60 * 60 * 1000) {
-  return JSON.stringify({ accessToken, expires_on: Math.floor(expires / 1000) })
+function tokenOutput(
+  accessToken: string,
+  expires = Date.now() + 60 * 60 * 1000,
+  subscription: string | null = subscriptionID,
+) {
+  return JSON.stringify({ accessToken, expires_on: Math.floor(expires / 1000), subscription })
 }
 
 function models(...ids: string[]): Provider["models"] {
@@ -223,19 +228,86 @@ describe("plugin.azure", () => {
     expect(requests[0].headers.get("authorization")).toBe("Bearer management-token")
   })
 
-  test("keeps the Azure catalog for legacy Resource Name credentials", async () => {
+  test("resolves a Resource Name in the active subscription before listing deployments", async () => {
+    const scopes: string[] = []
+    const requests: Array<{ url: string; headers: Headers }> = []
     const hooks = createAzureAuthHooks({
-      tokenCommand: async () => {
-        throw new Error("Azure CLI should not be used to list deployments without a Resource ID")
+      request: async (input, init) => {
+        const url = input instanceof Request ? input.url : input.toString()
+        requests.push({ url, headers: new Headers(init?.headers) })
+        if (url.endsWith("/providers/Microsoft.CognitiveServices/accounts?api-version=2024-10-01")) {
+          return Response.json({
+            value: [
+              {
+                id: `/subscriptions/${subscriptionID}/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource`,
+                name: "test-resource",
+              },
+            ],
+          })
+        }
+        return Response.json({
+          value: [
+            { name: "gpt-5-mini", properties: { provisioningState: "Succeeded" } },
+            { name: "gpt-5.6-luna", properties: { provisioningState: "Creating" } },
+          ],
+        })
+      },
+      tokenCommand: async (scope) => {
+        scopes.push(scope)
+        return { stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }
       },
     })
     const list = hooks.provider?.models
     if (!list) throw new Error("Azure provider model hook is missing")
-    const catalog = models("gpt-5-mini", "gpt-5.6-luna")
 
-    const result = await list({ ...provider, models: catalog }, { auth: { ...oauth, accountId: "test-resource" } })
+    const result = await list(
+      { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna") },
+      { auth: { ...oauth, accountId: "test-resource" } },
+    )
 
-    expect(result).toEqual(catalog)
+    expect(Object.keys(result)).toEqual(["gpt-5-mini"])
+    expect(scopes).toEqual(["https://management.azure.com/.default"])
+    expect(requests.map((request) => request.url)).toEqual([
+      `https://management.azure.com/subscriptions/${subscriptionID}/providers/Microsoft.CognitiveServices/accounts?api-version=2024-10-01`,
+      `https://management.azure.com/subscriptions/${subscriptionID}/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource/deployments?api-version=2024-10-01`,
+    ])
+    expect(requests.map((request) => request.headers.get("authorization"))).toEqual([
+      "Bearer management-token",
+      "Bearer management-token",
+    ])
+  })
+
+  test("explains how to select a subscription when Azure CLI does not return one", async () => {
+    const hooks = createAzureAuthHooks({
+      tokenCommand: async () => ({
+        stdout: tokenOutput("management-token", Date.now() + 60 * 60 * 1000, null),
+        stderr: "",
+        exitCode: 0,
+      }),
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    expect(
+      list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "test-resource" } }),
+    ).rejects.toThrow(
+      "Azure CLI did not return an active subscription. Run `az account set --subscription NAME_OR_ID` and try again.",
+    )
+  })
+
+  test("does not fall back to the catalog when the Resource Name is absent from the active subscription", async () => {
+    const hooks = createAzureAuthHooks({
+      request: async () => Response.json({ value: [] }),
+      tokenCommand: async () => ({ stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }),
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    expect(
+      list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "missing-resource" } }),
+    ).rejects.toThrow(
+      'Azure resource "missing-resource" was not found in the active subscription. Run `az account set --subscription NAME_OR_ID` or reconnect using the full Resource ID.',
+    )
   })
 
   test("selects the token scope from the request route and strips API key headers", async () => {
@@ -393,7 +465,9 @@ describe("plugin.azure", () => {
     const prompt = method.prompts?.[0]
     if (!prompt || prompt.type !== "text") throw new Error("Azure Resource ID prompt is missing")
 
-    expect(prompt.validate?.("not/a/resource")).toBe("Enter an Azure Resource ID or a Resource Name like my-models")
+    expect(prompt.validate?.("not/a/resource")).toBe(
+      "Enter an Azure Resource Name like my-models or a full Resource ID",
+    )
     expect(prompt.validate?.("legacy-resource-name")).toBeUndefined()
     const authorization = await method.authorize({
       resourceName:

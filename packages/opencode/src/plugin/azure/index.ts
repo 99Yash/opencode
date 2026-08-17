@@ -1,9 +1,10 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import { Option, Predicate, Schema } from "effect"
+import { Option, Schema } from "effect"
 import {
   createAzureAuth,
   deployedModels,
   listAzureDeployments,
+  type AzureAccessToken,
   type AzureAuthPluginOptions,
   type AzureRequest,
 } from "./shared"
@@ -13,12 +14,22 @@ const AZURE_RESOURCE_MANAGER_SCOPE = "https://management.azure.com/.default"
 const AZURE_RESOURCE_ID_PATTERN =
   /^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[^/]+\/?$/i
 
-const decodeAzureResourceID = Schema.decodeUnknownOption(
-  Schema.NonEmptyString.check(Schema.isPattern(AZURE_RESOURCE_ID_PATTERN)),
-)
+const AzureResourceID = Schema.NonEmptyString.check(Schema.isPattern(AZURE_RESOURCE_ID_PATTERN))
+const decodeAzureResourceID = Schema.decodeUnknownOption(AzureResourceID)
 const decodeAzureResourceName = Schema.decodeUnknownOption(
   Schema.NonEmptyString.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/i)),
 )
+
+class AzureResource extends Schema.Class<AzureResource>("AzureResource")({
+  id: AzureResourceID,
+  name: Schema.NonEmptyString,
+}) {}
+
+const AzureResourcePage = Schema.Struct({
+  value: Schema.Array(AzureResource),
+  nextLink: Schema.optionalKey(Schema.String),
+})
+const decodeAzureResourcePage = Schema.decodeUnknownOption(Schema.fromJsonString(AzureResourcePage))
 
 type AzureAccount = {
   resourceName: string
@@ -35,9 +46,9 @@ export function createAzureAuthHooks(options: AzureAuthPluginOptions = {}): Hook
       provider: "azure",
       envs: [AZURE_RESOURCE_ID_ENV, "AZURE_RESOURCE_NAME"],
       key: "resourceName",
-      message: "Enter Azure Resource ID or Resource Name",
-      placeholder: "/subscriptions/.../resourceGroups/.../providers/Microsoft.CognitiveServices/accounts/my-models",
-      validationMessage: "Enter an Azure Resource ID or a Resource Name like my-models",
+      message: "Enter Azure Resource Name or Resource ID",
+      placeholder: "my-models",
+      validationMessage: "Enter an Azure Resource Name like my-models or a full Resource ID",
       instructions:
         "Sign in with `az login`. Assign the signed-in identity the Cognitive Services OpenAI User role on this resource; Owner or Contributor alone is not sufficient.",
       normalize: azureAccountID,
@@ -51,10 +62,14 @@ export function createAzureAuthHooks(options: AzureAuthPluginOptions = {}): Hook
       id: "azure",
       async models(info, context) {
         if (context.auth?.type !== "oauth") return info.models
-        const resourceID = [process.env[AZURE_RESOURCE_ID_ENV], context.auth.accountId]
-          .map(azureAccount)
-          .find((account) => Predicate.isString(account?.resourceID))?.resourceID
-        if (!resourceID) return info.models
+        const account =
+          azureAccount(process.env[AZURE_RESOURCE_ID_ENV]) ??
+          azureAccount(context.auth.accountId) ??
+          azureAccount(process.env.AZURE_RESOURCE_NAME)
+        if (!account) return info.models
+
+        const resourceID =
+          account.resourceID ?? (await resolveAzureResourceID(account.resourceName, shared.credential, shared.request))
 
         const deployments = await listAzureResourceDeployments(resourceID, shared.token, shared.request).catch(
           () => new Set<string>(),
@@ -81,6 +96,47 @@ function azureAccount(input: unknown): AzureAccount | undefined {
   const resourceName = decodeAzureResourceName(input)
   if (Option.isSome(resourceName)) return { resourceName: resourceName.value }
   return undefined
+}
+
+async function resolveAzureResourceID(
+  resourceName: string,
+  credential: (scope: string) => Promise<AzureAccessToken>,
+  request: AzureRequest,
+) {
+  const access = await credential(AZURE_RESOURCE_MANAGER_SCOPE)
+  if (!access.subscription) {
+    throw new Error(
+      "Azure CLI did not return an active subscription. Run `az account set --subscription NAME_OR_ID` and try again.",
+    )
+  }
+
+  return findAzureResourceID(
+    `https://management.azure.com/subscriptions/${access.subscription}/providers/Microsoft.CognitiveServices/accounts?api-version=2024-10-01`,
+    resourceName,
+    access.token,
+    request,
+  )
+}
+
+async function findAzureResourceID(url: string, resourceName: string, token: string, request: AzureRequest) {
+  const response = await request(url, { headers: { authorization: `Bearer ${token}` } })
+  if (!response.ok) {
+    throw new Error(`Failed to list Azure resources in the active subscription (${response.status})`)
+  }
+
+  const decoded = decodeAzureResourcePage(await response.text())
+  if (Option.isNone(decoded)) throw new Error("Azure returned an invalid resources response")
+  const resource = decoded.value.value.find((item) => item.name.toLowerCase() === resourceName.toLowerCase())
+  if (resource) return resource.id.replace(/\/$/, "")
+  if (decoded.value.nextLink) {
+    const next = new URL(decoded.value.nextLink, url)
+    if (next.origin !== new URL(url).origin) throw new Error("Azure returned an invalid resources page")
+    return findAzureResourceID(next.toString(), resourceName, token, request)
+  }
+
+  throw new Error(
+    `Azure resource "${resourceName}" was not found in the active subscription. Run \`az account set --subscription NAME_OR_ID\` or reconnect using the full Resource ID.`,
+  )
 }
 
 async function listAzureResourceDeployments(
