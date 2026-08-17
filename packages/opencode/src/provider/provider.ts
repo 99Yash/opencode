@@ -838,8 +838,9 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           // and Messages APIs; new OpenAI models reject tools+reasoning_effort on chat completions.
           // The passthrough wrappers inject a CF_TEMP_TOKEN sentinel that the gateway strips before
           // dispatch, so upstream billing stays on the gateway (Unified Billing / stored BYOK).
-          if (modelID.startsWith("openai/")) return aigateway(createOpenAI()(modelID.slice("openai/".length)))
-          if (modelID.startsWith("anthropic/"))
+          const route = cloudflareGatewayRoute(modelID)
+          if (route.type === "openai") return aigateway(createOpenAI()(modelID.slice("openai/".length)))
+          if (route.type === "anthropic")
             return aigateway(createAnthropic()(modelID.slice("anthropic/".length)))
           // Workers AI is the only first-party provider whose upstream is Cloudflare itself, so it is
           // the only one that should receive the Cloudflare token as its upstream Authorization header.
@@ -1222,15 +1223,22 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
   return result
 }
 
-// Cloudflare AI Gateway routes OpenAI and Anthropic models through their native
-// passthrough SDKs (Responses / Messages APIs). Resolving the native npm before
-// variants are computed makes reasoning variants produce payloads the native
-// SDKs understand (e.g. anthropic `effort` instead of compat `reasoningEffort`).
-function cloudflareGatewayNpm(providerID: string, modelID: string) {
-  if (providerID !== "cloudflare-ai-gateway") return undefined
-  if (modelID.startsWith("openai/")) return "@ai-sdk/openai"
-  if (modelID.startsWith("anthropic/")) return "@ai-sdk/anthropic"
-  return undefined
+// Keep runtime prefix routing and transform SDK identity on one decision.
+function cloudflareGatewayRoute(modelID: string) {
+  if (modelID.startsWith("openai/"))
+    return {
+      type: "openai" as const,
+      transformNpm: "@ai-sdk/openai",
+    }
+  if (modelID.startsWith("anthropic/"))
+    return {
+      type: "anthropic" as const,
+      transformNpm: "@ai-sdk/anthropic",
+    }
+  return {
+    type: "unified" as const,
+    transformNpm: undefined,
+  }
 }
 
 function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model): Model {
@@ -1243,7 +1251,7 @@ function fromModelsDevModel(provider: ModelsDev.Provider, model: ModelsDev.Model
       id: model.id,
       url: model.provider?.api ?? provider.api ?? "",
       npm:
-        cloudflareGatewayNpm(provider.id, model.id) ??
+        (provider.id === "cloudflare-ai-gateway" ? cloudflareGatewayRoute(model.id).transformNpm : undefined) ??
         model.provider?.npm ??
         provider.npm ??
         "@ai-sdk/openai-compatible",
@@ -1470,7 +1478,7 @@ const layer = Layer.effect(
               existingModel?.api.npm ??
               // Config-defined gateway models bypass fromModelsDevModel, so resolve the
               // native passthrough npm here before falling back to the catalog default.
-              cloudflareGatewayNpm(providerID, apiID) ??
+              (providerID === "cloudflare-ai-gateway" ? cloudflareGatewayRoute(apiID).transformNpm : undefined) ??
               modelsDev[providerID]?.npm ??
               "@ai-sdk/openai-compatible"
             const name = iife(() => {
