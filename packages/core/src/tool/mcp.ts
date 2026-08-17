@@ -2,12 +2,17 @@ export * as McpTool from "./mcp.js"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
+import { Document } from "@opencode-ai/schema/config"
 import { Context, Effect, Exit, Fiber, type JsonSchema, Layer, Scope, Semaphore, Stream } from "effect"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Bus } from "../bus.js"
 
 import { MCP } from "../mcp/index.js"
+import { Config } from "../config.js"
 import { Permission } from "../permission.js"
+import { Plugin } from "../plugin.js"
+import { McpCodeModePlugin } from "../plugin/mcp-codemode.js"
+import { PluginSupervisor } from "../plugin/supervisor.js"
 import { Tool } from "../tool.js"
 
 /**
@@ -27,6 +32,8 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const mcp = yield* MCP.Service
+    const config = yield* Config.Service
+    const codemode = yield* McpCodeModePlugin.Service
     const tools = yield* Tool.Service
     const bus = yield* Bus.Service
     const permission = yield* Permission.Service
@@ -39,14 +46,23 @@ export const layer = Layer.effect(
     const reconcile = lock.withPermit(
       Effect.gen(function* () {
         const discovered = yield* mcp.tools()
+        const servers = new Map(
+          (yield* config.entries())
+            .filter((entry): entry is Document => entry.type === "document")
+            .flatMap((entry) => Object.entries(entry.info.mcp?.servers ?? {})),
+        )
         const next = yield* Scope.fork(scope)
         yield* tools
           .transform((draft) => {
             for (const tool of discovered) {
               const schema = (tool.inputSchema ?? {}) as JsonSchema.JsonSchema
+              const server = servers.get(tool.server)
               draft.add({
                 name: tool.name,
-                options: { namespace: namespace(tool.server), codemode: tool.codemode !== false },
+                options: {
+                  namespace: namespace(tool.server),
+                  codemode: (tool.codemode ?? (server ? codemode.resolve(server) : undefined)) !== false,
+                },
                 description: tool.description ?? "",
                 input: {
                   ...schema,
@@ -122,7 +138,7 @@ export const layer = Layer.effect(
     )
 
     const initial = yield* reconcile.pipe(Effect.forkScoped)
-    yield* bus.subscribe(McpEvent.ToolsChanged).pipe(
+    yield* bus.subscribe([McpEvent.ToolsChanged, Plugin.Event.Updated]).pipe(
       Stream.runForEach(() => reconcile),
       Effect.forkScoped({ startImmediately: true }),
     )
@@ -133,5 +149,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Tool.node, MCP.node, Bus.node, Permission.node],
+  deps: [Tool.node, MCP.node, McpCodeModePlugin.node, Config.node, Bus.node, Permission.node, PluginSupervisor.node],
 })

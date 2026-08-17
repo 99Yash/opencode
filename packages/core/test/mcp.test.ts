@@ -29,6 +29,8 @@ import { MCP } from "@opencode-ai/core/mcp/index"
 import { MCPClient } from "@opencode-ai/core/mcp/client"
 import { MCPStdio } from "@opencode-ai/core/mcp/stdio"
 import { Permission } from "@opencode-ai/core/permission"
+import { McpCodeModePlugin } from "@opencode-ai/core/plugin/mcp-codemode"
+import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
 import { McpTool } from "@opencode-ai/core/tool/mcp"
@@ -336,12 +338,16 @@ const permissions = Layer.mock(Permission.Service, {
     }),
 })
 const events = Layer.mock(Bus.Service, { subscribe: () => Stream.never })
+const plugins = Layer.succeed(PluginSupervisor.Service, PluginSupervisor.Service.of({ flush: Effect.void }))
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Tool.node, McpTool.node]), [
     [MCP.node, mcp],
+    [McpCodeModePlugin.node, McpCodeModePlugin.layer],
+    [Config.node, Config.testLayer()],
     [Permission.node, permissions],
     [Bus.node, events],
     [Image.node, imagePassthrough],
+    [PluginSupervisor.node, plugins],
   ]),
 )
 
