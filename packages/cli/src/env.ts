@@ -14,6 +14,6 @@ export const password = Config.redacted("OPENCODE_PASSWORD").pipe(
 
 // Whether servers require authentication. Prefer a positive environment
 // variable so deployments can opt out with an explicit `false`.
-export const serverAuth = Config.boolean("OPENCODE_SERVER_AUTH").pipe(Config.withDefault(true))
+export const auth = Config.boolean("OPENCODE_AUTH").pipe(Config.withDefault(true))
 
 export * as Env from "./env"
