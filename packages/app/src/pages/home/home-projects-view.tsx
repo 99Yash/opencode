@@ -86,7 +86,11 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
         <Show
           when={
             props.servers.length === 1 &&
-            !(props.showRecentForServer(props.servers[0]) && props.recentForServer(props.servers[0]).length > 0)
+            !(
+              props.projects.length === 0 &&
+              props.showRecentForServer(props.servers[0]) &&
+              props.recentForServer(props.servers[0]).length > 0
+            )
           }
         >
           <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
@@ -425,16 +429,18 @@ function HomeProjectEmpty(
       <Show when={props.projects.length > 0}>
         <HomeProjectList {...props} server={props.server} items={props.projects} />
       </Show>
-      <HomeProjectNavButton
-        type="button"
-        data-action="home-add-project-row"
-        class="disabled:opacity-60 [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted"
-        disabled={unreachable()}
-        onClick={() => props.onChooseProject(props.server)}
-      >
-        <IconV2 name="folder-add-left" size="small" />
-        <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
-      </HomeProjectNavButton>
+      <Show when={props.projects.length === 0}>
+        <HomeProjectNavButton
+          type="button"
+          data-action="home-add-project-row"
+          class="disabled:opacity-60 [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted"
+          disabled={unreachable()}
+          onClick={() => props.onChooseProject(props.server)}
+        >
+          <IconV2 name="folder-add-left" size="small" />
+          <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
+        </HomeProjectNavButton>
+      </Show>
       <Show when={props.items.length > 0}>
         <div class="group/recent relative mt-3 flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-1">
           <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.recentlyClosed")}</div>
