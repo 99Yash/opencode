@@ -1,5 +1,6 @@
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
+import type { Provider } from "@opencode-ai/sdk/v2"
 import { Schema } from "effect"
 import { OAUTH_DUMMY_KEY } from "../auth"
 
@@ -13,12 +14,35 @@ const AzureCliToken = Schema.Struct({
 })
 const decodeAzureCliToken = Schema.decodeUnknownPromise(AzureCliToken)
 
+const decodeAzureAccounts = Schema.decodeUnknownPromise(
+  Schema.Array(
+    Schema.Struct({
+      name: Schema.NonEmptyString,
+      resourceGroup: Schema.NonEmptyString,
+    }),
+  ),
+)
+
+const decodeAzureDeployments = Schema.decodeUnknownPromise(
+  Schema.Array(
+    Schema.Struct({
+      name: Schema.NonEmptyString,
+      properties: Schema.Struct({
+        model: Schema.Struct({
+          name: Schema.NonEmptyString,
+        }),
+        provisioningState: Schema.NonEmptyString,
+      }),
+    }),
+  ),
+)
+
 type AzureCommand = {
   quiet(): AzureCommand
   json(): Promise<unknown>
 }
 
-type AzureShell = (strings: TemplateStringsArray, scope: string) => AzureCommand
+type AzureShell = (strings: TemplateStringsArray, ...values: string[]) => AzureCommand
 
 export async function AzureAuthPlugin(input: PluginInput): Promise<Hooks> {
   return createAzureAuthHooks(input.$)
@@ -52,6 +76,14 @@ export function createAzureAuthHooks(
   }
 
   return {
+    provider: {
+      id: "azure",
+      async models(provider, context) {
+        if (context.auth?.type !== "oauth") return provider.models
+        if (!context.auth.accountId) return {}
+        return discoverAzureModels(provider.models, context.auth.accountId, shell).catch(() => ({}))
+      },
+    },
     auth: {
       provider: "azure",
       async loader(getAuth) {
@@ -104,6 +136,36 @@ export function createAzureAuthHooks(
       ],
     },
   }
+}
+
+async function discoverAzureModels(models: Provider["models"], resourceName: string, shell: AzureShell) {
+  const accounts = await decodeAzureAccounts(
+    await shell`az cognitiveservices account list --output json --only-show-errors`.quiet().json(),
+  )
+  const account = accounts.find((account) => account.name.toLowerCase() === resourceName.toLowerCase())
+  if (!account) return {}
+
+  const deployments = await decodeAzureDeployments(
+    await shell`az cognitiveservices account deployment list --name ${account.name} --resource-group ${account.resourceGroup} --output json --only-show-errors`
+      .quiet()
+      .json(),
+  )
+  const found = new Map<string, Provider["models"][string]>()
+  deployments.forEach((deployment) => {
+    if (deployment.properties.provisioningState !== "Succeeded") return
+    const modelID = Object.keys(models).find(
+      (modelID) => modelID.toLowerCase() === deployment.properties.model.name.toLowerCase(),
+    )
+    if (!modelID) return
+    found.set(modelID, {
+      ...models[modelID],
+      api: {
+        ...models[modelID].api,
+        id: deployment.name,
+      },
+    })
+  })
+  return Object.fromEntries(found)
 }
 
 function scopeForRequest(input: RequestInfo | URL) {

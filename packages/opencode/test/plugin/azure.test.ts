@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import type { Hooks } from "@opencode-ai/plugin"
-import type { Provider } from "@opencode-ai/sdk"
-import type { Auth } from "@opencode-ai/sdk/v2"
+import type { Auth, Provider } from "@opencode-ai/sdk/v2"
 import { OAUTH_DUMMY_KEY } from "../../src/auth"
 import { createAzureAuthHooks } from "../../src/plugin/azure"
 
@@ -50,15 +49,61 @@ function customFetch(options: Record<string, unknown>) {
   }
 }
 
+function models(...ids: string[]): Provider["models"] {
+  return Object.fromEntries(
+    ids.map((id) => [
+      id,
+      {
+        id,
+        providerID: "azure",
+        name: id,
+        family: "",
+        api: { id, url: "", npm: "@ai-sdk/azure" },
+        status: "active",
+        headers: {},
+        options: {},
+        cost: { input: 0, output: 0, cache: { read: 0, write: 0 } },
+        limit: { context: 0, output: 0 },
+        capabilities: {
+          temperature: true,
+          reasoning: false,
+          attachment: false,
+          toolcall: true,
+          input: { text: true, audio: false, image: false, video: false, pdf: false },
+          output: { text: true, audio: false, image: false, video: false, pdf: false },
+          interleaved: false,
+        },
+        release_date: "",
+        variants: {},
+      },
+    ]),
+  )
+}
+
 function azureShell(scopes: string[]) {
-  return (_strings: TemplateStringsArray, scope: string) => {
-    scopes.push(scope)
+  return (_strings: TemplateStringsArray, ...values: string[]) => {
     const output = {
       quiet: () => output,
-      json: async () => ({
-        accessToken: `${scope}-token`,
-        expires_on: Math.floor((Date.now() + 60 * 60 * 1000) / 1000),
-      }),
+      json: async () => {
+        const scope = values[0]
+        scopes.push(scope)
+        return {
+          accessToken: `${scope}-token`,
+          expires_on: Math.floor((Date.now() + 60 * 60 * 1000) / 1000),
+        }
+      },
+    }
+    return output
+  }
+}
+
+function discoveryShell(accounts: unknown, deployments: unknown, commands: string[]) {
+  return (strings: TemplateStringsArray, ...values: string[]) => {
+    const command = String.raw(strings, ...values)
+    commands.push(command)
+    const output = {
+      quiet: () => output,
+      json: async () => (command.includes("deployment list") ? deployments : accounts),
     }
     return output
   }
@@ -70,7 +115,7 @@ describe("plugin.azure", () => {
     const hooks = createAzureAuthHooks(azureShell([]))
 
     expect(hooks.auth?.provider).toBe("azure")
-    expect(hooks.provider).toBeUndefined()
+    expect(hooks.provider?.id).toBe("azure")
     expect(hooks.auth?.methods.map((method) => [method.type, method.label])).toEqual([
       ["api", "API key"],
       ["oauth", "Microsoft Entra ID (Azure CLI)"],
@@ -105,11 +150,78 @@ describe("plugin.azure", () => {
     expect(scopes).toEqual(["https://cognitiveservices.azure.com/.default"])
   })
 
+  test("discovers deployed models through Azure CLI", async () => {
+    const commands: string[] = []
+    const hooks = createAzureAuthHooks(
+      discoveryShell(
+        [{ name: "test-resource", resourceGroup: "test-group" }],
+        [
+          {
+            name: "gpt-production",
+            properties: { model: { name: "gpt-5-mini" }, provisioningState: "Succeeded" },
+          },
+          {
+            name: "DeepSeek-V4-Flash",
+            properties: { model: { name: "DeepSeek-V4-Flash" }, provisioningState: "Succeeded" },
+          },
+          {
+            name: "phi-production",
+            properties: { model: { name: "Phi-4-mini-instruct" }, provisioningState: "Succeeded" },
+          },
+          {
+            name: "gpt-5-nano",
+            properties: { model: { name: "gpt-5-nano" }, provisioningState: "Creating" },
+          },
+        ],
+        commands,
+      ),
+    )
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    const result = await list(
+      {
+        ...provider,
+        models: models("gpt-5-mini", "deepseek-v4-flash", "phi-4-mini", "phi-4-mini-instruct", "gpt-5-nano"),
+      },
+      { auth: oauth },
+    )
+
+    expect(Object.keys(result)).toEqual(["gpt-5-mini", "deepseek-v4-flash", "phi-4-mini-instruct"])
+    expect(result["gpt-5-mini"].api.id).toBe("gpt-production")
+    expect(result["deepseek-v4-flash"].api.id).toBe("DeepSeek-V4-Flash")
+    expect(result["phi-4-mini-instruct"].api.id).toBe("phi-production")
+    expect(commands).toEqual([
+      "az cognitiveservices account list --output json --only-show-errors",
+      "az cognitiveservices account deployment list --name test-resource --resource-group test-group --output json --only-show-errors",
+    ])
+  })
+
+  test("keeps startup running when Azure discovery fails", async () => {
+    const hooks = createAzureAuthHooks(() => {
+      const output = {
+        quiet: () => output,
+        json: async () => {
+          throw new Error("Azure CLI failed")
+        },
+      }
+      return output
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    expect(await list({ ...provider, models: models("gpt-5-mini") }, { auth: oauth })).toEqual({})
+  })
+
   test("does not change API-key loading", async () => {
     const scopes: string[] = []
     const hooks = createAzureAuthHooks(azureShell(scopes))
+    const catalog = models("gpt-5-mini")
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
 
     expect(await loader(hooks)(async () => ({ type: "api", key: "test-key" }), provider)).toEqual({})
+    expect(await list({ ...provider, models: catalog }, { auth: { type: "api", key: "test-key" } })).toBe(catalog)
     expect(scopes).toEqual([])
   })
 

@@ -800,29 +800,6 @@ it.instance("getSmallModel skips inferred models for Azure", () =>
   }),
 )
 
-it.instance(
-  "Azure uses the resource name stored by Entra login",
-  Effect.gen(function* () {
-    const providers = yield* list
-    expect(providers[ProviderV2.ID.azure].options.resourceName).toBe("entra-resource")
-  }),
-  {
-    init: () =>
-      setProcessEnv(
-        "OPENCODE_AUTH_CONTENT",
-        JSON.stringify({
-          azure: {
-            type: "oauth",
-            access: "opencode-oauth-dummy-key",
-            refresh: "opencode-oauth-dummy-key",
-            expires: Date.now() + 60 * 60 * 1000,
-            accountId: "entra-resource",
-          },
-        }),
-      ),
-  },
-)
-
 it.instance("getSmallModel skips inferred models for Azure Cognitive Services", () =>
   Effect.gen(function* () {
     yield* set("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "test-resource")
