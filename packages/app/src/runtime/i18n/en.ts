@@ -208,6 +208,8 @@ export const dict = {
 
   "provider.disconnect.toast.disconnected.title": "{{provider}} disconnected",
   "provider.disconnect.toast.disconnected.description": "{{provider}} models are no longer available.",
+  "provider.disconnect.toast.noCredentials.description": "No removable credentials found for {{provider}}.",
+  "provider.disconnect.toast.failed.description": "Failed to disconnect {{provider}}.",
 
   "model.tag.free": "Free",
   "model.tag.latest": "Latest",
@@ -678,6 +680,8 @@ export const dict = {
   "session.timeline.notice.finished": "{{actor}} finished",
   "session.timeline.notice.failed": "{{actor}} failed",
   "session.timeline.notice.cancelled": "{{actor}} cancelled",
+  "session.timeline.notice.instructionsUpdated": "Instructions updated: {{sources}}",
+  "session.timeline.notice.restart": "Continuing after restart",
   "session.error.serverConnection": "Can't connect to this server",
   "session.review.filesChanged": "Files Changed {{count}}",
   "session.review.change.one": "Change",
