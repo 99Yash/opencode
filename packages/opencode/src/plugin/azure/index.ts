@@ -1,64 +1,85 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import { azureAccount } from "./schema"
+import type { Auth } from "@opencode-ai/sdk/v2"
+import { Predicate } from "effect"
 import {
-  AZURE_COGNITIVE_SERVICES_SCOPE,
-  AZURE_DISCOVERY_TIMEOUT,
+  AZURE_FOUNDRY_SCOPE,
+  AZURE_FOUNDRY_PROJECT_ENDPOINT_ENV,
+  AZURE_RESOURCE_MANAGER_SCOPE,
+  AZURE_RESOURCE_ID_ENV,
+  AZURE_RESOURCE_NAME_ENV,
   createAzureAuth,
-  deployedModels,
-  listAzureResourceDeployments,
-  resolveAzureResourceID,
   type AzureAuthPluginOptions,
-} from "./shared"
+} from "./auth"
+import { deployedModels, listAzureDeployments, resolveAzureResourceID } from "./discovery"
+import { azureConnection } from "./schema"
 
-const AZURE_RESOURCE_ID_ENV = "AZURE_RESOURCE_ID"
+const AZURE_DISCOVERY_TIMEOUT = 5_000
 
 export async function AzureAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return createAzureAuthHooks()
 }
 
 export function createAzureAuthHooks(options: AzureAuthPluginOptions = {}): Hooks {
-  const shared = createAzureAuth(
-    {
-      provider: "azure",
-      envs: [AZURE_RESOURCE_ID_ENV, "AZURE_RESOURCE_NAME"],
-      scope: AZURE_COGNITIVE_SERVICES_SCOPE,
-      key: "resourceName",
-      message: "Enter Azure Resource Name or Resource ID",
-      placeholder: "my-models",
-      validationMessage: "Enter an Azure Resource Name like my-models or a full Resource ID",
-      instructions:
-        "Sign in with `az login`. Assign the signed-in identity the Cognitive Services OpenAI User role on this resource; Owner or Contributor alone is not sufficient.",
-      normalize(input) {
-        const account = azureAccount(input)
-        return account?.resourceID ?? account?.resourceName
-      },
-    },
-    options,
-  )
+  const azure = createAzureAuth(options)
 
   return {
-    auth: shared.auth,
+    auth: azure.auth,
     provider: {
       id: "azure",
       async models(info, context) {
-        if (context.auth?.type !== "oauth") return info.models
-        const account =
-          azureAccount(process.env[AZURE_RESOURCE_ID_ENV]) ??
-          azureAccount(context.auth.accountId) ??
-          azureAccount(process.env.AZURE_RESOURCE_NAME)
-        if (!account) return info.models
+        const apiKey = process.env.AZURE_API_KEY
+        const auth: Auth | undefined = context.auth ?? (apiKey ? { type: "api", key: apiKey } : undefined)
+        const connection = [
+          auth?.type === "oauth" ? auth.accountId : undefined,
+          auth?.type === "api" ? auth.metadata?.connection : undefined,
+          auth?.type === "api" ? auth.metadata?.resourceID : undefined,
+          auth?.type === "api" ? auth.metadata?.projectEndpoint : undefined,
+          auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+          process.env[AZURE_RESOURCE_ID_ENV],
+          process.env[AZURE_FOUNDRY_PROJECT_ENDPOINT_ENV],
+          process.env[AZURE_RESOURCE_NAME_ENV],
+        ]
+          .map(azureConnection)
+          .find(Predicate.isNotUndefined)
+        if (!connection || !auth) return info.models
 
         const signal = AbortSignal.timeout(AZURE_DISCOVERY_TIMEOUT)
+        if (connection.projectEndpoint) {
+          const headers = new Headers()
+          if (auth.type === "api") headers.set("api-key", auth.key)
+          if (auth.type === "oauth") {
+            const token = await azure.token(AZURE_FOUNDRY_SCOPE, signal).catch(() => undefined)
+            if (!token) return {}
+            headers.set("authorization", `Bearer ${token}`)
+          }
+          if (auth.type !== "api" && auth.type !== "oauth") return info.models
+          const deployments = await listAzureDeployments(
+            `${connection.projectEndpoint}/deployments?api-version=v1&deploymentType=ModelDeployment`,
+            headers,
+            azure.request,
+            (deployment) => deployment.type === "ModelDeployment",
+            signal,
+          ).catch(() => [])
+          return deployedModels(info.models, deployments)
+        }
+        if (auth.type !== "oauth") return info.models
+
         const resourceID =
-          account.resourceID ??
-          (await resolveAzureResourceID(account.resourceName, shared.credential, shared.request, signal).catch(
+          connection.resourceID ??
+          (await resolveAzureResourceID(connection.resourceName, azure.credential, azure.request, signal).catch(
             () => undefined,
           ))
         if (!resourceID) return {}
 
-        const deployments = await listAzureResourceDeployments(resourceID, shared.token, shared.request, signal).catch(
-          () => [],
-        )
+        const token = await azure.token(AZURE_RESOURCE_MANAGER_SCOPE, signal).catch(() => undefined)
+        if (!token) return {}
+        const deployments = await listAzureDeployments(
+          `https://management.azure.com${resourceID}/deployments?api-version=2024-10-01`,
+          new Headers({ authorization: `Bearer ${token}` }),
+          azure.request,
+          (deployment) => deployment.properties?.provisioningState === "Succeeded",
+          signal,
+        ).catch(() => [])
         return deployedModels(info.models, deployments)
       },
     },

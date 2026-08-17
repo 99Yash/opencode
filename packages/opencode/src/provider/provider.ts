@@ -241,26 +241,28 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
     azure: Effect.fnUntraced(function* (provider: Info) {
       const env = yield* dep.env()
       const auth = yield* dep.auth(provider.id)
-      const resource = iife(() => {
-        return [
-          provider.options?.resourceID,
-          provider.options?.resourceName,
-          auth?.type === "api" ? auth.metadata?.resourceID : undefined,
-          auth?.type === "api" ? auth.metadata?.resourceName : undefined,
-          auth?.type === "oauth" ? auth.accountId : undefined,
-          env["AZURE_RESOURCE_ID"],
-          env["AZURE_RESOURCE_NAME"],
-        ]
-          .map(azureResourceName)
-          .find(Predicate.isString)
-      })
+      const resource = [
+        provider.options?.resourceID,
+        provider.options?.projectEndpoint,
+        provider.options?.resourceName,
+        auth?.type === "api" ? auth.metadata?.connection : undefined,
+        auth?.type === "api" ? auth.metadata?.resourceID : undefined,
+        auth?.type === "api" ? auth.metadata?.projectEndpoint : undefined,
+        auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+        auth?.type === "oauth" ? auth.accountId : undefined,
+        env["AZURE_RESOURCE_ID"],
+        env["AZURE_AI_PROJECT_ENDPOINT"],
+        env["AZURE_RESOURCE_NAME"],
+      ]
+        .map(azureResourceName)
+        .find(Predicate.isString)
 
       if (!resource && !provider.options?.baseURL) {
         return {
           autoload: false,
           async getModel() {
             throw new Error(
-              "AZURE_RESOURCE_ID or AZURE_RESOURCE_NAME is missing; set one in the environment or reconnect the Azure provider",
+              "Azure Resource Name, Resource ID, or Foundry Project endpoint is missing; reconnect the Azure provider",
             )
           },
         }
@@ -285,38 +287,16 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       }
     }),
     "azure-cognitive-services": Effect.fnUntraced(function* (provider: Info) {
-      const env = yield* dep.env()
-      const auth = yield* dep.auth(provider.id)
-      const resourceName = [
-        provider.options?.resourceName,
-        auth?.type === "api" ? auth.metadata?.resourceName : undefined,
-        auth?.type === "api" ? auth.metadata?.projectEndpoint : undefined,
-        auth?.type === "oauth" ? auth.accountId : undefined,
-        env["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"],
-        env["AZURE_AI_PROJECT_ENDPOINT"],
-      ]
-        .map(azureResourceName)
-        .find(Predicate.isString)
+      const resourceName = yield* dep.get("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME")
       return {
         autoload: false,
         async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
           return selectAzureLanguageModel(sdk, modelID, Boolean(options?.["useCompletionUrls"]))
         },
         options: {
-          // Used only when a Cognitive model relies on the default @ai-sdk/azure endpoint.
-          azureOpenAICompatibleBaseURL: resourceName
+          baseURL: resourceName
             ? `https://${resourceName}.cognitiveservices.azure.com/openai${provider.options?.useDeploymentBasedUrls ? "" : "/v1"}`
             : undefined,
-        },
-        vars(_options): Record<string, string> {
-          if (resourceName) {
-            return {
-              // Some Cognitive Services catalog entries use the generic Azure placeholder.
-              AZURE_RESOURCE_NAME: resourceName,
-              AZURE_COGNITIVE_SERVICES_RESOURCE_NAME: resourceName,
-            }
-          }
-          return {}
         },
       }
     }),
@@ -1751,27 +1731,14 @@ const layer = Layer.effect(
           delete options.fetch
         }
 
-        if (
-          model.providerID === "azure-cognitive-services" &&
-          model.api.npm === "@ai-sdk/azure" &&
-          !model.api.url &&
-          (!Predicate.isString(options["baseURL"]) || options["baseURL"] === "") &&
-          Predicate.isString(options["azureOpenAICompatibleBaseURL"]) &&
-          options["azureOpenAICompatibleBaseURL"] !== ""
-        ) {
-          // Azure Cognitive Services hosts multiple protocol shapes under one provider.
-          // Only default @ai-sdk/azure models use this Azure OpenAI-compatible URL.
-          options["baseURL"] = options["azureOpenAICompatibleBaseURL"]
-        }
-
         if (model.api.npm.includes("@ai-sdk/openai-compatible") && options["includeUsage"] !== false) {
           options["includeUsage"] = true
         }
 
         const baseURL = iife(() => {
           let url =
-            Predicate.isString(options["baseURL"]) && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
-          if (!url) return undefined
+            typeof options["baseURL"] === "string" && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
+          if (!url) return
 
           const loader = s.varsLoaders[model.providerID]
           if (loader) {
@@ -1790,7 +1757,6 @@ const layer = Layer.effect(
         })
 
         if (baseURL !== undefined) options["baseURL"] = baseURL
-        delete options["azureOpenAICompatibleBaseURL"]
         if (options["apiKey"] === undefined && provider.key) options["apiKey"] = provider.key
         if (model.headers)
           options["headers"] = {

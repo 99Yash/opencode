@@ -11,7 +11,7 @@ const decodeAzureResourceID = Schema.decodeUnknownOption(AzureResourceID)
 const decodeAzureResourceName = Schema.decodeUnknownOption(AzureResourceName)
 const decodeURL = Schema.decodeUnknownOption(Schema.URLFromString)
 
-export function azureAccount(input: unknown) {
+function azureResource(input: unknown) {
   if (!Predicate.isString(input)) return undefined
   const value = input.trim()
   const resourceID = decodeAzureResourceID(value)
@@ -26,9 +26,20 @@ export function azureAccount(input: unknown) {
   return undefined
 }
 
+export function azureConnection(input: unknown) {
+  const resource = azureResource(input)
+  if (resource) return { ...resource, projectEndpoint: undefined }
+
+  const projectEndpoint = foundryProjectEndpoint(input)
+  if (!projectEndpoint) return undefined
+  const resourceName = azureResourceName(projectEndpoint)
+  if (!resourceName) return undefined
+  return { projectEndpoint, resourceID: undefined, resourceName }
+}
+
 export function azureResourceName(input: unknown) {
-  const account = azureAccount(input)
-  if (account) return account.resourceName
+  const resource = azureResource(input)
+  if (resource) return resource.resourceName
 
   const endpoint = decodeURL(input)
   if (Option.isNone(endpoint)) return undefined

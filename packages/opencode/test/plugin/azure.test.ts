@@ -4,11 +4,11 @@ import type { Auth, Provider } from "@opencode-ai/sdk/v2"
 import { Predicate } from "effect"
 import { OAUTH_DUMMY_KEY } from "../../src/auth"
 import { createAzureAuthHooks } from "../../src/plugin/azure"
-import { createAzureCognitiveServicesAuthHooks } from "../../src/plugin/azure/cognitive-services"
+import { azureConnection } from "../../src/plugin/azure/schema"
 
 const provider: Provider = {
-  id: "azure-cognitive-services",
-  name: "Azure Cognitive Services",
+  id: "azure",
+  name: "Azure",
   source: "custom",
   env: [],
   options: {},
@@ -25,21 +25,21 @@ const oauth: Auth = {
 const subscriptionID = "00000000-1111-4222-8333-444444444444"
 
 const projectEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
-const cognitiveApiKey = process.env.AZURE_COGNITIVE_SERVICES_API_KEY
+const azureApiKey = process.env.AZURE_API_KEY
 const resourceID = process.env.AZURE_RESOURCE_ID
 const resourceName = process.env.AZURE_RESOURCE_NAME
 
 beforeEach(() => {
   delete process.env.AZURE_AI_PROJECT_ENDPOINT
-  delete process.env.AZURE_COGNITIVE_SERVICES_API_KEY
+  delete process.env.AZURE_API_KEY
   delete process.env.AZURE_RESOURCE_ID
   delete process.env.AZURE_RESOURCE_NAME
 })
 afterEach(() => {
   if (projectEndpoint === undefined) delete process.env.AZURE_AI_PROJECT_ENDPOINT
   else process.env.AZURE_AI_PROJECT_ENDPOINT = projectEndpoint
-  if (cognitiveApiKey === undefined) delete process.env.AZURE_COGNITIVE_SERVICES_API_KEY
-  else process.env.AZURE_COGNITIVE_SERVICES_API_KEY = cognitiveApiKey
+  if (azureApiKey === undefined) delete process.env.AZURE_API_KEY
+  else process.env.AZURE_API_KEY = azureApiKey
   if (resourceID === undefined) delete process.env.AZURE_RESOURCE_ID
   else process.env.AZURE_RESOURCE_ID = resourceID
   if (resourceName === undefined) delete process.env.AZURE_RESOURCE_NAME
@@ -49,6 +49,17 @@ afterEach(() => {
 function loader(hooks: Hooks) {
   if (!hooks.auth?.loader) throw new Error("Azure auth loader is missing")
   return hooks.auth.loader
+}
+
+function modelHook(hooks: Hooks) {
+  if (!hooks.provider?.models) throw new Error("Azure provider model hook is missing")
+  return hooks.provider.models
+}
+
+function oauthMethod(hooks: Hooks) {
+  const method = hooks.auth?.methods.find((method) => method.type === "oauth")
+  if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
+  return method
 }
 
 function customFetch(options: Record<string, unknown>) {
@@ -113,123 +124,93 @@ function captureRequests() {
 }
 
 describe("plugin.azure", () => {
-  test("lists only models deployed in the Foundry project", async () => {
-    process.env.AZURE_AI_PROJECT_ENDPOINT = "not-a-project-endpoint"
-    const scopes: string[] = []
-    const requests: Array<{ url: string; headers: Headers }> = []
-    const hooks = createAzureCognitiveServicesAuthHooks({
-      request: async (input, init) => {
-        const url = input instanceof Request ? input.url : input.toString()
-        requests.push({
-          url,
-          headers: new Headers(init?.headers),
-        })
-        if (url.startsWith("https://management.azure.com/")) return new Response(null, { status: 403 })
-        return Response.json({
-          value: [
-            { name: "phi-4-mini", type: "ModelDeployment" },
-            { name: "gpt-4.1-mini", type: "ModelDeployment" },
-          ],
-        })
-      },
-      tokenCommand: async (scope) => {
-        scopes.push(scope)
-        return { stdout: tokenOutput("foundry-token"), stderr: "", exitCode: 0 }
-      },
-    })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+  test("exposes one Azure auth surface for API key and Entra ID", () => {
+    const hooks = createAzureAuthHooks()
 
-    const result = await list(
-      { ...provider, models: models("phi-4-mini", "gpt-4.1-mini", "claude-haiku-4-5") },
-      { auth: oauth },
-    )
-
-    expect(Object.keys(result)).toEqual(["phi-4-mini", "gpt-4.1-mini"])
-    expect(new Set(scopes)).toEqual(new Set(["https://ai.azure.com/.default", "https://management.azure.com/.default"]))
-    expect(requests).toHaveLength(2)
-    const projectRequest = requests.find((request) => request.url.includes("/api/projects/"))
-    if (!projectRequest) throw new Error("Foundry project deployments request is missing")
-    expect(projectRequest.url).toBe(
-      "https://test-resource.services.ai.azure.com/api/projects/test-project/deployments?api-version=v1&deploymentType=ModelDeployment",
-    )
-    expect(projectRequest.headers.get("authorization")).toBe("Bearer foundry-token")
+    expect(hooks.auth?.provider).toBe("azure")
+    expect(hooks.auth?.methods.map((method) => [method.type, method.label])).toEqual([
+      ["api", "API key"],
+      ["oauth", "Microsoft Entra ID (Azure CLI)"],
+    ])
+    expect(hooks.provider?.id).toBe("azure")
+    expect(hooks.auth?.methods.map((method) => method.prompts?.[0])).toEqual([
+      expect.objectContaining({ type: "select", key: "connectionType", message: "Select Azure connection type" }),
+      expect.objectContaining({ type: "text", key: "connection", message: "Enter Azure Resource name" }),
+    ])
   })
 
-  test("maps exact Foundry ARM model metadata to OpenCode model IDs", async () => {
+  test("normalizes every supported Azure connection locator", () => {
+    expect(azureConnection("test-resource")).toMatchObject({ resourceName: "test-resource" })
+    expect(
+      azureConnection(
+        "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource/",
+      ),
+    ).toEqual({
+      resourceID:
+        "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
+      resourceName: "test-resource",
+      projectEndpoint: undefined,
+    })
+    expect(azureConnection("https://test-resource.services.ai.azure.com/api/projects/test-project/")).toEqual({
+      projectEndpoint: "https://test-resource.services.ai.azure.com/api/projects/test-project",
+      resourceID: undefined,
+      resourceName: "test-resource",
+    })
+  })
+
+  test("maps exact Foundry project model metadata to OpenCode model IDs", async () => {
     const scopes: string[] = []
     const requests: string[] = []
-    const hooks = createAzureCognitiveServicesAuthHooks({
+    const hooks = createAzureAuthHooks({
       request: async (input) => {
         const url = input instanceof Request ? input.url : input.toString()
         requests.push(url)
-        if (url.includes("/providers/Microsoft.CognitiveServices/accounts?")) {
-          return Response.json({
-            value: [
-              {
-                id: `/subscriptions/${subscriptionID}/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource`,
-                name: "test-resource",
-              },
-            ],
-          })
-        }
-        if (url.startsWith("https://management.azure.com/")) {
+        if (url.includes("/api/projects/")) {
           return Response.json({
             value: [
               {
                 name: "production-gpt",
-                properties: {
-                  provisioningState: "Succeeded",
-                  model: { name: "gpt-5-mini", format: "OpenAI" },
-                },
+                type: "ModelDeployment",
+                modelName: "gpt-5-mini",
               },
               {
-                name: "production-claude",
-                properties: {
-                  provisioningState: "Succeeded",
-                  model: { name: "claude-haiku-4-5", format: "Anthropic" },
-                },
+                name: "production-deepseek",
+                type: "ModelDeployment",
+                modelName: "DeepSeek-V4-Flash",
               },
               {
                 name: "custom-instruct",
-                properties: {
-                  provisioningState: "Succeeded",
-                  model: { name: "custom-instruct" },
-                },
+                type: "ModelDeployment",
+                modelName: "custom-instruct",
               },
             ],
           })
         }
-        return Response.json({
-          value: [{ name: "gpt-5-mini", type: "ModelDeployment", modelName: "gpt-5-mini" }],
-        })
+        throw new Error(`Unexpected request: ${url}`)
       },
       tokenCommand: async (scope) => {
         scopes.push(scope)
         return { stdout: tokenOutput(`${scope}-token`), stderr: "", exitCode: 0 }
       },
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     const result = await list(
-      { ...provider, models: models("gpt-5-mini", "claude-haiku-4-5", "custom") },
+      { ...provider, models: models("gpt-5-mini", "deepseek-v4-flash", "custom") },
       { auth: oauth },
     )
 
-    expect(Object.keys(result)).toEqual(["gpt-5-mini", "claude-haiku-4-5"])
+    expect(Object.keys(result)).toEqual(["gpt-5-mini", "deepseek-v4-flash"])
     expect(result["gpt-5-mini"].api.id).toBe("production-gpt")
-    expect(result["claude-haiku-4-5"].api.id).toBe("production-claude")
-    expect(new Set(scopes)).toEqual(new Set(["https://ai.azure.com/.default", "https://management.azure.com/.default"]))
-    expect(requests).toHaveLength(3)
+    expect(result["deepseek-v4-flash"].api.id).toBe("production-deepseek")
+    expect(scopes).toEqual(["https://ai.azure.com/.default"])
+    expect(requests).toHaveLength(1)
   })
 
-  test("lists project deployments with an environment API key without invoking Azure CLI", async () => {
-    process.env.AZURE_AI_PROJECT_ENDPOINT = "https://test-resource.services.ai.azure.com/api/projects/test-project"
-    process.env.AZURE_COGNITIVE_SERVICES_API_KEY = "project-key"
+  test("lists project deployments with an API key without invoking Azure CLI", async () => {
     let cliCalls = 0
     const requests: Array<{ url: string; headers: Headers }> = []
-    const hooks = createAzureCognitiveServicesAuthHooks({
+    const hooks = createAzureAuthHooks({
       request: async (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -244,16 +225,71 @@ describe("plugin.azure", () => {
         throw new Error("Azure CLI should not be used for API key auth")
       },
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
-    const result = await list({ ...provider, models: models("gpt-5-mini", "claude-haiku-4-5") }, {})
+    const result = await list(
+      { ...provider, models: models("gpt-5-mini", "claude-haiku-4-5") },
+      {
+        auth: {
+          type: "api",
+          key: "project-key",
+          metadata: {
+            connectionType: "projectEndpoint",
+            projectEndpoint: "https://test-resource.services.ai.azure.com/api/projects/test-project",
+          },
+        },
+      },
+    )
+    const legacy = await list(
+      { ...provider, models: models("gpt-5-mini", "claude-haiku-4-5") },
+      {
+        auth: {
+          type: "api",
+          key: "project-key",
+          metadata: {
+            resourceName: "https://test-resource.services.ai.azure.com/api/projects/test-project",
+          },
+        },
+      },
+    )
 
     expect(Object.keys(result)).toEqual(["claude-haiku-4-5"])
+    expect(Object.keys(legacy)).toEqual(["claude-haiku-4-5"])
     expect(cliCalls).toBe(0)
-    expect(requests).toHaveLength(1)
-    expect(requests[0].headers.get("api-key")).toBe("project-key")
-    expect(requests[0].headers.get("authorization")).toBeNull()
+    expect(requests).toHaveLength(2)
+    expect(requests.map((request) => request.headers.get("api-key"))).toEqual(["project-key", "project-key"])
+    expect(requests.map((request) => request.headers.get("authorization"))).toEqual([null, null])
+  })
+
+  test("keeps the app usable when Foundry authentication is unavailable", async () => {
+    const hooks = createAzureAuthHooks({
+      tokenCommand: async () => ({ stdout: "", stderr: "Run `az login`", exitCode: 1 }),
+    })
+    const list = modelHook(hooks)
+
+    expect(await list({ ...provider, models: models("gpt-5-mini") }, { auth: oauth })).toEqual({})
+  })
+
+  test("keeps the app usable when Azure discovery times out", async () => {
+    const hooks = createAzureAuthHooks({
+      request: async () => {
+        throw new DOMException("The operation timed out", "TimeoutError")
+      },
+    })
+    const list = modelHook(hooks)
+
+    expect(
+      await list(
+        { ...provider, models: models("gpt-5-mini") },
+        {
+          auth: {
+            type: "api",
+            key: "project-key",
+            metadata: { connection: oauth.accountId ?? "" },
+          },
+        },
+      ),
+    ).toEqual({})
   })
 
   test("lists succeeded Azure deployments without changing their deployment IDs", async () => {
@@ -284,8 +320,7 @@ describe("plugin.azure", () => {
         return { stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }
       },
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     const result = await list(
       { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna", "gpt-5-nano", "deepseek-v4-flash") },
@@ -337,8 +372,7 @@ describe("plugin.azure", () => {
         return { stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }
       },
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     const result = await list(
       { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna") },
@@ -365,8 +399,7 @@ describe("plugin.azure", () => {
         exitCode: 0,
       }),
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     expect(
       await list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "test-resource" } }),
@@ -378,8 +411,7 @@ describe("plugin.azure", () => {
       request: async () => Response.json({ value: [] }),
       tokenCommand: async () => ({ stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }),
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     expect(
       await list({ ...provider, models: models("gpt-5-mini") }, { auth: { ...oauth, accountId: "missing-resource" } }),
@@ -395,8 +427,7 @@ describe("plugin.azure", () => {
       },
       tokenCommand: async () => ({ stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }),
     })
-    const list = hooks.provider?.models
-    if (!list) throw new Error("Azure provider model hook is missing")
+    const list = modelHook(hooks)
 
     expect(
       await list(
@@ -416,7 +447,7 @@ describe("plugin.azure", () => {
   test("selects the token scope from the request route and strips API key headers", async () => {
     const scopes: string[] = []
     const captured = captureRequests()
-    const hooks = createAzureCognitiveServicesAuthHooks({
+    const hooks = createAzureAuthHooks({
       request: captured.request,
       tokenCommand: async (scope) => {
         scopes.push(scope)
@@ -539,29 +570,27 @@ describe("plugin.azure", () => {
     expect(captured.requests[0].headers.get("authorization")).toBe("Bearer recovered-token")
   })
 
-  test("checks Azure CLI login before storing OAuth metadata", async () => {
+  test("accepts a Foundry project endpoint and checks Azure CLI before storing it", async () => {
     const scopes: string[] = []
-    const hooks = createAzureCognitiveServicesAuthHooks({
+    const hooks = createAzureAuthHooks({
       tokenCommand: async (scope) => {
         scopes.push(scope)
         return { stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }
       },
     })
-    const auth = hooks.auth
-    const method = auth?.methods.find((method) => method.type === "oauth")
-    if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
-    const prompt = method.prompts?.[0]
-    if (!prompt || prompt.type !== "text") throw new Error("Azure Project endpoint prompt is missing")
+    const method = oauthMethod(hooks)
+    const prompt = method.prompts?.find((prompt) => prompt.key === "connection")
+    if (!prompt || prompt.type !== "text") throw new Error("Azure Resource name prompt is missing")
 
-    expect(prompt.validate?.("not-a-project-endpoint")).toBe(
-      "Enter a Project endpoint like https://RESOURCE.services.ai.azure.com/api/projects/PROJECT",
+    expect(prompt.validate?.("not/a/resource")).toBe(
+      "Enter an Azure Resource name, full Resource ID, or Foundry Project endpoint",
     )
     expect(prompt.validate?.("https://connected-resource.services.ai.azure.com/api/projects/connected-project")).toBe(
       undefined,
     )
 
     const authorization = await method.authorize({
-      projectEndpoint: "https://connected-resource.services.ai.azure.com/api/projects/connected-project/",
+      connection: "https://connected-resource.services.ai.azure.com/api/projects/connected-project/",
     })
     if (authorization.method !== "auto") throw new Error("Unexpected Azure authorization method")
     const result = await authorization.callback()
@@ -580,17 +609,15 @@ describe("plugin.azure", () => {
     const hooks = createAzureAuthHooks({
       tokenCommand: async () => ({ stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }),
     })
-    const method = hooks.auth?.methods.find((method) => method.type === "oauth")
-    if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
-    const prompt = method.prompts?.[0]
-    if (!prompt || prompt.type !== "text") throw new Error("Azure Resource ID prompt is missing")
+    const method = oauthMethod(hooks)
+    const prompt = method.prompts?.find((prompt) => prompt.key === "connection")
+    if (!prompt || prompt.type !== "text") throw new Error("Azure Resource name prompt is missing")
 
     expect(prompt.validate?.("not/a/resource")).toBe(
-      "Enter an Azure Resource Name like my-models or a full Resource ID",
+      "Enter an Azure Resource name, full Resource ID, or Foundry Project endpoint",
     )
-    expect(prompt.validate?.("legacy-resource-name")).toBeUndefined()
     const authorization = await method.authorize({
-      resourceName:
+      connection:
         "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource/",
     })
     if (authorization.method !== "auto") throw new Error("Unexpected Azure authorization method")
@@ -608,8 +635,7 @@ describe("plugin.azure", () => {
     const hooks = createAzureAuthHooks({
       tokenCommand: async () => ({ stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }),
     })
-    const method = hooks.auth?.methods.find((method) => method.type === "oauth")
-    if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
+    const method = oauthMethod(hooks)
 
     expect(method.prompts).toEqual([])
     const authorization = await method.authorize()

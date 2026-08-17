@@ -818,6 +818,16 @@ it.instance("getSmallModel skips inferred models for Azure", () =>
   }),
 )
 
+it.instance("Azure is the only built-in Azure auth provider", () =>
+  Effect.gen(function* () {
+    const plugin = yield* Plugin.Service
+    const hooks = yield* plugin.list()
+    const providers = hooks.flatMap((hook) => (hook.auth ? [hook.auth.provider] : []))
+
+    expect(providers.filter((provider) => ["azure", "azure-cognitive-services"].includes(provider))).toEqual(["azure"])
+  }),
+)
+
 it.instance(
   "Azure OpenAI resolves an ARM Resource ID to its resource name",
   Effect.gen(function* () {
@@ -843,54 +853,52 @@ it.instance(
   },
 )
 
-it.instance("getSmallModel skips inferred models for Azure Cognitive Services", () =>
+it.instance("legacy Azure Cognitive Services API-key provider remains available", () =>
   Effect.gen(function* () {
     yield* set("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "test-resource")
     yield* set("AZURE_COGNITIVE_SERVICES_API_KEY", "test-key")
-    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("azure-cognitive-services"))
+    const providerID = ProviderV2.ID.make("azure-cognitive-services")
+    const providers = yield* list
+    const model = yield* Provider.use.getSmallModel(providerID)
+
+    expect(providers[providerID]).toBeDefined()
     expect(model).toBeUndefined()
   }),
 )
 
 it.instance(
-  "Azure Cognitive Services resolves a Foundry project endpoint by model shape",
+  "Azure resolves a Foundry project endpoint by model shape",
   () =>
     Effect.gen(function* () {
       const provider = yield* Provider.Service
 
-      const opus = yield* provider.getModel(
-        ProviderV2.ID.make("azure-cognitive-services"),
-        ModelV2.ID.make("claude-opus-4-5"),
-      )
+      const opus = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("claude-opus-4-5"))
       expect(languageBaseURL(yield* provider.getLanguage(opus))).toBe(
         "https://oauth-resource.services.ai.azure.com/anthropic/v1",
       )
 
-      const kimi = yield* provider.getModel(
-        ProviderV2.ID.make("azure-cognitive-services"),
-        ModelV2.ID.make("kimi-k2.6"),
-      )
+      const kimi = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("kimi-k2.6"))
       expect(languageURL(yield* provider.getLanguage(kimi), "/chat/completions")).toBe(
         "https://oauth-resource.services.ai.azure.com/models/chat/completions",
       )
 
-      const gpt = yield* provider.getModel(ProviderV2.ID.make("azure-cognitive-services"), ModelV2.ID.make("gpt-5.1"))
+      const gpt = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("gpt-5.1"))
       expect(languageURL(yield* provider.getLanguage(gpt), "/responses")).toBe(
-        "https://oauth-resource.cognitiveservices.azure.com/openai/v1/responses",
+        "https://oauth-resource.openai.azure.com/openai/v1/responses?api-version=v1",
       )
     }),
   {
     config: {
       provider: {
-        "azure-cognitive-services": {
+        azure: {
           options: {
-            baseURL: "",
-            resourceName: "https://oauth-resource.services.ai.azure.com/api/projects/oauth-project",
+            apiKey: "test-key",
+            projectEndpoint: "https://oauth-resource.services.ai.azure.com/api/projects/oauth-project",
           },
         },
       },
     },
-    init: () => setProcessEnv("AZURE_COGNITIVE_SERVICES_API_KEY", "test-key"),
+    init: () => setProcessEnv("AZURE_API_KEY", "test-key"),
   },
 )
 
