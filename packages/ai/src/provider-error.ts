@@ -77,7 +77,7 @@ const CONTENT_POLICY_TEXT = /content[-_\s]?policy|content_filter|safety/i
 
 export interface ProviderFailure {
   readonly message: string
-  readonly data?: typeof Schema.Json.Type | undefined
+  readonly data: typeof Schema.Json.Type
   readonly status?: number | undefined
   readonly code?: string | undefined
   readonly retryAfterMs?: number | undefined

@@ -61,6 +61,11 @@ describe("toSessionError", () => {
       ).type,
     ).toBe("provider.no-route")
     expect(toSessionError(llm(new UnknownProviderReason({ message: "unknown" }))).type).toBe("provider.unknown")
+    expect(toSessionError(llm(new InvalidProviderOutputReason({ message: "malformed", raw: "not-json" })))).toEqual({
+      type: "provider.invalid-output",
+      message: "malformed",
+      data: "not-json",
+    })
   })
 
   test("preserves provider error data", () => {
