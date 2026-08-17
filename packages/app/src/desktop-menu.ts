@@ -48,6 +48,7 @@ export type DesktopMenuItem = {
   type: "item"
   labelKey?: DesktopNativeKey
   command?: string
+  dynamic?: "recentProjects"
   action?: DesktopMenuAction
   role?: DesktopMenuRole
   href?: string
@@ -115,7 +116,7 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       {
         type: "item",
         labelKey: "desktop.menu.openRecentProjects",
-        command: "project.openRecent",
+        dynamic: "recentProjects",
       },
       {
         type: "item",
@@ -301,6 +302,16 @@ export const DESKTOP_MENU: DesktopMenu[] = [
     ],
   },
 ]
+
+export type DesktopRecentProject = {
+  command: string
+  label: string
+  server?: string
+}
+
+export function desktopRecentProjectCommand(server: string, directory: string) {
+  return `project.openRecent:${encodeURIComponent(server)}:${encodeURIComponent(directory)}`
+}
 
 export function desktopMenuVisible(item: { platforms?: DesktopMenuPlatform[] }, platform: DesktopMenuPlatform) {
   return !item.platforms || item.platforms.includes(platform)

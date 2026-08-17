@@ -4,6 +4,7 @@ import {
   DESKTOP_MENU,
   desktopMenuVisible,
   type DesktopMenuEntry,
+  type DesktopRecentProject,
   type DesktopMenuRole,
 } from "@opencode-ai/app/desktop-menu"
 
@@ -16,6 +17,7 @@ type Deps = {
   trigger: (id: string) => void
   checkForUpdates: () => void
   relaunch: () => void
+  recentProjects: () => DesktopRecentProject[]
 }
 
 export function createMenu(deps: Deps) {
@@ -42,6 +44,15 @@ function nativeItem(entry: DesktopMenuEntry, deps: Deps): MenuItemConstructorOpt
     label: entry.labelKey ? nativeT(entry.labelKey) : undefined,
     accelerator: entry.accelerator?.macos,
     enabled: entry.enabled === "updater" ? UPDATER_ENABLED : undefined,
+  }
+
+  if (entry.dynamic === "recentProjects") {
+    item.submenu = deps.recentProjects().map((project) => ({
+      label: project.server ? `${project.label} — ${project.server}` : project.label,
+      click: () => deps.trigger(project.command),
+    }))
+    item.enabled = item.submenu.length > 0
+    return item
   }
 
   if (entry.command) {
