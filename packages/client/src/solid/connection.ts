@@ -28,58 +28,6 @@ const connectTimeout = 2_000
 const reconnectDelay = 1_000
 const connectionHistoryLimit = 50
 
-type CurrentDelta = Extract<
-  OpenCodeEvent,
-  { type: "session.text.delta" | "session.reasoning.delta" | "session.tool.input.delta" | "session.compaction.delta" }
->
-
-export function coalesceClientEvents(events: OpenCodeEvent[]) {
-  return events.reduce<OpenCodeEvent[]>((output, event) => {
-    const current = currentDelta(event)
-    const previous = output[output.length - 1]
-    const prior = currentDelta(previous)
-    if (
-      !current ||
-      !prior ||
-      previous?.location?.directory !== event.location?.directory ||
-      currentDeltaKey(prior) !== currentDeltaKey(current)
-    ) {
-      output.push(event)
-      return output
-    }
-    const fragment = currentDeltaFragment(prior) + currentDeltaFragment(current)
-    output[output.length - 1] = {
-      ...current,
-      data:
-        current.type === "session.compaction.delta"
-          ? { ...current.data, text: fragment }
-          : { ...current.data, delta: fragment },
-    } as CurrentDelta
-    return output
-  }, [])
-}
-
-function currentDelta(event: OpenCodeEvent | undefined): CurrentDelta | undefined {
-  if (
-    event?.type === "session.text.delta" ||
-    event?.type === "session.reasoning.delta" ||
-    event?.type === "session.tool.input.delta" ||
-    event?.type === "session.compaction.delta"
-  )
-    return event
-}
-
-function currentDeltaKey(event: CurrentDelta) {
-  if (event.type === "session.tool.input.delta")
-    return `${event.type}:${event.data.sessionID}:${event.data.assistantMessageID}:${event.data.id}`
-  if (event.type === "session.compaction.delta") return `${event.type}:${event.data.sessionID}`
-  return `${event.type}:${event.data.sessionID}:${event.data.assistantMessageID}:${event.data.ordinal}`
-}
-
-function currentDeltaFragment(event: CurrentDelta) {
-  return event.type === "session.compaction.delta" ? event.data.text : event.data.delta
-}
-
 export function createClientConnection(initialApi: OpenCodeClient, options: ClientConnectionOptions) {
   const abort = new AbortController()
   const history: ClientConnectionEvent[] = []
@@ -108,7 +56,7 @@ export function createClientConnection(initialApi: OpenCodeClient, options: Clie
       flushTimer = undefined
       const events = pending
       pending = []
-      batch(() => coalesceClientEvents(events).forEach(options.onEvent))
+      batch(() => events.forEach(options.onEvent))
     }, options.flushInterval ?? 10)
   }
 
