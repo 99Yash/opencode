@@ -884,6 +884,7 @@ it.instance(
       provider: {
         "azure-cognitive-services": {
           options: {
+            baseURL: "",
             resourceName: "https://oauth-resource.services.ai.azure.com/api/projects/oauth-project",
           },
         },

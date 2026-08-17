@@ -344,6 +344,23 @@ describe("plugin.azure", () => {
     expect(captured.requests[0].headers.get("user-agent")).toMatch(/^opencode\//)
   })
 
+  test("does not send Azure OAuth tokens to unsupported endpoints", async () => {
+    const scopes: string[] = []
+    const captured = captureRequests()
+    const hooks = createAzureAuthHooks({
+      request: captured.request,
+      tokenCommand: async (scope) => {
+        scopes.push(scope)
+        return { stdout: tokenOutput("azure-token"), stderr: "", exitCode: 0 }
+      },
+    })
+    const fetch = customFetch(await loader(hooks)(async () => oauth, provider))
+
+    expect(fetch("https://example.com/v1/responses")).rejects.toThrow("Azure OAuth only supports Azure HTTPS endpoints")
+    expect(scopes).toEqual([])
+    expect(captured.requests).toEqual([])
+  })
+
   test("deduplicates concurrent Azure CLI requests and caches the token", async () => {
     const scopes: string[] = []
     const hooks = createAzureAuthHooks({
@@ -447,7 +464,7 @@ describe("plugin.azure", () => {
     const result = await authorization.callback()
 
     expect(authorization.url).toBe("")
-    expect(scopes).toEqual(["https://cognitiveservices.azure.com/.default"])
+    expect(scopes).toEqual(["https://ai.azure.com/.default"])
     expect(result).toMatchObject({
       type: "success",
       access: OAUTH_DUMMY_KEY,
@@ -479,6 +496,24 @@ describe("plugin.azure", () => {
       type: "success",
       accountId:
         "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
+    })
+  })
+
+  test("uses the first valid Azure account environment value", async () => {
+    process.env.AZURE_RESOURCE_ID = "not/a/resource"
+    process.env.AZURE_RESOURCE_NAME = "test-resource"
+    const hooks = createAzureAuthHooks({
+      tokenCommand: async () => ({ stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }),
+    })
+    const method = hooks.auth?.methods.find((method) => method.type === "oauth")
+    if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
+
+    expect(method.prompts).toEqual([])
+    const authorization = await method.authorize()
+    if (authorization.method !== "auto") throw new Error("Unexpected Azure authorization method")
+    expect(await authorization.callback()).toMatchObject({
+      type: "success",
+      accountId: "test-resource",
     })
   })
 })

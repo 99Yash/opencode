@@ -1,6 +1,7 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import type { Auth } from "@opencode-ai/sdk/v2"
-import { Option, Predicate, Schema } from "effect"
+import { Predicate } from "effect"
+import { foundryProjectEndpoint } from "./schema"
 import {
   AZURE_FOUNDRY_SCOPE,
   createAzureAuth,
@@ -12,7 +13,6 @@ import {
 
 const AZURE_COGNITIVE_SERVICES_API_KEY_ENV = "AZURE_COGNITIVE_SERVICES_API_KEY"
 const AZURE_FOUNDRY_PROJECT_ENDPOINT_ENV = "AZURE_AI_PROJECT_ENDPOINT"
-const decodeURL = Schema.decodeUnknownOption(Schema.URLFromString)
 
 export async function AzureCognitiveServicesAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return createAzureCognitiveServicesAuthHooks()
@@ -23,12 +23,13 @@ export function createAzureCognitiveServicesAuthHooks(options: AzureAuthPluginOp
     {
       provider: "azure-cognitive-services",
       envs: [AZURE_FOUNDRY_PROJECT_ENDPOINT_ENV],
+      scope: AZURE_FOUNDRY_SCOPE,
       key: "projectEndpoint",
       message: "Enter Microsoft Foundry Project Endpoint",
       placeholder: "https://my-resource.services.ai.azure.com/api/projects/my-project",
       validationMessage: "Enter a Project endpoint like https://RESOURCE.services.ai.azure.com/api/projects/PROJECT",
       instructions:
-        "Sign in with `az login`. Assign the signed-in identity the Foundry User role on this project; Owner or Contributor alone is not sufficient.",
+        "Sign in with `az login`. Assign the signed-in identity the Foundry User role on this Foundry resource; Owner or Contributor alone is not sufficient.",
       normalize: foundryProjectEndpoint,
     },
     options,
@@ -60,15 +61,6 @@ export function createAzureCognitiveServicesAuthHooks(options: AzureAuthPluginOp
       },
     },
   }
-}
-
-function foundryProjectEndpoint(input: unknown) {
-  const decoded = decodeURL(input)
-  if (Option.isNone(decoded)) return undefined
-  if (decoded.value.protocol !== "https:") return undefined
-  if (!decoded.value.hostname.endsWith(".services.ai.azure.com")) return undefined
-  if (!/^\/api\/projects\/[^/]+\/?$/.test(decoded.value.pathname)) return undefined
-  return `${decoded.value.origin}${decoded.value.pathname.replace(/\/$/, "")}`
 }
 
 async function listAzureFoundryProjectDeployments(

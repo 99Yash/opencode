@@ -1,6 +1,8 @@
 import type { Hooks, PluginInput } from "@opencode-ai/plugin"
 import { Option, Schema } from "effect"
+import { AzureResourceID, azureAccount } from "./schema"
 import {
+  AZURE_COGNITIVE_SERVICES_SCOPE,
   createAzureAuth,
   deployedModels,
   listAzureDeployments,
@@ -11,14 +13,6 @@ import {
 
 const AZURE_RESOURCE_ID_ENV = "AZURE_RESOURCE_ID"
 const AZURE_RESOURCE_MANAGER_SCOPE = "https://management.azure.com/.default"
-const AZURE_RESOURCE_ID_PATTERN =
-  /^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/[^/]+\/?$/i
-
-const AzureResourceID = Schema.NonEmptyString.check(Schema.isPattern(AZURE_RESOURCE_ID_PATTERN))
-const decodeAzureResourceID = Schema.decodeUnknownOption(AzureResourceID)
-const decodeAzureResourceName = Schema.decodeUnknownOption(
-  Schema.NonEmptyString.check(Schema.isPattern(/^[a-z0-9][a-z0-9-]*$/i)),
-)
 
 class AzureResource extends Schema.Class<AzureResource>("AzureResource")({
   id: AzureResourceID,
@@ -31,11 +25,6 @@ const AzureResourcePage = Schema.Struct({
 })
 const decodeAzureResourcePage = Schema.decodeUnknownOption(Schema.fromJsonString(AzureResourcePage))
 
-type AzureAccount = {
-  resourceName: string
-  resourceID?: string
-}
-
 export async function AzureAuthPlugin(_input: PluginInput): Promise<Hooks> {
   return createAzureAuthHooks()
 }
@@ -45,13 +34,17 @@ export function createAzureAuthHooks(options: AzureAuthPluginOptions = {}): Hook
     {
       provider: "azure",
       envs: [AZURE_RESOURCE_ID_ENV, "AZURE_RESOURCE_NAME"],
+      scope: AZURE_COGNITIVE_SERVICES_SCOPE,
       key: "resourceName",
       message: "Enter Azure Resource Name or Resource ID",
       placeholder: "my-models",
       validationMessage: "Enter an Azure Resource Name like my-models or a full Resource ID",
       instructions:
         "Sign in with `az login`. Assign the signed-in identity the Cognitive Services OpenAI User role on this resource; Owner or Contributor alone is not sufficient.",
-      normalize: azureAccountID,
+      normalize(input) {
+        const account = azureAccount(input)
+        return account?.resourceID ?? account?.resourceName
+      },
     },
     options,
   )
@@ -78,24 +71,6 @@ export function createAzureAuthHooks(options: AzureAuthPluginOptions = {}): Hook
       },
     },
   }
-}
-
-function azureAccountID(input: unknown) {
-  const account = azureAccount(input)
-  return account?.resourceID ?? account?.resourceName
-}
-
-function azureAccount(input: unknown): AzureAccount | undefined {
-  const resourceID = decodeAzureResourceID(input)
-  if (Option.isSome(resourceID)) {
-    const value = resourceID.value.replace(/\/$/, "")
-    const resourceName = value.split("/").at(-1)
-    if (resourceName) return { resourceID: value, resourceName }
-  }
-
-  const resourceName = decodeAzureResourceName(input)
-  if (Option.isSome(resourceName)) return { resourceName: resourceName.value }
-  return undefined
 }
 
 async function resolveAzureResourceID(

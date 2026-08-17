@@ -8,6 +8,7 @@ import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Npm } from "@opencode-ai/core/npm"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Plugin } from "../plugin"
+import { azureResourceName } from "../plugin/azure/schema"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
@@ -18,7 +19,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Option, Predicate, Schema, Types } from "effect"
+import { Effect, Layer, Context, Predicate, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -157,28 +158,6 @@ function selectAzureLanguageModel(sdk: any, modelID: string, useChat: boolean) {
   if (sdk.messages) return sdk.messages(modelID)
   if (sdk.chat) return sdk.chat(modelID)
   return sdk.languageModel(modelID)
-}
-
-function azureResourceName(input: unknown) {
-  if (!Predicate.isString(input)) return undefined
-  const value = input.trim()
-  if (value === "") return undefined
-
-  const resourceID =
-    /^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/([^/]+)\/?$/i.exec(
-      value,
-    )
-  if (resourceID) return resourceID[1]
-
-  const endpoint = Schema.decodeUnknownOption(Schema.URLFromString)(value)
-  if (Option.isNone(endpoint)) return /^[a-z0-9-]+$/i.test(value) ? value : undefined
-  if (endpoint.value.hostname.endsWith(".services.ai.azure.com")) {
-    return endpoint.value.hostname.slice(0, -".services.ai.azure.com".length)
-  }
-  if (endpoint.value.hostname.endsWith(".cognitiveservices.azure.com")) {
-    return endpoint.value.hostname.slice(0, -".cognitiveservices.azure.com".length)
-  }
-  return undefined
 }
 
 function selectBedrockMantleLanguageModel(sdk: BundledSDK, modelID: string) {
@@ -1776,7 +1755,7 @@ const layer = Layer.effect(
           model.providerID === "azure-cognitive-services" &&
           model.api.npm === "@ai-sdk/azure" &&
           !model.api.url &&
-          !Predicate.isString(options["baseURL"]) &&
+          (!Predicate.isString(options["baseURL"]) || options["baseURL"] === "") &&
           Predicate.isString(options["azureOpenAICompatibleBaseURL"]) &&
           options["azureOpenAICompatibleBaseURL"] !== ""
         ) {

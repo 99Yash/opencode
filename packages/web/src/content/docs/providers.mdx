@@ -414,45 +414,9 @@ If tool calls aren't working well, pick a loaded model with strong tool-calling 
 If you encounter "I'm sorry, but I cannot assist with that request" errors, try changing the content filter from **DefaultV2** to **Default** in your Azure resource.
 :::
 
-1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need the **Resource name**; this becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`). With Microsoft Entra ID, OpenCode uses the active Azure CLI subscription to find the resource and its deployments automatically. A full **Resource ID** is only needed as an explicit override.
+1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. Copy its **Resource name** and, if you want to use API key authentication, either key from **Keys and Endpoint**.
 
-   To find the active subscription and tenant:
-
-   ```bash
-   az account show \
-     --query '{subscriptionName:name, subscriptionId:id, tenantId:tenantId}' \
-     --output table
-   ```
-
-   If the wrong subscription is active, list the available subscriptions and select one:
-
-   ```bash
-   az account list \
-     --query '[].{name:name, subscriptionId:id, active:isDefault}' \
-     --output table
-
-   az account set --subscription SUBSCRIPTION_ID
-   ```
-
-   You can list the Azure AI resources in the active subscription to verify the resource name. The output also contains the resource group and complete Resource ID; you do not need to construct the ID manually.
-
-   ```bash
-   az cognitiveservices account list \
-     --query '[].{name:name, resourceGroup:resourceGroup, resourceId:id}' \
-     --output json
-   ```
-
-   You can verify the deployments before connecting OpenCode:
-
-   ```bash
-   az cognitiveservices account deployment list \
-     --resource-group RESOURCE_GROUP \
-     --name RESOURCE_NAME \
-     --query '[].{deployment:name, model:properties.model.name, state:properties.provisioningState}' \
-     --output table
-   ```
-
-2. Go to [Azure AI Foundry](https://ai.azure.com/) and deploy a model.
+2. In [Microsoft Foundry](https://ai.azure.com/), deploy a model to the resource.
 
    :::note
    The deployment name must exactly match the OpenCode model ID.
@@ -464,9 +428,9 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    /connect
    ```
 
-4. Choose an auth method.
+4. Choose an authentication method.
    - **API key**: Paste either `KEY 1` or `KEY 2` from your resource.
-   - **Microsoft Entra ID (Azure CLI)**: [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, then assign the signed-in identity the `Cognitive Services OpenAI User` role on the Azure OpenAI resource under **Access control (IAM)**. `Owner` or `Contributor` alone does not grant inference access. Role assignments may take a few minutes to propagate.
+   - **Microsoft Entra ID (Azure CLI)**: [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, then assign the signed-in identity the [`Cognitive Services OpenAI User`](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/role-based-access-control) role on the Azure OpenAI resource. `Owner` or `Contributor` alone does not grant inference access.
 
    ```txt
    ┌ Select auth method
@@ -476,7 +440,7 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    └
    ```
 
-5. Enter the Resource name. With Microsoft Entra ID, OpenCode resolves it to a full Resource ID through the active Azure CLI subscription and filters `/models` to successful deployments. You can still enter a full Resource ID to bypass discovery. If you chose API key, enter the resource name and API key when prompted.
+5. Enter the Resource name. If you chose API key authentication, enter the key when prompted.
 
    ```txt
    ┌ Enter Azure Resource Name or Resource ID
@@ -485,7 +449,13 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    └ enter
    ```
 
-   If OpenCode cannot find the resource, use `az account set --subscription NAME_OR_ID` to select the subscription that owns it and reconnect.
+   With Microsoft Entra ID, OpenCode finds the resource and its deployments in the active Azure CLI subscription. If a different subscription is active, select the correct one and reconnect:
+
+   ```bash
+   az account set --subscription NAME_OR_ID
+   ```
+
+   You can enter the full Resource ID instead when subscription-wide discovery is unavailable.
 
 6. Optional: set the Resource name as an environment variable to skip the resource prompt during `/connect`.
 
@@ -499,13 +469,13 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    export AZURE_RESOURCE_NAME=RESOURCE_NAME
    ```
 
-   For CI, cross-subscription setups, or an explicit override, set the complete Resource ID instead:
+   Or set the complete Resource ID to bypass subscription-wide discovery:
 
    ```bash
    AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME opencode
    ```
 
-7. Run the `/models` command to select your deployed model. With Entra ID, OpenCode retrieves the successful deployments through Azure Resource Manager and hides undeployed catalog entries.
+7. Run the `/models` command to select your deployed model. With Microsoft Entra ID, OpenCode shows only successful deployments from the configured resource.
 
    ```txt
    /models
@@ -515,29 +485,12 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
 
 ### Azure Cognitive Services
 
-1. In [Microsoft Foundry](https://ai.azure.com/), create a **Foundry resource** and a project. Copy the **Project endpoint** from the project's overview page. It looks like `https://RESOURCE_NAME.services.ai.azure.com/api/projects/PROJECT_NAME`.
-
-   If you know the subscription, resource group, and resource name, the Azure CLI can list the projects and their endpoints:
-
-   ```bash
-   az cognitiveservices account project list \
-     --subscription SUBSCRIPTION_ID \
-     --resource-group RESOURCE_GROUP \
-     --name RESOURCE_NAME \
-     --query '[].{project:name, endpoint:properties.endpoints."AI Foundry API"}' \
-     --output table
-   ```
-
-   Use the value in the `Endpoint` column. The subscription and resource discovery commands in the Azure OpenAI section above can be used to find the other values.
+1. In [Microsoft Foundry](https://ai.azure.com/), create a **Foundry resource** and a project. Copy the **Project endpoint** from the project's overview page. It looks like `https://RESOURCE_NAME.services.ai.azure.com/api/projects/PROJECT_NAME`. If you want to use API key authentication, copy the API key shown there too.
 
 2. Deploy a model from the Foundry model catalog.
 
    :::note
    The deployment name must exactly match the OpenCode model ID, for example `gpt-5-mini` or `claude-haiku-4-5`.
-   :::
-
-   :::note
-   Partner models such as Claude require Azure Marketplace consent and may have no default quota for your subscription. If Foundry shows `0` TPM, request quota before creating the deployment.
    :::
 
 3. Run the `/connect` command and search for **Azure Cognitive Services**.
@@ -546,9 +499,9 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    /connect
    ```
 
-4. Choose an auth method.
-   - **API key**: Paste either `KEY 1` or `KEY 2` from your resource.
-   - **Microsoft Entra ID (Azure CLI)**: [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, then assign the signed-in identity the `Foundry User` role on the resource or project under **Access control (IAM)**. `Owner` or `Contributor` alone does not grant inference access. Role assignments may take a few minutes to propagate.
+4. Choose an authentication method.
+   - **API key**: Paste the API key copied with the Project endpoint.
+   - **Microsoft Entra ID (Azure CLI)**: [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, then assign the signed-in identity the [`Foundry User`](https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry) role on the Foundry resource. `Owner` or `Contributor` alone does not grant inference access.
 
    ```txt
    ┌ Select auth method

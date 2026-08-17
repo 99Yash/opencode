@@ -42,6 +42,7 @@ type AzureCliCommandResult = {
 type AzureAccountConfig = {
   provider: "azure" | "azure-cognitive-services"
   envs: ReadonlyArray<string>
+  scope: string
   key: string
   message: string
   placeholder: string
@@ -73,19 +74,18 @@ export function createAzureAuth(config: AzureAccountConfig, options: AzureAuthPl
   const credential = azureCliTokenProvider(options.tokenCommand ?? runAzureCliTokenCommand)
   const token = async (scope: string) => (await credential(scope)).token
   const request = options.request ?? fetch
-  const configuredAccount = accountFromEnvironment(config.envs)
-  const prompts: NonNullable<Hooks["auth"]>["methods"][number]["prompts"] =
-    configuredAccount && config.normalize(configuredAccount)
-      ? []
-      : [
-          {
-            type: "text",
-            key: config.key,
-            message: config.message,
-            placeholder: config.placeholder,
-            validate: (value: string) => (config.normalize(value) ? undefined : config.validationMessage),
-          },
-        ]
+  const configuredAccount = accountFromEnvironment(config)
+  const prompts: NonNullable<Hooks["auth"]>["methods"][number]["prompts"] = configuredAccount
+    ? []
+    : [
+        {
+          type: "text",
+          key: config.key,
+          message: config.message,
+          placeholder: config.placeholder,
+          validate: (value: string) => (config.normalize(value) ? undefined : config.validationMessage),
+        },
+      ]
 
   return {
     credential,
@@ -103,11 +103,14 @@ export function createAzureAuth(config: AzureAccountConfig, options: AzureAuthPl
             const currentAuth = await getAuth()
             if (currentAuth.type !== "oauth") return request(requestInput, init)
 
+            const scope = scopeForRequest(requestInput)
+            if (!scope) throw new Error("Azure OAuth only supports Azure HTTPS endpoints")
+
             const headers = new Headers(requestInput instanceof Request ? requestInput.headers : undefined)
             new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
             headers.delete("api-key")
             headers.delete("x-api-key")
-            headers.set("authorization", `Bearer ${await token(scopeForRequest(requestInput))}`)
+            headers.set("authorization", `Bearer ${await token(scope)}`)
             headers.set("User-Agent", `opencode/${InstallationVersion}`)
             return request(requestInput, { ...init, headers })
           },
@@ -129,11 +132,11 @@ export function createAzureAuth(config: AzureAccountConfig, options: AzureAuthPl
             instructions: config.instructions,
             method: "auto",
             callback: async () => {
-              const account = inputs?.[config.key] || accountFromEnvironment(config.envs)
-              const normalized = config.normalize(account)
+              const account = inputs?.[config.key]
+              const normalized = account ? config.normalize(account) : accountFromEnvironment(config)
               if (!normalized) throw new Error(account ? config.validationMessage : config.message)
 
-              await token(AZURE_COGNITIVE_SERVICES_SCOPE)
+              await token(config.scope)
               return {
                 type: "success",
                 access: OAUTH_DUMMY_KEY,
@@ -173,17 +176,22 @@ export function deployedModels(models: Provider["models"], deployments: Set<stri
   return Object.fromEntries(Object.entries(models).filter(([modelID]) => deployments.has(modelID)))
 }
 
-function accountFromEnvironment(names: ReadonlyArray<string>) {
-  return names.map((name) => process.env[name]).find((value) => Predicate.isString(value) && value !== "")
+function accountFromEnvironment(config: AzureAccountConfig) {
+  return config.envs.map((name) => config.normalize(process.env[name])).find(Predicate.isString)
 }
 
 function scopeForRequest(input: RequestInfo | URL) {
   const url = input instanceof Request ? new URL(input.url) : input instanceof URL ? input : new URL(input)
-  if (!url.hostname.endsWith(".services.ai.azure.com")) return AZURE_COGNITIVE_SERVICES_SCOPE
-
-  // The shared host serves legacy Model Inference and Foundry-native routes with different token audiences.
-  if (url.pathname === "/models" || url.pathname.startsWith("/models/")) return AZURE_COGNITIVE_SERVICES_SCOPE
-  return AZURE_FOUNDRY_SCOPE
+  if (url.protocol !== "https:") return undefined
+  if (url.hostname.endsWith(".services.ai.azure.com")) {
+    if (url.pathname === "/models" || url.pathname.startsWith("/models/")) {
+      return AZURE_COGNITIVE_SERVICES_SCOPE
+    }
+    return AZURE_FOUNDRY_SCOPE
+  }
+  if (url.hostname.endsWith(".cognitiveservices.azure.com")) return AZURE_COGNITIVE_SERVICES_SCOPE
+  if (url.hostname.endsWith(".openai.azure.com")) return AZURE_COGNITIVE_SERVICES_SCOPE
+  return undefined
 }
 
 function azureCliTokenProvider(command: NonNullable<AzureAuthPluginOptions["tokenCommand"]>) {
