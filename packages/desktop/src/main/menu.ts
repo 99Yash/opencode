@@ -47,10 +47,25 @@ function nativeItem(entry: DesktopMenuEntry, deps: Deps): MenuItemConstructorOpt
   }
 
   if (entry.dynamic === "recentProjects") {
-    item.submenu = deps.recentProjects().map((project) => ({
-      label: project.server ? `${project.label} — ${project.server}` : project.label,
-      click: () => deps.trigger(project.command),
-    }))
+    const projects = deps.recentProjects()
+    const servers = new Map<string, DesktopRecentProject[]>()
+    projects.forEach((project) => {
+      if (!project.server) return
+      servers.set(project.server, [...(servers.get(project.server) ?? []), project])
+    })
+    item.submenu = servers.size
+      ? [...servers.entries()].flatMap(([server, entries], index) => [
+          ...(index > 0 ? ([{ type: "separator" as const }] satisfies MenuItemConstructorOptions[]) : []),
+          { label: server, enabled: false },
+          ...entries.slice(0, 5).map((project) => ({
+            label: project.label,
+            click: () => deps.trigger(project.command),
+          })),
+        ])
+      : projects.slice(0, 5).map((project) => ({
+          label: project.label,
+          click: () => deps.trigger(project.command),
+        }))
     item.enabled = item.submenu.length > 0
     return item
   }

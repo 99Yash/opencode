@@ -102,32 +102,42 @@ export function WindowsAppMenu(props: {
                       if (entry.type === "separator") return <DropdownMenu.Separator />
                       if (entry.dynamic === "recentProjects") {
                         const servers = global.servers.list()
-                        const projects = servers.flatMap((server) =>
-                          global
-                            .ensureServerCtx(server)
-                            .projects.recent()
-                            .map((project) => ({ server, project })),
-                        )
+                        const groups = servers
+                          .map((server) => ({
+                            server,
+                            projects: global.ensureServerCtx(server).projects.recent().slice(0, 5),
+                          }))
+                          .filter((group) => group.projects.length > 0)
                         return (
                           <DesktopMenuSubmenu label={entry.labelKey ? language.t(entry.labelKey) : ""}>
-                            <For each={projects}>
-                              {(item) => (
-                                <DesktopMenuItem
-                                  label={
-                                    servers.length > 1
-                                      ? `${displayName(item.project)} — ${serverName(item.server)}`
-                                      : displayName(item.project)
-                                  }
-                                  disabled={false}
-                                  onSelect={() =>
-                                    runCommand(
-                                      desktopRecentProjectCommand(
-                                        ServerConnection.key(item.server),
-                                        item.project.worktree,
-                                      ),
-                                    )
-                                  }
-                                />
+                            <For each={groups}>
+                              {(group, index) => (
+                                <>
+                                  <Show when={index() > 0}>
+                                    <DropdownMenu.Separator />
+                                  </Show>
+                                  <Show when={servers.length > 1}>
+                                    <DropdownMenu.GroupLabel class="desktop-app-menu-heading">
+                                      {serverName(group.server)}
+                                    </DropdownMenu.GroupLabel>
+                                  </Show>
+                                  <For each={group.projects}>
+                                    {(project) => (
+                                      <DesktopMenuItem
+                                        label={displayName(project)}
+                                        disabled={false}
+                                        onSelect={() =>
+                                          runCommand(
+                                            desktopRecentProjectCommand(
+                                              ServerConnection.key(group.server),
+                                              project.worktree,
+                                            ),
+                                          )
+                                        }
+                                      />
+                                    )}
+                                  </For>
+                                </>
                               )}
                             </For>
                           </DesktopMenuSubmenu>
