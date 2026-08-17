@@ -36,6 +36,7 @@ export type HomeProjectsViewProps = {
   projectsForServer: (server: ServerConnection.Any) => LocalProject[]
   recentForServer: (server: ServerConnection.Any) => LocalProject[]
   showRecentForServer: (server: ServerConnection.Any) => boolean
+  onDismissRecent: (server: ServerConnection.Any) => void
   homedirForServer: (server: ServerConnection.Any) => string
   collapsed: (server: ServerConnection.Any) => boolean
   canDefaultServer: boolean
@@ -115,7 +116,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                     {...contextMenuProps}
                     server={props.servers[0]}
                     projects={props.projects}
-                    items={props.recentForServer(props.servers[0])}
+                    items={props.showRecentForServer(props.servers[0]) ? props.recentForServer(props.servers[0]) : []}
                   />
                 }
               >
@@ -132,7 +133,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                 const healthy = () => !!props.serverHealth(item)?.healthy
                 const hasProjects = () => projects().length > 0
                 const showRecent = () => props.showRecentForServer(item)
-                const hasChildren = () => hasProjects() || recent().length > 0
+                const hasChildren = () => hasProjects() || (showRecent() && recent().length > 0)
                 const collapsed = () => props.collapsed(item)
                 return (
                   <div class="flex min-w-0 flex-col gap-1">
@@ -155,7 +156,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                             {...contextMenuProps}
                             server={item}
                             projects={projects()}
-                            items={recent()}
+                            items={showRecent() ? recent() : []}
                           />
                         }
                       >
@@ -435,8 +436,19 @@ function HomeProjectEmpty(
         <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
       </HomeProjectNavButton>
       <Show when={props.items.length > 0}>
-        <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center pl-1.5 pr-3">
+        <div class="group/recent relative mt-3 flex h-7 min-w-0 shrink-0 items-center justify-between pl-1.5 pr-1">
           <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.recentlyClosed")}</div>
+          <TooltipV2 placement="bottom" value={props.language.t("common.dismiss")}>
+            <IconButtonV2
+              data-action="home-dismiss-recent-projects"
+              class="opacity-0 group-hover/recent:opacity-100 focus-visible:opacity-100"
+              variant="ghost-muted"
+              size="small"
+              icon={<IconV2 name="close" />}
+              aria-label={props.language.t("common.dismiss")}
+              onClick={() => props.onDismissRecent(props.server)}
+            />
+          </TooltipV2>
         </div>
         <For each={props.items}>
           {(project) => <HomeSuggestedProjectRow {...props} project={project} server={props.server} />}

@@ -2,11 +2,14 @@ import type { HomeProjectsController } from "./home-projects-controller"
 import { HomeProjectsView } from "./home-projects-view"
 import type { HomeScrollController } from "./home-scroll-controller"
 import { ServerConnection } from "@/context/servers"
+import { createStore } from "solid-js/store"
 
 export function HomeProjects(props: { projects: HomeProjectsController; scroll: HomeScrollController }) {
   const recentMode = new Map<ServerConnection.Key, boolean>()
+  const [dismissedRecent, setDismissedRecent] = createStore({} as Record<string, boolean>)
   const showRecentForServer = (server: ServerConnection.Any) => {
     const key = ServerConnection.key(server)
+    if (dismissedRecent[key]) return false
     if (recentMode.get(key)) return true
     if (props.projects.server.projects(server).length > 0) return false
     recentMode.set(key, true)
@@ -23,6 +26,7 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       projectsForServer={props.projects.server.projects}
       recentForServer={props.projects.project.recentForServer}
       showRecentForServer={showRecentForServer}
+      onDismissRecent={(server) => setDismissedRecent(ServerConnection.key(server), true)}
       homedirForServer={props.projects.project.homedirForServer}
       collapsed={props.projects.server.collapsed}
       canDefaultServer={props.projects.server.canDefault()}
