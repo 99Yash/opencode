@@ -138,6 +138,9 @@ function createServerController(
       limit: RECENTLY_CLOSED_DISPLAY_LIMIT,
     }).map((worktree) => enrich({ worktree, expanded: false }))
   })
+  const recentProjectsList = createMemo(() =>
+    [...recentlyClosedList(), ...knownProjectsList()].slice(0, RECENTLY_CLOSED_DISPLAY_LIMIT),
+  )
 
   const isLocal =
     (conn?.type === "sidecar" && conn.variant === "base") || (conn?.type === "http" && isLocalHost(conn.http.url))
@@ -151,6 +154,7 @@ function createServerController(
       list: projectsList,
       recentlyClosed: recentlyClosedList,
       known: knownProjectsList,
+      recent: recentProjectsList,
     },
     permission,
     notification,

@@ -68,8 +68,7 @@ export function createHomeProjectsController(home: HomeController) {
     },
     project: {
       list: home.project.list,
-      recentlyClosedForServer: home.project.recentlyClosedForServer,
-      knownForServer: home.project.knownForServer,
+      recentForServer: home.project.recentForServer,
       homedirForServer: home.project.homedirForServer,
       select: home.project.select,
       add: home.project.add,

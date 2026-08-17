@@ -63,8 +63,7 @@ export function createHomeController() {
       selected: selectedProject,
       newSession: newSessionProject,
       forServer: (conn: ServerConnection.Any) => global.ensureServerCtx(conn).projects.list(),
-      recentlyClosedForServer: (conn: ServerConnection.Any) => global.ensureServerCtx(conn).projects.recentlyClosed(),
-      knownForServer: (conn: ServerConnection.Any) => global.ensureServerCtx(conn).projects.known(),
+      recentForServer: (conn: ServerConnection.Any) => global.ensureServerCtx(conn).projects.recent(),
       homedirForServer: (conn: ServerConnection.Any) => global.ensureServerCtx(conn).sync.data.path.home,
       select: (conn: ServerConnection.Any, directory: string) => {
         const key = ServerConnection.key(conn)

@@ -34,8 +34,8 @@ export type HomeProjectsViewProps = {
   selection: HomeProjectSelection
   serverHealth: (server: ServerConnection.Any) => ServerHealth | undefined
   projectsForServer: (server: ServerConnection.Any) => LocalProject[]
-  recentlyClosedForServer: (server: ServerConnection.Any) => LocalProject[]
-  knownForServer: (server: ServerConnection.Any) => LocalProject[]
+  recentForServer: (server: ServerConnection.Any) => LocalProject[]
+  showRecentForServer: (server: ServerConnection.Any) => boolean
   homedirForServer: (server: ServerConnection.Any) => string
   collapsed: (server: ServerConnection.Any) => boolean
   canDefaultServer: boolean
@@ -85,11 +85,7 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
         <Show
           when={
             props.servers.length === 1 &&
-            !(
-              props.projects.length === 0 &&
-              (props.recentlyClosedForServer(props.servers[0]).length > 0 ||
-                props.knownForServer(props.servers[0]).length > 0)
-            )
+            !(props.showRecentForServer(props.servers[0]) && props.recentForServer(props.servers[0]).length > 0)
           }
         >
           <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
@@ -112,13 +108,12 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
           fallback={
             <div class="pr-3">
               <Show
-                when={props.projects.length > 0}
+                when={!props.showRecentForServer(props.servers[0]) && props.projects.length > 0}
                 fallback={
                   <HomeProjectEmpty
                     {...props}
                     server={props.servers[0]}
-                    recentlyClosed={props.recentlyClosedForServer(props.servers[0])}
-                    known={props.knownForServer(props.servers[0])}
+                    items={props.recentForServer(props.servers[0])}
                   />
                 }
               >
@@ -131,11 +126,11 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
             <For each={props.servers}>
               {(item) => {
                 const projects = () => props.projectsForServer(item)
-                const recentlyClosed = () => props.recentlyClosedForServer(item)
-                const known = () => props.knownForServer(item)
+                const recent = () => props.recentForServer(item)
                 const healthy = () => !!props.serverHealth(item)?.healthy
                 const hasProjects = () => projects().length > 0
-                const hasChildren = () => hasProjects() || recentlyClosed().length > 0 || known().length > 0
+                const showRecent = () => props.showRecentForServer(item)
+                const hasChildren = () => hasProjects() || recent().length > 0
                 const collapsed = () => props.collapsed(item)
                 return (
                   <div class="flex min-w-0 flex-col gap-1">
@@ -151,15 +146,8 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                     <Show when={healthy() && hasChildren() && !collapsed()}>
                       <div class="mx-3 h-px bg-v2-border-border-base" />
                       <Show
-                        when={hasProjects()}
-                        fallback={
-                          <HomeProjectEmpty
-                            {...props}
-                            server={item}
-                            recentlyClosed={recentlyClosed()}
-                            known={known()}
-                          />
-                        }
+                        when={!showRecent() && hasProjects()}
+                        fallback={<HomeProjectEmpty {...props} server={item} items={recent()} />}
                       >
                         <HomeProjectList {...props} {...contextMenuProps} server={item} items={projects()} />
                       </Show>
@@ -415,8 +403,7 @@ function HomeProjectSlot(
 function HomeProjectEmpty(
   props: HomeProjectsViewProps & {
     server: ServerConnection.Any
-    recentlyClosed: LocalProject[]
-    known: LocalProject[]
+    items: LocalProject[]
   },
 ) {
   const unreachable = () => props.serverHealth(props.server)?.healthy === false
@@ -432,20 +419,12 @@ function HomeProjectEmpty(
         <IconV2 name="folder-add-left" size="small" />
         <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("home.project.add")}</span>
       </HomeProjectNavButton>
-      <Show when={props.recentlyClosed.length > 0}>
+      <Show when={props.items.length > 0}>
         <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center pl-1.5 pr-3">
           <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.recentlyClosed")}</div>
         </div>
-        <For each={props.recentlyClosed}>
-          {(project) => <HomeSuggestedProjectRow {...props} project={project} server={props.server} kind="recent" />}
-        </For>
-      </Show>
-      <Show when={props.known.length > 0}>
-        <div class="mt-3 flex h-7 min-w-0 shrink-0 items-center pl-1.5 pr-3">
-          <div class="text-v2-text-text-faint [font-weight:530]">{props.language.t("home.knownProjects")}</div>
-        </div>
-        <For each={props.known}>
-          {(project) => <HomeSuggestedProjectRow {...props} project={project} server={props.server} kind="known" />}
+        <For each={props.items}>
+          {(project) => <HomeSuggestedProjectRow {...props} project={project} server={props.server} />}
         </For>
       </Show>
     </div>
@@ -456,7 +435,6 @@ function HomeSuggestedProjectRow(
   props: HomeProjectsViewProps & {
     project: LocalProject
     server: ServerConnection.Any
-    kind: "recent" | "known"
   },
 ) {
   const unreachable = () => props.serverHealth(props.server)?.healthy === false
@@ -467,18 +445,38 @@ function HomeSuggestedProjectRow(
     return worktree
   }
   return (
-    <TooltipV2 placement="right" value={path()}>
-      <HomeProjectNavButton
-        type="button"
-        data-component={props.kind === "recent" ? "home-recently-closed-row" : "home-known-project-row"}
-        class="disabled:opacity-60"
-        disabled={unreachable()}
-        onClick={() => props.onAddProjects(props.server, [props.project.worktree])}
+    <div class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]">
+      <TooltipV2 placement="right" value={path()}>
+        <HomeProjectNavButton
+          type="button"
+          data-component="home-recent-project-row"
+          class="pr-10 disabled:opacity-60"
+          disabled={unreachable()}
+          onClick={() => props.onAddProjects(props.server, [props.project.worktree])}
+        >
+          <HomeProjectAvatar project={props.project} outline />
+          <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
+        </HomeProjectNavButton>
+      </TooltipV2>
+      <div
+        class={`
+          hover-reveal absolute right-1 top-1/2 flex -translate-y-1/2
+          group-hover/project:opacity-100 focus-within:opacity-100
+        `}
       >
-        <HomeProjectAvatar project={props.project} outline />
-        <span class={HOME_PROJECT_NAV_LABEL}>{displayName(props.project)}</span>
-      </HomeProjectNavButton>
-    </TooltipV2>
+        <TooltipV2 placement="bottom" value={props.language.t("home.project.add")}>
+          <IconButtonV2
+            data-action="home-add-recent-project"
+            variant="ghost-muted"
+            size="small"
+            icon={<IconV2 name="plus" />}
+            aria-label={props.language.t("home.project.add")}
+            disabled={unreachable()}
+            onClick={() => props.onAddProjects(props.server, [props.project.worktree])}
+          />
+        </TooltipV2>
+      </div>
+    </div>
   )
 }
 

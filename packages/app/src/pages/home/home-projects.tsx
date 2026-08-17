@@ -1,8 +1,18 @@
 import type { HomeProjectsController } from "./home-projects-controller"
 import { HomeProjectsView } from "./home-projects-view"
 import type { HomeScrollController } from "./home-scroll-controller"
+import { ServerConnection } from "@/context/servers"
 
 export function HomeProjects(props: { projects: HomeProjectsController; scroll: HomeScrollController }) {
+  const recentMode = new Map<ServerConnection.Key, boolean>()
+  const showRecentForServer = (server: ServerConnection.Any) => {
+    const key = ServerConnection.key(server)
+    if (recentMode.get(key)) return true
+    if (props.projects.server.projects(server).length > 0) return false
+    recentMode.set(key, true)
+    return true
+  }
+
   return (
     <HomeProjectsView
       language={props.projects.copy.language}
@@ -11,8 +21,8 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       selection={props.projects.selection.value()}
       serverHealth={props.projects.server.health}
       projectsForServer={props.projects.server.projects}
-      recentlyClosedForServer={props.projects.project.recentlyClosedForServer}
-      knownForServer={props.projects.project.knownForServer}
+      recentForServer={props.projects.project.recentForServer}
+      showRecentForServer={showRecentForServer}
       homedirForServer={props.projects.project.homedirForServer}
       collapsed={props.projects.server.collapsed}
       canDefaultServer={props.projects.server.canDefault()}
