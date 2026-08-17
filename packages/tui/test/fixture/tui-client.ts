@@ -153,11 +153,6 @@ export function createFetch(override?: FetchHandler, events?: ReturnType<typeof 
       return json({ location: { directory, project: { id: "proj_test", directory, canonical: directory } }, data: [] })
     }
     if (url.pathname === "/provider") return json({ all: [], default: {}, connected: [] })
-    if (url.pathname === "/api/model/default")
-      return json({
-        location: { directory, project: { id: "proj_test", directory: worktree, canonical: worktree } },
-        data: null,
-      })
     if (url.pathname === "/session") return json([])
     if (url.pathname === "/vcs") return json({ branch: "main" })
     if (url.pathname === "/api/experimental/migration/v1") return json({ status: "completed" })

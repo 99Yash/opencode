@@ -110,8 +110,8 @@ export function locationKey(location: LocationRef) {
   return JSON.stringify([location.directory, location.workspaceID])
 }
 
-function locationQuery(ref?: LocationRef | null) {
-  return ref?.directory ? { directory: ref.directory, workspace: ref.workspaceID } : undefined
+function locationQuery(ref?: LocationRef) {
+  return ref ? { directory: ref.directory, workspace: ref.workspaceID } : undefined
 }
 
 function createSync() {
@@ -364,7 +364,6 @@ export function createData(config: CreateDataInput) {
           .then((location) => {
             const key = locationKey(location)
             setStore("location", key, { ...store.location[key], info: location })
-            setDefaultLocation({ directory: location.directory, workspaceID: location.workspaceID })
           })
           .catch((error) => console.error("Failed to preload location", error))
         void result.location.vcs.sync().catch((error) => console.error("Failed to preload VCS info", error))
@@ -379,12 +378,6 @@ export function createData(config: CreateDataInput) {
         // hydration can load pending and projected messages atomically.
         sync.complete(`session.pending:${event.data.sessionID}`)
         sync.complete(`session.message:${event.data.sessionID}`)
-        return
-      case "session.forked":
-        result.session.invalidate(event.data.sessionID)
-        result.session.pending.invalidate(event.data.sessionID)
-        result.session.message.invalidate(event.data.sessionID)
-        void result.session.sync(event.data.sessionID)
         return
       case "session.deleted":
         removeSession(event.data.sessionID)
@@ -473,14 +466,8 @@ export function createData(config: CreateDataInput) {
           setStore("session", "info", sessionID, "projectID", adopted.projectID)
           setStore("session", "info", sessionID, "subpath", adopted.subpath)
         }
-        result.project.invalidate()
-        void result.project.sync()
         return
       }
-      case "worktree.updated":
-        result.project.invalidate()
-        void result.project.sync()
-        return
       case "session.inbox.delivered": {
         const admitted = store.session.input[event.data.sessionID]?.includes(event.data.inboxID) ?? false
         removePending(event.data.sessionID, event.data.inboxID)
@@ -982,8 +969,8 @@ export function createData(config: CreateDataInput) {
         }))
         break
       case "reference.updated":
-        result.location.reference.invalidate(location)
-        void result.location.reference.sync(location)
+        result.location.reference.invalidate()
+        void result.location.reference.sync()
         break
       case "integration.updated":
         result.location.integration.invalidate(location)
@@ -1298,11 +1285,6 @@ export function createData(config: CreateDataInput) {
           const key = locationKey(location)
           if (!store.location[key]) setStore("location", key, {})
           setStore("location", key, "info", location)
-          const requested = locationKey(current)
-          if (requested !== key) {
-            if (!store.location[requested]) setStore("location", requested, {})
-            setStore("location", requested, "info", location)
-          }
           if (!ref) {
             setDefaultLocation({ directory: location.directory, workspaceID: location.workspaceID })
           }
@@ -1310,9 +1292,7 @@ export function createData(config: CreateDataInput) {
       },
       async sync(ref?: LocationRef) {
         await result.location.syncInfo(ref)
-        const requested = ref ?? defaultLocation()
-        const info = result.location.info(requested)
-        const location = info ? { directory: info.directory, workspaceID: info.workspaceID } : requested
+        const location = ref ?? defaultLocation()
         await Promise.all([
           result.location.vcs.sync(location),
           result.location.agent.sync(location),

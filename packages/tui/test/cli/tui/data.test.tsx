@@ -1873,14 +1873,15 @@ test("refreshes effective catalog data after catalog updates", async () => {
 
 test("refreshes agents after agent updates", async () => {
   const events = createEventStream()
-  let agentID = "build"
+  let requests = 0
   const calls = createFetch((url) => {
     if (url.pathname !== "/api/agent") return
+    requests++
     return json({
       location: { directory, project: { id: "proj_test", directory } },
       data: [
         {
-          id: agentID,
+          id: requests === 1 ? "build" : "reviewer",
           request: { headers: {}, body: {} },
           mode: "primary",
           hidden: false,
@@ -1910,11 +1911,6 @@ test("refreshes agents after agent updates", async () => {
 
   try {
     await wait(() => data.location.agent.list()?.[0]?.id === "build")
-    await Bun.sleep(20)
-    events.emit({ id: "evt_agent_unlocated", created: 0, type: "agent.updated", data: {} })
-    await Bun.sleep(20)
-    expect(data.location.agent.list()?.[0]?.id).toBe("build")
-    agentID = "reviewer"
     emitEvent(events, { id: "evt_agent", created: 0, type: "agent.updated", data: {} })
     await wait(() => data.location.agent.list()?.[0]?.id === "reviewer")
   } finally {
@@ -2805,7 +2801,7 @@ test("renders admitted prompts immediately and tracks them until promoted", asyn
     await mounted
     const received: string[] = []
     const unsubscribe = sync.listen((event) => received.push(event.name))
-    events.emit({
+    emitEvent(events, {
       id: "evt_admitted_1",
       created: 0,
       type: "session.inbox.enqueued",

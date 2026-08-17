@@ -113,7 +113,7 @@ export function createClientConnection(initialApi: OpenCodeClient, options: Clie
   async function runStream(active: number) {
     let attempt = 0
     while (!abort.signal.aborted && started && generation === active) {
-      setConnection({ status: attempt === 0 ? "connecting" : "reconnecting", attempt, error: undefined })
+      setConnection({ status: attempt === 0 ? "connecting" : "reconnecting", attempt })
       const controller = new AbortController()
       stream = controller
       const cancel = () => controller.abort(abort.signal.reason)
