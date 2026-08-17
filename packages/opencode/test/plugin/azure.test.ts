@@ -4,6 +4,7 @@ import type { Auth, Provider } from "@opencode-ai/sdk/v2"
 import { Predicate } from "effect"
 import { OAUTH_DUMMY_KEY } from "../../src/auth"
 import { createAzureAuthHooks } from "../../src/plugin/azure"
+import { createAzureCognitiveServicesAuthHooks } from "../../src/plugin/azure/cognitive-services"
 
 const provider: Provider = {
   id: "azure-cognitive-services",
@@ -111,7 +112,7 @@ describe("plugin.azure", () => {
     process.env.AZURE_AI_PROJECT_ENDPOINT = "not-a-project-endpoint"
     const scopes: string[] = []
     const requests: Array<{ url: string; headers: Headers }> = []
-    const hooks = createAzureAuthHooks("azure-cognitive-services", {
+    const hooks = createAzureCognitiveServicesAuthHooks({
       request: async (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -151,7 +152,7 @@ describe("plugin.azure", () => {
     process.env.AZURE_COGNITIVE_SERVICES_API_KEY = "project-key"
     let cliCalls = 0
     const requests: Array<{ url: string; headers: Headers }> = []
-    const hooks = createAzureAuthHooks("azure-cognitive-services", {
+    const hooks = createAzureCognitiveServicesAuthHooks({
       request: async (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -181,7 +182,7 @@ describe("plugin.azure", () => {
   test("lists only succeeded Azure OpenAI deployments when OAuth stores a Resource ID", async () => {
     const scopes: string[] = []
     const requests: Array<{ url: string; headers: Headers }> = []
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       request: async (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -223,7 +224,7 @@ describe("plugin.azure", () => {
   })
 
   test("keeps the Azure catalog for legacy Resource Name credentials", async () => {
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       tokenCommand: async () => {
         throw new Error("Azure CLI should not be used to list deployments without a Resource ID")
       },
@@ -240,7 +241,7 @@ describe("plugin.azure", () => {
   test("selects the token scope from the request route and strips API key headers", async () => {
     const scopes: string[] = []
     const captured = captureRequests()
-    const hooks = createAzureAuthHooks("azure-cognitive-services", {
+    const hooks = createAzureCognitiveServicesAuthHooks({
       request: captured.request,
       tokenCommand: async (scope) => {
         scopes.push(scope)
@@ -273,7 +274,7 @@ describe("plugin.azure", () => {
 
   test("deduplicates concurrent Azure CLI requests and caches the token", async () => {
     const scopes: string[] = []
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       request: captureRequests().request,
       tokenCommand: async (scope) => {
         scopes.push(scope)
@@ -293,7 +294,7 @@ describe("plugin.azure", () => {
   test("accepts the legacy expiresOn field", async () => {
     const captured = captureRequests()
     let calls = 0
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       request: captured.request,
       tokenCommand: async () => {
         calls++
@@ -319,7 +320,7 @@ describe("plugin.azure", () => {
   test("does not cache invalid Azure CLI output", async () => {
     const captured = captureRequests()
     let calls = 0
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       request: captured.request,
       tokenCommand: async () => {
         calls++
@@ -348,7 +349,7 @@ describe("plugin.azure", () => {
 
   test("checks Azure CLI login before storing OAuth metadata", async () => {
     const scopes: string[] = []
-    const hooks = createAzureAuthHooks("azure-cognitive-services", {
+    const hooks = createAzureCognitiveServicesAuthHooks({
       tokenCommand: async (scope) => {
         scopes.push(scope)
         return { stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }
@@ -384,7 +385,7 @@ describe("plugin.azure", () => {
   })
 
   test("validates and stores a normalized Azure Resource ID", async () => {
-    const hooks = createAzureAuthHooks("azure", {
+    const hooks = createAzureAuthHooks({
       tokenCommand: async () => ({ stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }),
     })
     const method = hooks.auth?.methods.find((method) => method.type === "oauth")
