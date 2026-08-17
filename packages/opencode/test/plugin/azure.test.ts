@@ -24,16 +24,24 @@ const oauth: Auth = {
 
 const projectEndpoint = process.env.AZURE_AI_PROJECT_ENDPOINT
 const cognitiveApiKey = process.env.AZURE_COGNITIVE_SERVICES_API_KEY
+const resourceID = process.env.AZURE_RESOURCE_ID
+const resourceName = process.env.AZURE_RESOURCE_NAME
 
 beforeEach(() => {
   delete process.env.AZURE_AI_PROJECT_ENDPOINT
   delete process.env.AZURE_COGNITIVE_SERVICES_API_KEY
+  delete process.env.AZURE_RESOURCE_ID
+  delete process.env.AZURE_RESOURCE_NAME
 })
 afterEach(() => {
   if (projectEndpoint === undefined) delete process.env.AZURE_AI_PROJECT_ENDPOINT
   else process.env.AZURE_AI_PROJECT_ENDPOINT = projectEndpoint
   if (cognitiveApiKey === undefined) delete process.env.AZURE_COGNITIVE_SERVICES_API_KEY
   else process.env.AZURE_COGNITIVE_SERVICES_API_KEY = cognitiveApiKey
+  if (resourceID === undefined) delete process.env.AZURE_RESOURCE_ID
+  else process.env.AZURE_RESOURCE_ID = resourceID
+  if (resourceName === undefined) delete process.env.AZURE_RESOURCE_NAME
+  else process.env.AZURE_RESOURCE_NAME = resourceName
 })
 
 function loader(hooks: Hooks) {
@@ -168,6 +176,65 @@ describe("plugin.azure", () => {
     expect(requests).toHaveLength(1)
     expect(requests[0].headers.get("api-key")).toBe("project-key")
     expect(requests[0].headers.get("authorization")).toBeNull()
+  })
+
+  test("lists only succeeded Azure OpenAI deployments when OAuth stores a Resource ID", async () => {
+    const scopes: string[] = []
+    const requests: Array<{ url: string; headers: Headers }> = []
+    const hooks = createAzureAuthHooks("azure", {
+      request: async (input, init) => {
+        requests.push({
+          url: input instanceof Request ? input.url : input.toString(),
+          headers: new Headers(init?.headers),
+        })
+        return Response.json({
+          value: [
+            { name: "gpt-5-mini", properties: { provisioningState: "Succeeded" } },
+            { name: "gpt-5.6-luna", properties: { provisioningState: "Creating" } },
+          ],
+        })
+      },
+      tokenCommand: async (scope) => {
+        scopes.push(scope)
+        return { stdout: tokenOutput("management-token"), stderr: "", exitCode: 0 }
+      },
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+
+    const result = await list(
+      { ...provider, models: models("gpt-5-mini", "gpt-5.6-luna", "gpt-5-nano") },
+      {
+        auth: {
+          ...oauth,
+          accountId:
+            "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
+        },
+      },
+    )
+
+    expect(Object.keys(result)).toEqual(["gpt-5-mini"])
+    expect(scopes).toEqual(["https://management.azure.com/.default"])
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url).toBe(
+      "https://management.azure.com/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource/deployments?api-version=2024-10-01",
+    )
+    expect(requests[0].headers.get("authorization")).toBe("Bearer management-token")
+  })
+
+  test("keeps the Azure catalog for legacy Resource Name credentials", async () => {
+    const hooks = createAzureAuthHooks("azure", {
+      tokenCommand: async () => {
+        throw new Error("Azure CLI should not be used to list deployments without a Resource ID")
+      },
+    })
+    const list = hooks.provider?.models
+    if (!list) throw new Error("Azure provider model hook is missing")
+    const catalog = models("gpt-5-mini", "gpt-5.6-luna")
+
+    const result = await list({ ...provider, models: catalog }, { auth: { ...oauth, accountId: "test-resource" } })
+
+    expect(result).toEqual(catalog)
   })
 
   test("selects the token scope from the request route and strips API key headers", async () => {
@@ -313,6 +380,30 @@ describe("plugin.azure", () => {
       access: OAUTH_DUMMY_KEY,
       refresh: OAUTH_DUMMY_KEY,
       accountId: "https://connected-resource.services.ai.azure.com/api/projects/connected-project",
+    })
+  })
+
+  test("validates and stores a normalized Azure Resource ID", async () => {
+    const hooks = createAzureAuthHooks("azure", {
+      tokenCommand: async () => ({ stdout: tokenOutput("connect-token"), stderr: "", exitCode: 0 }),
+    })
+    const method = hooks.auth?.methods.find((method) => method.type === "oauth")
+    if (!method || method.type !== "oauth") throw new Error("Azure OAuth method is missing")
+    const prompt = method.prompts?.[0]
+    if (!prompt || prompt.type !== "text") throw new Error("Azure Resource ID prompt is missing")
+
+    expect(prompt.validate?.("not/a/resource")).toBe("Enter an Azure Resource ID or a Resource Name like my-models")
+    expect(prompt.validate?.("legacy-resource-name")).toBeUndefined()
+    const authorization = await method.authorize({
+      resourceName:
+        "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource/",
+    })
+    if (authorization.method !== "auto") throw new Error("Unexpected Azure authorization method")
+
+    expect(await authorization.callback()).toMatchObject({
+      type: "success",
+      accountId:
+        "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
     })
   })
 })

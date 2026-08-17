@@ -414,7 +414,45 @@ If tool calls aren't working well, pick a loaded model with strong tool-calling 
 If you encounter "I'm sorry, but I cannot assist with that request" errors, try changing the content filter from **DefaultV2** to **Default** in your Azure resource.
 :::
 
-1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need the **Resource name**; this becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`).
+1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need the **Resource name**; this becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`). When using Microsoft Entra ID, also copy the full **Resource ID** from the resource's **JSON View**. It contains the subscription, resource group, and resource name that OpenCode needs to list deployments.
+
+   To find the active subscription and tenant:
+
+   ```bash
+   az account show \
+     --query '{subscriptionName:name, subscriptionId:id, tenantId:tenantId}' \
+     --output table
+   ```
+
+   If the wrong subscription is active, list the available subscriptions and select one:
+
+   ```bash
+   az account list \
+     --query '[].{name:name, subscriptionId:id, active:isDefault}' \
+     --output table
+
+   az account set --subscription SUBSCRIPTION_ID
+   ```
+
+   Then list the Azure AI resources in that subscription. The output contains the resource name, resource group, and complete Resource ID; you do not need to construct the ID manually.
+
+   ```bash
+   az cognitiveservices account list \
+     --subscription SUBSCRIPTION_ID \
+     --query '[].{name:name, resourceGroup:resourceGroup, resourceId:id}' \
+     --output json
+   ```
+
+   You can verify the deployments before connecting OpenCode:
+
+   ```bash
+   az cognitiveservices account deployment list \
+     --subscription SUBSCRIPTION_ID \
+     --resource-group RESOURCE_GROUP \
+     --name RESOURCE_NAME \
+     --query '[].{deployment:name, model:properties.model.name, state:properties.provisioningState}' \
+     --output table
+   ```
 
 2. Go to [Azure AI Foundry](https://ai.azure.com/) and deploy a model.
 
@@ -440,28 +478,30 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    └
    ```
 
-5. Enter the resource name copied in step 1. If you chose API key, enter your API key when prompted.
+5. Enter the full Resource ID when using Microsoft Entra ID. This lets OpenCode filter `/models` to successful deployments on that resource. A plain resource name remains supported, but cannot be used for deployment discovery. If you chose API key, enter the resource name and API key when prompted.
 
    ```txt
-   ┌ Enter Azure Resource Name
+   ┌ Enter Azure Resource ID or Resource Name
    │
-   │ RESOURCE_NAME
+   │ /subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME
    └ enter
    ```
 
-6. Optional: set your resource name as an environment variable to skip the resource name prompt during `/connect`.
+6. Optional: set the Resource ID as an environment variable to skip the resource prompt during `/connect`.
 
    ```bash
-   AZURE_RESOURCE_NAME=XXX opencode
+   AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME opencode
    ```
 
    Or add it to your bash profile:
 
    ```bash title="~/.bash_profile"
-   export AZURE_RESOURCE_NAME=XXX
+   export AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME
    ```
 
-7. Run the `/models` command to select your deployed model.
+   `AZURE_RESOURCE_NAME` remains supported when deployment filtering is not required.
+
+7. Run the `/models` command to select your deployed model. With Entra ID and a Resource ID, OpenCode retrieves the successful deployments through Azure Resource Manager and hides undeployed catalog entries.
 
    ```txt
    /models
@@ -472,6 +512,19 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
 ### Azure Cognitive Services
 
 1. In [Microsoft Foundry](https://ai.azure.com/), create a **Foundry resource** and a project. Copy the **Project endpoint** from the project's overview page. It looks like `https://RESOURCE_NAME.services.ai.azure.com/api/projects/PROJECT_NAME`.
+
+   If you know the subscription, resource group, and resource name, the Azure CLI can list the projects and their endpoints:
+
+   ```bash
+   az cognitiveservices account project list \
+     --subscription SUBSCRIPTION_ID \
+     --resource-group RESOURCE_GROUP \
+     --name RESOURCE_NAME \
+     --query '[].{project:name, endpoint:properties.endpoints."AI Foundry API"}' \
+     --output table
+   ```
+
+   Use the value in the `Endpoint` column. The subscription and resource discovery commands in the Azure OpenAI section above can be used to find the other values.
 
 2. Deploy a model from the Foundry model catalog.
 

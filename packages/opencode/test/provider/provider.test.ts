@@ -818,6 +818,31 @@ it.instance("getSmallModel skips inferred models for Azure", () =>
   }),
 )
 
+it.instance(
+  "Azure OpenAI resolves an ARM Resource ID to its resource name",
+  Effect.gen(function* () {
+    const provider = yield* Provider.Service
+    const model = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("gpt-5-mini"))
+
+    expect(languageURL(yield* provider.getLanguage(model), "/responses")).toBe(
+      "https://test-resource.openai.azure.com/openai/v1/responses?api-version=v1",
+    )
+  }),
+  {
+    config: {
+      provider: {
+        azure: {
+          options: {
+            resourceID:
+              "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
+          },
+        },
+      },
+    },
+    init: () => setProcessEnv("AZURE_API_KEY", "test-key"),
+  },
+)
+
 it.instance("getSmallModel skips inferred models for Azure Cognitive Services", () =>
   Effect.gen(function* () {
     yield* set("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "test-resource")

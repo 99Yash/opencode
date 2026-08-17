@@ -164,6 +164,12 @@ function azureResourceName(input: unknown) {
   const value = input.trim()
   if (value === "") return undefined
 
+  const resourceID =
+    /^\/subscriptions\/[^/]+\/resourceGroups\/[^/]+\/providers\/Microsoft\.CognitiveServices\/accounts\/([^/]+)\/?$/i.exec(
+      value,
+    )
+  if (resourceID) return resourceID[1]
+
   const endpoint = Schema.decodeUnknownOption(Schema.URLFromString)(value)
   if (Option.isNone(endpoint)) return /^[a-z0-9-]+$/i.test(value) ? value : undefined
   if (endpoint.value.hostname.endsWith(".services.ai.azure.com")) {
@@ -258,11 +264,16 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       const auth = yield* dep.auth(provider.id)
       const resource = iife(() => {
         return [
+          provider.options?.resourceID,
           provider.options?.resourceName,
+          auth?.type === "api" ? auth.metadata?.resourceID : undefined,
           auth?.type === "api" ? auth.metadata?.resourceName : undefined,
           auth?.type === "oauth" ? auth.accountId : undefined,
+          env["AZURE_RESOURCE_ID"],
           env["AZURE_RESOURCE_NAME"],
-        ].find((name) => Predicate.isString(name) && name.trim() !== "")
+        ]
+          .map(azureResourceName)
+          .find(Predicate.isString)
       })
 
       if (!resource && !provider.options?.baseURL) {
@@ -270,7 +281,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           autoload: false,
           async getModel() {
             throw new Error(
-              "AZURE_RESOURCE_NAME is missing, set it using env var or reconnecting the azure provider and setting it",
+              "AZURE_RESOURCE_ID or AZURE_RESOURCE_NAME is missing; set one in the environment or reconnect the Azure provider",
             )
           },
         }
