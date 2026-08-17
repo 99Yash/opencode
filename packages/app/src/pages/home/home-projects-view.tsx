@@ -112,7 +112,9 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                 fallback={
                   <HomeProjectEmpty
                     {...props}
+                    {...contextMenuProps}
                     server={props.servers[0]}
+                    projects={props.projects}
                     items={props.recentForServer(props.servers[0])}
                   />
                 }
@@ -147,7 +149,15 @@ export function HomeProjectsView(props: HomeProjectsViewProps) {
                       <div class="mx-3 h-px bg-v2-border-border-base" />
                       <Show
                         when={!showRecent() && hasProjects()}
-                        fallback={<HomeProjectEmpty {...props} server={item} items={recent()} />}
+                        fallback={
+                          <HomeProjectEmpty
+                            {...props}
+                            {...contextMenuProps}
+                            server={item}
+                            projects={projects()}
+                            items={recent()}
+                          />
+                        }
                       >
                         <HomeProjectList {...props} {...contextMenuProps} server={item} items={projects()} />
                       </Show>
@@ -401,14 +411,19 @@ function HomeProjectSlot(
 }
 
 function HomeProjectEmpty(
-  props: HomeProjectsViewProps & {
-    server: ServerConnection.Any
-    items: LocalProject[]
-  },
+  props: HomeProjectsViewProps &
+    HomeProjectsContextMenuProps & {
+      server: ServerConnection.Any
+      projects: LocalProject[]
+      items: LocalProject[]
+    },
 ) {
   const unreachable = () => props.serverHealth(props.server)?.healthy === false
   return (
     <div class="flex min-w-0 flex-col gap-1">
+      <Show when={props.projects.length > 0}>
+        <HomeProjectList {...props} server={props.server} items={props.projects} />
+      </Show>
       <HomeProjectNavButton
         type="button"
         data-action="home-add-project-row"
@@ -446,7 +461,7 @@ function HomeSuggestedProjectRow(
   }
   return (
     <div class="group/project relative flex h-7 min-w-0 items-center rounded-[6px]">
-      <TooltipV2 placement="right" value={path()}>
+      <TooltipV2 class="w-full" placement="right" value={path()}>
         <HomeProjectNavButton
           type="button"
           data-component="home-recent-project-row"
