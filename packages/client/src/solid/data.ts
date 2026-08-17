@@ -41,7 +41,7 @@ import { createEffect, createSignal, onCleanup } from "solid-js"
 
 export type DataSessionStatus = "idle" | "running"
 
-export type CreateServerDataInput = {
+export type CreateDataInput = {
   readonly api: () => OpenCodeClient
   readonly directory: string
   readonly event: {
@@ -145,7 +145,7 @@ function createSync() {
   }
 }
 
-export function createServerData(config: CreateServerDataInput) {
+export function createData(config: CreateDataInput) {
   const api = config.api
 
   const [store, setStore] = createStore<Store>({
@@ -1312,9 +1312,7 @@ export function createServerData(config: CreateServerDataInput) {
         await result.location.syncInfo(ref)
         const requested = ref ?? defaultLocation()
         const info = result.location.info(requested)
-        const location = info
-          ? { directory: info.directory, workspaceID: info.workspaceID }
-          : requested
+        const location = info ? { directory: info.directory, workspaceID: info.workspaceID } : requested
         await Promise.all([
           result.location.vcs.sync(location),
           result.location.agent.sync(location),
@@ -1547,4 +1545,4 @@ export function createServerData(config: CreateServerDataInput) {
   return result
 }
 
-export type Data = ReturnType<typeof createServerData>
+export type Data = ReturnType<typeof createData>

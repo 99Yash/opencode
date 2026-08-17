@@ -1,6 +1,6 @@
 import { expect, mock, test } from "bun:test"
 import type { OpenCodeClient, OpenCodeEvent, Project, SessionInfo } from "../src/promise"
-import { createServerData, type CreateServerDataInput } from "../src/solid/data"
+import { createData, type CreateDataInput } from "../src/solid/data"
 import { createRoot } from "solid-js"
 
 const session = {
@@ -33,7 +33,7 @@ test("refreshes forked sessions and worktree projects from events", async () => 
     project: { list: projectList },
   } as unknown as OpenCodeClient
   const event = {
-    on: (() => () => {}) as CreateServerDataInput["event"]["on"],
+    on: (() => () => {}) as CreateDataInput["event"]["on"],
     listen(handler: (event: { name: OpenCodeEvent["type"]; details: OpenCodeEvent }) => void) {
       listeners.add(handler)
       return () => listeners.delete(handler)
@@ -43,7 +43,7 @@ test("refreshes forked sessions and worktree projects from events", async () => 
 
   await new Promise<void>((resolve) => {
     createRoot((dispose) => {
-      const data = createServerData({ api: () => api, directory: "/repo", event, connection: { status: () => "connected" } })
+      const data = createData({ api: () => api, directory: "/repo", event, connection: { status: () => "connected" } })
       emit({ type: "session.forked", data: { sessionID: session.id } } as unknown as OpenCodeEvent)
       emit({ type: "worktree.updated", data: { projectID: project.id } } as unknown as OpenCodeEvent)
       void Promise.all([sessionGet, projectList].map((fn) => fn.mock.results[0]?.value)).then(() => {
@@ -68,13 +68,13 @@ test("resolves location info through the requested ref after canonicalization", 
     location: { get: mock(async () => canonical) },
   } as unknown as OpenCodeClient
   const event = {
-    on: (() => () => {}) as CreateServerDataInput["event"]["on"],
+    on: (() => () => {}) as CreateDataInput["event"]["on"],
     listen: () => () => {},
-  } as CreateServerDataInput["event"]
+  } as CreateDataInput["event"]
 
   await new Promise<void>((resolve) => {
     createRoot((dispose) => {
-      const data = createServerData({ api: () => api, directory: requested.directory, event })
+      const data = createData({ api: () => api, directory: requested.directory, event })
       void data.location.syncInfo(requested).then(() => {
         expect(data.location.info(requested)).toEqual(canonical)
         expect(data.location.info({ directory: canonical.directory })).toEqual(canonical)
