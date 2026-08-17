@@ -3,7 +3,7 @@ import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { Effect, Predicate } from "effect"
+import { Effect, Layer } from "effect"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -82,25 +82,7 @@ const paid = (providers: Record<string, { models: Record<string, { cost: { input
   return Object.values(item.models).filter((model) => model.cost.input > 0).length
 }
 
-function languageConfig(language: unknown) {
-  if (!Predicate.isObject(language)) throw new Error("Expected an AI SDK language model")
-  if (!Predicate.isObject(language["config"])) throw new Error("Expected an AI SDK language model config")
-  return language["config"]
-}
-
-function languageBaseURL(language: unknown) {
-  const baseURL = languageConfig(language)["baseURL"]
-  if (!Predicate.isString(baseURL)) throw new Error("Expected an AI SDK base URL")
-  return baseURL
-}
-
-function languageURL(language: unknown, path: string) {
-  const url = languageConfig(language)["url"]
-  if (!Predicate.isFunction(url)) throw new Error("Expected an AI SDK URL builder")
-  const result: unknown = Reflect.apply(url, undefined, [{ path }])
-  if (!Predicate.isString(result)) throw new Error("Expected an AI SDK URL")
-  return result
-}
+const languageBaseURL = (language: unknown) => (language as { config: { baseURL: string } }).config.baseURL
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node])))
 const experimentalModels = testEffect(providerLayer({ enableExperimentalModels: true }))
@@ -818,88 +800,36 @@ it.instance("getSmallModel skips inferred models for Azure", () =>
   }),
 )
 
-it.instance("Azure is the only built-in Azure auth provider", () =>
-  Effect.gen(function* () {
-    const plugin = yield* Plugin.Service
-    const hooks = yield* plugin.list()
-    const providers = hooks.flatMap((hook) => (hook.auth ? [hook.auth.provider] : []))
-
-    expect(providers.filter((provider) => ["azure", "azure-cognitive-services"].includes(provider))).toEqual(["azure"])
-  }),
-)
-
 it.instance(
-  "Azure OpenAI resolves an ARM Resource ID to its resource name",
+  "Azure uses the resource name stored by Entra login",
   Effect.gen(function* () {
-    const provider = yield* Provider.Service
-    const model = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("gpt-5-mini"))
-
-    expect(languageURL(yield* provider.getLanguage(model), "/responses")).toBe(
-      "https://test-resource.openai.azure.com/openai/v1/responses?api-version=v1",
-    )
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.azure].options.resourceName).toBe("entra-resource")
   }),
   {
-    config: {
-      provider: {
-        azure: {
-          options: {
-            resourceID:
-              "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/test-rg/providers/Microsoft.CognitiveServices/accounts/test-resource",
+    init: () =>
+      setProcessEnv(
+        "OPENCODE_AUTH_CONTENT",
+        JSON.stringify({
+          azure: {
+            type: "oauth",
+            access: "opencode-oauth-dummy-key",
+            refresh: "opencode-oauth-dummy-key",
+            expires: Date.now() + 60 * 60 * 1000,
+            accountId: "entra-resource",
           },
-        },
-      },
-    },
-    init: () => setProcessEnv("AZURE_API_KEY", "test-key"),
+        }),
+      ),
   },
 )
 
-it.instance("legacy Azure Cognitive Services API-key provider remains available", () =>
+it.instance("getSmallModel skips inferred models for Azure Cognitive Services", () =>
   Effect.gen(function* () {
     yield* set("AZURE_COGNITIVE_SERVICES_RESOURCE_NAME", "test-resource")
     yield* set("AZURE_COGNITIVE_SERVICES_API_KEY", "test-key")
-    const providerID = ProviderV2.ID.make("azure-cognitive-services")
-    const providers = yield* list
-    const model = yield* Provider.use.getSmallModel(providerID)
-
-    expect(providers[providerID]).toBeDefined()
+    const model = yield* Provider.use.getSmallModel(ProviderV2.ID.make("azure-cognitive-services"))
     expect(model).toBeUndefined()
   }),
-)
-
-it.instance(
-  "Azure resolves a Foundry project endpoint by model shape",
-  () =>
-    Effect.gen(function* () {
-      const provider = yield* Provider.Service
-
-      const opus = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("claude-opus-4-5"))
-      expect(languageBaseURL(yield* provider.getLanguage(opus))).toBe(
-        "https://oauth-resource.services.ai.azure.com/anthropic/v1",
-      )
-
-      const kimi = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("kimi-k2.6"))
-      expect(languageURL(yield* provider.getLanguage(kimi), "/chat/completions")).toBe(
-        "https://oauth-resource.services.ai.azure.com/models/chat/completions",
-      )
-
-      const gpt = yield* provider.getModel(ProviderV2.ID.azure, ModelV2.ID.make("gpt-5.1"))
-      expect(languageURL(yield* provider.getLanguage(gpt), "/responses")).toBe(
-        "https://oauth-resource.openai.azure.com/openai/v1/responses?api-version=v1",
-      )
-    }),
-  {
-    config: {
-      provider: {
-        azure: {
-          options: {
-            apiKey: "test-key",
-            projectEndpoint: "https://oauth-resource.services.ai.azure.com/api/projects/oauth-project",
-          },
-        },
-      },
-    },
-    init: () => setProcessEnv("AZURE_API_KEY", "test-key"),
-  },
 )
 
 it.instance(

@@ -8,7 +8,6 @@ import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Npm } from "@opencode-ai/core/npm"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Plugin } from "../plugin"
-import { azureResourceName } from "../plugin/azure/schema"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
@@ -19,7 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Predicate, Schema, Types } from "effect"
+import { Effect, Layer, Context, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -241,28 +240,21 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
     azure: Effect.fnUntraced(function* (provider: Info) {
       const env = yield* dep.env()
       const auth = yield* dep.auth(provider.id)
-      const resource = [
-        provider.options?.resourceID,
-        provider.options?.projectEndpoint,
-        provider.options?.resourceName,
-        auth?.type === "api" ? auth.metadata?.connection : undefined,
-        auth?.type === "api" ? auth.metadata?.resourceID : undefined,
-        auth?.type === "api" ? auth.metadata?.projectEndpoint : undefined,
-        auth?.type === "api" ? auth.metadata?.resourceName : undefined,
-        auth?.type === "oauth" ? auth.accountId : undefined,
-        env["AZURE_RESOURCE_ID"],
-        env["AZURE_AI_PROJECT_ENDPOINT"],
-        env["AZURE_RESOURCE_NAME"],
-      ]
-        .map(azureResourceName)
-        .find(Predicate.isString)
+      const resource = iife(() => {
+        return [
+          provider.options?.resourceName,
+          auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+          auth?.type === "oauth" ? auth.accountId : undefined,
+          env["AZURE_RESOURCE_NAME"],
+        ].find((name) => typeof name === "string" && name.trim() !== "")
+      })
 
       if (!resource && !provider.options?.baseURL) {
         return {
           autoload: false,
           async getModel() {
             throw new Error(
-              "Azure Resource Name, Resource ID, or Foundry Project endpoint is missing; reconnect the Azure provider",
+              "AZURE_RESOURCE_NAME is missing, set it using env var or reconnecting the azure provider and setting it",
             )
           },
         }

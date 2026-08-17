@@ -408,22 +408,20 @@ If tool calls aren't working well, pick a loaded model with strong tool-calling 
 
 ---
 
-### Microsoft Foundry and Azure OpenAI
-
-Use the **Azure** provider for both Microsoft Foundry resources and standalone Azure OpenAI resources. A Foundry resource supports Azure OpenAI models as well as models from providers such as Anthropic, DeepSeek, Meta, and Mistral.
+### Azure OpenAI
 
 :::note
 If you encounter "I'm sorry, but I cannot assist with that request" errors, try changing the content filter from **DefaultV2** to **Default** in your Azure resource.
 :::
 
-1. Create a resource.
-   - For Microsoft Foundry, create a **Foundry resource** and project in the [Microsoft Foundry portal](https://ai.azure.com/). Copy the Project endpoint from the project overview. It looks like `https://RESOURCE.services.ai.azure.com/api/projects/PROJECT`.
-   - For standalone Azure OpenAI, create an **Azure OpenAI** resource in the [Azure portal](https://portal.azure.com/) and copy its Resource name.
+1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need:
+   - **Resource name**: This becomes part of your API endpoint (`https://RESOURCE_NAME.openai.azure.com/`)
+   - **API key**: Either `KEY 1` or `KEY 2` from your resource
 
-2. Deploy a model to the resource.
+2. Go to [Azure AI Foundry](https://ai.azure.com/) and deploy a model.
 
    :::note
-   OpenCode matches exact deployment or Azure model names to its model catalog; it does not rewrite model IDs. If a deployment cannot be matched automatically, use the exact OpenCode model ID as its deployment name.
+   The deployment name must match the model name for opencode to work properly.
    :::
 
 3. Run the `/connect` command and search for **Azure**.
@@ -432,91 +430,85 @@ If you encounter "I'm sorry, but I cannot assist with that request" errors, try 
    /connect
    ```
 
-4. Choose an authentication method.
-   - **API key**: Paste a key from the resource. To discover deployments with an API key, enter a Foundry Project endpoint in the next step.
-   - **Microsoft Entra ID (Azure CLI)**: [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, and assign the signed-in identity the required inference role. Use [`Cognitive Services OpenAI User`](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/role-based-access-control) for a standalone Azure OpenAI resource or [`Foundry User`](https://learn.microsoft.com/en-us/azure/foundry/concepts/rbac-foundry) for a Foundry resource. `Owner` or `Contributor` alone does not grant inference access.
+4. Enter your API key.
 
    ```txt
-   ┌ Select auth method
+   ┌ API key
    │
-   │ API key
-   │ Microsoft Entra ID (Azure CLI)
-   └
-   ```
-
-5. Finish the connection.
-   - With **Microsoft Entra ID (Azure CLI)**, enter the Azure Resource name. OpenCode resolves it in the active Azure CLI subscription and discovers its deployments. You can paste a full Resource ID or Foundry Project endpoint instead when you need to bypass subscription-wide lookup.
-   - With **API key**, choose the connection type, enter its value, then enter the key. A Foundry Project endpoint enables deployment discovery; a Resource name or Resource ID keeps the existing Azure OpenAI API-key behavior.
-
-   ```txt
-   ┌ Enter Azure Resource name
    │
-   │ my-resource
    └ enter
    ```
 
-   API-key setup first asks which locator you want to use:
-
-   ```txt
-   ┌ Select Azure connection type
-   │
-   │ Foundry Project endpoint
-   │ Azure Resource name
-   │ Azure Resource ID
-   └
-   ```
-
-   If a different Azure CLI subscription is active, select the correct one and reconnect:
+5. Set your resource name as an environment variable:
 
    ```bash
-   az account set --subscription NAME_OR_ID
-   ```
-
-   A full Resource ID or Foundry Project endpoint bypasses subscription-wide resource discovery.
-
-6. Optional: set one connection value as an environment variable to skip the resource prompt during `/connect`.
-
-   ```bash
-   AZURE_RESOURCE_NAME=RESOURCE_NAME opencode
+   AZURE_RESOURCE_NAME=XXX opencode
    ```
 
    Or add it to your bash profile:
 
    ```bash title="~/.bash_profile"
-   export AZURE_RESOURCE_NAME=RESOURCE_NAME
+   export AZURE_RESOURCE_NAME=XXX
    ```
 
-   For a Foundry project, use its Project endpoint:
-
-   ```bash
-   AZURE_AI_PROJECT_ENDPOINT=https://RESOURCE.services.ai.azure.com/api/projects/PROJECT opencode
-   ```
-
-   Or set the complete Resource ID:
-
-   ```bash
-   AZURE_RESOURCE_ID=/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/RESOURCE_NAME opencode
-   ```
-
-7. Run the `/models` command to select your model. When deployment discovery is available, OpenCode shows only deployments it can match to the Azure model catalog. Resource-name or Resource-ID API-key configurations retain the existing full-catalog behavior.
+6. Run the `/models` command to select your deployed model.
 
    ```txt
    /models
    ```
 
+#### Microsoft Entra ID (Azure CLI)
+
+You can use your Azure CLI session instead of an API key. [Install the Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli), run `az login`, then select **Microsoft Entra ID (Azure CLI)** when connecting the **Azure** provider and enter the same Resource name.
+
+Assign your identity the inference role required by the deployment: **Cognitive Services OpenAI User** for Azure OpenAI models or **Cognitive Services User** for other Foundry models. OpenCode refreshes access tokens through the Azure CLI, so you only need to sign in again when the CLI session expires.
+
 ---
 
 ### Azure Cognitive Services
 
-The separate `azure-cognitive-services` provider remains available for existing API-key configurations. New Microsoft Foundry connections should use the **Azure** provider above; both providers can address the same underlying Foundry resource.
+1. Head over to the [Azure portal](https://portal.azure.com/) and create an **Azure OpenAI** resource. You'll need:
+   - **Resource name**: This becomes part of your API endpoint (`https://AZURE_COGNITIVE_SERVICES_RESOURCE_NAME.cognitiveservices.azure.com/`)
+   - **API key**: Either `KEY 1` or `KEY 2` from your resource
 
-Existing environment configuration remains supported:
+2. Go to [Azure AI Foundry](https://ai.azure.com/) and deploy a model.
 
-```bash
-AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=RESOURCE_NAME \
-AZURE_COGNITIVE_SERVICES_API_KEY=API_KEY \
-opencode
-```
+   :::note
+   The deployment name must match the model name for opencode to work properly.
+   :::
+
+3. Run the `/connect` command and search for **Azure Cognitive Services**.
+
+   ```txt
+   /connect
+   ```
+
+4. Enter your API key.
+
+   ```txt
+   ┌ API key
+   │
+   │
+   └ enter
+   ```
+
+5. Set your resource name as an environment variable:
+
+   ```bash
+   AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX opencode
+   ```
+
+   Or add it to your bash profile:
+
+   ```bash title="~/.bash_profile"
+   export AZURE_COGNITIVE_SERVICES_RESOURCE_NAME=XXX
+   ```
+
+6. Run the `/models` command to select your deployed model.
+
+   ```txt
+   /models
+   ```
 
 ---
 
