@@ -68,8 +68,9 @@ export function createHomeProjectsController(home: HomeController) {
     },
     project: {
       list: home.project.list,
-      recentlyClosed: home.project.recentlyClosed,
-      homedir: home.project.homedir,
+      recentlyClosedForServer: home.project.recentlyClosedForServer,
+      knownForServer: home.project.knownForServer,
+      homedirForServer: home.project.homedirForServer,
       select: home.project.select,
       add: home.project.add,
       openNewSession: home.project.openProjectNewSession,

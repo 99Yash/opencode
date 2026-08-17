@@ -3,6 +3,7 @@ import { Accessor, createEffect, createMemo, createRoot } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createServerProjects, RECENTLY_CLOSED_DISPLAY_LIMIT, ServerConnection, useServers } from "./servers"
 import { pathKey } from "@/utils/path-key"
+import { knownProjectWorktrees } from "./project-suggestions"
 import { useServerHealth } from "@/utils/server-health"
 import { createServerSdkContext } from "./server-sdk"
 import { createServerSyncContext } from "./server-sync"
@@ -129,6 +130,14 @@ function createServerController(
       .slice(0, RECENTLY_CLOSED_DISPLAY_LIMIT)
       .map((worktree) => enrich({ worktree, expanded: false }))
   })
+  const knownProjectsList = createMemo(() => {
+    return knownProjectWorktrees({
+      open: projects.list().map((project) => project.worktree),
+      recentlyClosed: projects.recentlyClosed(),
+      known: sync.data.project.map((project) => project.worktree),
+      limit: RECENTLY_CLOSED_DISPLAY_LIMIT,
+    }).map((worktree) => enrich({ worktree, expanded: false }))
+  })
 
   const isLocal =
     (conn?.type === "sidecar" && conn.variant === "base") || (conn?.type === "http" && isLocalHost(conn.http.url))
@@ -141,6 +150,7 @@ function createServerController(
       ...projects,
       list: projectsList,
       recentlyClosed: recentlyClosedList,
+      known: knownProjectsList,
     },
     permission,
     notification,

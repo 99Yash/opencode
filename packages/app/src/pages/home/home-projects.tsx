@@ -8,11 +8,12 @@ export function HomeProjects(props: { projects: HomeProjectsController; scroll: 
       language={props.projects.copy.language}
       servers={props.projects.server.list()}
       projects={props.projects.project.list()}
-      recentlyClosed={props.projects.project.recentlyClosed()}
       selection={props.projects.selection.value()}
-      homedir={props.projects.project.homedir()}
       serverHealth={props.projects.server.health}
       projectsForServer={props.projects.server.projects}
+      recentlyClosedForServer={props.projects.project.recentlyClosedForServer}
+      knownForServer={props.projects.project.knownForServer}
+      homedirForServer={props.projects.project.homedirForServer}
       collapsed={props.projects.server.collapsed}
       canDefaultServer={props.projects.server.canDefault()}
       defaultServerKey={props.projects.server.defaultKey()}
