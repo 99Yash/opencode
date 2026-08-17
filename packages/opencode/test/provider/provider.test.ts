@@ -3,7 +3,7 @@ import { mkdir, unlink } from "fs/promises"
 import path from "path"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { Effect, Layer } from "effect"
+import { Effect, Predicate } from "effect"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -82,9 +82,25 @@ const paid = (providers: Record<string, { models: Record<string, { cost: { input
   return Object.values(item.models).filter((model) => model.cost.input > 0).length
 }
 
-const languageBaseURL = (language: unknown) => (language as { config: { baseURL: string } }).config.baseURL
-const languageURL = (language: unknown, path: string) =>
-  (language as { config: { url: (options: { path: string }) => string } }).config.url({ path })
+function languageConfig(language: unknown) {
+  if (!Predicate.isObject(language)) throw new Error("Expected an AI SDK language model")
+  if (!Predicate.isObject(language["config"])) throw new Error("Expected an AI SDK language model config")
+  return language["config"]
+}
+
+function languageBaseURL(language: unknown) {
+  const baseURL = languageConfig(language)["baseURL"]
+  if (!Predicate.isString(baseURL)) throw new Error("Expected an AI SDK base URL")
+  return baseURL
+}
+
+function languageURL(language: unknown, path: string) {
+  const url = languageConfig(language)["url"]
+  if (!Predicate.isFunction(url)) throw new Error("Expected an AI SDK URL builder")
+  const result: unknown = Reflect.apply(url, undefined, [{ path }])
+  if (!Predicate.isString(result)) throw new Error("Expected an AI SDK URL")
+  return result
+}
 
 const it = testEffect(LayerNode.compile(LayerNode.group([Provider.node, Env.node, Plugin.node])))
 const experimentalModels = testEffect(providerLayer({ enableExperimentalModels: true }))
@@ -811,40 +827,45 @@ it.instance("getSmallModel skips inferred models for Azure Cognitive Services", 
   }),
 )
 
-it.instance("Azure Cognitive Services resolves OAuth resource endpoints by model shape", () =>
-  Effect.gen(function* () {
-    yield* setProcessEnv(
-      "OPENCODE_AUTH_CONTENT",
-      JSON.stringify({
+it.instance(
+  "Azure Cognitive Services resolves a Foundry project endpoint by model shape",
+  () =>
+    Effect.gen(function* () {
+      const provider = yield* Provider.Service
+
+      const opus = yield* provider.getModel(
+        ProviderV2.ID.make("azure-cognitive-services"),
+        ModelV2.ID.make("claude-opus-4-5"),
+      )
+      expect(languageBaseURL(yield* provider.getLanguage(opus))).toBe(
+        "https://oauth-resource.services.ai.azure.com/anthropic/v1",
+      )
+
+      const kimi = yield* provider.getModel(
+        ProviderV2.ID.make("azure-cognitive-services"),
+        ModelV2.ID.make("kimi-k2.6"),
+      )
+      expect(languageURL(yield* provider.getLanguage(kimi), "/chat/completions")).toBe(
+        "https://oauth-resource.services.ai.azure.com/models/chat/completions",
+      )
+
+      const gpt = yield* provider.getModel(ProviderV2.ID.make("azure-cognitive-services"), ModelV2.ID.make("gpt-5.1"))
+      expect(languageURL(yield* provider.getLanguage(gpt), "/responses")).toBe(
+        "https://oauth-resource.cognitiveservices.azure.com/openai/v1/responses",
+      )
+    }),
+  {
+    config: {
+      provider: {
         "azure-cognitive-services": {
-          type: "oauth",
-          refresh: "refresh-token",
-          access: "access-token",
-          expires: Date.now() + 60_000,
-          accountId: "oauth-resource",
+          options: {
+            resourceName: "https://oauth-resource.services.ai.azure.com/api/projects/oauth-project",
+          },
         },
-      }),
-    )
-    const provider = yield* Provider.Service
-
-    const opus = yield* provider.getModel(
-      ProviderV2.ID.make("azure-cognitive-services"),
-      ModelV2.ID.make("claude-opus-4-5"),
-    )
-    expect(languageBaseURL(yield* provider.getLanguage(opus))).toBe(
-      "https://oauth-resource.services.ai.azure.com/anthropic/v1",
-    )
-
-    const kimi = yield* provider.getModel(ProviderV2.ID.make("azure-cognitive-services"), ModelV2.ID.make("kimi-k2.6"))
-    expect(languageURL(yield* provider.getLanguage(kimi), "/chat/completions")).toBe(
-      "https://oauth-resource.services.ai.azure.com/models/chat/completions",
-    )
-
-    const gpt = yield* provider.getModel(ProviderV2.ID.make("azure-cognitive-services"), ModelV2.ID.make("gpt-5.1"))
-    expect(languageURL(yield* provider.getLanguage(gpt), "/responses")).toBe(
-      "https://oauth-resource.cognitiveservices.azure.com/openai/v1/responses",
-    )
-  }),
+      },
+    },
+    init: () => setProcessEnv("AZURE_COGNITIVE_SERVICES_API_KEY", "test-key"),
+  },
 )
 
 it.instance(

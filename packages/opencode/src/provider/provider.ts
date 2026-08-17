@@ -18,7 +18,7 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Effect, Layer, Context, Option, Predicate, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectPromise } from "@/effect/promise"
@@ -159,6 +159,22 @@ function selectAzureLanguageModel(sdk: any, modelID: string, useChat: boolean) {
   return sdk.languageModel(modelID)
 }
 
+function azureResourceName(input: unknown) {
+  if (!Predicate.isString(input)) return undefined
+  const value = input.trim()
+  if (value === "") return undefined
+
+  const endpoint = Schema.decodeUnknownOption(Schema.URLFromString)(value)
+  if (Option.isNone(endpoint)) return /^[a-z0-9-]+$/i.test(value) ? value : undefined
+  if (endpoint.value.hostname.endsWith(".services.ai.azure.com")) {
+    return endpoint.value.hostname.slice(0, -".services.ai.azure.com".length)
+  }
+  if (endpoint.value.hostname.endsWith(".cognitiveservices.azure.com")) {
+    return endpoint.value.hostname.slice(0, -".cognitiveservices.azure.com".length)
+  }
+  return undefined
+}
+
 function selectBedrockMantleLanguageModel(sdk: BundledSDK, modelID: string) {
   if (modelID === "openai.gpt-oss-safeguard-20b" || modelID === "openai.gpt-oss-safeguard-120b")
     return sdk.chat?.(modelID) ?? sdk.languageModel(modelID)
@@ -246,7 +262,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
           auth?.type === "api" ? auth.metadata?.resourceName : undefined,
           auth?.type === "oauth" ? auth.accountId : undefined,
           env["AZURE_RESOURCE_NAME"],
-        ].find((name) => typeof name === "string" && name.trim() !== "")
+        ].find((name) => Predicate.isString(name) && name.trim() !== "")
       })
 
       if (!resource && !provider.options?.baseURL) {
@@ -284,9 +300,13 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
       const resourceName = [
         provider.options?.resourceName,
         auth?.type === "api" ? auth.metadata?.resourceName : undefined,
+        auth?.type === "api" ? auth.metadata?.projectEndpoint : undefined,
         auth?.type === "oauth" ? auth.accountId : undefined,
         env["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"],
-      ].find((name) => typeof name === "string" && name.trim() !== "")
+        env["AZURE_AI_PROJECT_ENDPOINT"],
+      ]
+        .map(azureResourceName)
+        .find(Predicate.isString)
       return {
         autoload: false,
         async getModel(sdk: any, modelID: string, options?: Record<string, any>) {
@@ -1745,8 +1765,8 @@ const layer = Layer.effect(
           model.providerID === "azure-cognitive-services" &&
           model.api.npm === "@ai-sdk/azure" &&
           !model.api.url &&
-          typeof options["baseURL"] !== "string" &&
-          typeof options["azureOpenAICompatibleBaseURL"] === "string" &&
+          !Predicate.isString(options["baseURL"]) &&
+          Predicate.isString(options["azureOpenAICompatibleBaseURL"]) &&
           options["azureOpenAICompatibleBaseURL"] !== ""
         ) {
           // Azure Cognitive Services hosts multiple protocol shapes under one provider.
@@ -1760,8 +1780,8 @@ const layer = Layer.effect(
 
         const baseURL = iife(() => {
           let url =
-            typeof options["baseURL"] === "string" && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
-          if (!url) return
+            Predicate.isString(options["baseURL"]) && options["baseURL"] !== "" ? options["baseURL"] : model.api.url
+          if (!url) return undefined
 
           const loader = s.varsLoaders[model.providerID]
           if (loader) {
