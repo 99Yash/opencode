@@ -2,7 +2,7 @@ import "@/index.css"
 import * as Sentry from "@sentry/solid"
 import { I18nProvider } from "@opencode-ai/ui/context"
 import type { UiI18n } from "@opencode-ai/ui/context/i18n"
-import { DialogProvider } from "@opencode-ai/ui/context/dialog"
+import { DialogProvider, useDialog } from "@opencode-ai/ui/context/dialog"
 import { FileComponentProvider } from "@opencode-ai/ui/context/file"
 import { File } from "@opencode-ai/session-ui/file"
 import { Font } from "@opencode-ai/ui/font"
@@ -182,6 +182,8 @@ function DesktopCommands() {
   const command = useCommand()
   const language = useLanguage()
   const platform = usePlatform()
+  const global = useGlobal()
+  const dialog = useDialog()
 
   command.register("desktop", () => {
     const commands: CommandOption[] = []
@@ -195,6 +197,18 @@ function DesktopCommands() {
         },
       })
     }
+    commands.push({
+      id: "project.openRecent",
+      title: language.t("desktop.menu.openRecentProjects"),
+      category: language.t("command.category.file"),
+      hidden: true,
+      disabled: global.servers.list().every((server) => global.ensureServerCtx(server).projects.recent().length === 0),
+      onSelect: () => {
+        void import("@/components/dialog-open-recent-projects").then(({ DialogOpenRecentProjects }) =>
+          dialog.show(() => <DialogOpenRecentProjects />),
+        )
+      },
+    })
     return commands
   })
 

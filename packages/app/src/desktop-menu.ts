@@ -114,6 +114,11 @@ export const DESKTOP_MENU: DesktopMenu[] = [
       },
       {
         type: "item",
+        labelKey: "desktop.menu.openRecentProjects",
+        command: "project.openRecent",
+      },
+      {
+        type: "item",
         labelKey: "desktop.menu.settings",
         command: "settings.open",
         accelerator: { windows: "Ctrl+," },
