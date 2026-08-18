@@ -12,6 +12,7 @@ import { AISDK } from "../aisdk.js"
 import { Catalog } from "../catalog.js"
 import { Command } from "../command.js"
 import { Credential } from "../credential.js"
+import { Formatter } from "../formatter.js"
 import { Bus } from "../bus.js"
 import { Integration } from "../integration.js"
 import { Location } from "../location.js"
@@ -36,6 +37,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: import("../p
   const commands = yield* Command.Service
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
+  const formatter = yield* Formatter.Service
   const mcp = yield* MCP.Service
   const location = yield* Location.Service
   const reference = yield* Reference.Service
@@ -184,6 +186,22 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: import("../p
     },
     event: {
       subscribe: () => bus.subscribe().pipe(Stream.filter(EventManifest.isServer)),
+    },
+    formatter: {
+      reload: formatter.reload,
+      transform: (callback) =>
+        formatter.transform((draft) => {
+          callback({
+            add: (definition) =>
+              draft.set(definition.name, {
+                name: definition.name,
+                extensions: [...definition.extensions],
+                environment: definition.environment === undefined ? undefined : { ...definition.environment },
+                enabled: Effect.succeed([...definition.command]),
+              }),
+            remove: draft.remove,
+          })
+        }),
     },
     integration: {
       list: () => response(integration.list()),

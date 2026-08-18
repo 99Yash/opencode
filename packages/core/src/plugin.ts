@@ -9,6 +9,7 @@ import { Agent } from "./agent.js"
 import { AISDK } from "./aisdk.js"
 import { Catalog } from "./catalog.js"
 import { Command } from "./command.js"
+import { Formatter } from "./formatter.js"
 import { Bus } from "./bus.js"
 import { Integration } from "./integration.js"
 import { MCP } from "./mcp/index.js"
@@ -154,6 +155,7 @@ export const node = makeLocationNode({
     AISDK.node,
     Catalog.node,
     Command.node,
+    Formatter.node,
     Integration.node,
     MCP.node,
     Location.node,

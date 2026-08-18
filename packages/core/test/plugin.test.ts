@@ -8,6 +8,7 @@ import { Bus } from "@opencode-ai/core/bus"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
+import { Formatter } from "@opencode-ai/core/formatter"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -16,6 +17,8 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Tool } from "@opencode-ai/core/tool"
 import { testEffect } from "./lib/effect"
 import { PluginTestLayer } from "./plugin/fixture"
+import fs from "fs/promises"
+import path from "path"
 
 const it = testEffect(PluginTestLayer)
 
@@ -96,6 +99,34 @@ describe("Plugin", () => {
         "disconnect:/target",
         "list:/target",
       ])
+    }),
+  )
+
+  it.effect("registers formatters through the plugin context", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const formatter = yield* Formatter.Service
+      const location = yield* Location.Service
+      const host = yield* PluginHost.make(plugins)
+      const file = path.join(location.directory, "plugin.formatter-test")
+      yield* Effect.promise(() => fs.writeFile(file, "before"))
+      const registration = yield* host.formatter.transform((draft) => {
+        draft.add({
+          name: "plugin",
+          command: [
+            process.execPath,
+            "-e",
+            "const fs = require('fs'); fs.writeFileSync(process.argv.at(-1), 'after')",
+            "$FILE",
+          ],
+          extensions: [".formatter-test"],
+        })
+      })
+
+      expect(yield* formatter.file(file)).toBe(true)
+      expect(yield* Effect.promise(() => fs.readFile(file, "utf8"))).toBe("after")
+      yield* registration.dispose
+      expect(yield* formatter.file(file)).toBe(false)
     }),
   )
 

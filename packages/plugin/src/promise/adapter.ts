@@ -158,6 +158,10 @@ export function fromPromise(plugin: Plugin) {
                 ),
               ),
           },
+          formatter: {
+            transform: transform(host.formatter),
+            reload: () => run(host.formatter.reload()),
+          },
           integration: {
             list: adaptApiMethod(IntegrationEndpoints["integration.list"], host.integration.list),
             get: adaptApiMethod(IntegrationEndpoints["integration.get"], host.integration.get),

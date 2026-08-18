@@ -12,6 +12,8 @@ import { Config } from "../config.js"
 import { Credential } from "../credential.js"
 import { ConfigAgentPlugin } from "../config/plugin/agent.js"
 import { ConfigCommandPlugin } from "../config/plugin/command.js"
+import { ConfigFormatterPlugin } from "../config/plugin/formatter.js"
+import { ConfigImagePlugin } from "../config/plugin/image.js"
 import { ConfigInstructionPlugin } from "../config/plugin/instruction.js"
 import { ConfigMCPPlugin } from "../config/plugin/mcp.js"
 import { ConfigProviderPlugin } from "../config/plugin/provider.js"
@@ -20,6 +22,7 @@ import { ConfigReferencePlugin } from "../config/plugin/reference.js"
 import { ConfigSkillPlugin } from "../config/plugin/skill.js"
 import { ConfigPluginSource } from "../config/plugin/source.js"
 import { ConfigWebSearchPlugin } from "../config/plugin/websearch.js"
+import { ConfigToolOutputPlugin } from "../config/plugin/tool-output.js"
 import { Bus } from "../bus.js"
 import { Environment } from "../environment/index.js"
 import { FileMutation } from "../file-mutation.js"
@@ -57,6 +60,7 @@ import { ShellTool } from "../tool/plugin/shell.js"
 import { SkillTool } from "../tool/plugin/skill.js"
 import { SubagentTool } from "../tool/plugin/subagent.js"
 import { Tool } from "../tool.js"
+import { ToolOutput } from "../tool-output.js"
 import { WebFetchTool } from "../tool/plugin/webfetch.js"
 import { WebSearchTool } from "../tool/plugin/websearch.js"
 import { WellKnown } from "../wellknown.js"
@@ -111,6 +115,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
   const skill = yield* Skill.Service
   const skillDiscovery = yield* SkillDiscovery.Service
   const tools = yield* Tool.Service
+  const toolOutput = yield* ToolOutput.Service
   const watcher = yield* Watcher.Service
   const wellknown = yield* WellKnown.Service
   return Context.mergeAll(
@@ -149,6 +154,7 @@ const services = Effect.fn("PluginInternal.services")(function* () {
     Context.make(Skill.Service, skill),
     Context.make(SkillDiscovery.Service, skillDiscovery),
     Context.make(Tool.Service, tools),
+    Context.make(ToolOutput.Service, toolOutput),
     Context.make(Watcher.Service, watcher),
     Context.make(WellKnown.Service, wellknown),
   )
@@ -194,6 +200,7 @@ export const requirements = LayerNode.group([
   Skill.node,
   SkillDiscovery.node,
   Tool.node,
+  ToolOutput.node,
   Watcher.node,
   WellKnown.node,
 ])
@@ -232,6 +239,9 @@ const post = [
   ConfigReferencePlugin.Plugin,
   ConfigAgentPlugin.Plugin,
   ConfigCommandPlugin.Plugin,
+  ConfigFormatterPlugin.Plugin,
+  ConfigImagePlugin.Plugin,
+  ConfigToolOutputPlugin.Plugin,
   ConfigSkillPlugin.Plugin,
   ConfigProviderPlugin.Plugin,
   ConfigWebSearchPlugin.Plugin,

@@ -7,6 +7,7 @@ import type { AISDKDomain } from "./aisdk.js"
 import type { CatalogDomain } from "./catalog.js"
 import type { CommandDomain } from "./command.js"
 import type { EventDomain } from "./event.js"
+import type { FormatterDomain } from "./formatter.js"
 import type { IntegrationDomain } from "./integration.js"
 import type { MCPDomain } from "./mcp.js"
 import type { ReferenceDomain } from "./reference.js"
@@ -24,6 +25,7 @@ export interface Context {
   readonly catalog: CatalogDomain
   readonly command: CommandDomain
   readonly event: EventDomain
+  readonly formatter: FormatterDomain
   readonly integration: IntegrationDomain
   readonly mcp: MCPDomain
   readonly plugin: PluginApi<unknown>

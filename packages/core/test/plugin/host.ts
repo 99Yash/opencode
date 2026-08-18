@@ -48,6 +48,10 @@ export function host(overrides: Overrides = {}): Plugin.Context {
     event: overrides.event ?? {
       subscribe: () => Stream.empty,
     },
+    formatter: overrides.formatter ?? {
+      transform: () => Effect.die("unused formatter.transform"),
+      reload: () => Effect.die("unused formatter.reload"),
+    },
     integration: overrides.integration ?? {
       list: () => Effect.die("unused integration.list"),
       get: () => Effect.die("unused integration.get"),

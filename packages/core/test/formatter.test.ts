@@ -7,33 +7,32 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Npm } from "@opencode-ai/util/npm"
 import { Document, Info } from "@opencode-ai/schema/config"
 import { Config } from "../src/config"
+import { ConfigFormatterPlugin } from "../src/config/plugin/formatter"
 import { Formatter } from "../src/formatter"
 import { Location } from "../src/location"
 import { location } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
+import { host } from "./plugin/host"
 
 const it = testEffect(Layer.empty)
 type ConfigInput = typeof Info.Encoded
 
 function formatterLayer(directory: string, configured?: ConfigInput["formatter"]) {
-  const entries =
-    configured === undefined
-      ? []
-      : [
-          new Document({
-            type: "document",
-            info: Schema.decodeUnknownSync(Info)({ formatter: configured }),
-          }),
-        ]
-  return AppNodeBuilder.build(Formatter.node, [
-    [Config.node, Config.testLayer(entries)],
+  const layer = AppNodeBuilder.build(Formatter.node, [
     [
       Location.node,
       Layer.succeed(Location.Service, Location.Service.of(location({ directory: AbsolutePath.make(directory) }))),
     ],
     [Npm.node, Layer.mock(Npm.Service, { which: () => Effect.succeed(undefined) })],
   ])
+  const entries =
+    configured === undefined
+      ? []
+      : [new Document({ type: "document", info: Schema.decodeUnknownSync(Info)({ formatter: configured }) })]
+  return Layer.effectDiscard(ConfigFormatterPlugin.Plugin.effect(host()).pipe(Effect.provide(Config.testLayer(entries)))).pipe(
+    Layer.provideMerge(layer),
+  )
 }
 
 function withTemp<A, E, R>(body: (directory: string) => Effect.Effect<A, E, R>) {
@@ -160,6 +159,36 @@ describe("Formatter", () => {
           }),
         ),
       ),
+    ),
+  )
+
+  it.live("resolves a replacement formatter command independently", () =>
+    withTemp((directory) =>
+      Effect.gen(function* () {
+        const formatter = yield* Formatter.Service
+        const file = path.join(directory, "test.replaced")
+        const register = (content: string) =>
+          formatter.transform((draft) => {
+            draft.set("replacement", {
+              name: "replacement",
+              extensions: [".replaced"],
+              enabled: Effect.succeed([
+                process.execPath,
+                "-e",
+                `require('fs').writeFileSync(process.argv.at(-1), '${content}')`,
+                "$FILE",
+              ]),
+            })
+          })
+
+        yield* register("first")
+        expect(yield* formatter.file(file)).toBe(true)
+        expect(yield* Effect.promise(() => fs.readFile(file, "utf8"))).toBe("first")
+
+        yield* register("second")
+        expect(yield* formatter.file(file)).toBe(true)
+        expect(yield* Effect.promise(() => fs.readFile(file, "utf8"))).toBe("second")
+      }).pipe(Effect.provide(formatterLayer(directory, false))),
     ),
   )
 })

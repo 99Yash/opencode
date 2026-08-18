@@ -7,6 +7,7 @@ import { which } from "../util/which.js"
 
 export interface Info {
   readonly name: string
+  readonly builtIn?: boolean
   readonly environment?: Record<string, string>
   readonly extensions: readonly string[]
   readonly enabled: Effect.Effect<string[] | false>

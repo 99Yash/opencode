@@ -8,11 +8,23 @@ import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Npm } from "@opencode-ai/util/npm"
 import { AppProcess } from "@opencode-ai/util/process"
 import { Global } from "@opencode-ai/util/global"
-import { Config } from "./config.js"
 import { Location } from "./location.js"
 import { make, type Info } from "./formatter/builtins.js"
+import { State } from "./state.js"
 
-export interface Interface {
+type Data = {
+  readonly formatters: Map<string, Info>
+}
+
+export interface Draft {
+  readonly list: () => readonly Info[]
+  readonly get: (name: string) => Info | undefined
+  readonly set: (name: string, formatter: Info) => void
+  readonly remove: (name: string) => void
+  readonly clear: () => void
+}
+
+export interface Interface extends State.Transformable<Draft> {
   readonly file: (filepath: string) => Effect.Effect<boolean>
 }
 
@@ -21,66 +33,48 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const config = yield* Config.Service
     const fs = yield* FSUtil.Service
     const location = yield* Location.Service
     const npm = yield* Npm.Service
     const processes = yield* AppProcess.Service
     const global = yield* Global.Service
-    const commands = new Map<string, string[] | false>()
-    let formatters: Info[] = []
-
-    const load = yield* Effect.cached(
-      Effect.gen(function* () {
-        const configured = Config.latest(yield* config.entries(), "formatter")
-        if (!configured) {
-          yield* Effect.logInfo("all formatters are disabled")
-          return
-        }
-
-        const builtIns = make({
-          directory: location.directory,
-          worktree: location.project.directory,
-          fs,
-          npm,
-          processes,
-          bin: global.bin,
-        })
-        formatters = builtIns
-        if (configured === true) return
-
-        for (const [name, entry] of Object.entries(configured)) {
-          const index = formatters.findIndex((formatter) => formatter.name === name)
-          if (entry.disabled) {
-            if (index !== -1) formatters.splice(index, 1)
-            continue
-          }
-
-          const builtIn = builtIns.find((formatter) => formatter.name === name)
-          const formatter: Info = {
-            name,
-            extensions: entry.extensions ?? builtIn?.extensions ?? [],
-            environment: { ...builtIn?.environment, ...entry.environment },
-            enabled:
-              builtIn && !entry.command ? builtIn.enabled : Effect.succeed(entry.command ? [...entry.command] : false),
-          }
-          if (index === -1) formatters.push(formatter)
-          else formatters[index] = formatter
-        }
-      }).pipe(Effect.withSpan("Formatter.load")),
-    )
+    const commands = new WeakMap<Info, string[] | false>()
+    const builtIns = make({
+      directory: location.directory,
+      worktree: location.project.directory,
+      fs,
+      npm,
+      processes,
+      bin: global.bin,
+    })
+    const state = State.create<Data, Draft>({
+      name: "formatter",
+      initial: () => ({
+        formatters: new Map(builtIns.map((formatter) => [formatter.name, { ...formatter, builtIn: true }])),
+      }),
+      draft: (data) => ({
+        list: () => Array.from(data.formatters.values()),
+        get: (name) => data.formatters.get(name),
+        set: (name, formatter) => data.formatters.set(name, { ...formatter, name }),
+        remove: (name) => {
+          data.formatters.delete(name)
+        },
+        clear: () => data.formatters.clear(),
+      }),
+    })
 
     const command = Effect.fnUntraced(function* (formatter: Info) {
-      const cached = commands.get(formatter.name)
+      const cached = commands.get(formatter)
       if (cached !== undefined) return cached
       const result = yield* formatter.enabled
-      if (result !== false) commands.set(formatter.name, result)
+      if (result !== false) commands.set(formatter, result)
       return result
     })
 
     const file = Effect.fn("Formatter.file")(function* (filepath: string) {
-      yield* load
-      const matching = formatters.filter((formatter) => formatter.extensions.includes(path.extname(filepath)))
+      const matching = Array.from(state.get().formatters.values()).filter((formatter) =>
+        formatter.extensions.includes(path.extname(filepath)),
+      )
 
       for (const formatter of matching) {
         const enabled = yield* command(formatter)
@@ -118,12 +112,12 @@ const layer = Layer.effect(
       return false
     })
 
-    return Service.of({ file })
+    return Service.of({ file, transform: state.transform, reload: state.reload })
   }),
 )
 
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Config.node, FSUtil.node, Location.node, Npm.node, AppProcess.node, Global.node],
+  deps: [FSUtil.node, Location.node, Npm.node, AppProcess.node, Global.node],
 })

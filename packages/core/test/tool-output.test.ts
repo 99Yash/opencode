@@ -1,7 +1,8 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { Config } from "@opencode-ai/core/config"
+import { ConfigToolOutputPlugin } from "@opencode-ai/core/config/plugin/tool-output"
 import { Document, Info } from "@opencode-ai/schema/config"
 import { ConfigToolOutput } from "@opencode-ai/schema/config/tool-output"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -12,6 +13,7 @@ import { Global } from "@opencode-ai/util/global"
 import { Identifier } from "@opencode-ai/core/id/id"
 import { tmpdir } from "./fixture/tmpdir"
 import { it } from "./lib/effect"
+import { host } from "./plugin/host"
 
 const withStore = <A, E, R>(
   body: (output: ToolOutput.Interface, fs: FSUtil.Interface, root: string) => Effect.Effect<A, E, R>,
@@ -21,10 +23,12 @@ const withStore = <A, E, R>(
     Effect.promise(() => tmpdir()),
     (tmp) => {
       const config = Config.testLayer([new Document({ type: "document", info })])
-      const layer = AppNodeBuilder.build(LayerNode.group([ToolOutput.node, FSUtil.node]), [
-        [Config.node, config],
+      const base = AppNodeBuilder.build(LayerNode.group([ToolOutput.node, FSUtil.node]), [
         [Global.node, Global.layerWith({ data: tmp.path })],
       ])
+      const layer = Layer.effectDiscard(
+        ConfigToolOutputPlugin.Plugin.effect(host()).pipe(Effect.provide(config)),
+      ).pipe(Layer.provideMerge(base))
       return Effect.gen(function* () {
         return yield* body(yield* ToolOutput.Service, yield* FSUtil.Service, tmp.path)
       }).pipe(Effect.provide(layer))

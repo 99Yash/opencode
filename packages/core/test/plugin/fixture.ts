@@ -10,6 +10,7 @@ import { Bus } from "@opencode-ai/core/bus"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Form } from "@opencode-ai/core/form"
+import { Formatter } from "@opencode-ai/core/formatter"
 import { Integration } from "@opencode-ai/core/integration"
 import { Location } from "@opencode-ai/core/location"
 import { MCP } from "@opencode-ai/core/mcp/index"
@@ -44,6 +45,7 @@ export const PluginTestLayer = LayerNode.compile(
     Credential.node,
     Bus.node,
     Form.node,
+    Formatter.node,
     LayerNodePlatform.httpClient,
     Plugin.node,
     Agent.node,

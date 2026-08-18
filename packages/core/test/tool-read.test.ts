@@ -2,6 +2,7 @@ import { beforeEach, describe, expect } from "bun:test"
 import path from "path"
 import { Effect, Exit, Layer, Stream } from "effect"
 import { Config } from "@opencode-ai/core/config"
+import { ConfigImagePlugin } from "@opencode-ai/core/config/plugin/image"
 import { Document, Info } from "@opencode-ai/schema/config"
 import { ConfigMedia } from "@opencode-ai/schema/config/media"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -25,6 +26,7 @@ import { Environment } from "@opencode-ai/core/environment/index"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
 import { toolIdentity, executeTool, registerToolPlugin, toolDefinitions } from "./lib/tool"
+import { host } from "./plugin/host"
 
 const readToolNode = makeLocationNode({
   name: "test/read-tool-plugin",
@@ -90,7 +92,8 @@ const permission = permissionLayer({
     ),
 })
 const config = Config.testLayer()
-const imageLayer = AppNodeBuilder.build(Image.node, [[Config.node, config]])
+const imageLayer = AppNodeBuilder.build(Image.node)
+const configureImage = ConfigImagePlugin.Plugin.effect(host())
 const testFileSystem = Layer.effect(
   FSUtil.Service,
   FSUtil.Service.use((fs) =>
@@ -132,11 +135,15 @@ const mutation = Layer.succeed(
 )
 const unavailableImage = Layer.succeed(
   Image.Service,
-  Image.Service.of({ normalize: () => Effect.fail(new Image.ResizerUnavailableError()) }),
+  Image.Service.of({
+    normalize: () => Effect.fail(new Image.ResizerUnavailableError()),
+    transform: () => Effect.die("unused image.transform"),
+    reload: () => Effect.die("unused image.reload"),
+  }),
 )
 const readLayer = (imageLayer: Layer.Layer<Image.Service>) =>
   Layer.mergeAll(
-    AppNodeBuilder.build(LayerNode.group([Tool.node, readToolNode]), [
+    AppNodeBuilder.build(LayerNode.group([Tool.node, readToolNode, Image.node]), [
       [ReadToolFileSystem.node, reader],
       [Permission.node, permission],
       [Config.node, config],
@@ -395,6 +402,7 @@ describe("ReadTool", () => {
           }),
         }),
       ])
+      yield* configureImage
       const registry = yield* Tool.Service
 
       expect(
@@ -436,6 +444,7 @@ describe("ReadTool", () => {
           }),
         }),
       ])
+      yield* configureImage
       const registry = yield* Tool.Service
       const result = yield* executeTool(registry, {
         sessionID,
@@ -477,6 +486,7 @@ describe("ReadTool", () => {
           }),
         }),
       ])
+      yield* configureImage
       const registry = yield* Tool.Service
 
       expect(
