@@ -4,10 +4,10 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { ProviderIcon } from "@opencode-ai/ui/provider-icon"
 import { showToast } from "@/utils/toast"
 import { popularProviders, useProviders } from "@/hooks/use-providers"
+import { useIntegrations } from "@/hooks/use-integrations"
 import { createMemo, type Component, For, Show } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { useServerSDK } from "@/context/server-sdk"
-import { useServerSync } from "@/context/server-sync"
 import { DialogConnectProvider, useProviderConnectController } from "../dialog-connect-provider"
 import { DialogCustomProvider } from "../dialog-custom-provider"
 import { SettingsServerScope } from "../settings-server-picker"
@@ -38,9 +38,10 @@ export const SettingsProvidersV2: Component<{
   const dialog = useDialog()
   const language = useLanguage()
   const serverSdk = useServerSDK()
-  const serverSync = useServerSync()
   const providers = useProviders(() => props.directory)
+  const integrations = useIntegrations(() => props.directory)
   const providerConnect = useProviderConnectController({ onBack: props.onBack })
+  const integration = (providerID: string) => integrations.list().find((item) => item.id === providerID)
 
   const connect = (provider?: string) => {
     providerConnect.select(provider)
@@ -52,15 +53,12 @@ export const SettingsProvidersV2: Component<{
   }
 
   const connected = createMemo(() => {
-    return providers.connected().filter(
-      (provider) =>
-        provider.id !== "opencode" ||
-        Object.values(provider.models).some((model) => {
-          if (typeof model !== "object" || model === null || !("cost" in model)) return false
-          const cost = model.cost
-          return typeof cost === "object" && cost !== null && "input" in cost
-        }),
-    )
+    return providers
+      .connected()
+      .filter(
+        (provider) =>
+          provider.id !== "opencode" || Object.values(provider.models).some((model) => model.cost.input > 0),
+      )
   })
 
   const popular = createMemo(() => {
@@ -73,7 +71,14 @@ export const SettingsProvidersV2: Component<{
     return items
   })
 
+  // Connection state comes from the integration list like the TUI: credential
+  // connections mean an API key or OAuth grant, env connections mean detected
+  // environment variables, and a connectionless integration is config-provided.
   const source = (item: ProviderItem): ProviderSource | undefined => {
+    const current = integration(item.id)
+    if (current?.connections.some((connection) => connection.type === "credential")) return "api"
+    if (current?.connections.some((connection) => connection.type === "env")) return "env"
+    if (current) return "config"
     if (!("source" in item)) return
     const value = item.source
     if (value === "env" || value === "api" || value === "config" || value === "custom") return value
@@ -84,25 +89,19 @@ export const SettingsProvidersV2: Component<{
     const current = source(item)
     if (current === "env") return language.t("settings.providers.tag.environment")
     if (current === "api") return language.t("provider.connect.method.apiKey")
-    if (current === "config") {
-      if (isConfigCustom(item.id)) return language.t("settings.providers.tag.custom")
-      return language.t("settings.providers.tag.config")
-    }
+    if (current === "config") return language.t("settings.providers.tag.config")
     if (current === "custom") return language.t("settings.providers.tag.custom")
     return language.t("settings.providers.tag.other")
   }
 
-  const canDisconnect = (item: ProviderItem) => source(item) !== "env" && !isConfigCustom(item.id)
+  const canDisconnect = (item: ProviderItem) => {
+    const current = integration(item.id)
+    if (current) return current.connections.some((connection) => connection.type === "credential")
+    const currentSource = source(item)
+    return currentSource !== "env" && currentSource !== "config"
+  }
 
   const note = (id: string) => PROVIDER_NOTES.find((item) => item.match(id))?.key
-
-  const isConfigCustom = (providerID: string) => {
-    const provider = serverSync.data.config.provider?.[providerID]
-    if (!provider) return false
-    if (provider.npm !== "@ai-sdk/openai-compatible") return false
-    if (!provider.models || Object.keys(provider.models).length === 0) return false
-    return true
-  }
 
   const disconnect = async (providerID: string, name: string) => {
     const location = props.directory ? { directory: props.directory } : undefined

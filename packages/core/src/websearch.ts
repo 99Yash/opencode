@@ -1,7 +1,7 @@
 export * as WebSearch from "./websearch.js"
 
 import { WebSearch } from "@opencode-ai/schema/websearch"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Bus } from "./bus.js"
 import { KV } from "./kv.js"
@@ -25,25 +25,26 @@ export type Result = WebSearch.Result
 export const Response = WebSearch.Response
 export type Response = WebSearch.Response
 
+export const ProviderKey = "websearch:provider"
+export const Selection = Schema.Union([ID, Schema.Literal("random"), Schema.Literal(false)])
+export type Selection = typeof Selection.Type
+
 export interface ProviderImplementation extends Provider {
   readonly execute: (input: ProviderInput) => Effect.Effect<readonly Result[], unknown>
 }
 
-export class ProviderRequiredError extends Schema.TaggedErrorClass<ProviderRequiredError>()(
+export class ProviderRequiredError extends Schema.TaggedError<ProviderRequiredError>()(
   "WebSearch.ProviderRequired",
   {},
 ) {}
 
-export class ProviderNotFoundError extends Schema.TaggedErrorClass<ProviderNotFoundError>()(
-  "WebSearch.ProviderNotFound",
-  {
-    providerID: ID,
-  },
-) {}
+export class ProviderNotFoundError extends Schema.TaggedError<ProviderNotFoundError>()("WebSearch.ProviderNotFound", {
+  providerID: ID,
+}) {}
 
-export class DisabledError extends Schema.TaggedErrorClass<DisabledError>()("WebSearch.Disabled", {}) {}
+export class DisabledError extends Schema.TaggedError<DisabledError>()("WebSearch.Disabled", {}) {}
 
-export class RequestError extends Schema.TaggedErrorClass<RequestError>()("WebSearch.Request", {
+export class RequestError extends Schema.TaggedError<RequestError>()("WebSearch.Request", {
   providerID: ID,
   cause: Schema.Defect(),
 }) {}
@@ -53,6 +54,7 @@ export type Error = ProviderRequiredError | ProviderNotFoundError | DisabledErro
 export interface Interface extends State.Transformable<Draft> {
   readonly providers: () => Effect.Effect<readonly Provider[]>
   readonly default: () => Effect.Effect<Provider | undefined, DisabledError>
+  readonly select: (selection: Selection) => Effect.Effect<void>
   readonly query: (input: Input) => Effect.Effect<Response, Error>
 }
 
@@ -60,14 +62,14 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/We
 
 type Data = {
   readonly providers: Map<ID, ProviderImplementation>
-  defaultProviderID?: ID
+  selection?: Selection
 }
 
 export type Draft = {
   add: (provider: ProviderImplementation) => void
   default: {
-    get: () => ID | undefined
-    set: (providerID: ID) => void
+    get: () => Selection | undefined
+    set: (selection: Selection) => void
   }
 }
 
@@ -82,8 +84,8 @@ const layer = Layer.effect(
       draft: (draft) => ({
         add: (provider) => draft.providers.set(provider.id, provider),
         default: {
-          get: () => draft.defaultProviderID,
-          set: (providerID) => (draft.defaultProviderID = providerID),
+          get: () => draft.selection,
+          set: (selection) => (draft.selection = selection),
         },
       }),
       finalize: () => bus.publish(WebSearch.Event.Updated, {}).pipe(Effect.asVoid),
@@ -96,12 +98,16 @@ const layer = Layer.effect(
 
     const defaultProvider = Effect.fn("WebSearch.default")(function* () {
       const data = state.get()
-      const configured = data.defaultProviderID ? data.providers.get(data.defaultProviderID) : undefined
-      if (configured) return configured
-      const stored = yield* kv.get("websearch:provider")
-      if (stored === false) return yield* new DisabledError()
-      if (typeof stored !== "string") return
-      return data.providers.get(ID.make(stored))
+      const stored = data.selection === undefined ? yield* kv.get(ProviderKey) : undefined
+      const decoded = Schema.decodeUnknownOption(Selection)(stored)
+      if (stored !== undefined && Option.isNone(decoded)) yield* kv.remove(ProviderKey)
+      const selection = data.selection ?? Option.getOrUndefined(decoded)
+      if (selection === false) return yield* new DisabledError()
+      if (selection === "random") {
+        const providers = Array.from(data.providers.values())
+        return providers[Math.floor(Math.random() * providers.length)]
+      }
+      return selection ? data.providers.get(selection) : undefined
     })
 
     const resolve = Effect.fn("WebSearch.resolve")(function* (input: Input) {
@@ -124,6 +130,9 @@ const layer = Layer.effect(
       default: Effect.fn("WebSearch.defaultInfo")(function* () {
         const provider = yield* defaultProvider()
         return provider && { id: provider.id, name: provider.name }
+      }),
+      select: Effect.fn("WebSearch.select")(function* (selection) {
+        yield* kv.set(ProviderKey, selection)
       }),
       query: Effect.fn("WebSearch.query")(function* (input) {
         const provider = yield* resolve(input)

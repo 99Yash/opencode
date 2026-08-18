@@ -81,16 +81,39 @@ describe("WebSearch", () => {
     }),
   )
 
-  it.effect("uses the provider stored in KV", () =>
+  it.effect("persists the selected provider in KV", () =>
     Effect.gen(function* () {
-      yield* register("exa")
       const parallel = yield* register("parallel")
       const websearch = yield* WebSearch.Service
       const kv = yield* KV.Service
-      yield* kv.set("websearch:provider", parallel.providerID)
 
-      expect((yield* websearch.query({ query: "stored" })).providerID).toBe(parallel.providerID)
-      yield* kv.remove("websearch:provider")
+      yield* websearch.select(parallel.providerID)
+
+      expect(yield* kv.get(WebSearch.ProviderKey)).toBe(parallel.providerID)
+      expect((yield* websearch.query({ query: "remembered" })).providerID).toBe(parallel.providerID)
+    }),
+  )
+
+  it.effect("keeps config transforms above the persisted selection", () =>
+    Effect.gen(function* () {
+      const exa = yield* register("exa")
+      const parallel = yield* register("parallel")
+      const websearch = yield* WebSearch.Service
+      yield* websearch.select(parallel.providerID)
+      yield* websearch.transform((draft) => draft.default.set(exa.providerID))
+
+      expect((yield* websearch.query({ query: "configured" })).providerID).toBe(exa.providerID)
+    }),
+  )
+
+  it.effect("chooses a registered provider for random selection", () =>
+    Effect.gen(function* () {
+      yield* register("exa")
+      yield* register("parallel")
+      const websearch = yield* WebSearch.Service
+      yield* websearch.transform((draft) => draft.default.set("random"))
+
+      expect(["exa", "parallel"]).toContain((yield* websearch.query({ query: "random" })).providerID)
     }),
   )
 
@@ -98,11 +121,9 @@ describe("WebSearch", () => {
     Effect.gen(function* () {
       yield* register("exa")
       const websearch = yield* WebSearch.Service
-      const kv = yield* KV.Service
-      yield* kv.set("websearch:provider", false)
+      yield* websearch.transform((draft) => draft.default.set(false))
 
       expect((yield* websearch.query({ query: "disabled" }).pipe(Effect.flip))._tag).toBe("WebSearch.Disabled")
-      yield* kv.remove("websearch:provider")
     }),
   )
 

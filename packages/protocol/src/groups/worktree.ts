@@ -3,9 +3,9 @@ import { Worktree } from "@opencode-ai/schema/worktree"
 import { Schema, Struct } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 
-const root = "/api/experimental/project/:projectID/worktree"
+const root = "/api/worktree/:projectID"
 
-export class WorktreeError extends Schema.ErrorClass<WorktreeError>("WorktreeError")(
+export class WorktreeError extends Schema.Error<WorktreeError>("WorktreeError")(
   {
     name: Schema.Literal("WorktreeError"),
     data: Schema.Struct({

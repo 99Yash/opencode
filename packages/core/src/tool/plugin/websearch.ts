@@ -5,7 +5,6 @@ import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema, Semaphore } from "effect"
 import { HttpClientError } from "effect/unstable/http"
 import { Form } from "../../form.js"
-import { KV } from "../../kv.js"
 import { Permission } from "../../permission.js"
 import { WebSearch } from "../../websearch.js"
 
@@ -30,7 +29,6 @@ export const Plugin = {
   effect: Effect.fn("WebSearchTool.Plugin")(function* (ctx: PluginContext) {
     const permission = yield* Permission.Service
     const forms = yield* Form.Service
-    const kv = yield* KV.Service
     const websearch = yield* WebSearch.Service
 
     yield* ctx.tool
@@ -65,7 +63,7 @@ export const Plugin = {
                     return providerSelectionLock
                       .withPermit(
                         Effect.gen(function* () {
-                          if (yield* websearch.default()) return yield* Effect.void
+                          if (yield* websearch.default()) return
                           const providers = (yield* ctx.websearch.providers()).data
                           const defaultProvider = providers[0]
                           if (!defaultProvider) return yield* new WebSearch.ProviderRequiredError()
@@ -83,7 +81,7 @@ export const Plugin = {
                                 options: [
                                   {
                                     value: "allow",
-                                    label: `Allow web search via ${defaultProvider.name}`,
+                                    label: `Allow search via ${providers.map((provider) => provider.name).join(", ")}`,
                                   },
                                   {
                                     value: "choose",
@@ -97,7 +95,7 @@ export const Plugin = {
                           if (response.status === "cancelled")
                             return yield* Effect.fail(new Error("Web search cancelled"))
                           if (response.answer.choice === "disable") {
-                            yield* kv.set("websearch:provider", false)
+                            yield* websearch.select(false)
                             return yield* new WebSearch.DisabledError()
                           }
                           const selection =
@@ -123,13 +121,15 @@ export const Plugin = {
                               : undefined
                           if (selection?.status === "cancelled")
                             return yield* Effect.fail(new Error("Web search cancelled"))
-                          const providerID = selection?.answer.provider ?? defaultProvider.id
+                          const providerID = selection?.answer.provider ?? "random"
                           if (
                             typeof providerID !== "string" ||
-                            !providers.some((provider) => provider.id === providerID)
+                            (providerID !== "random" && !providers.some((provider) => provider.id === providerID))
                           )
                             return yield* new WebSearch.ProviderRequiredError()
-                          return yield* kv.set("websearch:provider", providerID)
+                          yield* websearch.select(providerID === "random" ? "random" : WebSearch.ID.make(providerID))
+                          if (providerID !== "random") return WebSearch.ID.make(providerID)
+                          return providers[Math.floor(Math.random() * providers.length)]?.id
                         }),
                       )
                       .pipe(
@@ -137,7 +137,12 @@ export const Plugin = {
                           duration: "1 minute",
                           orElse: () => Effect.fail(new Error("Web search cancelled")),
                         }),
-                        Effect.andThen(Effect.suspend(search)),
+                        Effect.flatMap((providerID) => {
+                          if (!providerID) return Effect.suspend(search)
+                          return context
+                            .progress({ provider: providerID })
+                            .pipe(Effect.andThen(ctx.websearch.query({ ...input, providerID })))
+                        }),
                       )
                   }),
                 )
@@ -193,7 +198,11 @@ export const Plugin = {
 
     yield* ctx.session.hook("context", (event) =>
       Effect.gen(function* () {
-        if ((yield* kv.get("websearch:provider")) === false) delete event.tools[name]
+        const disabled = yield* websearch.default().pipe(
+          Effect.as(false),
+          Effect.catchTag("WebSearch.Disabled", () => Effect.succeed(true)),
+        )
+        if (disabled) delete event.tools[name]
       }),
     )
   }),

@@ -20,7 +20,7 @@ import { Capabilities, ID, Info, Ref, VariantID } from "./model.js"
 import { Npm } from "@opencode-ai/util/npm"
 import { Provider } from "./provider.js"
 
-export class VariantUnavailableError extends Schema.TaggedErrorClass<VariantUnavailableError>()(
+export class VariantUnavailableError extends Schema.TaggedError<VariantUnavailableError>()(
   "SessionRunnerModel.VariantUnavailableError",
   {
     providerID: Provider.ID,
@@ -33,7 +33,7 @@ export class VariantUnavailableError extends Schema.TaggedErrorClass<VariantUnav
   }
 }
 
-export class UnsupportedPackageError extends Schema.TaggedErrorClass<UnsupportedPackageError>()(
+export class UnsupportedPackageError extends Schema.TaggedError<UnsupportedPackageError>()(
   "SessionRunnerModel.UnsupportedPackageError",
   {
     providerID: Provider.ID,
@@ -46,7 +46,7 @@ export class UnsupportedPackageError extends Schema.TaggedErrorClass<Unsupported
   }
 }
 
-export class UnresolvedProviderVariablesError extends Schema.TaggedErrorClass<UnresolvedProviderVariablesError>()(
+export class UnresolvedProviderVariablesError extends Schema.TaggedError<UnresolvedProviderVariablesError>()(
   "SessionRunnerModel.UnresolvedProviderVariablesError",
   {
     providerID: Provider.ID,
@@ -358,17 +358,21 @@ export const layer = Layer.effect(
       const connection = yield* integrations.connection.active(
         provider?.integrationID ?? Integration.ID.make(selected.providerID),
       )
-      const model = yield* resolveModel(
-        selected,
-        variant,
-        connection ? yield* integrations.connection.resolve(connection) : undefined,
-        {
-          loadPackage: (specifier) => Provider.loadPackage(specifier, npm),
-          loadAISDK: (model) => aisdk.model(model),
-        },
-      )
+      const credential = connection ? yield* integrations.connection.resolve(connection) : undefined
+      const runtimeInfo = yield* withVariant(selected, variant)
+      const model = yield* fromCatalogModel(runtimeInfo, credential, {
+        loadPackage: (specifier) => Provider.loadPackage(specifier, npm),
+        loadAISDK: (model) => aisdk.model(model),
+      })
+      const runtime =
+        provider?.activation === "enabled" &&
+        credential === undefined &&
+        !hasConfiguredAuth(runtimeInfo) &&
+        usesAPIKeyAuth(runtimeInfo.package)
+          ? LanguageModel.update(model, { route: model.route.with({ auth: Auth.none }) })
+          : model
       return {
-        model,
+        model: runtime,
         ref: Ref.make({
           id: selected.id,
           providerID: selected.providerID,
@@ -398,6 +402,35 @@ export const layer = Layer.effect(
     })
   }),
 )
+
+function hasConfiguredAuth(model: Info) {
+  return [model.settings?.apiKey, model.settings?.authToken, model.settings?.accessToken].some(
+    (value) => typeof value === "string" && value !== "",
+  )
+}
+
+function usesAPIKeyAuth(packageName: string | undefined) {
+  const name = Provider.packageName(packageName)
+  return (
+    name === "@ai-sdk/openai" ||
+    name === "@ai-sdk/anthropic" ||
+    name === "@ai-sdk/openai-compatible" ||
+    name === "@ai-sdk/google" ||
+    name === "@ai-sdk/xai" ||
+    name === "@openrouter/ai-sdk-provider" ||
+    name === "@ai-sdk/azure" ||
+    name === "@opencode-ai/ai/providers/openai" ||
+    name?.startsWith("@opencode-ai/ai/providers/openai/") === true ||
+    name === "@opencode-ai/ai/providers/anthropic" ||
+    name === "@opencode-ai/ai/providers/anthropic-compatible" ||
+    name === "@opencode-ai/ai/providers/openai-compatible" ||
+    name === "@opencode-ai/ai/providers/google" ||
+    name === "@opencode-ai/ai/providers/xai" ||
+    name === "@opencode-ai/ai/providers/openrouter" ||
+    name === "@opencode-ai/ai/providers/azure" ||
+    name?.startsWith("@opencode-ai/ai/providers/azure/") === true
+  )
+}
 
 export const node = makeLocationNode({
   service: Service,

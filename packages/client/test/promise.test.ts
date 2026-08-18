@@ -66,7 +66,6 @@ test("config.get returns ordered config entries for a location", async () => {
         ],
       },
     },
-    { type: "file" as const, path: "/tmp/project/opencode.json" },
   ]
   const client = OpenCode.make({
     baseUrl: "http://localhost:3000",
@@ -192,22 +191,6 @@ test("integration connections optionally submit a form answer", async () => {
   expect(await requests[3].json()).toEqual({ methodID: "device" })
 })
 
-test("health.stop sends exact replacement identity", async () => {
-  let request: Request | undefined
-  const client = OpenCode.make({
-    baseUrl: "http://localhost:3000",
-    fetch: async (input, init) => {
-      request = input instanceof Request ? input : new Request(input, init)
-      return Response.json({ accepted: true })
-    },
-  })
-
-  expect(await client.health.stop({ instanceID: "instance" })).toEqual({ accepted: true })
-  expect(request?.method).toBe("POST")
-  expect(request?.url).toBe("http://localhost:3000/api/service/stop")
-  expect(await request?.json()).toEqual({ instanceID: "instance" })
-})
-
 test("MCP resource catalog uses the public HTTP contract", async () => {
   let request: Request | undefined
   const client = OpenCode.make({
@@ -283,10 +266,10 @@ test("worktree methods use the global project contract", async () => {
   await client.worktree.refresh({ projectID: "proj_test" })
 
   expect(requests.map((request) => [request.method, request.url])).toEqual([
-    ["GET", "http://localhost:3000/api/experimental/project/proj_test/worktree"],
-    ["POST", "http://localhost:3000/api/experimental/project/proj_test/worktree"],
-    ["DELETE", "http://localhost:3000/api/experimental/project/proj_test/worktree"],
-    ["POST", "http://localhost:3000/api/experimental/project/proj_test/worktree/refresh"],
+    ["GET", "http://localhost:3000/api/worktree/proj_test"],
+    ["POST", "http://localhost:3000/api/worktree/proj_test"],
+    ["DELETE", "http://localhost:3000/api/worktree/proj_test"],
+    ["POST", "http://localhost:3000/api/worktree/proj_test/refresh"],
   ])
   expect(await requests[1]?.json()).toEqual({
     strategy: "git",

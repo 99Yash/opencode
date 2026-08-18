@@ -23,7 +23,7 @@ import {
   NEW_SESSION_TAB_TITLE,
   sessionTabComplete,
   sessionTabDetail,
-  sessionTabShortcutLabel,
+  sessionTabNumberLabel,
   seedSessionTabMotion,
   sessionTabOverflowWidth,
   type SessionTab,
@@ -345,6 +345,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
   let rail: { screenX: number; screenY: number } | undefined
   let scroll: ScrollBoxRenderable | undefined
   let didDrag = false
+  let addPressed = false
   // A captured drag ends with a synthetic up on its drop target; do not turn that into a click.
   let suppressClick = false
 
@@ -425,7 +426,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                 const value = session()
                 return value ? data.project.get(value.projectID) : undefined
               })
-              const numberWidth = () => 2
+              const numberWidth = () => Math.max(2, String(items().length).length)
               const restingTitleWidth = () => Math.max(1, width() - numberWidth() - 2)
               const hoveredTitleWidth = () => Math.max(1, restingTitleWidth() - 1)
               const titleWidth = () => (hovered() === tab.sessionID ? hoveredTitleWidth() : restingTitleWidth())
@@ -656,14 +657,14 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                       backgroundColor={pulseBackground()}
                       onLevel={setSweepLevel}
                     />
-                    <box zIndex={1} width="100%" flexDirection="row" paddingLeft={1} paddingRight={1}>
+                    <box zIndex={1} width="100%" flexDirection="row" paddingRight={1}>
                       <text
-                        width={numberWidth()}
+                        width={numberWidth() + 1}
                         fg={numberColor()}
                         selectable={false}
                         attributes={selected() ? TextAttributes.BOLD : undefined}
                       >
-                        {sessionTabShortcutLabel(index())}
+                        {sessionTabNumberLabel(index()).padStart(numberWidth())}
                       </text>
                       <text
                         width={titleWidth()}
@@ -760,7 +761,8 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
               onMouseDown={(event: MouseEvent) => {
                 didDrag = false
                 setDragging(undefined)
-                if (event.button !== RIGHT_MOUSE_BUTTON) return
+                addPressed = event.button !== RIGHT_MOUSE_BUTTON
+                if (addPressed) return
                 if (!rail) return
                 setContextMenu({ x: event.x, y: event.y })
                 event.preventDefault()
@@ -769,8 +771,11 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
               onMouseUp={(event: MouseEvent) => {
                 if (event.button === RIGHT_MOUSE_BUTTON) return
                 if (suppressClick) return
+                if (!addPressed) return
+                addPressed = false
                 if (!newTab()) tabs.add?.()
               }}
+              onMouseDragEnd={() => (addPressed = false)}
             >
               <text
                 width={2}
@@ -837,6 +842,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   const [contextMenu, setContextMenu] = createSignal<TabContextMenuState>()
   let strip: { screenX: number; screenY: number } | undefined
   let didDrag = false
+  let addPressed = false
   // A captured drag ends with a synthetic up on its drop target; do not turn that into a click.
   let suppressClick = false
   const hueStep = () => (mode() === "light" ? 800 : 200)
@@ -1001,24 +1007,6 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
       }}
       onMouseDrag={drag}
       onMouseDragEnd={release}
-      renderAfter={function (buffer) {
-        const x = Math.max(0, this.screenX)
-        const y = this.screenY + this.height
-        const width = Math.min(this.width, buffer.width - x)
-        if (y < 0 || y >= buffer.height || width <= 0) return
-        buffer.fillRect(
-          x,
-          y,
-          width,
-          1,
-          RGBA.fromValues(
-            theme.background.default.r,
-            theme.background.default.g,
-            theme.background.default.b,
-            mode() === "light" ? 0.14 : 0.28,
-          ),
-        )
-      }}
     >
       <Show when={layout().before > 0}>
         <text width={sessionTabOverflowWidth(layout().before)} fg={theme.text.subdued} selectable={false}>
@@ -1052,8 +1040,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           const glows = () => !selected() && (status().attention || (!status().busy && status().unread !== undefined))
           const title = () => tab.title ?? "Untitled session"
           const tabNumber = createMemo(() => items().findIndex((item) => item.sessionID === tab.sessionID) + 1)
-          // Shortcut labels stay one cell wide: 1-9, 0 for ten, then a neutral dot.
-          const numberWidth = () => 2
+          const numberWidth = () => Math.max(2, String(items().length).length)
           // Hovering reveals the close mark, so the title's right bound shifts left of it.
           const restingTitleWidth = () => Math.max(1, width() - 1 - numberWidth())
           const hoveredTitleWidth = () => Math.max(1, restingTitleWidth() - 2)
@@ -1153,11 +1140,8 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                 onLevel={setSweepLevel}
               />
               <box zIndex={1} width="100%" flexDirection="row">
-                <text width={1} selectable={false}>
-                  {" "}
-                </text>
-                <text width={numberWidth()} fg={numberColor()} selectable={false} attributes={bold()}>
-                  {tab === NEW_SESSION_TAB ? "+" : sessionTabShortcutLabel(tabNumber() - 1)}
+                <text width={numberWidth() + 1} fg={numberColor()} selectable={false} attributes={bold()}>
+                  {(tab === NEW_SESSION_TAB ? "+" : sessionTabNumberLabel(tabNumber() - 1)).padStart(numberWidth())}
                 </text>
                 <text
                   width={availableTitleWidth()}
@@ -1221,7 +1205,8 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           onMouseDown={(event) => {
             didDrag = false
             setDragging(undefined)
-            if (event.button !== RIGHT_MOUSE_BUTTON) return
+            addPressed = event.button !== RIGHT_MOUSE_BUTTON
+            if (addPressed) return
             setContextMenu({ x: event.x, y: event.y })
             event.preventDefault()
             event.stopPropagation()
@@ -1229,8 +1214,11 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           onMouseUp={(event) => {
             if (event.button === RIGHT_MOUSE_BUTTON) return
             if (suppressClick) return
+            if (!addPressed) return
+            addPressed = false
             tabs.add?.()
           }}
+          onMouseDragEnd={() => (addPressed = false)}
         >
           {" + "}
         </text>

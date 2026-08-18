@@ -43,6 +43,8 @@ type UserContent = Extract<LanguageModelV3Message, { role: "user" }>["content"]
 type AssistantContent = Extract<LanguageModelV3Message, { role: "assistant" }>["content"]
 type ToolResultContent = Extract<AssistantContent[number], { type: "tool-result" }>
 
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+
 export interface SDKEvent {
   readonly model: Info
   readonly package: string
@@ -146,7 +148,7 @@ function prepareOptions(model: Info, pkg: string) {
     }
 
     if (typeof opts.body === "string" && model.body !== undefined) {
-      const decoded = Option.getOrUndefined(Schema.decodeUnknownOption(Schema.UnknownFromJsonString)(opts.body))
+      const decoded = Option.getOrUndefined(decodeJson(opts.body))
       if (Schema.is(Schema.Record(Schema.String, Schema.Json))(decoded)) {
         opts.body = JSON.stringify(Provider.mergeOverlay(decoded, model.body))
       }
@@ -163,7 +165,7 @@ function prepareOptions(model: Info, pkg: string) {
   return options
 }
 
-export class InitError extends Schema.TaggedErrorClass<InitError>()("AISDK.InitError", {
+export class InitError extends Schema.TaggedError<InitError>()("AISDK.InitError", {
   providerID: Provider.ID,
   cause: Schema.Defect(),
 }) {}
@@ -435,7 +437,22 @@ function prompt(request: LLMRequest): LanguageModelV3Prompt {
     .map((part) => part.text)
     .filter(Boolean)
     .join("\n\n")
-  const messages = request.messages.flatMap(message)
+  const pending: UserContent = []
+  const messages = request.messages.flatMap((input, index) => {
+    if (input.role !== "tool") return message(input)
+    const lowered = toolMessage(input)
+    pending.push(...lowered.media)
+    if (request.messages[index + 1]?.role === "tool" || pending.length === 0) return lowered.messages
+    const media = [...pending]
+    pending.length = 0
+    return [
+      ...lowered.messages,
+      {
+        role: "user" as const,
+        content: [{ type: "text" as const, text: "Attached media from tool result:" }, ...media],
+      },
+    ]
+  })
   if (!system.length) return messages
   return [{ role: "system", content: system }, ...messages]
 }
@@ -448,10 +465,33 @@ function message(input: LLMRequest["messages"][number]): LanguageModelV3Message[
       return [{ role: "user", content: input.content.flatMap(userPart) }]
     case "assistant":
       return [{ role: "assistant", content: input.content.flatMap(assistantPart) }]
-    case "tool": {
-      const content = input.content.flatMap(toolResultPart)
-      return content.length ? [{ role: "tool", content }] : []
-    }
+    case "tool":
+      return toolMessage(input).messages
+  }
+}
+
+function toolMessage(input: LLMRequest["messages"][number]) {
+  const media: UserContent = []
+  const content = input.content.flatMap((part) => {
+    if (part.type !== "tool-result" || part.result.type !== "content") return toolResultPart(part)
+    const value = part.result.value.filter((item) => {
+      if (item.type !== "file") return true
+      if (!item.mime.startsWith("image/") && item.mime !== "application/pdf") return true
+      const data = /^data:[^;,]+(?:;[^,]*)*;base64,(.*)$/s.exec(item.uri)?.[1] ?? item.uri
+      media.push({ type: "file", mediaType: item.mime, data, filename: item.name })
+      return false
+    })
+    return toolResultPart({
+      ...part,
+      result:
+        value.length === 0
+          ? { type: "text", value: "Media attached in the following user message." }
+          : { ...part.result, value },
+    })
+  })
+  return {
+    messages: content.length ? ([{ role: "tool", content }] satisfies LanguageModelV3Message[]) : [],
+    media,
   }
 }
 
