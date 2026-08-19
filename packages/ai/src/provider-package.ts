@@ -1,3 +1,5 @@
+import { Auth } from "./route/auth.js"
+import type { AuthOverride, RequiredApiKeyAuth } from "./route/auth-options.js"
 import type { LanguageModel, ProviderOptions } from "./schema/index.js"
 
 export interface Settings {}
@@ -36,7 +38,17 @@ export const routeDefaults = (input: Defaults) => ({
   limits: input.limits,
 })
 
-export const credentialValue = (input: Credential) => (input.type === "key" ? input.value : input.accessToken)
+export const bearerCredentialValue = (input: Credential) => (input.type === "key" ? input.value : input.accessToken)
+
+export const bearerAuthOption = (input: Credential): AuthOverride => ({ auth: Auth.bearer(bearerCredentialValue(input)) })
+
+export const apiKeyOrBearerAuthOption = (
+  input: Credential,
+  competingKeyHeader: string,
+): RequiredApiKeyAuth | AuthOverride =>
+  input.type === "key"
+    ? { apiKey: input.value }
+    : { auth: Auth.remove(competingKeyHeader).andThen(Auth.bearer(input.accessToken)) }
 
 export interface Definition<
   ProviderSettings extends Settings = Settings,

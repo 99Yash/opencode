@@ -3,7 +3,6 @@ import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
 import { Framing } from "../route/framing.js"
 import { Protocol } from "../route/protocol.js"
-import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { ProviderID, type CacheHint, type ModelID } from "../schema/index.js"
 import { ProviderPackage } from "../provider-package.js"
@@ -196,7 +195,7 @@ export const model: ProviderPackage.Definition<Settings, OpenRouterProviderOptio
   configure({
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? { auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)) }
+      ? ProviderPackage.bearerAuthOption(input.credential)
       : { apiKey: input.settings.apiKey }),
     baseURL: input.settings.baseURL,
     providerOptions: input.settings.providerOptions,

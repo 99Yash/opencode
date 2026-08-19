@@ -1,4 +1,3 @@
-import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import type { Route, RouteDefaultsInput } from "../route/client.js"
 import { ProviderPackage } from "../provider-package.js"
@@ -158,9 +157,7 @@ const config = (input: ProviderPackage.ModelInput<Settings>): Config => {
   return {
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? {
-          auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)),
-        }
+      ? ProviderPackage.bearerAuthOption(input.credential)
       : { apiKey: settings.apiKey }),
     baseURL: settings.baseURL,
     headers: Object.keys(headers).length === 0 ? undefined : headers,

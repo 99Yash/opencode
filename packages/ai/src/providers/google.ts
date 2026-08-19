@@ -63,9 +63,7 @@ export const model: ProviderPackage.Definition<Settings, Gemini.ProviderOptionsI
   configure({
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? input.credential.type === "key"
-        ? { apiKey: input.credential.value }
-        : { auth: Auth.remove("x-goog-api-key").andThen(Auth.bearer(input.credential.accessToken)) }
+      ? ProviderPackage.apiKeyOrBearerAuthOption(input.credential, "x-goog-api-key")
       : { apiKey: input.settings.apiKey }),
     baseURL: input.settings.baseURL,
     providerOptions: input.settings.providerOptions,

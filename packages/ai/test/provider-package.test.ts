@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { ConfigProvider, Effect } from "effect"
 import { Headers } from "effect/unstable/http"
-import { LLM } from "@opencode-ai/ai"
+import { LLM, ProviderPackage } from "@opencode-ai/ai"
 import { model } from "@opencode-ai/ai/providers/openai"
 
 const packageInput = <Input extends Record<string, unknown>>(id: string, input: Input) => {
@@ -9,7 +9,11 @@ const packageInput = <Input extends Record<string, unknown>>(id: string, input: 
   return { id, settings, defaults: { headers, body, limits } }
 }
 
-const authHeaders = (selected: ReturnType<typeof model>, headers: Record<string, string> = {}) =>
+const authHeaders = (
+  selected: ReturnType<typeof model>,
+  headers: Record<string, string> = {},
+  env: Record<string, string> = {},
+) =>
   Effect.runPromise(
     selected.route.auth.apply({
       request: LLM.request({ model: selected, prompt: "hello" }),
@@ -17,8 +21,51 @@ const authHeaders = (selected: ReturnType<typeof model>, headers: Record<string,
       url: "https://example.test/v1",
       body: "{}",
       headers: Headers.fromInput(headers),
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))),
+  )
+
+const applyAuth = (
+  option: ReturnType<typeof ProviderPackage.bearerAuthOption>,
+  headers: Record<string, string> = {},
+) => {
+  const selected = model(packageInput("gpt-5", { apiKey: "fixture" }))
+  return Effect.runPromise(
+    option.auth.apply({
+      request: LLM.request({ model: selected, prompt: "hello" }),
+      method: "POST",
+      url: "https://example.test/v1",
+      body: "{}",
+      headers: Headers.fromInput(headers),
     }),
   )
+}
+
+describe("provider package credential lowering", () => {
+  test("intentionally renders keys and OAuth credentials as bearer auth", async () => {
+    const key = await applyAuth(ProviderPackage.bearerAuthOption({ type: "key", value: "provider-key" }))
+    const oauth = await applyAuth(
+      ProviderPackage.bearerAuthOption({ type: "oauth", accessToken: "provider-token" }),
+    )
+
+    expect(key.authorization).toBe("Bearer provider-key")
+    expect(oauth.authorization).toBe("Bearer provider-token")
+  })
+
+  test("keeps key-header credentials configurable and removes stale keys for OAuth", async () => {
+    expect(
+      ProviderPackage.apiKeyOrBearerAuthOption({ type: "key", value: "provider-key" }, "x-api-key"),
+    ).toEqual({ apiKey: "provider-key" })
+    const oauth = ProviderPackage.apiKeyOrBearerAuthOption(
+      { type: "oauth", accessToken: "provider-token" },
+      "x-api-key",
+    )
+    if (!("auth" in oauth)) throw new Error("Expected OAuth credential to lower to auth")
+    const headers = await applyAuth(oauth, { "x-api-key": "stale" })
+
+    expect(headers.authorization).toBe("Bearer provider-token")
+    expect(headers["x-api-key"]).toBeUndefined()
+  })
+})
 
 describe("provider package entrypoints", () => {
   test("semantic API aliases expose the same contract", async () => {
@@ -114,6 +161,7 @@ describe("provider package entrypoints", () => {
 
   test("lets provider packages interpret resolved credentials", async () => {
     const Anthropic = await import("@opencode-ai/ai/providers/anthropic")
+    const Azure = await import("@opencode-ai/ai/providers/azure")
     const Google = await import("@opencode-ai/ai/providers/google")
     const GoogleVertex = await import("@opencode-ai/ai/providers/google-vertex")
     const GoogleVertexChat = await import("@opencode-ai/ai/providers/google-vertex/chat")
@@ -133,6 +181,24 @@ describe("provider package entrypoints", () => {
       id: "claude-sonnet-4-6",
       settings: {},
       credential: { type: "oauth", accessToken: "anthropic-token" },
+      defaults: {},
+    })
+    const anthropicEmptyKey = Anthropic.model({
+      id: "claude-sonnet-4-6",
+      settings: {},
+      credential: { type: "key", value: "" },
+      defaults: {},
+    })
+    const azureKey = Azure.model({
+      id: "deployment",
+      settings: { resourceName: "opencode-test" },
+      credential: { type: "key", value: "azure-key" },
+      defaults: {},
+    })
+    const azureOAuth = Azure.model({
+      id: "deployment",
+      settings: { resourceName: "opencode-test" },
+      credential: { type: "oauth", accessToken: "azure-token" },
       defaults: {},
     })
     const googleKey = Google.model({
@@ -169,6 +235,13 @@ describe("provider package entrypoints", () => {
     expect((await authHeaders(openai)).authorization).toBe("Bearer openai-token")
     const anthropicKeyHeaders = await authHeaders(anthropicKey, { authorization: "Bearer stale" })
     const anthropicOAuthHeaders = await authHeaders(anthropicOAuth, { "x-api-key": "stale" })
+    const anthropicEmptyKeyHeaders = await authHeaders(
+      anthropicEmptyKey,
+      { authorization: "Bearer stale" },
+      { ANTHROPIC_API_KEY: "environment-key" },
+    )
+    const azureKeyHeaders = await authHeaders(azureKey, { authorization: "Bearer stale" })
+    const azureOAuthHeaders = await authHeaders(azureOAuth, { "api-key": "stale" })
     const googleKeyHeaders = await authHeaders(googleKey, { authorization: "Bearer stale" })
     const googleOAuthHeaders = await authHeaders(googleOAuth, { "x-goog-api-key": "stale" })
     const vertexKeyHeaders = await authHeaders(vertexKey, { authorization: "Bearer stale" })
@@ -177,6 +250,12 @@ describe("provider package entrypoints", () => {
     expect(anthropicKeyHeaders.authorization).toBeUndefined()
     expect(anthropicOAuthHeaders.authorization).toBe("Bearer anthropic-token")
     expect(anthropicOAuthHeaders["x-api-key"]).toBeUndefined()
+    expect(anthropicEmptyKeyHeaders["x-api-key"]).toBe("environment-key")
+    expect(anthropicEmptyKeyHeaders.authorization).toBeUndefined()
+    expect(azureKeyHeaders["api-key"]).toBe("azure-key")
+    expect(azureKeyHeaders.authorization).toBeUndefined()
+    expect(azureOAuthHeaders.authorization).toBe("Bearer azure-token")
+    expect(azureOAuthHeaders["api-key"]).toBeUndefined()
     expect(googleKeyHeaders["x-goog-api-key"]).toBe("google-key")
     expect(googleKeyHeaders.authorization).toBeUndefined()
     expect(googleOAuthHeaders.authorization).toBe("Bearer google-token")

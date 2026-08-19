@@ -1,4 +1,3 @@
-import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
@@ -100,7 +99,7 @@ export const model: ProviderPackage.Definition<Settings, XAIProviderOptionsInput
   configure({
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? { auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)) }
+      ? ProviderPackage.bearerAuthOption(input.credential)
       : { apiKey: input.settings.apiKey }),
     baseURL: input.settings.baseURL,
     providerOptions: input.settings.providerOptions,

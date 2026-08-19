@@ -129,9 +129,7 @@ const config = (input: ProviderPackage.ModelInput<Settings>): Config => {
   const common = {
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? input.credential.type === "key"
-        ? { apiKey: input.credential.value }
-        : { auth: Auth.remove("api-key").andThen(Auth.bearer(input.credential.accessToken)) }
+      ? ProviderPackage.apiKeyOrBearerAuthOption(input.credential, "api-key")
       : { apiKey: settings.apiKey }),
     apiVersion: settings.apiVersion,
     providerOptions: settings.providerOptions,

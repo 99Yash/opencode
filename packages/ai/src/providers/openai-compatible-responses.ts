@@ -1,6 +1,5 @@
 import { ProviderPackage } from "../provider-package.js"
 import { OpenAICompatibleResponses } from "../protocols/openai-compatible-responses.js"
-import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import type { RouteDefaultsInput } from "../route/client.js"
 import { ProviderID, type ModelID } from "../schema/index.js"
@@ -51,7 +50,7 @@ export const model: ProviderPackage.Definition<Settings, OpenResponsesProviderOp
   configure({
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? { auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)) }
+      ? ProviderPackage.bearerAuthOption(input.credential)
       : { apiKey: input.settings.apiKey }),
     baseURL: input.settings.baseURL,
     provider: input.settings.provider,

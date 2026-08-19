@@ -60,9 +60,7 @@ export const model: ProviderPackage.Definition<Settings, AnthropicMessages.Provi
   return configure({
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
-      ? input.credential.type === "key"
-        ? { apiKey: input.credential.value }
-        : { auth: Auth.remove("x-api-key").andThen(Auth.bearer(input.credential.accessToken)) }
+      ? ProviderPackage.apiKeyOrBearerAuthOption(input.credential, "x-api-key")
       : input.settings.authToken === undefined
         ? { apiKey: input.settings.apiKey }
         : { auth: Auth.bearer(input.settings.authToken) }),

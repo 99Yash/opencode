@@ -87,7 +87,7 @@ const config = (input: ProviderPackage.ModelInput<Settings>): Config => {
   return {
     ...ProviderPackage.routeDefaults(input.defaults),
     apiKey: input.credential
-      ? ProviderPackage.credentialValue(input.credential)
+      ? ProviderPackage.bearerCredentialValue(input.credential)
       : input.settings.auth === "sigv4"
         ? undefined
         : input.settings.apiKey,
