@@ -17,6 +17,8 @@ import { createFragmentReconciler, fragmentRef, type FragmentReconciler } from "
 import { createSubagentTracker, toolCommit, toolFinalPhase } from "./stream-v2.subagent"
 import { normalizeTool, toolOutputText } from "./tool"
 import { toolDisplayContent } from "../util/tool-display"
+import { commandCommit } from "./command.shared"
+import { commandText } from "../util/command"
 import type {
   FooterApi,
   FooterView,
@@ -186,7 +188,12 @@ function pendingPrompt(item: SessionInboxInfo): FooterQueuedPrompt | undefined {
   if (item.type !== "user") return undefined
   return {
     messageID: item.id,
-    prompt: { messageID: item.id, text: item.payload.displayText ?? item.payload.text, parts: [] },
+    prompt: {
+      messageID: item.id,
+      text: item.payload.command ? commandText(item.payload.command) : item.payload.text,
+      parts: [],
+      command: item.payload.command,
+    },
     delivery: item.delivery,
   }
 }
@@ -655,12 +662,19 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       state.messageIDs.add(message.id)
       if (!render) return
       if (reuseVisibleWait && waiting) return
+      if (message.command) {
+        write([
+          commandCommit(message.id, message.command),
+          ...(message.skills ?? []).map((skill) => skillCommit(message.id, skill.name, skill.id)),
+        ])
+        return
+      }
       write([
         ...(message.skills ?? []).map((skill) => skillCommit(message.id, skill.name, skill.id)),
         {
           kind: "user",
           source: "system",
-          text: message.displayText ?? message.text,
+          text: message.text,
           phase: "start",
           messageID: message.id,
         },
@@ -953,15 +967,19 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       const visible = state.messageIDs.has(event.data.inboxID)
       if (waiting || pending) state.messageIDs.add(event.data.inboxID)
       if (!waiting && pending && !visible) {
-        write([
-          {
-            kind: "user",
-            source: "system",
-            text: pending.prompt.text,
-            phase: "start",
-            messageID: event.data.inboxID,
-          },
-        ])
+        write(
+          pending.prompt.command
+            ? [commandCommit(event.data.inboxID, pending.prompt.command)]
+            : [
+                {
+                  kind: "user",
+                  source: "system",
+                  text: pending.prompt.text,
+                  phase: "start",
+                  messageID: event.data.inboxID,
+                },
+              ],
+        )
       }
       write([], { phase: "running", status: "waiting for assistant" })
       return
@@ -974,15 +992,19 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       if (event.data.delivery === "queue") return
       if (state.messageIDs.has(event.data.inboxID)) return
       state.messageIDs.add(event.data.inboxID)
-      write([
-        {
-          kind: "user",
-          source: "system",
-          text: pending.prompt.text,
-          phase: "start",
-          messageID: event.data.inboxID,
-        },
-      ])
+      write(
+        pending.prompt.command
+          ? [commandCommit(event.data.inboxID, pending.prompt.command)]
+          : [
+              {
+                kind: "user",
+                source: "system",
+                text: pending.prompt.text,
+                phase: "start",
+                messageID: event.data.inboxID,
+              },
+            ],
+      )
       return
     }
     if (event.type === "session.inbox.cancelled") {

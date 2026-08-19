@@ -667,7 +667,10 @@ describe("V2 mini transport", () => {
             sessionID: "ses_1",
             timeCreated: 1,
             type: "user",
-            payload: { text: "expanded command template", displayText: "/command input" },
+            payload: {
+              text: "expanded command template",
+              command: { name: "command", arguments: "input" },
+            },
             delivery: "queue",
           },
           {
@@ -707,7 +710,7 @@ describe("V2 mini transport", () => {
     while (!ui.commits.some((item) => item.messageID === "msg_queued")) await Bun.sleep(0)
 
     expect(ui.commits).toContainEqual(
-      expect.objectContaining({ kind: "user", messageID: "msg_queued", text: "/command input" }),
+      expect.objectContaining({ kind: "system", messageID: "msg_queued", text: '→ Command "/command input"' }),
     )
     expect(pending()).toEqual([["msg_cancelled", "queue"]])
     events.push({

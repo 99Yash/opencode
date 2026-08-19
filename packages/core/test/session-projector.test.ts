@@ -325,7 +325,7 @@ describe("SessionProjector", () => {
         sessionID,
         item: {
           type: "user",
-          payload: { text: "expanded command template", displayText: "/command input" },
+          payload: { text: "expanded command template", command: { name: "command", arguments: "input" } },
           delivery: "steer",
         },
       })
@@ -345,7 +345,10 @@ describe("SessionProjector", () => {
         session_id: sessionID,
         type: "user",
         seq: event.durable?.seq,
-        data: { text: "expanded command template", displayText: "/command input" },
+        data: {
+          text: "expanded command template",
+          command: { name: "command", arguments: "input" },
+        },
       })
     }),
   )

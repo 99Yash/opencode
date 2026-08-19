@@ -21,6 +21,7 @@ import {
   resolveSessionInfo,
 } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
+import { commandCommit } from "./command.shared"
 import { cycleVariant, formatModelLabel, resolveVariant } from "./variant.shared"
 import type {
   LocalReplayRow,
@@ -903,13 +904,17 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         state.shown = true
         state.history.push({ ...prompt, delivery: undefined })
         if (prompt.mode !== "shell" && delivery === "steer") {
-          rememberLocal({
-            kind: "user",
-            text: prompt.text,
-            phase: "start",
-            source: "system",
-            messageID: prompt.messageID,
-          })
+          rememberLocal(
+            prompt.command && prompt.command.source !== "skill"
+              ? commandCommit(prompt.messageID, prompt.command)
+              : {
+                  kind: "user",
+                  text: prompt.text,
+                  phase: "start",
+                  source: "system",
+                  messageID: prompt.messageID,
+                },
+          )
         }
       },
       admit: async (prompt, delivery, signal) => {
@@ -1044,9 +1049,7 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
             admitted,
           )
           if (prompt.messageID) {
-            state.localRows = state.localRows.filter(
-              (row) => row.commit.kind !== "user" || row.commit.messageID !== prompt.messageID,
-            )
+            state.localRows = state.localRows.filter((row) => row.commit.messageID !== prompt.messageID)
           }
           // Shell and skill turns never send CLI file attachments; keep them
           // pending for the next prompt-shaped turn.

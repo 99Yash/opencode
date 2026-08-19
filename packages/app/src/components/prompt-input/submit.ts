@@ -136,10 +136,10 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       sessionID: input.draft.sessionID,
       id: messageID,
       text: request.text,
-      ...(request.displayText === request.text ? {} : { displayText: request.displayText }),
       files: request.files.map((file) => ({ uri: file.uri, name: file.name, mention: file.mention })),
       agents: request.agents,
       metadata: {
+        displayText: request.displayText,
         comments: request.comments,
         agent: input.draft.agent,
         model: {

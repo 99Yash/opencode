@@ -1,6 +1,7 @@
 import type { SessionMessageInfo, SessionMessageUser } from "@opencode-ai/client/promise"
 import { promptCopy, promptSame } from "./prompt.shared"
 import type { RunInput, RunPrompt } from "./types"
+import { commandText } from "../util/command"
 
 const LIMIT = 200
 
@@ -22,7 +23,7 @@ export type RunSession = {
 
 function messagePrompt(message: SessionMessageUser): RunPrompt {
   return {
-    text: message.displayText ?? message.text,
+    text: message.command ? commandText(message.command) : message.text,
     parts: [
       ...(message.files ?? []).map((file) => ({
         type: "file" as const,

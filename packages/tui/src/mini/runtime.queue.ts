@@ -12,6 +12,7 @@ import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { Locale } from "../util/locale"
 import { isCompactCommand, isExitCommand, isNewCommand } from "./prompt.shared"
 import type { FooterApi, FooterEvent, RunDelivery, RunPrompt } from "./types"
+import { commandCommit } from "./command.shared"
 
 type Trace = {
   write(type: string, data?: unknown): void
@@ -173,13 +174,16 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
             }
 
             if (sent.mode !== "shell") {
-              const commit = {
-                kind: "user",
-                text: sent.text,
-                phase: "start",
-                source: "system",
-                messageID: sent.messageID,
-              } as const
+              const commit =
+                sent.command && sent.command.source !== "skill"
+                  ? commandCommit(sent.messageID, sent.command)
+                  : ({
+                      kind: "user",
+                      text: sent.text,
+                      phase: "start",
+                      source: "system",
+                      messageID: sent.messageID,
+                    } as const)
               input.trace?.write("ui.commit", commit)
               input.footer.append(commit)
             }

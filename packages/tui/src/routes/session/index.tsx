@@ -100,6 +100,7 @@ import {
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
+import { commandText } from "../../util/command"
 import { useArgs } from "../../context/args"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
 import { useSessionTabs } from "../../context/session-tabs"
@@ -205,7 +206,11 @@ export function Session(props: { verticalTabsWidth: number }) {
   )
   const pendingDeliveries = createMemo(() => new Map(pendingUsers().map((item) => [item.id, item.delivery])))
   const queuedPrompts = createMemo(() =>
-    pendingUsers().flatMap((item) => (item.delivery === "queue" ? [{ id: item.id, text: item.payload.text }] : [])),
+    pendingUsers().flatMap((item) =>
+      item.delivery === "queue"
+        ? [{ id: item.id, text: item.payload.command ? commandText(item.payload.command) : item.payload.text }]
+        : [],
+    ),
   )
   const [composer, setComposer] = createStore({
     open: false,
@@ -2178,7 +2183,29 @@ function UserMessage(props: { message: SessionMessageUser }) {
           backgroundColor={hover() ? theme.raise(theme.background.default) : theme.background.default}
           flexShrink={0}
         >
-          <text fg={theme.text.default}>{props.message.displayText ?? props.message.text}</text>
+          <Show when={!props.message.command}>
+            <text fg={theme.text.default}>{props.message.text}</text>
+          </Show>
+          <Show when={props.message.command}>
+            {(command) => (
+              <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
+                <text fg={theme.text.default}>
+                  <span
+                    style={{
+                      bg: theme.hue.accent[mode() === "light" ? 700 : 200],
+                      fg: theme.background.default,
+                      bold: true,
+                    }}
+                  >
+                    {" command "}
+                  </span>
+                  <span style={{ bg: theme.raise(theme.background.default), fg: theme.text.subdued }}>
+                    {` ${commandText(command())} `}
+                  </span>
+                </text>
+              </box>
+            )}
+          </Show>
           <Show when={skills().length}>
             <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
               <For each={skills()}>
@@ -3612,7 +3639,10 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function formatSessionTranscript(session: SessionInfo, messages: SessionMessageInfo[], thinking: boolean) {
   const body = messages.flatMap((message) => {
-    if (message.type === "user") return [`## User\n\n${message.displayText ?? message.text}`]
+    if (message.type === "user")
+      return [
+        `## User\n\n${message.command ? commandText(message.command) : message.text}`,
+      ]
     if (message.type === "shell")
       return [`## Shell\n\n\`\`\`\n$ ${message.command}\n${message.output?.output ?? ""}\n\`\`\``]
     if (message.type !== "assistant") return []

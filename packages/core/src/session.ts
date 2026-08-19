@@ -222,7 +222,7 @@ export interface Interface {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
     text: string
-    displayText?: string
+    command?: Prompt["command"]
     files?: PromptInput.Prompt["files"]
     agents?: PromptInput.Prompt["agents"]
     skills?: PromptInput.Prompt["skills"]
@@ -654,7 +654,7 @@ const layer = Layer.effect(
           id: input.id,
           sessionID: input.sessionID,
           text: evaluated.text,
-          displayText: `/${input.command}${input.arguments ? ` ${input.arguments}` : ""}`,
+          command: { name: input.command, arguments: input.arguments ?? "" },
           files: input.files,
           agents: input.agents,
           skills: input.skills,
@@ -962,7 +962,7 @@ function synthesizeTerminalShellInfo(started: ShellSchema.Info): ShellSchema.Inf
 }
 
 const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
-  input: PromptInput.Prompt,
+  input: PromptInput.Prompt & Pick<Prompt, "command">,
   image: Effect.Effect<Image.Interface>,
   skills: Effect.Effect<Skill.Interface>,
 ) {
@@ -985,9 +985,9 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
       })
     })
   })
-  return Prompt.make({
+  return Prompt.fromUserMessage({
     text: input.text,
-    displayText: input.displayText === input.text ? undefined : input.displayText,
+    command: input.command,
     agents: input.agents,
     files,
     skills: selected?.length ? selected : undefined,

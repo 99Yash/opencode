@@ -397,7 +397,6 @@ const Endpoint5_12 = (raw: RawClient["server.session"]) => (input: Endpoint5_12I
       payload: {
         id: input["id"],
         text: input["text"],
-        displayText: input["displayText"],
         files: input["files"],
         agents: input["agents"],
         skills: input["skills"],

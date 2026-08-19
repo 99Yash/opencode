@@ -50,12 +50,12 @@ describe("session message presentation", () => {
     })
   })
 
-  test("projects explicit presentation text", () => {
+  test("projects command invocation text", () => {
     const message = {
       id: "msg_user",
       type: "user",
       text: "expanded command template",
-      displayText: "/command input",
+      command: { name: "command", arguments: "input" },
       time: { created: 1 },
     } satisfies SessionMessageUser
 

@@ -105,7 +105,9 @@ describe("run session shared", () => {
 
   test("uses presentation text for command history", () => {
     const out = createSession([
-      userMessage("msg-user-1", "expanded command template", { displayText: "/command input" }),
+      userMessage("msg-user-1", "expanded command template", {
+        command: { name: "command", arguments: "input" },
+      }),
     ])
 
     expect(out.turns[0]?.prompt.text).toBe("/command input")

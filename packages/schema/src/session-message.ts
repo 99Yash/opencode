@@ -72,11 +72,7 @@ export const LocationSwitched = Schema.Struct({
 export interface User extends Schema.Schema.Type<typeof User> {}
 export const User = Schema.Struct({
   ...Base,
-  text: Prompt.fields.text,
-  displayText: Prompt.fields.displayText,
-  files: Prompt.fields.files,
-  agents: Prompt.fields.agents,
-  skills: Prompt.fields.skills,
+  ...Prompt.fields,
   type: Schema.tag("user"),
 }).annotate({ identifier: "Session.Message.User" })
 

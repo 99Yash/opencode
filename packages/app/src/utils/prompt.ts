@@ -44,7 +44,9 @@ export function extractPromptFromMessage(
   message: SessionMessageUser,
   opts?: { directory?: string; attachmentName?: string },
 ): Prompt {
-  const text = message.displayText ?? readPromptPresentation(message.metadata)?.displayText ?? message.text
+  const text = message.command
+    ? `/${message.command.name}${message.command.arguments ? ` ${message.command.arguments}` : ""}`
+    : (readPromptPresentation(message.metadata)?.displayText ?? message.text)
   const directory = opts?.directory
   const attachmentName = opts?.attachmentName ?? "attachment"
   const toRelative = (path: string) => {

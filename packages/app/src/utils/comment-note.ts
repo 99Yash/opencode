@@ -57,9 +57,9 @@ export function readPromptPresentation(value: unknown) {
   if (!value || typeof value !== "object") return
   const displayText = (value as { displayText?: unknown }).displayText
   const comments = (value as { comments?: unknown }).comments
-  if (!Array.isArray(comments)) return
+  if (typeof displayText !== "string" || !Array.isArray(comments)) return
   return {
-    displayText: typeof displayText === "string" ? displayText : undefined,
+    displayText,
     comments: comments.flatMap((item): PromptComment[] => {
       if (!item || typeof item !== "object") return []
       const path = (item as { path?: unknown }).path

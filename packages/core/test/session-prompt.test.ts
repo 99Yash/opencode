@@ -235,18 +235,18 @@ describe("Session.prompt", () => {
       const message = yield* session.prompt({
         sessionID,
         text: "Fix the failing tests",
-        displayText: "/fix tests",
+        command: { name: "fix", arguments: "tests" },
         resume: false,
       })
 
       expect(message.payload.text).toBe("Fix the failing tests")
-      expect(message.payload.displayText).toBe("/fix tests")
+      expect(message.payload.command).toEqual({ name: "fix", arguments: "tests" })
       expect(yield* session.messages({ sessionID })).toEqual([])
       expect(yield* admitted(message.id)).toMatchObject({
         id: message.id,
         sessionID,
         type: "user",
-        payload: { text: "Fix the failing tests", displayText: "/fix tests" },
+        payload: { text: "Fix the failing tests", command: { name: "fix", arguments: "tests" } },
         delivery: "steer",
       })
     }),

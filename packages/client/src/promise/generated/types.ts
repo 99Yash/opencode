@@ -30,6 +30,8 @@ export type FileDiffInfo = {
   status: "added" | "deleted" | "modified"
 }
 
+export type PromptCommandInvocation = { name: string; arguments: string }
+
 export type PromptBase64 = string
 
 export type PromptFileSource = { type: "inline" } | { type: "uri"; uri: string }
@@ -1684,7 +1686,7 @@ export type SessionMessageUser = {
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   text: string
-  displayText?: string
+  command?: PromptCommandInvocation
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   skills?: Array<PromptSkillAttachment>
@@ -1693,7 +1695,7 @@ export type SessionMessageUser = {
 
 export type SessionInboxUserPayload = {
   text: string
-  displayText?: string
+  command?: PromptCommandInvocation
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   skills?: Array<PromptSkillAttachment>
@@ -1702,7 +1704,7 @@ export type SessionInboxUserPayload = {
 
 export type SessionInboxUserPayload1 = {
   text: string
-  displayText?: string
+  command?: PromptCommandInvocation
   files?: Array<PromptFileAttachment>
   agents?: Array<PromptAgentAttachment>
   skills?: Array<PromptSkillAttachment>
@@ -2555,7 +2557,7 @@ export type SessionImportInput = {
           readonly metadata?: { readonly [x: string]: JsonValue }
           readonly time: { readonly created: number }
           readonly text: string
-          readonly displayText?: string
+          readonly command?: { readonly name: string; readonly arguments: string }
           readonly files?: ReadonlyArray<{
             readonly data: string
             readonly mime: string
@@ -2825,7 +2827,7 @@ export type SessionImportInput = {
           readonly metadata?: { readonly [x: string]: JsonValue }
           readonly time: { readonly created: number }
           readonly text: string
-          readonly displayText?: string
+          readonly command?: { readonly name: string; readonly arguments: string }
           readonly files?: ReadonlyArray<{
             readonly data: string
             readonly mime: string
@@ -3095,7 +3097,7 @@ export type SessionImportInput = {
           readonly metadata?: { readonly [x: string]: JsonValue }
           readonly time: { readonly created: number }
           readonly text: string
-          readonly displayText?: string
+          readonly command?: { readonly name: string; readonly arguments: string }
           readonly files?: ReadonlyArray<{
             readonly data: string
             readonly mime: string
@@ -3371,7 +3373,6 @@ export type SessionPromptInput = {
   readonly id?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3393,7 +3394,6 @@ export type SessionPromptInput = {
   readonly text: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3412,32 +3412,9 @@ export type SessionPromptInput = {
     readonly delivery?: ("steer" | "queue") | null
     readonly resume?: boolean | null
   }["text"]
-  readonly displayText?: {
-    readonly id?: string | null
-    readonly text: string
-    readonly displayText?: string
-    readonly files?: ReadonlyArray<{
-      readonly uri: string
-      readonly name?: string
-      readonly description?: string
-      readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
-    }>
-    readonly agents?: ReadonlyArray<{
-      readonly name: string
-      readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
-    }>
-    readonly skills?: ReadonlyArray<{
-      readonly id: string
-      readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
-    }>
-    readonly metadata?: { readonly [x: string]: JsonValue }
-    readonly delivery?: ("steer" | "queue") | null
-    readonly resume?: boolean | null
-  }["displayText"]
   readonly files?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3459,7 +3436,6 @@ export type SessionPromptInput = {
   readonly agents?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3481,7 +3457,6 @@ export type SessionPromptInput = {
   readonly skills?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3503,7 +3478,6 @@ export type SessionPromptInput = {
   readonly metadata?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3525,7 +3499,6 @@ export type SessionPromptInput = {
   readonly delivery?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
@@ -3547,7 +3520,6 @@ export type SessionPromptInput = {
   readonly resume?: {
     readonly id?: string | null
     readonly text: string
-    readonly displayText?: string
     readonly files?: ReadonlyArray<{
       readonly uri: string
       readonly name?: string
