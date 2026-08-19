@@ -1556,10 +1556,20 @@ function BackgroundToolHint(props: { messages: SessionMessageInfo[] }) {
 }
 
 function SessionMessageView(props: { message: SessionMessageInfo }) {
+  const ctx = use()
+  const commandOnly = () => {
+    if (props.message.type !== "user" || !props.message.command) return false
+    return !props.message.files?.length && !props.message.skills?.length && !ctx.pendingDelivery(props.message.id)
+  }
   return (
     <Switch>
       <Match when={props.message.type === "user"}>
-        <UserMessage message={props.message as SessionMessageUser} />
+        <Show
+          when={commandOnly()}
+          fallback={<UserMessage message={props.message as SessionMessageUser} />}
+        >
+          <SessionCommandMessage message={props.message as SessionMessageUser} />
+        </Show>
       </Match>
       <Match when={props.message.type === "shell"}>
         <ShellMessage message={props.message as Extract<SessionMessageInfo, { type: "shell" }>} />
@@ -1930,6 +1940,19 @@ function SessionSkillMessage(props: { message: Extract<SessionMessageInfo, { typ
     <InlineToolRow icon="→" color={theme.text.subdued} pending="Skill" complete={true}>
       Skill {props.message.name}
     </InlineToolRow>
+  )
+}
+
+function SessionCommandMessage(props: { message: SessionMessageUser }) {
+  const theme = useTheme()
+  return (
+    <Show when={props.message.command}>
+      {(command) => (
+        <InlineToolRow icon="→" color={theme.text.subdued} pending="Command" complete={true}>
+          Command {commandText(command())}
+        </InlineToolRow>
+      )}
+    </Show>
   )
 }
 
