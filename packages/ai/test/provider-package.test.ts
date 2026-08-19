@@ -114,6 +114,7 @@ describe("provider package entrypoints", () => {
 
   test("lets provider packages interpret resolved credentials", async () => {
     const Anthropic = await import("@opencode-ai/ai/providers/anthropic")
+    const Google = await import("@opencode-ai/ai/providers/google")
     const GoogleVertex = await import("@opencode-ai/ai/providers/google-vertex")
     const GoogleVertexChat = await import("@opencode-ai/ai/providers/google-vertex/chat")
     const openai = model({
@@ -132,6 +133,18 @@ describe("provider package entrypoints", () => {
       id: "claude-sonnet-4-6",
       settings: {},
       credential: { type: "oauth", accessToken: "anthropic-token" },
+      defaults: {},
+    })
+    const googleKey = Google.model({
+      id: "gemini-2.5-flash",
+      settings: {},
+      credential: { type: "key", value: "google-key" },
+      defaults: {},
+    })
+    const googleOAuth = Google.model({
+      id: "gemini-2.5-flash",
+      settings: {},
+      credential: { type: "oauth", accessToken: "google-token" },
       defaults: {},
     })
     const vertexKey = GoogleVertex.model({
@@ -156,12 +169,18 @@ describe("provider package entrypoints", () => {
     expect((await authHeaders(openai)).authorization).toBe("Bearer openai-token")
     const anthropicKeyHeaders = await authHeaders(anthropicKey, { authorization: "Bearer stale" })
     const anthropicOAuthHeaders = await authHeaders(anthropicOAuth, { "x-api-key": "stale" })
+    const googleKeyHeaders = await authHeaders(googleKey, { authorization: "Bearer stale" })
+    const googleOAuthHeaders = await authHeaders(googleOAuth, { "x-goog-api-key": "stale" })
     const vertexKeyHeaders = await authHeaders(vertexKey, { authorization: "Bearer stale" })
     const vertexOAuthHeaders = await authHeaders(vertexOAuth, { "x-goog-api-key": "stale" })
     expect(anthropicKeyHeaders["x-api-key"]).toBe("anthropic-key")
     expect(anthropicKeyHeaders.authorization).toBeUndefined()
     expect(anthropicOAuthHeaders.authorization).toBe("Bearer anthropic-token")
     expect(anthropicOAuthHeaders["x-api-key"]).toBeUndefined()
+    expect(googleKeyHeaders["x-goog-api-key"]).toBe("google-key")
+    expect(googleKeyHeaders.authorization).toBeUndefined()
+    expect(googleOAuthHeaders.authorization).toBe("Bearer google-token")
+    expect(googleOAuthHeaders["x-goog-api-key"]).toBeUndefined()
     expect(vertexKeyHeaders["x-goog-api-key"]).toBe("vertex-key")
     expect(vertexKeyHeaders.authorization).toBeUndefined()
     expect(vertexOAuthHeaders.authorization).toBe("Bearer vertex-token")

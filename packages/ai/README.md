@@ -34,8 +34,10 @@ Run `LLMClient.stream(request)` instead of `generate` when you want incremental 
 Use `Image.generate` with an image model for direct asset generation:
 
 ```ts
+import { Effect, Layer } from "effect"
 import { Image, ImageClient, ImageInput } from "@opencode-ai/ai"
 import { OpenAI } from "@opencode-ai/ai/providers"
+import { RequestExecutor } from "@opencode-ai/ai/route"
 
 const program = Effect.gen(function* () {
   const response = yield* Image.generate({
@@ -318,10 +320,13 @@ Native catalog integrations load provider behavior through package-like entrypoi
 ```ts
 import { model } from "@opencode-ai/ai/providers/openai/responses"
 
+const apiKey = process.env.OPENAI_API_KEY
+if (!apiKey) throw new Error("OPENAI_API_KEY is required")
+
 const selected = model({
   id: "gpt-5",
   settings: {},
-  credential: { type: "key", value: process.env.OPENAI_API_KEY },
+  credential: { type: "key", value: apiKey },
   defaults: {
     headers: { "x-application": "opencode" },
     limits: { context: 200_000, output: 64_000 },

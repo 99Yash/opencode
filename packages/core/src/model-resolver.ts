@@ -124,7 +124,7 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
   const resolved = prepareRuntimeModel(model, credential)
   const packageName = Provider.packageName(resolved.package)
   const configuration = credential?.type === "key" ? credential.configuration : undefined
-  const configured = resolved.settings ?? {}
+  const configured = Provider.mergeOverlay(resolved.settings, configuration) ?? {}
   const mapping = Provider.isAISDK(resolved.package)
     ? AISDKNative.map({
         packageName,
@@ -235,14 +235,15 @@ const legacyCredentialSettings = (credential: Credential.Value | undefined) => {
 
 const providerCredential = (credential: Credential.Value | undefined): ProviderPackage.Credential | undefined => {
   if (!credential) return undefined
+  if (credential.type === "key" && credential.key.length === 0) return undefined
+  if (credential.type === "oauth" && credential.access.length === 0) return undefined
   if (credential.type === "key")
     return {
       type: "key",
       value: credential.key,
-      metadata: credential.metadata,
       configuration: credential.configuration,
     }
-  return { type: "oauth", accessToken: credential.access, metadata: credential.metadata }
+  return { type: "oauth", accessToken: credential.access }
 }
 
 const unsupported = (model: Info) =>

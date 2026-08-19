@@ -72,8 +72,8 @@ const streamText = LLM.stream(request).pipe(
   Stream.runDrain,
 )
 
-// 5. Tools are typed with Effect Schema. Provider turns remain explicit:
-// advertise definitions on the request, stream one turn, dispatch local calls,
+// 5. Tools are typed with Effect Schema. Model calls remain explicit:
+// advertise definitions on the request, stream one call, dispatch local calls,
 // then persist/build follow-up history in the enclosing product flow.
 const tools = {
   get_weather: Tool.make({
@@ -100,7 +100,7 @@ const streamWithTools = Effect.gen(function* () {
     console.log("tool result", event.name, dispatched.result)
 
     // A durable agent would persist these messages before starting another
-    // raw model turn. This tutorial keeps the boundary visible instead.
+    // model call. This tutorial keeps the boundary visible instead.
     const followUp = LLMRequest.update(request, {
       messages: [
         ...request.messages,
@@ -186,14 +186,14 @@ const FakeProtocol = Protocol.make<FakeBody, string, string, void>({
   },
 })
 
-// An route is the runnable binding for that protocol. It adds the deployment
+// A route is the runnable binding for that protocol. It adds the deployment
 // axes that the protocol deliberately does not know: URL, auth, and framing.
 const FakeAdapter = Route.make({
   id: "fake-echo",
   provider: "fake-echo",
   protocol: FakeProtocol,
   endpoint: Endpoint.path("/v1/echo", { baseURL: "https://fake.local" }),
-  auth: Auth.passthrough,
+  auth: Auth.none,
   framing: Framing.sse,
 })
 

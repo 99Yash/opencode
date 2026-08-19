@@ -81,11 +81,16 @@ describe("ModelResolver", () => {
         model(Provider.aisdk("@ai-sdk/azure"), {
           providerID: Provider.ID.azure,
           modelID: "configured-deployment",
+          settings: { resourceName: "catalog-resource", apiVersion: "catalog-version" },
         }),
         Credential.Key.make({
           type: "key",
           key: "secret",
-          configuration: { resourceName: "configured-resource" },
+          configuration: {
+            resourceName: "configured-resource",
+            apiVersion: "configured-version",
+            useDeploymentBasedUrls: true,
+          },
         }),
       )
       const chat = yield* ModelResolver.fromCatalogModel(
@@ -125,7 +130,10 @@ describe("ModelResolver", () => {
           query: { "api-version": "2025-01-01-preview" },
         },
       })
-      expect(configuredCredential.route.endpoint.baseURL).toBe("https://configured-resource.openai.azure.com/openai/v1")
+      expect(configuredCredential.route.endpoint).toMatchObject({
+        baseURL: "https://configured-resource.openai.azure.com/openai/deployments/configured-deployment",
+        query: { "api-version": "configured-version" },
+      })
       expect(chat).toMatchObject({ id: "chat-deployment", provider: "azure" })
       expect(chat.route.id).toBe("azure-openai-chat")
       expect(deployment).toMatchObject({ id: "legacy-url-deployment", provider: "azure" })
@@ -147,11 +155,22 @@ describe("ModelResolver", () => {
             settings: { baseURL: "https://${AZURE_HOST}/openai" },
           }),
         )
+        const configured = yield* ModelResolver.fromCatalogModel(
+          model(Provider.aisdk("@ai-sdk/azure"), {
+            providerID: Provider.ID.azure,
+          }),
+          Credential.Key.make({
+            type: "key",
+            key: "secret",
+            configuration: { baseURL: "https://${AZURE_HOST}/openai" },
+          }),
+        )
 
         expect(resolved.route.endpoint).toMatchObject({
           baseURL: "https://resource.openai.azure.com/openai/v1",
           query: { "api-version": "v1" },
         })
+        expect(configured.route.endpoint.baseURL).toBe("https://resource.openai.azure.com/openai/v1")
       }),
     ),
   )
@@ -268,26 +287,32 @@ describe("ModelResolver", () => {
     }),
   )
 
-  it.effect("treats an empty configured API key as omitted", () =>
+  it.effect("treats empty configured and selected API keys as omitted", () =>
     Effect.gen(function* () {
       const resolved = yield* ModelResolver.fromCatalogModel(
         model(Provider.aisdk("@ai-sdk/openai"), {
           settings: { apiKey: "", baseURL: "https://openai.example/v1" },
         }),
       )
-      const headers = yield* resolved.route.auth
-        .apply({
-          request: LLM.request({ model: resolved, prompt: "Hello" }),
+      const selected = yield* ModelResolver.fromCatalogModel(
+        model(Provider.aisdk("@ai-sdk/openai"), {
+          settings: { baseURL: "https://openai.example/v1" },
+        }),
+        Credential.Key.make({ type: "key", key: "" }),
+      )
+      const headers = yield* Effect.forEach([resolved, selected], (model) =>
+        model.route.auth.apply({
+          request: LLM.request({ model, prompt: "Hello" }),
           method: "POST",
           url: "https://openai.example/v1/responses",
           body: "{}",
           headers: Headers.empty,
-        })
-        .pipe(
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENAI_API_KEY: "environment-key" } }))),
-        )
+        }),
+      ).pipe(
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENAI_API_KEY: "environment-key" } }))),
+      )
 
-      expect(headers.authorization).toBe("Bearer environment-key")
+      expect(headers.map((item) => item.authorization)).toEqual(["Bearer environment-key", "Bearer environment-key"])
     }),
   )
 
@@ -748,7 +773,12 @@ describe("ModelResolver", () => {
         }),
       )
 
-      expect(resolved.route.defaults.providerOptions).toMatchObject({ reasoningEffort: "high", store: true })
+      expect(resolved.route.defaults.providerOptions).toEqual({
+        store: true,
+        reasoningEffort: "high",
+        reasoningSummary: "auto",
+        include: ["reasoning.encrypted_content"],
+      })
     }),
   )
 

@@ -83,6 +83,20 @@ OpenAI.configure({
   generation: { maxTokens: 100 },
   store: false,
 }).responses("gpt-4.1-mini")
+OpenAI.model({
+  id: "gpt-5",
+  settings: {},
+  credential: { type: "key", value: "sk-test" },
+  defaults: { headers: { "x-test": "value" } },
+})
+OpenAI.model({
+  id: "gpt-5",
+  settings: {
+    // @ts-expect-error Common request defaults belong under input.defaults.
+    headers: { "x-test": "value" },
+  },
+  defaults: {},
+})
 
 // @ts-expect-error OpenAI model selectors only accept model ids.
 OpenAI.configure({ apiKey: "sk-test" }).responses("gpt-4.1-mini", {})

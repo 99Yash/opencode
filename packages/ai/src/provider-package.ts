@@ -1,18 +1,16 @@
 import type { LanguageModel, ProviderOptions } from "./schema/index.js"
 
-export interface Settings extends Readonly<Record<string, unknown>> {}
+export interface Settings {}
 
 export type Credential =
   | {
       readonly type: "key"
       readonly value: string
-      readonly metadata?: Readonly<Record<string, unknown>>
       readonly configuration?: Readonly<Record<string, unknown>>
     }
   | {
       readonly type: "oauth"
       readonly accessToken: string
-      readonly metadata?: Readonly<Record<string, unknown>>
     }
 
 export interface Defaults {

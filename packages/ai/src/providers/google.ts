@@ -28,9 +28,11 @@ export interface Settings extends ProviderPackage.Settings {
 
 const auth = (options: ProviderAuthOption<"optional">) => {
   if ("auth" in options && options.auth) return options.auth
-  return Auth.optional("apiKey" in options ? options.apiKey : undefined, "apiKey")
-    .orElse(Auth.config("GOOGLE_GENERATIVE_AI_API_KEY"))
-    .pipe(Auth.header("x-goog-api-key"))
+  return Auth.remove("authorization").andThen(
+    Auth.optional("apiKey" in options ? options.apiKey : undefined, "apiKey")
+      .orElse(Auth.config("GOOGLE_GENERATIVE_AI_API_KEY"))
+      .pipe(Auth.header("x-goog-api-key")),
+  )
 }
 
 const configuredRoute = (input: Config) => {
@@ -63,7 +65,7 @@ export const model: ProviderPackage.Definition<Settings, Gemini.ProviderOptionsI
     ...(input.credential
       ? input.credential.type === "key"
         ? { apiKey: input.credential.value }
-        : { auth: Auth.bearer(input.credential.accessToken) }
+        : { auth: Auth.remove("x-goog-api-key").andThen(Auth.bearer(input.credential.accessToken)) }
       : { apiKey: input.settings.apiKey }),
     baseURL: input.settings.baseURL,
     providerOptions: input.settings.providerOptions,
