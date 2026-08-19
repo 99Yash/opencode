@@ -1353,6 +1353,28 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
+    const chainedSkills = Effect.fnUntraced(function* (cmd: Command.Info, argumentsText: string) {
+      if (cmd.source !== "skill") return { commands: [cmd], arguments: argumentsText }
+
+      const available = new Map(
+        (yield* commands.list()).filter((item) => item.source === "skill").map((item) => [item.name, item]),
+      )
+      const selected = [cmd]
+      const seen = new Set([cmd.name])
+      let matched = false
+      const remaining = argumentsText.replace(/(^|\s)\/([^\s/]+)(?=\s|$)\s?/g, (token, prefix, name) => {
+        const skill = available.get(name)
+        if (!skill) return token
+        matched = true
+        if (!seen.has(name)) {
+          seen.add(name)
+          selected.push(skill)
+        }
+        return prefix
+      })
+      return { commands: selected, arguments: matched ? remaining.trim() : argumentsText }
+    })
+
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
       yield* Effect.logInfo("command", {
         "session.id": input.sessionID,
@@ -1369,9 +1391,12 @@ const layer = Layer.effect(
       }
       const agentName = cmd.agent ?? input.agent
 
-      const raw = input.arguments.match(argsRegex) ?? []
+      const chained = yield* chainedSkills(cmd, input.arguments)
+      const raw = chained.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templateCommand = yield* Effect.promise(async () => cmd.template)
+      const templateCommand = yield* Effect.promise(async () =>
+        (await Promise.all(chained.commands.map(async (item) => item.template))).join("\n\n"),
+      )
 
       const placeholders = templateCommand.match(placeholderRegex) ?? []
       let last = 0
@@ -1388,10 +1413,10 @@ const layer = Layer.effect(
         return args[argIndex]
       })
       const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-      let template = withArgs.replaceAll("$ARGUMENTS", input.arguments)
+      let template = withArgs.replaceAll("$ARGUMENTS", chained.arguments)
 
-      if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
-        template = template + "\n\n" + input.arguments
+      if (placeholders.length === 0 && !usesArgumentsPlaceholder && chained.arguments.trim()) {
+        template = template + "\n\n" + chained.arguments
       }
 
       const shellMatches = ConfigMarkdown.shell(template)

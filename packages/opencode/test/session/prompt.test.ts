@@ -1816,6 +1816,41 @@ unix(
   30_000,
 )
 
+it.instance(
+  "command expands multiple skill invocations into one prompt",
+  () =>
+    Effect.gen(function* () {
+      const { directory } = yield* TestInstance
+      yield* writeText(
+        path.join(directory, ".opencode", "skills", "skill-alpha", "SKILL.md"),
+        "---\nname: skill-alpha\ndescription: Alpha instructions\n---\nALPHA_INSTRUCTIONS",
+      )
+      yield* writeText(
+        path.join(directory, ".opencode", "skills", "skill-beta", "SKILL.md"),
+        "---\nname: skill-beta\ndescription: Beta instructions\n---\nBETA_INSTRUCTIONS",
+      )
+      const { llm } = yield* useServerConfig(providerCfg)
+      const { prompt, chat } = yield* boot()
+      yield* llm.text("done")
+
+      yield* prompt.command({
+        sessionID: chat.id,
+        command: "skill-alpha",
+        arguments: "/skill-beta /skill-beta inspect src/foo/bar.ts and https://example.com/a/b /unknown /skill-alpha",
+      })
+
+      const messages = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+      expect(messages).toContain("ALPHA_INSTRUCTIONS")
+      expect(messages).toContain("BETA_INSTRUCTIONS")
+      expect(messages).toContain("inspect src/foo/bar.ts and https://example.com/a/b /unknown")
+      expect(messages.match(/ALPHA_INSTRUCTIONS/g)).toHaveLength(1)
+      expect(messages.match(/BETA_INSTRUCTIONS/g)).toHaveLength(1)
+      expect(messages.match(/inspect src\/foo\/bar\.ts/g)).toHaveLength(1)
+    }),
+  { git: true },
+  30_000,
+)
+
 unixNoLLMServer(
   "cancel interrupts shell and resolves cleanly",
   () =>
