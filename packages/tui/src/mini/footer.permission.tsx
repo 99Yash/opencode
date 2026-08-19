@@ -31,7 +31,7 @@ import {
 import { footerWidthPolicy } from "./footer.width"
 import { toolFiletype } from "./tool"
 import { transparent, type RunBlockTheme, type RunFooterTheme } from "./theme"
-import type { MiniPermissionRequest, PermissionReply } from "./types"
+import type { MiniPermissionRequest, PermissionReply, RunTuiConfig } from "./types"
 import { PatchDiff } from "../component/patch-diff"
 
 function buttons(
@@ -74,6 +74,7 @@ function buttons(
 /** @internal Exported to test managed textarea submission without permission navigation. */
 export function RejectField(props: {
   theme: RunFooterTheme
+  cursor?: RunTuiConfig["cursor"]
   text: string
   disabled: boolean
   onChange: (text: string) => void
@@ -113,6 +114,7 @@ export function RejectField(props: {
       backgroundColor={props.theme.surface}
       focusedBackgroundColor={props.theme.surface}
       cursorColor={props.theme.text}
+      cursorStyle={props.cursor}
       focused={!props.disabled}
       onSubmit={props.onConfirm}
       onContentChange={() => {
@@ -139,6 +141,7 @@ export function RunPermissionBody(props: {
   request: MiniPermissionRequest
   directory?: () => string
   theme: RunFooterTheme
+  cursor?: RunTuiConfig["cursor"]
   block: RunBlockTheme
   onReply: (input: PermissionReply) => void | Promise<void>
   mono?: boolean
@@ -327,6 +330,7 @@ export function RunPermissionBody(props: {
               <box width={narrow() ? "100%" : undefined} flexGrow={1} flexShrink={1}>
                 <RejectField
                   theme={props.theme}
+                  cursor={props.cursor}
                   text={state().message}
                   disabled={busy()}
                   onChange={(text) => {

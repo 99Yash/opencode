@@ -335,6 +335,7 @@ export class RunFooter implements FooterApi {
               variants: footer.variants,
               currentVariant: footer.currentVariant,
               theme: footer.theme,
+              cursor: options.tuiConfig.cursor,
               mono: options.mono,
               miniSettings: footer.miniSettings,
               history: footer.history,

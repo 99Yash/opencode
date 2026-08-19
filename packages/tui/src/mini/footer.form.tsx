@@ -33,11 +33,12 @@ import {
 } from "./form.shared"
 import type { FormBodyState } from "./form.shared"
 import type { RunFooterTheme } from "./theme"
-import type { FormCancel, FormReply, MiniFormRequest } from "./types"
+import type { FormCancel, FormReply, MiniFormRequest, RunTuiConfig } from "./types"
 
 export function RunFormBody(props: {
   request: MiniFormRequest
   theme: RunFooterTheme
+  cursor?: RunTuiConfig["cursor"]
   onReply: (input: FormReply) => void | Promise<void>
   onCancel: (input: FormCancel) => void | Promise<void>
   openExternal?: (url: string) => Promise<unknown>
@@ -320,6 +321,7 @@ export function RunFormBody(props: {
                 backgroundColor={props.theme.surface}
                 focusedBackgroundColor={props.theme.surface}
                 cursorColor={props.theme.text}
+                cursorStyle={props.cursor}
                 focused
                 onSubmit={commitInput}
                 onContentChange={() => {

@@ -55,6 +55,7 @@ import type {
   RunPrompt,
   RunProvider,
   RunReference,
+  RunTuiConfig,
 } from "./types"
 import type { RunTheme } from "./theme"
 
@@ -92,6 +93,7 @@ type RunFooterViewProps = {
   subagent?: () => FooterSubagentState
   queuedPrompts?: () => FooterQueuedPrompt[]
   theme: () => RunTheme
+  cursor?: RunTuiConfig["cursor"]
   mono: boolean
   miniSettings: () => MiniSettings
   history?: () => RunPrompt[]
@@ -733,6 +735,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                         <Match when={active().type === "prompt" && route().type === "composer"}>
                           <RunPromptBody
                             theme={theme}
+                            cursor={props.cursor}
                             background={() => runTheme().background}
                             placeholder={composer.placeholder}
                             onSubmit={composer.onSubmit}
@@ -882,6 +885,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                             request={permission()!.request}
                             directory={props.directory}
                             theme={theme()}
+                            cursor={props.cursor}
                             block={block()}
                             onReply={props.onPermissionReply}
                             mono={props.mono}
@@ -893,6 +897,7 @@ export function RunFooterView(props: RunFooterViewProps) {
                               <RunFormBody
                                 request={value.request}
                                 theme={theme()}
+                                cursor={props.cursor}
                                 state={formStates.get(value.request.id) ?? createFormBodyState(value.request)}
                                 onState={(state) => {
                                   if (!formsAbsent && !settledForms.has(state.formID))

@@ -169,6 +169,7 @@ async function renderFooter(
           subagent={subagents}
           queuedPrompts={() => input.queuedPrompts ?? []}
           theme={input.theme ?? (() => RUN_THEME_FALLBACK)}
+          cursor={config.cursor}
           mono={input.mono ?? false}
           miniSettings={miniSettings}
           onSubmit={input.onSubmit ?? (() => true)}
@@ -337,6 +338,18 @@ test("direct footer composer area does not adopt footer surface", async () => {
     await app.renderOnce()
 
     expect(area.backgroundColor.toInts()).not.toEqual(surface.toInts())
+  } finally {
+    app.cleanup()
+  }
+})
+
+test("direct footer composer uses the configured cursor style", async () => {
+  const cursor = { style: "underline" as const, blinking: false }
+  const app = await renderFooter({ tuiConfig: { ...tuiConfig, cursor } })
+
+  try {
+    await app.renderOnce()
+    expect(app.renderer.currentFocusedEditor?.cursorStyle).toEqual(cursor)
   } finally {
     app.cleanup()
   }
