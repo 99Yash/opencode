@@ -1,7 +1,7 @@
 export * as ModelResolver from "./model-resolver.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { LanguageModel } from "@opencode-ai/ai"
+import { LanguageModel, ProviderPackage } from "@opencode-ai/ai"
 import { Auth } from "@opencode-ai/ai/route"
 import { Context, Effect, Layer, Schema } from "effect"
 import { produce } from "immer"
@@ -124,7 +124,7 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
   const resolved = prepareRuntimeModel(model, credential)
   const packageName = Provider.packageName(resolved.package)
   const configuration = credential?.type === "key" ? credential.configuration : undefined
-  const configured = { ...resolved.settings, ...credential?.metadata, ...configuration }
+  const configured = resolved.settings ?? {}
   const mapping = Provider.isAISDK(resolved.package)
     ? AISDKNative.map({
         packageName,
@@ -139,8 +139,8 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
     if (!loadAISDK) return yield* unsupported(resolved)
     const settings = yield* prepareProviderSettings(
       resolved,
-      Provider.mergeOverlay(resolved.settings, {
-        ...nativeCredentialSettings(resolved.package ?? "", credential),
+      Provider.mergeOverlay(withoutEmptyAPIKey(resolved.settings), {
+        ...legacyCredentialSettings(credential),
         ...credential?.metadata,
         ...configuration,
       }) ?? {},
@@ -157,16 +157,18 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
   const module = yield* (dependencies?.loadPackage ?? Provider.loadPackage)(specifier).pipe(
     Effect.mapError(() => unsupported(resolved)),
   )
-  const settings = {
-    ...(credential ? withoutNativeAuthSettings(mapped) : mapped),
-    ...nativeCredentialSettings(specifier, credential),
-    headers: Provider.mergeHeaders(mapping?.headers, resolved.headers),
-    body: Provider.mergeOverlay(mapping?.body, resolved.body),
-    limits: { context: resolved.limit.context, input: resolved.limit.input, output: resolved.limit.output },
-  }
   return yield* Effect.try({
     try: () => {
-      const runtime = module.model(resolved.modelID ?? resolved.id, settings)
+      const runtime = module.model({
+        id: resolved.modelID ?? resolved.id,
+        settings: mapped,
+        credential: providerCredential(credential),
+        defaults: {
+          headers: Provider.mergeHeaders(mapping?.headers, resolved.headers),
+          body: Provider.mergeOverlay(mapping?.body, resolved.body),
+          limits: { context: resolved.limit.context, input: resolved.limit.input, output: resolved.limit.output },
+        },
+      })
       return LanguageModel.update(runtime, {
         provider: resolved.providerID,
         compatibility: resolved.compatibility
@@ -225,25 +227,28 @@ function unresolvedProviderVariables(model: Info, baseURL: string) {
   })
 }
 
-const nativeCredentialSettings = (specifier: string, credential: Credential.Value | undefined) => {
+const legacyCredentialSettings = (credential: Credential.Value | undefined) => {
   if (!credential) return {}
   if (credential.type === "key") return { apiKey: credential.key }
-  if (
-    specifier === "@opencode-ai/ai/providers/anthropic" ||
-    specifier === "@opencode-ai/ai/providers/anthropic-compatible"
-  )
-    return { authToken: credential.access }
-  if (
-    specifier === "@opencode-ai/ai/providers/google-vertex" ||
-    specifier.startsWith("@opencode-ai/ai/providers/google-vertex/")
-  )
-    return { accessToken: credential.access }
   return { apiKey: credential.access }
 }
 
-const withoutNativeAuthSettings = (settings: Record<string, unknown>) => {
-  const { accessToken: _accessToken, apiKey: _apiKey, authToken: _authToken, ...rest } = settings
+const withoutEmptyAPIKey = (settings: Readonly<Record<string, unknown>> | undefined) => {
+  if (settings?.apiKey !== "") return settings
+  const { apiKey: _apiKey, ...rest } = settings
   return rest
+}
+
+const providerCredential = (credential: Credential.Value | undefined): ProviderPackage.Credential | undefined => {
+  if (!credential) return undefined
+  if (credential.type === "key")
+    return {
+      type: "key",
+      value: credential.key,
+      metadata: credential.metadata,
+      configuration: credential.configuration,
+    }
+  return { type: "oauth", accessToken: credential.access, metadata: credential.metadata }
 }
 
 const unsupported = (model: Info) =>

@@ -33,22 +33,12 @@ const mergeStringRecords = (
   return Object.keys(result).length === 0 ? undefined : result
 }
 
-export const ProviderOptions = Schema.Record(Schema.String, Schema.Record(Schema.String, Schema.Unknown))
+export const ProviderOptions = Schema.Record(Schema.String, Schema.Unknown)
 export type ProviderOptions = Schema.Schema.Type<typeof ProviderOptions>
 
 export const mergeProviderOptions = (
   ...items: ReadonlyArray<ProviderOptions | undefined>
-): ProviderOptions | undefined => {
-  const result: Record<string, Record<string, unknown>> = {}
-  for (const item of items) {
-    if (!item) continue
-    for (const [provider, options] of Object.entries(item)) {
-      const merged = mergeJsonRecords(result[provider], options)
-      if (merged) result[provider] = merged
-    }
-  }
-  return Object.keys(result).length === 0 ? undefined : result
-}
+): ProviderOptions | undefined => mergeJsonRecords(...items)
 
 export class HttpOptions extends Schema.Class<HttpOptions>("AI.HttpOptions")({
   body: Schema.optional(JsonSchema),
@@ -269,10 +259,9 @@ export class CacheHint extends Schema.Class<CacheHint>("LLM.CacheHint")({
 // Auto-placement policy for prompt caching. The protocol-neutral lowering step
 // reads this and injects `CacheHint`s at the configured boundaries; the
 // per-protocol body builders then translate those hints into wire markers as
-// usual. `"auto"` is the recommended default for agent loops — it places
+// usual. `"auto"` is the default for agent loops — it places
 // breakpoints at the last tool definition, the first and last distinct system
-// parts, and the conversation tail. The rolling message breakpoint keeps a
-// prior cache entry within Anthropic/Bedrock's 20-block lookback during long
+// parts, and the conversation tail so recent prefixes remain reusable during
 // tool loops.
 //
 // Pass `"none"` to opt out entirely (the legacy behavior). Pass the granular

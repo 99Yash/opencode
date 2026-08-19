@@ -34,7 +34,7 @@ Run `LLMClient.stream(request)` instead of `generate` when you want incremental 
 Use `Image.generate` with an image model for direct asset generation:
 
 ```ts
-import { Image, ImageInput } from "@opencode-ai/ai"
+import { Image, ImageClient, ImageInput } from "@opencode-ai/ai"
 import { OpenAI } from "@opencode-ai/ai/providers"
 
 const program = Effect.gen(function* () {
@@ -52,6 +52,10 @@ const program = Effect.gen(function* () {
 
   return response.images // GeneratedImage[] with owned bytes or a provider URL
 })
+
+const imageLayer = ImageClient.layer.pipe(Layer.provide(RequestExecutor.fetchLayer))
+
+await Effect.runPromise(program.pipe(Effect.provide(imageLayer)))
 ```
 
 Pass ordered image inputs to the same method for editing, composition, or image-conditioned generation:
@@ -199,7 +203,7 @@ The hosted result is represented as a provider-executed tool call and tool resul
 
 - **`LLM.request({...})`** — build a provider-neutral `LLMRequest`. Accepts ergonomic inputs (`system: string`, `prompt: string`) that normalize into the canonical Schema classes.
 - **`LLM.generate` / `LLM.stream`** — re-exported from `LLMClient` for one-import use.
-- **`Message.user(...)` / `Message.assistant(...)` / `Message.tool(...)`** — message constructors from the canonical schema model.
+- **`Message.system(...)` / `Message.user(...)` / `Message.assistant(...)` / `Message.tool(...)`** — message constructors from the canonical schema model. Top-level `request.system` is the initial prompt; a system message in history is a chronological operator update.
 - **`LanguageModel.make(...)` / `ToolCallPart.make(...)` / `ToolResultPart.make(...)` / `ToolDefinition.make(...)`** — model and tool-related constructors from the canonical schema model.
 - **`LLMEvent.is.*`** — typed guards (`is.textDelta`, `is.toolCall`, `is.finish`, …) for filtering streams.
 - **`Image.generate({...})`** — generate images through a provider-neutral image request and response model.
@@ -237,11 +241,11 @@ Prompt caching is **on by default**. Every `LLMRequest` resolves to `cache: "aut
 
 ### Auto placement
 
-`"auto"` places up to four breakpoints — the last tool definition, the first system part, the last system part when distinct, and the final message boundary. These expose successively larger reusable prefixes for tools, the base agent, project instructions, and the active conversation. The rolling final-message boundary is the load-bearing detail in tool loops: it advances on every request so the previous cache entry stays within Anthropic's 20-block lookback.
+`"auto"` places up to four breakpoints — the last tool definition, the first system part, the last system part when distinct, and the final message boundary. These expose successively larger reusable prefixes for tools, the base agent, project instructions, and the active conversation. The rolling final-message boundary advances on every request so recent conversation prefixes remain reusable during tool loops.
 
 Tools precede every system and conversation block in the provider prefix, so tool definitions must remain byte-stable and deterministically ordered for downstream breakpoints to remain reusable.
 
-The math justifies the default: Anthropic's 5-minute cache write is 1.25× base, read is 0.1×, so a single reuse within 5 minutes already wins. One-shot completions below the per-model minimum-cacheable-token threshold silently no-op on the wire, so the worst case is harmless.
+Requests below a provider's minimum cacheable size simply do not produce a reusable cache entry.
 
 ### Opting out
 
@@ -285,6 +289,7 @@ LLM.request({
 | ----------------------- | ------------------------------------------------------------------------- |
 | Anthropic Messages      | emits up to 4 `cache_control` markers (4-breakpoint cap enforced)         |
 | Bedrock Converse        | emits up to 4 `cachePoint` blocks (4-breakpoint cap enforced)             |
+| OpenRouter              | emits up to 4 `cache_control` markers                                     |
 | OpenAI Chat / Responses | no-op (implicit caching above 1024 tokens)                                |
 | Gemini                  | no-op (implicit caching on 2.5+; explicit `CachedContent` is out-of-band) |
 
@@ -304,19 +309,23 @@ const gateway = CloudflareAIGateway.configure({
 }).model("workers-ai/@cf/meta/llama-3.1-8b-instruct")
 ```
 
-Included providers: OpenAI, Anthropic, Google (Gemini), Google Vertex Gemini and Anthropic, Amazon Bedrock, Azure OpenAI, Cloudflare AI Gateway, Cloudflare Workers AI, GitHub Copilot, OpenRouter, xAI, Z.ai, plus generic OpenAI-compatible Chat and Responses entrypoints and an Anthropic Messages-compatible entrypoint.
+Included providers: OpenAI, Anthropic, Google (Gemini), Google Vertex Gemini and Anthropic, Amazon Bedrock, Azure OpenAI, Cloudflare AI Gateway, Cloudflare Workers AI, OpenRouter, xAI, Z.ai, plus generic OpenAI-compatible Chat and Responses entrypoints and an Anthropic Messages-compatible entrypoint. GitHub Copilot remains a Core-owned AI SDK integration rather than an AI-package provider.
 
 ### Package-like entrypoints
 
-Native catalog integrations load provider behavior through package-like entrypoints. These are export paths from the same `@opencode-ai/ai` npm package, not independently published packages. Each entrypoint exports the same `model(modelID, settings)` contract, and `settings` contains serializable provider configuration plus common `headers`, `body`, and `limits` overlays.
+Native catalog integrations load provider behavior through package-like entrypoints. These are export paths from the same `@opencode-ai/ai` npm package, not independently published packages. Each entrypoint exports the same `model({ id, settings, credential, defaults })` contract. Core selects and refreshes the optional `key | oauth` credential, while the provider package interprets it as route authentication. Serializable provider settings remain separate from common `headers`, `body`, and `limits` defaults.
 
 ```ts
 import { model } from "@opencode-ai/ai/providers/openai/responses"
 
-const selected = model("gpt-5", {
-  apiKey: process.env.OPENAI_API_KEY,
-  headers: { "x-application": "opencode" },
-  limits: { context: 200_000, output: 64_000 },
+const selected = model({
+  id: "gpt-5",
+  settings: {},
+  credential: { type: "key", value: process.env.OPENAI_API_KEY },
+  defaults: {
+    headers: { "x-application": "opencode" },
+    limits: { context: 200_000, output: 64_000 },
+  },
 })
 ```
 
@@ -340,30 +349,57 @@ Tuned Vertex Gemini deployments use model ids shaped like `endpoints/1234567890`
 ```ts
 import { model } from "@opencode-ai/ai/providers/google-vertex/gemini"
 
-model("gemini-3.5-flash", { project: "my-project", location: "global" })
+model({
+  id: "gemini-3.5-flash",
+  settings: { project: "my-project", location: "global" },
+  defaults: {},
+})
 ```
 
 ```ts
 import { model } from "@opencode-ai/ai/providers/google-vertex/chat"
 
-model("deepseek-ai/deepseek-v3.2-maas", { project: "my-project", location: "global" })
+model({
+  id: "deepseek-ai/deepseek-v3.2-maas",
+  settings: { project: "my-project", location: "global" },
+  defaults: {},
+})
 ```
 
 ```ts
 import { model } from "@opencode-ai/ai/providers/google-vertex/responses"
 
-model("xai/grok-4.20-reasoning", { project: "my-project", location: "global" })
+model({
+  id: "xai/grok-4.20-reasoning",
+  settings: { project: "my-project", location: "global" },
+  defaults: {},
+})
 ```
 
 ```ts
 import { model } from "@opencode-ai/ai/providers/google-vertex/messages"
 
-model("claude-sonnet-4-6", { project: "my-project", location: "global" })
+model({
+  id: "claude-sonnet-4-6",
+  settings: { project: "my-project", location: "global" },
+  defaults: {},
+})
 ```
 
-Provider facades such as `OpenAI.configure(...).responses(...)` remain the direct application API. Package-like entrypoints are the self-similar loading contract used when a catalog selects behavior by export path.
+Provider facades such as `OpenAI.configure(...).responses(...)` remain the direct application API. Package-like entrypoints are the self-similar loading contract used when a catalog selects behavior by export path. The entrypoints listed above implement that contract and are covered by `test/provider-package.test.ts`.
 
-Other provider exports listed above remain direct facades until they explicitly implement the package-like contract. Exporting a provider facade does not implicitly make it a catalog-loadable provider package.
+## How OpenCode uses this package
+
+OpenCode does not call provider facades directly from the CLI or server. Core owns the integration:
+
+1. `packages/core/src/model-resolver.ts` resolves catalog metadata and an active integration credential into a `LanguageModel`. Native package entrypoints expose `model({ id, settings, credential, defaults })`; catalog packages without a native mapping fall back through Core's AI SDK adapter.
+2. `packages/core/src/session/model-request.ts` lowers Session state, instructions, tools, and plugin hooks into one canonical `LLMRequest`.
+3. `packages/core/src/session/runner/llm.ts` calls the yielded `LLMClient.Service` once per physical attempt and persists provider-neutral `LLMEvent`s.
+4. Core owns retries, continuation, compaction, permissions, durable tool execution, and Session history. None of that orchestration belongs in this package.
+
+Title generation, compaction, standalone generation, and transient Session generation also build `LLMRequest`s and use the same `LLMClient.Service`. Core's `AISDK` adapter wraps remaining Vercel AI SDK models in executable routes so native and fallback providers present the same request and event model to callers.
+
+This separation is intentional: `@opencode-ai/ai` owns one model call, provider protocols, and transport; Core owns the durable agent runtime.
 
 ## Provider options & HTTP overlays
 
@@ -371,10 +407,32 @@ Request options in order of stability:
 
 1. **`generation`** — portable knobs (`maxTokens`, `temperature`, `topP`, `topK`, penalties, seed, stop).
 2. **`promptCacheKey`** — stable cache affinity lowered by every protocol that supports it.
-3. **`providerOptions: { <provider>: {...} }`** — typed-at-the-facade provider-specific knobs (OpenAI `store`, Anthropic `thinking`, Gemini `thinkingConfig`, OpenRouter routing).
+3. **`providerOptions: { ... }`** — flat options inferred from the selected model (OpenAI `store`, Anthropic `thinking`, Gemini `thinkingConfig`, OpenRouter routing).
 4. **`http: { body, headers, query }`** — last-resort serializable overlays merged into the final HTTP request. Reach for this only when a stable typed path doesn't yet exist.
 
 Route/provider defaults are overridden by request-level values for each axis.
+
+Provider-specific facades accept their own options directly because the provider is already known:
+
+```ts
+const model = OpenAI.configure({
+  apiKey,
+  store: false,
+  reasoningEffort: "high",
+}).responses("gpt-5")
+```
+
+The selected model supplies the provider-specific option type, so per-request overrides stay flat while the canonical runtime request remains provider-neutral:
+
+```ts
+LLM.request({
+  model,
+  prompt,
+  providerOptions: {
+    reasoningEffort: "low",
+  },
+})
+```
 
 ## Routes
 
@@ -387,6 +445,5 @@ This package is built on Effect. Public methods return `Effect` or `Stream`; pro
 ## See also
 
 - `AGENTS.md` — architecture, route construction, contributor guide
-- `STATUS.md` — native provider parity status and AI SDK migration gaps
 - `example/tutorial.ts` — runnable end-to-end walkthrough
 - `test/provider/*.test.ts` — fixture-first protocol tests; `*.recorded.test.ts` files cover live cassettes

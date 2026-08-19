@@ -1,21 +1,19 @@
 import { Effect } from "effect"
-import type { ProviderPackage } from "../provider-package.js"
+import { ProviderPackage } from "../provider-package.js"
 import { Gemini } from "../protocols/gemini.js"
 import { ProviderShared } from "../protocols/shared.js"
 import { Auth } from "../route/auth.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
 import { Framing } from "../route/framing.js"
-import { ProviderID, type LLMRequest, type ModelID, type ProviderOptions } from "../schema/index.js"
+import { ProviderID, type LLMRequest, type ModelID } from "../schema/index.js"
 import { GoogleVertexShared } from "./google-vertex-shared.js"
 
 export interface GeminiOptionsInput extends Gemini.OptionsInput {
   readonly labels?: Readonly<Record<string, string>>
 }
 
-export type GeminiProviderOptionsInput = ProviderOptions & {
-  readonly gemini?: GeminiOptionsInput
-}
+export type GeminiProviderOptionsInput = GeminiOptionsInput
 
 export const id = ProviderID.make("google-vertex")
 
@@ -40,7 +38,7 @@ export type Settings = ProviderPackage.Settings &
 
 const fromRequest = Effect.fn("GoogleVertex.fromRequest")(function* (request: LLMRequest) {
   const body = yield* Gemini.protocol.body.from(request)
-  const value = request.providerOptions?.gemini?.labels
+  const value = request.providerOptions?.labels
   const labels = ProviderShared.isRecord(value)
     ? Object.fromEntries(
         Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -113,17 +111,21 @@ export const provider = {
   id,
   configure,
 }
-export const model: ProviderPackage.Definition<Settings, GeminiProviderOptionsInput>["model"] = (modelID, settings) => {
-  if (settings.apiKey !== undefined && settings.accessToken !== undefined)
+export const model: ProviderPackage.Definition<Settings, GeminiProviderOptionsInput>["model"] = (input) => {
+  if (!input.credential && input.settings.apiKey !== undefined && input.settings.accessToken !== undefined)
     throw new Error("Google Vertex apiKey cannot be combined with accessToken or auth")
   return configure({
-    ...(settings.apiKey === undefined ? { accessToken: settings.accessToken } : { apiKey: settings.apiKey }),
-    baseURL: settings.baseURL,
-    headers: settings.headers === undefined ? undefined : { ...settings.headers },
-    http: settings.body === undefined ? undefined : { body: { ...settings.body } },
-    limits: settings.limits,
-    location: settings.location,
-    project: settings.project,
-    providerOptions: settings.providerOptions,
-  }).model(modelID)
+    ...ProviderPackage.routeDefaults(input.defaults),
+    ...(input.credential
+      ? input.credential.type === "key"
+        ? { apiKey: input.credential.value }
+        : { accessToken: input.credential.accessToken }
+      : input.settings.apiKey === undefined
+        ? { accessToken: input.settings.accessToken }
+        : { apiKey: input.settings.apiKey }),
+    baseURL: input.settings.baseURL,
+    location: input.settings.location,
+    project: input.settings.project,
+    providerOptions: input.settings.providerOptions,
+  }).model(input.id)
 }

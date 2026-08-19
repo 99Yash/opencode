@@ -1,7 +1,7 @@
 import type { RouteDefaultsInput } from "../route/client.js"
 import { Auth } from "../route/auth.js"
 import type { ProviderAuthOption } from "../route/auth-options.js"
-import type { ProviderPackage } from "../provider-package.js"
+import { ProviderPackage } from "../provider-package.js"
 import { HttpOptions, ProviderID, mergeHttpOptions, type ModelID } from "../schema/index.js"
 import { Gemini } from "../protocols/gemini.js"
 import { GoogleImages } from "../protocols/google-images.js"
@@ -57,14 +57,16 @@ export const configure = (input: Config = {}) => {
 }
 
 export const provider = configure()
-export const model: ProviderPackage.Definition<Settings, Gemini.ProviderOptionsInput>["model"] = (modelID, settings) =>
+export const model: ProviderPackage.Definition<Settings, Gemini.ProviderOptionsInput>["model"] = (input) =>
   configure({
-    apiKey: settings.apiKey,
-    baseURL: settings.baseURL,
-    headers: settings.headers === undefined ? undefined : { ...settings.headers },
-    http: settings.body === undefined ? undefined : { body: { ...settings.body } },
-    limits: settings.limits,
-    providerOptions: settings.providerOptions,
-  }).model(modelID)
+    ...ProviderPackage.routeDefaults(input.defaults),
+    ...(input.credential
+      ? input.credential.type === "key"
+        ? { apiKey: input.credential.value }
+        : { auth: Auth.bearer(input.credential.accessToken) }
+      : { apiKey: input.settings.apiKey }),
+    baseURL: input.settings.baseURL,
+    providerOptions: input.settings.providerOptions,
+  }).model(input.id)
 
 export const image = provider.image

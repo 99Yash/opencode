@@ -1,5 +1,24 @@
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
+import { Headers } from "effect/unstable/http"
+import { LLM } from "@opencode-ai/ai"
 import { model } from "@opencode-ai/ai/providers/openai"
+
+const packageInput = <Input extends Record<string, unknown>>(id: string, input: Input) => {
+  const { headers, body, limits, ...settings } = input
+  return { id, settings, defaults: { headers, body, limits } }
+}
+
+const authHeaders = (selected: ReturnType<typeof model>) =>
+  Effect.runPromise(
+    selected.route.auth.apply({
+      request: LLM.request({ model: selected, prompt: "hello" }),
+      method: "POST",
+      url: "https://example.test/v1",
+      body: "{}",
+      headers: Headers.fromInput({}),
+    }),
+  )
 
 describe("provider package entrypoints", () => {
   test("semantic API aliases expose the same contract", async () => {
@@ -45,14 +64,18 @@ describe("provider package entrypoints", () => {
       body: { service_tier: "priority" },
       limits: { context: 200_000, output: 64_000 },
     }
-    const openrouter = OpenRouter.model("anthropic/claude-sonnet-4", {
-      ...settings,
-      providerOptions: { openrouter: { usage: true } },
-    })
-    const xai = XAI.model("grok-4", {
-      ...settings,
-      providerOptions: { xai: { reasoningEffort: "high" } },
-    })
+    const openrouter = OpenRouter.model(
+      packageInput("anthropic/claude-sonnet-4", {
+        ...settings,
+        providerOptions: { usage: true },
+      }),
+    )
+    const xai = XAI.model(
+      packageInput("grok-4", {
+        ...settings,
+        providerOptions: { reasoningEffort: "high" },
+      }),
+    )
 
     for (const selected of [openrouter, xai]) {
       expect(selected.route.endpoint.baseURL).toBe(settings.baseURL)
@@ -60,37 +83,97 @@ describe("provider package entrypoints", () => {
       expect(selected.route.defaults.http?.body).toEqual(settings.body)
       expect(selected.route.defaults.limits).toEqual(settings.limits)
     }
-    expect(openrouter.route.defaults.providerOptions).toEqual({ openrouter: { usage: true } })
-    expect(xai.route.defaults.providerOptions).toMatchObject({ xai: { reasoningEffort: "high", store: false } })
+    expect(openrouter.route.defaults.providerOptions).toEqual({ usage: true })
+    expect(xai.route.defaults.providerOptions).toMatchObject({ reasoningEffort: "high", store: false })
   })
 
   test("maps package settings onto the executable model", () => {
-    const selected = model("gpt-5", {
-      apiKey: "fixture",
-      baseURL: "https://api.openai.test/v1",
-      headers: { "x-application": "opencode" },
-      body: { service_tier: "priority" },
-      limits: { context: 200_000, output: 64_000 },
-      unrelatedInheritedSetting: true,
-    })
+    const selected = model(
+      packageInput("gpt-5", {
+        apiKey: "fixture",
+        baseURL: "https://api.openai.test/v1",
+        headers: { "x-application": "opencode" },
+        body: { service_tier: "priority" },
+        limits: { context: 200_000, output: 64_000 },
+        reasoningEffort: "high",
+        unrelatedInheritedSetting: true,
+      }),
+    )
 
     expect(selected.route.id).toBe("openai-responses")
     expect(selected.route.defaults.headers).toEqual({ "x-application": "opencode" })
     expect(selected.route.defaults.http?.body).toEqual({ service_tier: "priority" })
     expect(selected.route.defaults.limits).toEqual({ context: 200_000, output: 64_000 })
+    expect(selected.route.defaults.providerOptions).toEqual({
+      store: false,
+      reasoningEffort: "high",
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    })
+  })
+
+  test("lets provider packages interpret resolved credentials", async () => {
+    const Anthropic = await import("@opencode-ai/ai/providers/anthropic")
+    const GoogleVertex = await import("@opencode-ai/ai/providers/google-vertex")
+    const GoogleVertexChat = await import("@opencode-ai/ai/providers/google-vertex/chat")
+    const openai = model({
+      id: "gpt-5",
+      settings: {},
+      credential: { type: "oauth", accessToken: "openai-token" },
+      defaults: {},
+    })
+    const anthropicKey = Anthropic.model({
+      id: "claude-sonnet-4-6",
+      settings: {},
+      credential: { type: "key", value: "anthropic-key" },
+      defaults: {},
+    })
+    const anthropicOAuth = Anthropic.model({
+      id: "claude-sonnet-4-6",
+      settings: {},
+      credential: { type: "oauth", accessToken: "anthropic-token" },
+      defaults: {},
+    })
+    const vertexKey = GoogleVertex.model({
+      id: "gemini-3.5-flash",
+      settings: {},
+      credential: { type: "key", value: "vertex-key" },
+      defaults: {},
+    })
+    const vertexOAuth = GoogleVertex.model({
+      id: "gemini-3.5-flash",
+      settings: { project: "vertex-project" },
+      credential: { type: "oauth", accessToken: "vertex-token" },
+      defaults: {},
+    })
+    const vertexChatOAuth = GoogleVertexChat.model({
+      id: "deepseek-ai/deepseek-v3.2-maas",
+      settings: { apiKey: "configured-key", project: "vertex-project" },
+      credential: { type: "oauth", accessToken: "vertex-chat-token" },
+      defaults: {},
+    })
+
+    expect((await authHeaders(openai)).authorization).toBe("Bearer openai-token")
+    expect((await authHeaders(anthropicKey))["x-api-key"]).toBe("anthropic-key")
+    expect((await authHeaders(anthropicOAuth)).authorization).toBe("Bearer anthropic-token")
+    expect((await authHeaders(vertexKey))["x-goog-api-key"]).toBe("vertex-key")
+    expect((await authHeaders(vertexOAuth)).authorization).toBe("Bearer vertex-token")
+    expect((await authHeaders(vertexChatOAuth)).authorization).toBe("Bearer vertex-chat-token")
   })
 
   test("maps OpenAI-compatible Responses settings onto the executable model", async () => {
     const OpenAICompatibleResponses = await import("@opencode-ai/ai/providers/openai-compatible/responses")
-    const selected = OpenAICompatibleResponses.model("custom-model", {
-      apiKey: "fixture",
-      baseURL: "https://responses.example.test/v1",
-      provider: "example",
-      headers: { "x-application": "opencode" },
-      body: { service_tier: "priority" },
-      limits: { context: 200_000, output: 64_000 },
-      providerOptions: { openresponses: { reasoningEffort: "low", store: true } },
-    })
+    const selected = OpenAICompatibleResponses.model(
+      packageInput("custom-model", {
+        apiKey: "fixture",
+        baseURL: "https://responses.example.test/v1",
+        provider: "example",
+        headers: { "x-application": "opencode" },
+        body: { service_tier: "priority" },
+        limits: { context: 200_000, output: 64_000 },
+        providerOptions: { reasoningEffort: "low", store: true },
+      }),
+    )
 
     expect(String(selected.provider)).toBe("example")
     expect(selected.route.id).toBe("openai-compatible-responses")
@@ -101,22 +184,22 @@ describe("provider package entrypoints", () => {
     expect(selected.route.defaults.headers).toEqual({ "x-application": "opencode" })
     expect(selected.route.defaults.http?.body).toEqual({ service_tier: "priority" })
     expect(selected.route.defaults.limits).toEqual({ context: 200_000, output: 64_000 })
-    expect(selected.route.defaults.providerOptions).toEqual({
-      openresponses: { reasoningEffort: "low", store: true },
-    })
+    expect(selected.route.defaults.providerOptions).toEqual({ reasoningEffort: "low", store: true })
   })
 
   test("maps Anthropic-compatible settings onto the executable model", async () => {
     const AnthropicCompatible = await import("@opencode-ai/ai/providers/anthropic-compatible")
-    const selected = AnthropicCompatible.model("compatible-model", {
-      apiKey: "fixture",
-      baseURL: "https://messages.example.test/v1",
-      provider: "example",
-      headers: { "x-application": "opencode" },
-      body: { metadata: { user_id: "user_1" } },
-      limits: { context: 200_000, output: 64_000 },
-      providerOptions: { anthropic: { effort: "low" } },
-    })
+    const selected = AnthropicCompatible.model(
+      packageInput("compatible-model", {
+        apiKey: "fixture",
+        baseURL: "https://messages.example.test/v1",
+        provider: "example",
+        headers: { "x-application": "opencode" },
+        body: { metadata: { user_id: "user_1" } },
+        limits: { context: 200_000, output: 64_000 },
+        providerOptions: { effort: "low" },
+      }),
+    )
 
     expect(String(selected.provider)).toBe("example")
     expect(selected.route.id).toBe("anthropic-messages")
@@ -127,25 +210,25 @@ describe("provider package entrypoints", () => {
     expect(selected.route.defaults.headers).toEqual({ "x-application": "opencode" })
     expect(selected.route.defaults.http?.body).toEqual({ metadata: { user_id: "user_1" } })
     expect(selected.route.defaults.limits).toEqual({ context: 200_000, output: 64_000 })
-    expect(selected.route.defaults.providerOptions).toEqual({ anthropic: { effort: "low" } })
+    expect(selected.route.defaults.providerOptions).toEqual({ effort: "low" })
   })
 
   test("maps Anthropic provider options onto the executable model", async () => {
     const Anthropic = await import("@opencode-ai/ai/providers/anthropic")
-    const selected = Anthropic.model("claude-sonnet-4-6", {
-      apiKey: "fixture",
-      providerOptions: { anthropic: { thinking: { type: "adaptive" } } },
-    })
+    const selected = Anthropic.model(
+      packageInput("claude-sonnet-4-6", {
+        apiKey: "fixture",
+        providerOptions: { thinking: { type: "adaptive" } },
+      }),
+    )
 
-    expect(selected.route.defaults.providerOptions).toEqual({
-      anthropic: { thinking: { type: "adaptive" } },
-    })
+    expect(selected.route.defaults.providerOptions).toEqual({ thinking: { type: "adaptive" } })
   })
 
   test("requires an Anthropic-compatible base URL at runtime", async () => {
     const AnthropicCompatible = await import("@opencode-ai/ai/providers/anthropic-compatible")
     expect(() =>
-      Reflect.apply(AnthropicCompatible.model, undefined, ["compatible-model", { apiKey: "fixture" }]),
+      Reflect.apply(AnthropicCompatible.model, undefined, [packageInput("compatible-model", { apiKey: "fixture" })]),
     ).toThrow("Anthropic-compatible providers require a baseURL")
   })
 
@@ -154,25 +237,28 @@ describe("provider package entrypoints", () => {
     const AnthropicCompatible = await import("@opencode-ai/ai/providers/anthropic-compatible")
     expect(() =>
       Reflect.apply(AnthropicCompatible.model, undefined, [
-        "compatible-model",
-        {
+        packageInput("compatible-model", {
           apiKey: "fixture",
           authToken: "token",
           baseURL: "https://messages.example.test/v1",
-        },
+        }),
       ]),
     ).toThrow("Anthropic-compatible apiKey cannot be combined with authToken")
     expect(() =>
-      Reflect.apply(Anthropic.model, undefined, ["claude-sonnet-4-6", { apiKey: "fixture", authToken: "token" }]),
+      Reflect.apply(Anthropic.model, undefined, [
+        packageInput("claude-sonnet-4-6", { apiKey: "fixture", authToken: "token" }),
+      ]),
     ).toThrow("Anthropic apiKey cannot be combined with authToken")
   })
 
   test("maps legacy OpenAI organization and project settings to headers", () => {
-    const selected = model("gpt-5", {
-      apiKey: "fixture",
-      organization: "org_123",
-      project: "proj_123",
-    })
+    const selected = model(
+      packageInput("gpt-5", {
+        apiKey: "fixture",
+        organization: "org_123",
+        project: "proj_123",
+      }),
+    )
 
     expect(selected.route.defaults.headers).toMatchObject({
       "OpenAI-Organization": "org_123",
@@ -192,10 +278,10 @@ describe("provider package entrypoints", () => {
       limits: { context: 200_000, output: 64_000 },
     }
 
-    const responses = AzureResponses.model("deployment", settings)
-    const chat = AzureChat.model("deployment", settings)
+    const responses = AzureResponses.model(packageInput("deployment", settings))
+    const chat = AzureChat.model(packageInput("deployment", settings))
 
-    expect(Azure.model("deployment", settings).route.id).toBe("azure-openai-responses")
+    expect(Azure.model(packageInput("deployment", settings)).route.id).toBe("azure-openai-responses")
     expect(responses.route.id).toBe("azure-openai-responses")
     expect(responses.route.endpoint.baseURL).toBe("https://opencode-test.openai.azure.com/openai/v1")
     expect(responses.route.defaults.headers).toEqual({ "x-application": "opencode" })
@@ -206,16 +292,20 @@ describe("provider package entrypoints", () => {
 
   test("constructs Azure deployment URLs and preserves custom gateway URLs", async () => {
     const Azure = await import("@opencode-ai/ai/providers/azure")
-    const deployment = Azure.model("custom-deployment", {
-      apiKey: "fixture",
-      resourceName: "opencode-test",
-      apiVersion: "2025-01-01-preview",
-      useDeploymentBasedUrls: true,
-    })
-    const gateway = Azure.model("gateway-model", {
-      apiKey: "fixture",
-      baseURL: "https://gateway.example/azure/",
-    })
+    const deployment = Azure.model(
+      packageInput("custom-deployment", {
+        apiKey: "fixture",
+        resourceName: "opencode-test",
+        apiVersion: "2025-01-01-preview",
+        useDeploymentBasedUrls: true,
+      }),
+    )
+    const gateway = Azure.model(
+      packageInput("gateway-model", {
+        apiKey: "fixture",
+        baseURL: "https://gateway.example/azure/",
+      }),
+    )
 
     expect(deployment.route.endpoint).toMatchObject({
       baseURL: "https://opencode-test.openai.azure.com/openai/deployments/custom-deployment",
@@ -227,23 +317,23 @@ describe("provider package entrypoints", () => {
 
   test("maps Google package settings onto the Gemini model", async () => {
     const Google = await import("@opencode-ai/ai/providers/google")
-    const selected = Google.model("gemini-2.5-flash", {
-      apiKey: "fixture",
-      baseURL: "https://generativelanguage.test/v1beta",
-      headers: { "x-application": "opencode" },
-      body: { safetySettings: [] },
-      limits: { context: 1_000_000, output: 65_536 },
-      providerOptions: { gemini: { thinkingConfig: { thinkingBudget: 1_024 } } },
-    })
+    const selected = Google.model(
+      packageInput("gemini-2.5-flash", {
+        apiKey: "fixture",
+        baseURL: "https://generativelanguage.test/v1beta",
+        headers: { "x-application": "opencode" },
+        body: { safetySettings: [] },
+        limits: { context: 1_000_000, output: 65_536 },
+        providerOptions: { thinkingConfig: { thinkingBudget: 1_024 } },
+      }),
+    )
 
     expect(selected.route.id).toBe("gemini")
     expect(selected.route.endpoint.baseURL).toBe("https://generativelanguage.test/v1beta")
     expect(selected.route.defaults.headers).toEqual({ "x-application": "opencode" })
     expect(selected.route.defaults.http?.body).toEqual({ safetySettings: [] })
     expect(selected.route.defaults.limits).toEqual({ context: 1_000_000, output: 65_536 })
-    expect(selected.route.defaults.providerOptions).toEqual({
-      gemini: { thinkingConfig: { thinkingBudget: 1_024 } },
-    })
+    expect(selected.route.defaults.providerOptions).toEqual({ thinkingConfig: { thinkingBudget: 1_024 } })
   })
 
   test("selects Vertex entrypoints with the same model contract", async () => {
@@ -252,27 +342,35 @@ describe("provider package entrypoints", () => {
     const GoogleVertexChat = await import("@opencode-ai/ai/providers/google-vertex/chat")
     const GoogleVertexResponses = await import("@opencode-ai/ai/providers/google-vertex/responses")
     const GoogleVertexMessages = await import("@opencode-ai/ai/providers/google-vertex/messages")
-    const gemini = GoogleVertex.model("gemini-3.5-flash", {
-      apiKey: "fixture",
-      headers: { "x-application": "opencode" },
-      body: { safetySettings: [] },
-      limits: { context: 1_000_000, output: 65_536 },
-    })
-    const messages = GoogleVertexMessages.model("claude-sonnet-4-6", {
-      accessToken: "fixture",
-      location: "global",
-      project: "vertex-project",
-    })
-    const chat = GoogleVertexChat.model("deepseek-ai/deepseek-v3.2-maas", {
-      accessToken: "fixture",
-      location: "global",
-      project: "vertex-project",
-    })
-    const responses = GoogleVertexResponses.model("xai/grok-4.20-reasoning", {
-      accessToken: "fixture",
-      location: "global",
-      project: "vertex-project",
-    })
+    const gemini = GoogleVertex.model(
+      packageInput("gemini-3.5-flash", {
+        apiKey: "fixture",
+        headers: { "x-application": "opencode" },
+        body: { safetySettings: [] },
+        limits: { context: 1_000_000, output: 65_536 },
+      }),
+    )
+    const messages = GoogleVertexMessages.model(
+      packageInput("claude-sonnet-4-6", {
+        accessToken: "fixture",
+        location: "global",
+        project: "vertex-project",
+      }),
+    )
+    const chat = GoogleVertexChat.model(
+      packageInput("deepseek-ai/deepseek-v3.2-maas", {
+        accessToken: "fixture",
+        location: "global",
+        project: "vertex-project",
+      }),
+    )
+    const responses = GoogleVertexResponses.model(
+      packageInput("xai/grok-4.20-reasoning", {
+        accessToken: "fixture",
+        location: "global",
+        project: "vertex-project",
+      }),
+    )
 
     expect(GoogleVertexGemini.model).toBe(GoogleVertex.model)
     expect(gemini.route.id).toBe("google-vertex-gemini")
@@ -282,11 +380,13 @@ describe("provider package entrypoints", () => {
     expect(gemini.route.defaults.http?.body).toEqual({ safetySettings: [] })
     expect(gemini.route.defaults.limits).toEqual({ context: 1_000_000, output: 65_536 })
     expect(
-      GoogleVertex.model("gemini-3.5-flash", {
-        accessToken: "fixture",
-        location: "eu",
-        project: "vertex-project",
-      }).route.endpoint.baseURL,
+      GoogleVertex.model(
+        packageInput("gemini-3.5-flash", {
+          accessToken: "fixture",
+          location: "eu",
+          project: "vertex-project",
+        }),
+      ).route.endpoint.baseURL,
     ).toBe("https://aiplatform.eu.rep.googleapis.com/v1beta1/projects/vertex-project/locations/eu/publishers/google")
     expect(messages.route.id).toBe("google-vertex-messages")
     expect(messages.route.protocol).toBe("anthropic-messages")
@@ -305,7 +405,7 @@ describe("provider package entrypoints", () => {
       baseURL: "https://aiplatform.googleapis.com/v1/projects/vertex-project/locations/global/endpoints/openapi",
       path: "/responses",
     })
-    expect(responses.route.defaults.providerOptions).toEqual({ openresponses: { store: false } })
+    expect(responses.route.defaults.providerOptions).toEqual({ store: false })
   })
 
   test("rejects conflicting Vertex auth settings at runtime", async () => {
@@ -316,8 +416,11 @@ describe("provider package entrypoints", () => {
     const Providers = await import("@opencode-ai/ai/providers")
     expect(() =>
       Reflect.apply(GoogleVertex.model, undefined, [
-        "gemini-3.5-flash",
-        { accessToken: "token", apiKey: "fixture", project: "vertex-project" },
+        packageInput("gemini-3.5-flash", {
+          accessToken: "token",
+          apiKey: "fixture",
+          project: "vertex-project",
+        }),
       ]),
     ).toThrow("Google Vertex apiKey cannot be combined with accessToken or auth")
     const configured = Reflect.apply(GoogleVertex.configure, undefined, [
@@ -326,8 +429,7 @@ describe("provider package entrypoints", () => {
     expect(() => configured.model("gemini-3.5-flash")).toThrow("Google Vertex accessToken cannot be combined with auth")
     expect(() =>
       Reflect.apply(GoogleVertexMessages.model, undefined, [
-        "claude-sonnet-4-6",
-        { apiKey: "fixture", project: "vertex-project" },
+        packageInput("claude-sonnet-4-6", { apiKey: "fixture", project: "vertex-project" }),
       ]),
     ).toThrow("Google Vertex Messages does not support API keys")
     expect(() =>
@@ -337,8 +439,7 @@ describe("provider package entrypoints", () => {
     ).toThrow("Google Vertex Messages does not support API keys")
     expect(() =>
       Reflect.apply(GoogleVertexChat.model, undefined, [
-        "deepseek-ai/deepseek-v3.2-maas",
-        { apiKey: "fixture", project: "vertex-project" },
+        packageInput("deepseek-ai/deepseek-v3.2-maas", { apiKey: "fixture", project: "vertex-project" }),
       ]),
     ).toThrow("Google Vertex Chat does not support API keys")
     expect(() =>
@@ -348,8 +449,7 @@ describe("provider package entrypoints", () => {
     ).toThrow("Google Vertex Chat does not support API keys")
     expect(() =>
       Reflect.apply(GoogleVertexResponses.model, undefined, [
-        "xai/grok-4.20-reasoning",
-        { apiKey: "fixture", project: "vertex-project" },
+        packageInput("xai/grok-4.20-reasoning", { apiKey: "fixture", project: "vertex-project" }),
       ]),
     ).toThrow("Google Vertex Responses does not support API keys")
     expect(() =>

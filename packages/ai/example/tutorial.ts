@@ -17,13 +17,11 @@ import { OpenAI } from "@opencode-ai/ai/providers"
 const apiKey = Config.redacted("OPENAI_API_KEY")
 
 // 1. Pick a model. The provider helper records provider identity, protocol
-// choice, capabilities, deployment options, authentication, and defaults.
+// choice, deployment options, authentication, and defaults. Catalog capabilities
+// remain application-owned and are not part of LanguageModel.
 const model = OpenAI.configure({
   apiKey,
   generation: { maxTokens: 160 },
-  providerOptions: {
-    openai: { store: false },
-  },
 }).model("gpt-4o-mini")
 
 // 2. Build a provider-neutral request. This is useful when reusing one request
@@ -34,7 +32,7 @@ const model = OpenAI.configure({
 //   - `generation`: common controls such as max tokens, temperature, topP/topK,
 //     penalties, seed, and stop sequences.
 //   - `promptCacheKey`: stable cache affinity for protocols that support it.
-//   - `providerOptions`: namespaced provider-native behavior. For example,
+//   - `providerOptions`: model-typed provider-native behavior. For example,
 //     OpenAI store behavior, Anthropic thinking, Gemini thinking config, or
 //     OpenRouter routing/reasoning.
 //   - `http`: last-resort serializable overlays for final request body, headers,

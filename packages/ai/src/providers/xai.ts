@@ -1,20 +1,19 @@
+import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
 import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
-import { HttpOptions, ProviderID, type ModelID, type ProviderOptions } from "../schema/index.js"
+import { HttpOptions, ProviderID, type ModelID } from "../schema/index.js"
 import * as OpenAICompatibleProfiles from "./openai-compatible-profile.js"
 import * as OpenAICompatibleChat from "../protocols/openai-compatible-chat.js"
 import * as OpenAIChat from "../protocols/openai-chat.js"
 import * as OpenAIResponses from "../protocols/openai-responses.js"
 import { XAIImages } from "../protocols/xai-images.js"
 import type { OpenAIOptionsInput } from "./openai-options.js"
-import type { ProviderPackage } from "../provider-package.js"
+import { ProviderPackage } from "../provider-package.js"
 
 export const id = ProviderID.make("xai")
 
-export type XAIProviderOptionsInput = ProviderOptions & {
-  readonly xai?: OpenAIOptionsInput
-}
+export type XAIProviderOptionsInput = OpenAIOptionsInput
 
 export type LanguageModelOptions = Omit<RouteDefaultsInput, "providerOptions"> &
   ProviderAuthOption<"optional"> & {
@@ -37,7 +36,7 @@ const responsesRoute = Route.make({
   protocol: OpenAIResponses.protocol,
   endpoint: Endpoint.path("/responses", { baseURL: OpenAICompatibleProfiles.profiles.xai.baseURL }),
   transport: OpenAIResponses.httpTransport,
-  defaults: { providerOptions: { xai: { store: false } } },
+  defaults: { providerOptions: { store: false } },
 })
 
 const chatRoute = Route.make({
@@ -97,15 +96,15 @@ export const configure = (input: LanguageModelOptions = {}) => {
 }
 
 export const provider = configure()
-export const model: ProviderPackage.Definition<Settings, XAIProviderOptionsInput>["model"] = (modelID, settings) =>
+export const model: ProviderPackage.Definition<Settings, XAIProviderOptionsInput>["model"] = (input) =>
   configure({
-    apiKey: settings.apiKey,
-    baseURL: settings.baseURL,
-    headers: settings.headers,
-    http: settings.body === undefined ? undefined : { body: { ...settings.body } },
-    limits: settings.limits,
-    providerOptions: settings.providerOptions,
-  }).model(modelID)
+    ...ProviderPackage.routeDefaults(input.defaults),
+    ...(input.credential
+      ? { auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)) }
+      : { apiKey: input.settings.apiKey }),
+    baseURL: input.settings.baseURL,
+    providerOptions: input.settings.providerOptions,
+  }).model(input.id)
 export const responses = provider.responses
 export const chat = provider.chat
 export const image = provider.image

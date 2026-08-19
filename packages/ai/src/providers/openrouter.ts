@@ -3,9 +3,10 @@ import { Route, type RouteDefaultsInput } from "../route/client.js"
 import { Endpoint } from "../route/endpoint.js"
 import { Framing } from "../route/framing.js"
 import { Protocol } from "../route/protocol.js"
+import { Auth } from "../route/auth.js"
 import { AuthOptions, type ProviderAuthOption } from "../route/auth-options.js"
-import { ProviderID, type CacheHint, type ModelID, type ProviderOptions } from "../schema/index.js"
-import type { ProviderPackage } from "../provider-package.js"
+import { ProviderID, type CacheHint, type ModelID } from "../schema/index.js"
+import { ProviderPackage } from "../provider-package.js"
 import * as OpenAICompatibleProfiles from "./openai-compatible-profile.js"
 import * as OpenAIChat from "../protocols/openai-chat.js"
 import { newBreakpoints, ttlBucket } from "../protocols/utils/cache.js"
@@ -71,9 +72,7 @@ export interface OpenRouterOptions {
   }>
 }
 
-export type OpenRouterProviderOptionsInput = ProviderOptions & {
-  readonly openrouter?: OpenRouterOptions
-}
+export type OpenRouterProviderOptionsInput = OpenRouterOptions
 
 export type LanguageModelOptions = Omit<RouteDefaultsInput, "providerOptions"> &
   ProviderAuthOption<"optional"> & {
@@ -120,7 +119,7 @@ export const protocol = Protocol.make({
           return {
             ...body,
             messages,
-            ...bodyOptions(request.providerOptions?.openrouter),
+            ...bodyOptions(request.providerOptions),
             ...(request.promptCacheKey ? { prompt_cache_key: request.promptCacheKey } : {}),
           } as OpenRouterBody
         }),
@@ -193,15 +192,12 @@ export const configure = (input: LanguageModelOptions = {}) => {
 }
 
 export const provider = configure()
-export const model: ProviderPackage.Definition<Settings, OpenRouterProviderOptionsInput>["model"] = (
-  modelID,
-  settings,
-) =>
+export const model: ProviderPackage.Definition<Settings, OpenRouterProviderOptionsInput>["model"] = (input) =>
   configure({
-    apiKey: settings.apiKey,
-    baseURL: settings.baseURL,
-    headers: settings.headers,
-    http: settings.body === undefined ? undefined : { body: { ...settings.body } },
-    limits: settings.limits,
-    providerOptions: settings.providerOptions,
-  }).model(modelID)
+    ...ProviderPackage.routeDefaults(input.defaults),
+    ...(input.credential
+      ? { auth: Auth.bearer(ProviderPackage.credentialValue(input.credential)) }
+      : { apiKey: input.settings.apiKey }),
+    baseURL: input.settings.baseURL,
+    providerOptions: input.settings.providerOptions,
+  }).model(input.id)
