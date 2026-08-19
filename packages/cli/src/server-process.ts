@@ -41,11 +41,21 @@ export const run = Effect.fnUntraced(function* (options: Options) {
 
 const processEffect = Effect.fnUntraced(function* (options: Options) {
   const global = yield* Global.Service
+  const shutdownWatchdogs = new Set<ReturnType<typeof setTimeout>>()
   if (options.mode === "service") yield* Effect.sync(() => process.chdir(global.home))
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const foreground = options.mode === "default"
       const serviceOptions = options.mode === "service" ? yield* ServiceConfig.options() : undefined
+      // A native timer can still fire when an Effect finalizer never completes.
+      if (serviceOptions !== undefined)
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            const watchdog = setTimeout(() => process.exit(1), 10_000)
+            watchdog.unref()
+            shutdownWatchdogs.add(watchdog)
+          }),
+        )
       const config = options.mode === "service" ? yield* ServiceConfig.read() : {}
       const hostname = options.hostname ?? config.hostname ?? "127.0.0.1"
       const port = options.port ?? config.port ?? (options.mode === "service" ? ServiceConfig.defaultPort() : undefined)
@@ -154,7 +164,7 @@ const processEffect = Effect.fnUntraced(function* (options: Options) {
           ? waitForStdinClose()
           : Effect.never
     }).pipe(Effect.annotateLogs({ role: "server" })),
-  )
+  ).pipe(Effect.ensuring(Effect.sync(() => shutdownWatchdogs.forEach(clearTimeout))))
 })
 
 const infoJson = Schema.fromJsonString(Service.Info)
