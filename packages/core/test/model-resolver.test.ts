@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { LLM, LanguageModel } from "@opencode-ai/ai"
 import { OpenAIChat } from "@opencode-ai/ai/protocols"
 import { compileRequest } from "@opencode-ai/ai/route/client"
-import { Effect, Layer } from "effect"
+import { ConfigProvider, Effect, Layer } from "effect"
 import { Headers } from "effect/unstable/http"
 import { Credential } from "@opencode-ai/core/credential"
 import { Integration } from "@opencode-ai/core/integration"
@@ -269,24 +269,26 @@ describe("ModelResolver", () => {
   )
 
   it.effect("treats an empty configured API key as omitted", () =>
-    withEnv({ OPENAI_API_KEY: "environment-key" }, () =>
-      Effect.gen(function* () {
-        const resolved = yield* ModelResolver.fromCatalogModel(
-          model(Provider.aisdk("@ai-sdk/openai"), {
-            settings: { apiKey: "", baseURL: "https://openai.example/v1" },
-          }),
-        )
-        const headers = yield* resolved.route.auth.apply({
+    Effect.gen(function* () {
+      const resolved = yield* ModelResolver.fromCatalogModel(
+        model(Provider.aisdk("@ai-sdk/openai"), {
+          settings: { apiKey: "", baseURL: "https://openai.example/v1" },
+        }),
+      )
+      const headers = yield* resolved.route.auth
+        .apply({
           request: LLM.request({ model: resolved, prompt: "Hello" }),
           method: "POST",
           url: "https://openai.example/v1/responses",
           body: "{}",
           headers: Headers.empty,
         })
+        .pipe(
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENAI_API_KEY: "environment-key" } }))),
+        )
 
-        expect(headers.authorization).toBe("Bearer environment-key")
-      }),
-    ),
+      expect(headers.authorization).toBe("Bearer environment-key")
+    }),
   )
 
   it.effect("uses no native API-key auth for an explicitly enabled provider without credentials", () => {
