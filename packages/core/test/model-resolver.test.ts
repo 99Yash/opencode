@@ -491,7 +491,11 @@ describe("ModelResolver", () => {
           },
         ],
       })
-      const resolved = yield* ModelResolver.resolveModel(catalog, VariantID.make("xhigh"))
+      const resolved = yield* ModelResolver.resolveModel(
+        catalog,
+        VariantID.make("xhigh"),
+        Credential.Key.make({ type: "key", key: "secret" }),
+      )
 
       expect(resolved.route.defaults.headers).toMatchObject({ "x-test": "header", "x-variant": "high" })
       expect(resolved.route.defaults.http?.body).toEqual({
