@@ -20,6 +20,7 @@ import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Money } from "@opencode-ai/schema/money"
 import { Worktree } from "@opencode-ai/schema/worktree"
 import { Project } from "@opencode-ai/schema/project"
+import { Prompt } from "@opencode-ai/schema/prompt"
 import { AbsolutePath, RelativePath } from "../schema.js"
 import type { SessionSchema } from "./schema.js"
 
@@ -526,17 +527,14 @@ const layer = Layer.effectDiscard(
         yield* insertMessage(
           db,
           event,
-          input.type === "user"
-            ? {
-                id: input.id,
-                type: "user",
-                metadata: input.payload.metadata,
-                text: input.payload.text,
-                files: input.payload.files,
-                agents: input.payload.agents,
-                skills: input.payload.skills,
-                time: { created: DateTime.makeUnsafe(event.created) },
-              }
+              input.type === "user"
+                ? {
+                    ...Prompt.fromUserMessage(input.payload),
+                    id: input.id,
+                    type: "user",
+                    metadata: input.payload.metadata,
+                    time: { created: DateTime.makeUnsafe(event.created) },
+                  }
             : {
                 id: input.id,
                 type: "synthetic",

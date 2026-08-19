@@ -50,6 +50,18 @@ describe("session message presentation", () => {
     })
   })
 
+  test("projects explicit presentation text", () => {
+    const message = {
+      id: "msg_user",
+      type: "user",
+      text: "expanded command template",
+      displayText: "/command input",
+      time: { created: 1 },
+    } satisfies SessionMessageUser
+
+    expect(presentUserParts("ses_1", message)[0]).toMatchObject({ type: "text", text: "/command input" })
+  })
+
   test("projects current assistant content for existing DOM tools", () => {
     const message = {
       id: "msg_assistant",

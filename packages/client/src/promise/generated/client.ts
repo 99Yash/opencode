@@ -593,6 +593,7 @@ export function make(options: ClientOptions) {
             body: {
               id: input["id"],
               text: input["text"],
+              displayText: input["displayText"],
               files: input["files"],
               agents: input["agents"],
               skills: input["skills"],

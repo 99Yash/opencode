@@ -172,6 +172,7 @@ export type Endpoint5_12Input = {
   readonly sessionID: Session.ID
   readonly id?: SessionMessage.ID | undefined
   readonly text: string
+  readonly displayText?: string | undefined
   readonly files?: ReadonlyArray<PromptInput.FileAttachment> | undefined
   readonly agents?: ReadonlyArray<AgentAttachment> | undefined
   readonly skills?: ReadonlyArray<PromptInput.SkillAttachment> | undefined

@@ -22,7 +22,7 @@ export type RunSession = {
 
 function messagePrompt(message: SessionMessageUser): RunPrompt {
   return {
-    text: message.text,
+    text: message.displayText ?? message.text,
     parts: [
       ...(message.files ?? []).map((file) => ({
         type: "file" as const,

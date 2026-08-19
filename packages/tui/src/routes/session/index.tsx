@@ -2178,7 +2178,7 @@ function UserMessage(props: { message: SessionMessageUser }) {
           backgroundColor={hover() ? theme.raise(theme.background.default) : theme.background.default}
           flexShrink={0}
         >
-          <text fg={theme.text.default}>{props.message.text}</text>
+          <text fg={theme.text.default}>{props.message.displayText ?? props.message.text}</text>
           <Show when={skills().length}>
             <box flexDirection="row" paddingTop={1} gap={1} flexWrap="wrap">
               <For each={skills()}>
@@ -3612,7 +3612,7 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 
 function formatSessionTranscript(session: SessionInfo, messages: SessionMessageInfo[], thinking: boolean) {
   const body = messages.flatMap((message) => {
-    if (message.type === "user") return [`## User\n\n${message.text}`]
+    if (message.type === "user") return [`## User\n\n${message.displayText ?? message.text}`]
     if (message.type === "shell")
       return [`## Shell\n\n\`\`\`\n$ ${message.command}\n${message.output?.output ?? ""}\n\`\`\``]
     if (message.type !== "assistant") return []

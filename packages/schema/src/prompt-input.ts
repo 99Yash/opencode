@@ -28,6 +28,7 @@ export const SkillAttachment = Schema.Struct({
 
 export const Prompt = Schema.Struct({
   text: Schema.String,
+  displayText: Schema.String.pipe(optional),
   files: Schema.Array(FileAttachment).pipe(optional),
   agents: Schema.Array(AgentAttachment).pipe(optional),
   skills: Schema.Array(SkillAttachment).pipe(optional),

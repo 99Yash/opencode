@@ -323,7 +323,11 @@ describe("SessionProjector", () => {
       const admitted = yield* SessionInbox.admit(db, bus, {
         id,
         sessionID,
-        item: { type: "user", payload: { text: "promote me" }, delivery: "steer" },
+        item: {
+          type: "user",
+          payload: { text: "expanded command template", displayText: "/command input" },
+          delivery: "steer",
+        },
       })
       if (!admitted) return yield* Effect.die("Prompt admission failed")
 
@@ -337,7 +341,12 @@ describe("SessionProjector", () => {
       ).toBeUndefined()
       expect(
         yield* db.select().from(SessionMessageTable).where(eq(SessionMessageTable.id, id)).get().pipe(Effect.orDie),
-      ).toMatchObject({ session_id: sessionID, type: "user", seq: event.durable?.seq })
+      ).toMatchObject({
+        session_id: sessionID,
+        type: "user",
+        seq: event.durable?.seq,
+        data: { text: "expanded command template", displayText: "/command input" },
+      })
     }),
   )
 

@@ -222,6 +222,7 @@ export interface Interface {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
     text: string
+    displayText?: string
     files?: PromptInput.Prompt["files"]
     agents?: PromptInput.Prompt["agents"]
     skills?: PromptInput.Prompt["skills"]
@@ -586,11 +587,7 @@ const layer = Layer.effect(
               return yield* Image.Service
             }).pipe(Effect.provide(locations.get(session.location)))
             const skills = Skill.Service.pipe(Effect.provide(locations.get(session.location)))
-            const prompt = yield* resolvePrompt(
-              { text: input.text, files: input.files, agents: input.agents, skills: input.skills },
-              image,
-              skills,
-            ).pipe(Effect.provideService(FSUtil.Service, fs))
+            const prompt = yield* resolvePrompt(input, image, skills).pipe(Effect.provideService(FSUtil.Service, fs))
             const messageID = input.id ?? SessionMessage.ID.create()
             const admittedInput = SessionInbox.Item.make({
               type: "user",
@@ -657,6 +654,7 @@ const layer = Layer.effect(
           id: input.id,
           sessionID: input.sessionID,
           text: evaluated.text,
+          displayText: `/${input.command}${input.arguments ? ` ${input.arguments}` : ""}`,
           files: input.files,
           agents: input.agents,
           skills: input.skills,
@@ -987,7 +985,13 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
       })
     })
   })
-  return Prompt.make({ text: input.text, agents: input.agents, files, skills: selected?.length ? selected : undefined })
+  return Prompt.make({
+    text: input.text,
+    displayText: input.displayText === input.text ? undefined : input.displayText,
+    agents: input.agents,
+    files,
+    skills: selected?.length ? selected : undefined,
+  })
 })
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024

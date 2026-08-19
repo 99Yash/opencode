@@ -105,4 +105,18 @@ describe("extractPromptFromMessage", () => {
 
     expect(extractPromptFromMessage(message)[0]).toMatchObject({ type: "text", content: "model text" })
   })
+
+  test("restores explicit presentation text", () => {
+    const message = {
+      id: "msg_1",
+      type: "user",
+      text: "expanded command template",
+      displayText: "/command input",
+      metadata: { comments: [{ path: "src/app.ts", comment: "check this" }] },
+      time: { created: 1 },
+    } satisfies SessionMessageUser
+
+    expect(extractPromptFromMessage(message)[0]).toMatchObject({ type: "text", content: "/command input" })
+    expect(extractPromptComments(message)).toEqual([{ path: "src/app.ts", comment: "check this" }])
+  })
 })

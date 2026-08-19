@@ -408,7 +408,6 @@ describe("prompt submit worktree selection", () => {
       files: [],
       agents: [],
       metadata: {
-        displayText: "ls",
         comments: [],
         agent: "agent",
         model: { providerID: "provider", modelID: "model", variant: "high" },

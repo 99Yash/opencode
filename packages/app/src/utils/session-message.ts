@@ -57,7 +57,7 @@ export function presentUserMessage(
 
 export function presentUserParts(sessionID: string, message: SessionMessageUser): Part[] {
   const presentation = readPromptPresentation(message.metadata)
-  const text = presentation?.displayText ?? message.text
+  const text = message.displayText ?? presentation?.displayText ?? message.text
   return [
     ...(text ? [textPart(sessionID, message.id, 0, text)] : []),
     ...(message.files ?? []).map(

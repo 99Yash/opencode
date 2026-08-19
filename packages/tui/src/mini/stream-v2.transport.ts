@@ -186,7 +186,7 @@ function pendingPrompt(item: SessionInboxInfo): FooterQueuedPrompt | undefined {
   if (item.type !== "user") return undefined
   return {
     messageID: item.id,
-    prompt: { messageID: item.id, text: item.payload.text, parts: [] },
+    prompt: { messageID: item.id, text: item.payload.displayText ?? item.payload.text, parts: [] },
     delivery: item.delivery,
   }
 }
@@ -657,7 +657,13 @@ export async function createSessionTransport(input: StreamInput): Promise<Sessio
       if (reuseVisibleWait && waiting) return
       write([
         ...(message.skills ?? []).map((skill) => skillCommit(message.id, skill.name, skill.id)),
-        { kind: "user", source: "system", text: message.text, phase: "start", messageID: message.id },
+        {
+          kind: "user",
+          source: "system",
+          text: message.displayText ?? message.text,
+          phase: "start",
+          messageID: message.id,
+        },
       ])
       return
     }

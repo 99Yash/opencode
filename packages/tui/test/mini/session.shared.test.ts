@@ -103,6 +103,14 @@ describe("run session shared", () => {
     })
   })
 
+  test("uses presentation text for command history", () => {
+    const out = createSession([
+      userMessage("msg-user-1", "expanded command template", { displayText: "/command input" }),
+    ])
+
+    expect(out.turns[0]?.prompt.text).toBe("/command input")
+  })
+
   test("dedupes consecutive history entries, drops blanks, and copies prompt parts", () => {
     const parts = [
       {
