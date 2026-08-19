@@ -5,7 +5,6 @@ import { ToolFailure } from "@opencode-ai/ai"
 import type { Content } from "@opencode-ai/schema/tool"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
 import { Deferred, Effect, Schema, Scope } from "effect"
-import { Config } from "../../config.js"
 import { Environment } from "../../environment/index.js"
 import { LocationMutation } from "../../location-mutation.js"
 import { Permission } from "../../permission.js"
@@ -14,6 +13,7 @@ import { NonNegativeInt } from "../../schema.js"
 import { SessionSchema } from "../../session/schema.js"
 import { Shell } from "../../shell.js"
 import { ShellParse } from "../../shell/parse.js"
+import { ShellPolicy } from "../../shell/policy.js"
 import { ToolOutput } from "../../tool-output.js"
 
 export const name = "shell"
@@ -86,8 +86,9 @@ export const Plugin = {
     const environment = yield* Environment.Service
     const mutation = yield* LocationMutation.Service
     const shell = yield* Shell.Service
+    const shellPolicy = yield* ShellPolicy.Service
     const permission = yield* Permission.Service
-    const config = yield* Config.Service
+    const toolOutput = yield* ToolOutput.Service
 
     const notifyWhenDone = Effect.fn("ShellTool.notifyWhenDone")(function* (
       sessionID: SessionSchema.ID,
@@ -163,10 +164,8 @@ export const Plugin = {
                     invocation.cwd = target.absolute
                     finalTimeout = invocation.timeout
                     if (!unrestricted) {
-                      const portable =
-                        Config.latest(yield* config.entries(), "experimental")?.portable_shell_scanner === true
                       const parsed = yield* ShellParse.scan(invocation.command, invocation.shell, target.absolute, {
-                        portable,
+                        portable: shellPolicy.portableScanner(),
                       })
                       const directories = yield* Effect.forEach(parsed.directories, (directory) =>
                         mutation.resolve({ path: path.resolve(target.absolute, directory), kind: "directory" }),
@@ -209,18 +208,16 @@ export const Plugin = {
               yield* context.progress({ shellID: info.id })
 
               const captureShell = Effect.fnUntraced(function* () {
-                const configured = Config.latest(yield* config.entries(), "tool_output")
-                const maxLines = configured?.max_lines ?? ToolOutput.MAX_LINES
-                const maxBytes = configured?.max_bytes ?? ToolOutput.MAX_BYTES
+                const limits = toolOutput.limits()
                 const latest = yield* shell.output(info.id, { cursor: Number.MAX_SAFE_INTEGER })
                 const page = yield* shell.output(info.id, {
-                  cursor: Math.max(0, latest.size - maxBytes),
-                  limit: maxBytes,
+                  cursor: Math.max(0, latest.size - limits.maxBytes),
+                  limit: limits.maxBytes,
                 })
                 const lines = page.output.split("\n")
                 if (page.output.endsWith("\n")) lines.pop()
-                const truncated = latest.size > maxBytes || lines.length > maxLines
-                const output = lines.length > maxLines ? lines.slice(-maxLines).join("\n") : page.output
+                const truncated = latest.size > limits.maxBytes || lines.length > limits.maxLines
+                const output = lines.length > limits.maxLines ? lines.slice(-limits.maxLines).join("\n") : page.output
                 const notice = truncated ? `\n\n[output truncated; full output saved to: ${info.file}]` : ""
                 return {
                   output: `${output || "(no output)"}${notice}`,
