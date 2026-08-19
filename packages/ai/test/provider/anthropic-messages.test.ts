@@ -18,6 +18,14 @@ const opus48 = AnthropicMessages.route
   .with({ endpoint: { baseURL: "https://api.anthropic.test/v1/" }, auth: Auth.header("x-api-key", "test") })
   .model({ id: "claude-opus-4-8" })
 
+const vertexOpus48 = AnthropicMessages.route
+  .with({
+    provider: "google-vertex",
+    endpoint: { baseURL: "https://vertex.test/v1/" },
+    auth: Auth.header("authorization", "Bearer test"),
+  })
+  .model({ id: "claude-opus-4-8" })
+
 const request = LLM.request({
   id: "req_1",
   model,
@@ -272,6 +280,105 @@ describe("Anthropic Messages route", () => {
             { type: "text", text: "<system-update>\nOne.\n</system-update>" },
             { type: "text", text: "<system-update>\nTwo.\n</system-update>" },
           ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("keeps a terminal Vertex system update in the tool-result turn", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: vertexOpus48,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+            Message.tool({ id: "call_1", name: "lookup", result: "Done." }),
+            Message.system("Operator update."),
+          ],
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.messages).toEqual([
+        {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call_1", name: "lookup", input: {} }],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_1",
+              content: '"Done."',
+              is_error: undefined,
+              cache_control: undefined,
+            },
+            {
+              type: "text",
+              text: "<system-update>\nOperator update.\n</system-update>",
+              cache_control: undefined,
+            },
+          ],
+        },
+      ])
+    }),
+  )
+
+  it.effect("keeps a terminal direct Anthropic system update native", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: opus48,
+          messages: [
+            Message.assistant([ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })]),
+            Message.tool({ id: "call_1", name: "lookup", result: "Done." }),
+            Message.system("Operator update."),
+          ],
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.messages).toEqual([
+        {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "call_1", name: "lookup", input: {} }],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_1",
+              content: '"Done."',
+              is_error: undefined,
+              cache_control: undefined,
+            },
+          ],
+        },
+        {
+          role: "system",
+          content: [{ type: "text", text: "Operator update.", cache_control: undefined }],
+        },
+      ])
+    }),
+  )
+
+  it.effect("keeps an ordinary terminal Vertex system update native", () =>
+    Effect.gen(function* () {
+      const prepared = yield* compileRequest(
+        LLM.request({
+          model: vertexOpus48,
+          messages: [Message.user("Before."), Message.system("Operator update.")],
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.messages).toEqual([
+        { role: "user", content: [{ type: "text", text: "Before." }] },
+        {
+          role: "system",
+          content: [{ type: "text", text: "Operator update.", cache_control: undefined }],
         },
       ])
     }),

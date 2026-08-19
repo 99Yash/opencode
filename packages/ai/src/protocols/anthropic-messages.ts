@@ -502,7 +502,16 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
     if (message.role === "system") {
       if (splitsLocalToolResults(request.messages, index))
         return yield* invalid("Anthropic Messages system updates cannot split a local tool call from its tool result")
-      if (supportsNativeSystemUpdates(request) && canUseNativeSystemUpdate(request.messages, index)) {
+      // Vertex currently returns 404 for a terminal system message after local tool results.
+      const vertexToolResultUpdate =
+        request.model.provider === "google-vertex" &&
+        request.messages[index - 1]?.role === "tool" &&
+        request.messages[index + 1] === undefined
+      if (
+        supportsNativeSystemUpdates(request) &&
+        !vertexToolResultUpdate &&
+        canUseNativeSystemUpdate(request.messages, index)
+      ) {
         messages.push(yield* lowerNativeSystemUpdate(message, breakpoints))
         continue
       }
