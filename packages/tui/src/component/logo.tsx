@@ -15,12 +15,17 @@ const halves: Record<string, readonly [number, number]> = {
   ",": [0, 2],
 }
 
+function wordmarkProtocol(capabilities: TerminalCapabilities | null | undefined) {
+  if (capabilities?.sixel) return "sixel" as const
+  if (capabilities?.kitty_graphics) return "kitty" as const
+}
+
 export function Logo() {
   const theme = useTheme()
   const renderer = useRenderer()
   const dimensions = useTerminalDimensions()
-  const [sixel, setSixel] = createSignal(renderer.capabilities?.sixel ?? false)
-  const updateCapabilities = (capabilities: TerminalCapabilities) => setSixel(capabilities.sixel)
+  const [protocol, setProtocol] = createSignal(wordmarkProtocol(renderer.capabilities))
+  const updateCapabilities = (capabilities: TerminalCapabilities) => setProtocol(wordmarkProtocol(capabilities))
   renderer.on("capabilities", updateCapabilities)
   onCleanup(() => renderer.off("capabilities", updateCapabilities))
 
@@ -65,7 +70,8 @@ export function Logo() {
   }
 
   const art = createMemo(() => {
-    if (!sixel()) return
+    const imageProtocol = protocol()
+    if (!imageProtocol) return
     const rows =
       dimensions().height < 12
         ? []
@@ -113,9 +119,11 @@ export function Logo() {
       })
     })
 
-    const source = NativeImage.fromRgba(pixels, width, rows.length * 2)
+    const image = NativeImage.fromRgba(pixels, width, rows.length * 2)
+    const source = image.resize({ width: width * 16, height: rows.length * 32, kernel: "nearest" })
+    image.dispose()
     onCleanup(() => source.dispose())
-    return { source, width, height: rows.length }
+    return { source, width, height: rows.length, protocol: imageProtocol }
   })
 
   return (
@@ -150,7 +158,13 @@ export function Logo() {
       }
     >
       {(value) => (
-        <image source={value().source} width={value().width} height={value().height} fit="fill" protocol="auto" />
+        <image
+          source={value().source}
+          width={value().width}
+          height={value().height}
+          fit="fill"
+          protocol={value().protocol}
+        />
       )}
     </Show>
   )
