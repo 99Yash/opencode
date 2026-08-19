@@ -122,20 +122,24 @@ export const provider = {
 
 const config = (input: ProviderPackage.ModelInput<Settings>): Config => {
   const settings = input.settings
+  const configuration = input.credential?.type === "key" ? input.credential.configuration : undefined
+  const baseURL = settings.baseURL ?? (typeof configuration?.baseURL === "string" ? configuration.baseURL : undefined)
+  const resourceName =
+    settings.resourceName ?? (typeof configuration?.resourceName === "string" ? configuration.resourceName : undefined)
   const common = {
     ...ProviderPackage.routeDefaults(input.defaults),
     ...(input.credential
       ? input.credential.type === "key"
         ? { apiKey: input.credential.value }
-        : { auth: Auth.bearer(input.credential.accessToken) }
+        : { auth: Auth.remove("api-key").andThen(Auth.bearer(input.credential.accessToken)) }
       : { apiKey: settings.apiKey }),
     apiVersion: settings.apiVersion,
     providerOptions: settings.providerOptions,
     queryParams: settings.queryParams === undefined ? undefined : { ...settings.queryParams },
     useDeploymentBasedUrls: settings.useDeploymentBasedUrls,
   }
-  if (settings.baseURL !== undefined) return { ...common, baseURL: settings.baseURL }
-  if (settings.resourceName !== undefined) return { ...common, resourceName: settings.resourceName }
+  if (baseURL !== undefined) return { ...common, baseURL }
+  if (resourceName !== undefined) return { ...common, resourceName }
   throw new Error("Azure requires resourceName or baseURL")
 }
 

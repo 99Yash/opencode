@@ -9,14 +9,14 @@ const packageInput = <Input extends Record<string, unknown>>(id: string, input: 
   return { id, settings, defaults: { headers, body, limits } }
 }
 
-const authHeaders = (selected: ReturnType<typeof model>) =>
+const authHeaders = (selected: ReturnType<typeof model>, headers: Record<string, string> = {}) =>
   Effect.runPromise(
     selected.route.auth.apply({
       request: LLM.request({ model: selected, prompt: "hello" }),
       method: "POST",
       url: "https://example.test/v1",
       body: "{}",
-      headers: Headers.fromInput({}),
+      headers: Headers.fromInput(headers),
     }),
   )
 
@@ -154,10 +154,18 @@ describe("provider package entrypoints", () => {
     })
 
     expect((await authHeaders(openai)).authorization).toBe("Bearer openai-token")
-    expect((await authHeaders(anthropicKey))["x-api-key"]).toBe("anthropic-key")
-    expect((await authHeaders(anthropicOAuth)).authorization).toBe("Bearer anthropic-token")
-    expect((await authHeaders(vertexKey))["x-goog-api-key"]).toBe("vertex-key")
-    expect((await authHeaders(vertexOAuth)).authorization).toBe("Bearer vertex-token")
+    const anthropicKeyHeaders = await authHeaders(anthropicKey, { authorization: "Bearer stale" })
+    const anthropicOAuthHeaders = await authHeaders(anthropicOAuth, { "x-api-key": "stale" })
+    const vertexKeyHeaders = await authHeaders(vertexKey, { authorization: "Bearer stale" })
+    const vertexOAuthHeaders = await authHeaders(vertexOAuth, { "x-goog-api-key": "stale" })
+    expect(anthropicKeyHeaders["x-api-key"]).toBe("anthropic-key")
+    expect(anthropicKeyHeaders.authorization).toBeUndefined()
+    expect(anthropicOAuthHeaders.authorization).toBe("Bearer anthropic-token")
+    expect(anthropicOAuthHeaders["x-api-key"]).toBeUndefined()
+    expect(vertexKeyHeaders["x-goog-api-key"]).toBe("vertex-key")
+    expect(vertexKeyHeaders.authorization).toBeUndefined()
+    expect(vertexOAuthHeaders.authorization).toBe("Bearer vertex-token")
+    expect(vertexOAuthHeaders["x-goog-api-key"]).toBeUndefined()
     expect((await authHeaders(vertexChatOAuth)).authorization).toBe("Bearer vertex-chat-token")
   })
 

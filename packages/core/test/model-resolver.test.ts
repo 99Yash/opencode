@@ -77,6 +77,17 @@ describe("ModelResolver", () => {
         }),
         Credential.Key.make({ type: "key", key: "secret" }),
       )
+      const configuredCredential = yield* ModelResolver.fromCatalogModel(
+        model(Provider.aisdk("@ai-sdk/azure"), {
+          providerID: Provider.ID.azure,
+          modelID: "configured-deployment",
+        }),
+        Credential.Key.make({
+          type: "key",
+          key: "secret",
+          configuration: { resourceName: "configured-resource" },
+        }),
+      )
       const chat = yield* ModelResolver.fromCatalogModel(
         model(Provider.aisdk("@ai-sdk/azure"), {
           providerID: Provider.ID.azure,
@@ -114,6 +125,7 @@ describe("ModelResolver", () => {
           query: { "api-version": "2025-01-01-preview" },
         },
       })
+      expect(configuredCredential.route.endpoint.baseURL).toBe("https://configured-resource.openai.azure.com/openai/v1")
       expect(chat).toMatchObject({ id: "chat-deployment", provider: "azure" })
       expect(chat.route.id).toBe("azure-openai-chat")
       expect(deployment).toMatchObject({ id: "legacy-url-deployment", provider: "azure" })
@@ -986,11 +998,7 @@ describe("ModelResolver", () => {
         ["@ai-sdk/azure", "@opencode-ai/ai/providers/azure/responses", "api-model"],
         ["@ai-sdk/google", "@opencode-ai/ai/providers/google", "api-model"],
         ["@ai-sdk/google-vertex", "@opencode-ai/ai/providers/google-vertex", "api-model"],
-        [
-          "@ai-sdk/google-vertex/anthropic",
-          "@opencode-ai/ai/providers/google-vertex/messages",
-          "claude-sonnet-4-6",
-        ],
+        ["@ai-sdk/google-vertex/anthropic", "@opencode-ai/ai/providers/google-vertex/messages", "claude-sonnet-4-6"],
         ["@ai-sdk/openai", "@opencode-ai/ai/providers/openai", "api-model"],
         ["@ai-sdk/openai-compatible", "@opencode-ai/ai/providers/openai-compatible", "api-model"],
         ["@openrouter/ai-sdk-provider", "@opencode-ai/ai/providers/openrouter", "api-model"],

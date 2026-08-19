@@ -108,7 +108,7 @@ Keep provider facades small and explicit:
 - Resolve `apiKey` → `Auth` with `AuthOptions.bearer(options, "<PROVIDER>_API_KEY")` (it honors an explicit `auth` override and falls back to `Auth.config(envVar)` so missing keys surface a typed `Authentication` error rather than a runtime crash).
 - Use separate top-level facades for products with different required setup, such as `CloudflareAIGateway` and `CloudflareWorkersAI`.
 
-Provider facades, package settings, and model-derived `LLMRequest.providerOptions` are provider-specific, so expose typed native options flat at all three boundaries. The selected `LanguageModel<Options>` carries request-option typing; the route decodes the flat runtime record. Keep provider metadata namespaced because replay may contain metadata from multiple layers.
+Provider facades and model-derived `LLMRequest.providerOptions` are provider-specific, so expose typed native options flat at those boundaries. Provider package settings keep deployment configuration separate from their typed `providerOptions` field, except facades such as OpenAI whose settings are already unambiguous when flat. The selected `LanguageModel<Options>` carries request-option typing; the route decodes the flat runtime record. Keep provider metadata namespaced because replay may contain metadata from multiple layers.
 
 `Provider.make(...)` remains available for simple static provider definitions, but new built-in providers should prefer plain configured facades unless a helper removes real duplication without adding runtime behavior.
 

@@ -94,7 +94,10 @@ const configuredRoute = (input: Config, modelID: string | ModelID) => {
   return route.with({
     ...rest,
     endpoint: { baseURL: endpoint },
-    auth: apiKey === undefined ? GoogleVertexShared.oauth(input, project) : Auth.header("x-goog-api-key", apiKey),
+    auth:
+      apiKey === undefined
+        ? GoogleVertexShared.oauth(input, project)
+        : Auth.remove("authorization").andThen(Auth.header("x-goog-api-key", apiKey)),
   })
 }
 

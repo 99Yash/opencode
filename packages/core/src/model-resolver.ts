@@ -139,7 +139,7 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
     if (!loadAISDK) return yield* unsupported(resolved)
     const settings = yield* prepareProviderSettings(
       resolved,
-      Provider.mergeOverlay(withoutEmptyAPIKey(resolved.settings), {
+      Provider.mergeOverlay(resolved.settings, {
         ...legacyCredentialSettings(credential),
         ...credential?.metadata,
         ...configuration,
@@ -231,12 +231,6 @@ const legacyCredentialSettings = (credential: Credential.Value | undefined) => {
   if (!credential) return {}
   if (credential.type === "key") return { apiKey: credential.key }
   return { apiKey: credential.access }
-}
-
-const withoutEmptyAPIKey = (settings: Readonly<Record<string, unknown>> | undefined) => {
-  if (settings?.apiKey !== "") return settings
-  const { apiKey: _apiKey, ...rest } = settings
-  return rest
 }
 
 const providerCredential = (credential: Credential.Value | undefined): ProviderPackage.Credential | undefined => {

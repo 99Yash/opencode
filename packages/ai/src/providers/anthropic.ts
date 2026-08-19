@@ -31,9 +31,11 @@ export type Settings = ProviderPackage.Settings &
 
 const auth = (options: ProviderAuthOption<"optional">) => {
   if ("auth" in options && options.auth) return options.auth
-  return Auth.optional("apiKey" in options ? options.apiKey : undefined, "apiKey")
-    .orElse(Auth.config("ANTHROPIC_API_KEY"))
-    .pipe(Auth.header("x-api-key"))
+  return Auth.remove("authorization").andThen(
+    Auth.optional("apiKey" in options ? options.apiKey : undefined, "apiKey")
+      .orElse(Auth.config("ANTHROPIC_API_KEY"))
+      .pipe(Auth.header("x-api-key")),
+  )
 }
 
 export const configure = (input: Config = {}) => {
@@ -60,10 +62,10 @@ export const model: ProviderPackage.Definition<Settings, AnthropicMessages.Provi
     ...(input.credential
       ? input.credential.type === "key"
         ? { apiKey: input.credential.value }
-        : { auth: Auth.bearer(input.credential.accessToken) }
+        : { auth: Auth.remove("x-api-key").andThen(Auth.bearer(input.credential.accessToken)) }
       : input.settings.authToken === undefined
-          ? { apiKey: input.settings.apiKey }
-          : { auth: Auth.bearer(input.settings.authToken) }),
+        ? { apiKey: input.settings.apiKey }
+        : { auth: Auth.bearer(input.settings.authToken) }),
     baseURL: input.settings.baseURL,
     providerOptions: input.settings.providerOptions,
   }).model(input.id)
