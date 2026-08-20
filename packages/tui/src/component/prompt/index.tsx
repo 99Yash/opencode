@@ -977,7 +977,7 @@ export function Prompt(props: PromptProps) {
               return
             }
 
-            const item = history.move(-1, input.plainText)
+            const item = history.move(props.sessionID, -1, input.plainText)
             if (!item) return false
             input.setText(item.text)
             setStore("prompt", item)
@@ -1016,7 +1016,7 @@ export function Prompt(props: PromptProps) {
               return
             }
 
-            const item = history.move(1, input.plainText)
+            const item = history.move(props.sessionID, 1, input.plainText)
             if (!item) return false
             input.setText(item.text)
             setStore("prompt", item)
@@ -1288,7 +1288,7 @@ export function Prompt(props: PromptProps) {
         })
       if (pendingEditorSelection) editor.markSelectionSent()
     }
-    history.append({
+    history.append(sessionID, {
       ...store.prompt,
       mode: currentMode,
     })
@@ -1463,7 +1463,7 @@ export function Prompt(props: PromptProps) {
       (store.prompt.files?.length ?? 0) > 0 ||
       (store.prompt.agents?.length ?? 0) > 0
     ) {
-      history.append({
+      history.append(props.sessionID, {
         ...store.prompt,
         mode: store.mode,
       })
