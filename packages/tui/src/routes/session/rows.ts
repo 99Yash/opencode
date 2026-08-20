@@ -240,7 +240,7 @@ export function createSessionRows(sessionID: Accessor<string>, onSynced?: (sessi
         appendPart({ messageID: event.data.assistantMessageID, partID: `text:${event.data.ordinal}` }, { type: "text" })
     }),
     data.on("session.reasoning.started", (event) => {
-      if (event.data.sessionID === sessionID() && event.data.state)
+      if (event.data.sessionID === sessionID())
         appendPart(
           { messageID: event.data.assistantMessageID, partID: `reasoning:${event.data.ordinal}` },
           { type: "reasoning" },
