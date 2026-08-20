@@ -1608,7 +1608,7 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
   const syntax = createSyntaxStyleMemo(() => generateSubtleSyntax(theme))
 
   const toggle = () => {
-    if (!inMinimal() || opaque()) return
+    if (!inMinimal()) return
     setExpanded((prev) => !prev)
   }
 
@@ -1623,14 +1623,19 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
       >
         <box onMouseUp={toggle}>
           <ReasoningHeader
-            toggleable={inMinimal() && !opaque()}
+            toggleable={inMinimal()}
             open={!inMinimal() || expanded()}
             done={isDone()}
             title={summary().title}
             duration={isDone() ? Locale.duration(duration()) : undefined}
-            encrypted={opaque()}
+            opaque={opaque()}
           />
         </box>
+        <Show when={opaque() && (!inMinimal() || expanded())}>
+          <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
+            <text fg={theme.info}>OpenCode: No reasoning summary available</text>
+          </box>
+        </Show>
         <Show when={!opaque() && (!inMinimal() || expanded()) && summary().body}>
           <box paddingLeft={inMinimal() ? 2 : 0} marginTop={1}>
             <code
@@ -1655,7 +1660,7 @@ function ReasoningHeader(props: {
   done: boolean
   title: string | null
   duration?: string
-  encrypted?: boolean
+  opaque?: boolean
 }) {
   const { theme } = useTheme()
   const fg = () =>
@@ -1663,7 +1668,10 @@ function ReasoningHeader(props: {
       ? RGBA.fromValues(theme.warning.r, theme.warning.g, theme.warning.b, theme.thinkingOpacity)
       : theme.warning
   const completed = () => {
-    if (props.encrypted) return `Thought (encrypted)${props.duration ? ` · ${props.duration}` : ""}`
+    if (props.opaque) {
+      const detail = props.duration ? ` · ${props.duration}` : ""
+      return `${props.toggleable ? (props.open ? "- " : "+ ") : ""}Thought${detail}`
+    }
     const detail = [props.title, props.duration].filter(Boolean).join(" · ")
     return `${props.toggleable ? (props.open ? "- " : "+ ") : ""}Thought${detail ? `: ${detail}` : ""}`
   }
