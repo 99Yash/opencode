@@ -155,6 +155,11 @@ describe("VariantPlugin.fallback", () => {
         settings: settings(packageName, { thinkingConfig: { includeThoughts: true, thinkingBudget: 32_768 } }),
       },
     ])
+    expect(VariantPlugin.fallback(model("gemini-12.5-pro", packageName)).map((variant) => String(variant.id))).toEqual([
+      "low",
+      "medium",
+      "high",
+    ])
   })
 
   test.each([
@@ -181,6 +186,23 @@ describe("VariantPlugin.fallback", () => {
       { id: "high", settings: settings(packageName, { thinking: { type: "enabled", budgetTokens: 16_000 } }) },
       { id: "max", settings: settings(packageName, { thinking: { type: "enabled", budgetTokens: 19_999 } }) },
     ])
+    for (const family of ["haiku", "sonnet", "opus"]) {
+      expect(VariantPlugin.fallback(model(`claude-${family}-4-5`, packageName))[0]?.settings).toEqual(
+        settings(packageName, { thinking: { type: "enabled", budgetTokens: 16_000 } }),
+      )
+      expect(VariantPlugin.fallback(model(`claude-${family}-4-6`, packageName))[0]?.settings).toEqual(
+        settings(packageName, {
+          thinking: { type: "adaptive", display: "summarized" },
+          effort: "low",
+        }),
+      )
+    }
+    expect(VariantPlugin.fallback(model("claude-mythos-4-5", packageName))[0]?.settings).toEqual(
+      settings(packageName, {
+        thinking: { type: "adaptive", display: "summarized" },
+        effort: "low",
+      }),
+    )
   })
 
   test("does not add fallbacks for unknown packages", () => {
