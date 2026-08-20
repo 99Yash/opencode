@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import {
   assistantMessage,
+  partUpdated,
   reasoningPart,
   setupTimeline,
   status,
@@ -90,4 +91,27 @@ test("does not infer reasoning visibility from provider identity", async ({ page
   await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
   await expect(page.locator('[data-timeline-part-id*="reasoning"]')).toHaveCount(0)
   await expect(page.locator('[data-timeline-part-id="prt_provider_text"]')).toBeVisible()
+})
+
+test("replaces Thinking with a plain Thought label when opaque reasoning completes", async ({ page }) => {
+  const reasoningID = "prt_reasoning_opaque"
+  const reasoning = {
+    ...reasoningPart(reasoningID, ""),
+    metadata: { anthropic: { redactedData: "opaque" } },
+  }
+  const timeline = await setupTimeline(page, {
+    messages: [userMessage(), assistantMessage([reasoning], { completed: false })],
+    settings: { showReasoningSummaries: true },
+  })
+
+  await timeline.send(status("busy"), 150)
+  await expect(page.locator('[data-timeline-row="Thinking"]')).toBeVisible()
+  await expect(page.locator(`[data-timeline-part-id="${reasoningID}"]`)).toHaveCount(0)
+
+  await timeline.send(partUpdated({ ...reasoning, time: { start: 1700000001000, end: 1700000002000 } }), 150)
+
+  const completed = page.locator(`[data-timeline-part-id="${reasoningID}"]`)
+  await expect(page.locator('[data-timeline-row="Thinking"]')).toHaveCount(0)
+  await expect(completed).toHaveText("Thought")
+  await expect(completed.locator("button")).toHaveCount(0)
 })

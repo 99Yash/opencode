@@ -295,6 +295,12 @@
   color: var(--v2-text-text-muted);
   line-height: var(--line-height-normal);
 
+  [data-slot="reasoning-part-label"] {
+    display: block;
+    margin-top: 16px;
+    font-size: 13px;
+  }
+
   [data-component="markdown"] {
     margin-top: 16px;
     font-style: normal;

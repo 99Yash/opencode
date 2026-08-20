@@ -715,8 +715,12 @@ export function renderable(part: PartType, showReasoningSummaries = true) {
     return true
   }
   if (part.type === "text") return !!part.text?.trim()
-  if (part.type === "reasoning") return showReasoningSummaries && !!part.text?.trim()
+  if (part.type === "reasoning") return showReasoningSummaries && (!!part.text?.trim() || opaqueReasoning(part))
   return !!PART_MAPPING[part.type]
+}
+
+function opaqueReasoning(part: ReasoningPart) {
+  return !part.text.trim() && Boolean(part.metadata) && part.time.end !== undefined
 }
 
 export { partDefaultOpen } from "./part-default-open"
@@ -1758,6 +1762,7 @@ PART_MAPPING["text"] = function TextPartDisplay(props) {
 
 PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const data = useData()
+  const i18n = useI18n()
   const part = () => props.part as ReasoningPart
   const streaming = createMemo(
     () => props.message.role === "assistant" && typeof (props.message as AssistantMessage).time.completed !== "number",
@@ -1765,11 +1770,18 @@ PART_MAPPING["reasoning"] = function ReasoningPartDisplay(props) {
   const text = () => readPartText(data.store.part_text_accum_delta, part())
 
   return (
-    <Show when={text()}>
-      <div data-component="reasoning-part" data-timeline-part-id={part().id}>
+    <div data-component="reasoning-part" data-timeline-part-id={part().id}>
+      <Show
+        when={text()}
+        fallback={
+          <Show when={opaqueReasoning(part())}>
+            <span data-slot="reasoning-part-label">{i18n.t("ui.messagePart.reasoning.opaque")}</span>
+          </Show>
+        }
+      >
         <PacedMarkdown text={text()} cacheKey={part().id} streaming={streaming()} />
-      </div>
-    </Show>
+      </Show>
+    </div>
   )
 }
 
