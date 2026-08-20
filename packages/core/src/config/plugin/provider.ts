@@ -6,6 +6,7 @@ import { Money } from "@opencode-ai/schema/money"
 import { Effect, Stream } from "effect"
 import { Config } from "../../config.js"
 import { Provider } from "../../provider.js"
+import { VariantPlugin } from "../../plugin/variant.js"
 
 export const Plugin = define({
   id: "opencode.config.provider",
@@ -34,6 +35,8 @@ export const Plugin = define({
     })
 
     yield* ctx.catalog.transform((catalog) => {
+      const fallback = new Map<string, { providerID: string; modelID: string }>()
+      const explicit = new Map<string, { providerID: string; modelID: string }>()
       const configuredDefault = Config.latest(loaded.entries, "model")
       if (configuredDefault !== undefined)
         catalog.model.default.set(configuredDefault.providerID, configuredDefault.model)
@@ -48,6 +51,13 @@ export const Plugin = define({
           if (item.body !== undefined) provider.body = Provider.mergeOverlay(provider.body, item.body)
         })
         for (const [id, config] of Object.entries(item.models ?? {})) {
+          const key = `${providerID}\0${id}`
+          if (!catalog.model.get(providerID, id) && config.variants === undefined)
+            fallback.set(key, { providerID, modelID: id })
+          if (config.variants !== undefined) {
+            fallback.delete(key)
+            explicit.set(key, { providerID, modelID: id })
+          }
           catalog.model.update(providerID, id, (model) => {
             if (config.family !== undefined) model.family = config.family
             if (config.name !== undefined) model.name = config.name
@@ -67,6 +77,7 @@ export const Plugin = define({
             }
             if (config.variants !== undefined) {
               model.variants ??= []
+              if (config.variants.length === 0) model.variants = []
               for (const variant of config.variants) {
                 let existing = model.variants.find((item) => item.id === variant.id)
                 if (!existing) {
@@ -95,6 +106,15 @@ export const Plugin = define({
             if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
           })
         }
+      }
+      for (const item of fallback.values()) {
+        const model = catalog.model.get(item.providerID, item.modelID)
+        if (!model || model.variants.length > 0) continue
+        VariantPlugin.markFallback(model)
+      }
+      for (const item of explicit.values()) {
+        const model = catalog.model.get(item.providerID, item.modelID)
+        if (model) VariantPlugin.suppressFallback(model)
       }
     })
     yield* ctx.event.subscribe().pipe(
