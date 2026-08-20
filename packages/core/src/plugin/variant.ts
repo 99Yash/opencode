@@ -150,22 +150,22 @@ function googleVariants(
   modelID: string,
   output: number,
 ): NonNullable<Model.Info["variants"]> {
-  if (!/(?:^|[/.:_-])gemini-2[.-]5(?:[/.:_-]|$)/i.test(modelID))
-    return COMMON_EFFORTS.map((effort) => ({
-      id: Model.VariantID.make(effort),
-      settings: settings(packageName, { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } }),
+  if (/(?:^|[/.:_-])gemini-2[.-]5(?:[/.:_-]|$)/i.test(modelID)) {
+    const maximum = output - 1
+    if (maximum <= 0) return []
+    return [
+      { id: "high", budget: 16_000 },
+      { id: "max", budget: /(?:^|[/.:_-])pro(?:[/.:_-]|$)/i.test(modelID) ? 32_768 : 24_576 },
+    ].map((item) => ({
+      id: Model.VariantID.make(item.id),
+      settings: settings(packageName, {
+        thinkingConfig: { includeThoughts: true, thinkingBudget: Math.min(item.budget, maximum) },
+      }),
     }))
-  const variants = [
-    { id: "high", budget: 16_000 },
-    { id: "max", budget: /(?:^|[/.:_-])pro(?:[/.:_-]|$)/i.test(modelID) ? 32_768 : 24_576 },
-  ]
-  const maximum = output - 1
-  if (maximum <= 0) return []
-  return variants.map((item) => ({
-    id: Model.VariantID.make(item.id),
-    settings: settings(packageName, {
-      thinkingConfig: { includeThoughts: true, thinkingBudget: Math.min(item.budget, maximum) },
-    }),
+  }
+  return COMMON_EFFORTS.map((effort) => ({
+    id: Model.VariantID.make(effort),
+    settings: settings(packageName, { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } }),
   }))
 }
 
@@ -177,22 +177,22 @@ function anthropicVariants(
   const model = claudeModel(modelID)
   const version = model && CLAUDE_MANUAL_THINKING_MAX[model.family]
   const manual = version && (model.major < version[0] || (model.major === version[0] && model.minor <= version[1]))
-  if (!manual) {
-    const ids =
-      !model || model.major > 4 || model.minor >= 7 ? [...COMMON_EFFORTS, "xhigh", "max"] : [...COMMON_EFFORTS, "max"]
-    return ids.map((id) => ({
-      id: Model.VariantID.make(id),
-      settings: settings(packageName, { thinking: { type: "adaptive", display: "summarized" }, effort: id }),
+  if (manual) {
+    const maximum = Math.min(31_999, output - 1)
+    if (maximum <= 0) return []
+    return [
+      { id: "high", budget: Math.min(16_000, maximum) },
+      { id: "max", budget: maximum },
+    ].map((item) => ({
+      id: Model.VariantID.make(item.id),
+      settings: settings(packageName, { thinking: { type: "enabled", budgetTokens: item.budget } }),
     }))
   }
-  const maximum = Math.min(31_999, output - 1)
-  if (maximum <= 0) return []
-  return [
-    { id: "high", budget: Math.min(16_000, maximum) },
-    { id: "max", budget: maximum },
-  ].map((item) => ({
-    id: Model.VariantID.make(item.id),
-    settings: settings(packageName, { thinking: { type: "enabled", budgetTokens: item.budget } }),
+  const ids =
+    !model || model.major > 4 || model.minor >= 7 ? [...COMMON_EFFORTS, "xhigh", "max"] : [...COMMON_EFFORTS, "max"]
+  return ids.map((id) => ({
+    id: Model.VariantID.make(id),
+    settings: settings(packageName, { thinking: { type: "adaptive", display: "summarized" }, effort: id }),
   }))
 }
 
