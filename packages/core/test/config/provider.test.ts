@@ -20,7 +20,7 @@ const addPlugin = Effect.fn(function* (entries: Entry[], variants = false) {
   const plugin = yield* Plugin.Service
   const host = yield* PluginHost.make(plugin)
   yield* ConfigProviderPlugin.Plugin.effect(host).pipe(Effect.provide(Config.testLayer(entries)))
-  if (variants) yield* VariantPlugin.Plugin.effect(host)
+  if (variants) yield* VariantPlugin.Plugin.effect(host).pipe(Effect.provide(Config.testLayer(entries)))
 })
 
 function required<T>(value: T | undefined): T {
@@ -170,13 +170,15 @@ describe("ConfigProviderPlugin.Plugin", () => {
     }),
   )
 
-  it.effect("does not add config fallbacks to existing catalog models", () =>
+  it.effect("preserves authoritative catalog variants", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
       const providerID = Provider.ID.make("custom")
       const modelID = Model.ID.make("known")
       yield* catalog.transform((draft) => {
-        draft.model.update(providerID, modelID, () => {})
+        draft.model.update(providerID, modelID, (model) => {
+          model.variants = [{ id: Model.VariantID.make("custom"), settings: { reasoningEffort: "high" } }]
+        })
       })
       const entries = [
         new Document({
@@ -194,7 +196,9 @@ describe("ConfigProviderPlugin.Plugin", () => {
 
       yield* addPlugin(entries, true)
 
-      expect((yield* catalog.model.get(providerID, modelID))?.variants).toEqual([])
+      expect((yield* catalog.model.get(providerID, modelID))?.variants).toEqual([
+        { id: Model.VariantID.make("custom"), settings: { reasoningEffort: "high" } },
+      ])
     }),
   )
 

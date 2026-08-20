@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Catalog } from "@opencode-ai/core/catalog"
+import { Config } from "@opencode-ai/core/config"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Location } from "@opencode-ai/core/location"
@@ -31,7 +32,9 @@ describe("VariantPlugin", () => {
           model.package = Provider.aisdk("@ai-sdk/openai-compatible")
         })
       })
-      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) }))
+      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) })).pipe(
+        Effect.provide(Config.testLayer([])),
+      )
 
       expect((yield* service.model.get(Provider.ID.opencode, Model.ID.make("glm-5.2")))?.variants).toEqual([
         expect.objectContaining({ id: "high", settings: { reasoningEffort: "high" } }),
@@ -50,7 +53,9 @@ describe("VariantPlugin", () => {
           model.variants = [{ id: Model.VariantID.make("high"), settings: {}, headers: { custom: "true" }, body: {} }]
         })
       })
-      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) }))
+      yield* VariantPlugin.Plugin.effect(host({ catalog: catalogHost(service) })).pipe(
+        Effect.provide(Config.testLayer([])),
+      )
 
       expect((yield* service.model.get(Provider.ID.opencode, Model.ID.make("glm-5.2")))?.variants).toEqual([
         expect.objectContaining({ id: "high", headers: { custom: "true" } }),

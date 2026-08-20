@@ -1,38 +1,76 @@
 export * as VariantPlugin from "./variant.js"
 
-import { Effect } from "effect"
+import { type Entry } from "@opencode-ai/schema/config"
+import { Effect, Stream } from "effect"
 import { define } from "@opencode-ai/plugin/effect/plugin"
-import { Catalog } from "../catalog.js"
+import { Config } from "../config.js"
 import { Model } from "../model.js"
 import { Provider } from "../provider.js"
 
 export const Plugin = define({
   id: "opencode.variant",
-  effect: Effect.fn(function* () {
-    const catalog = yield* Catalog.Service
-    yield* catalog.transform((catalog) => {
+  effect: Effect.fn(function* (ctx) {
+    const config = yield* Config.Service
+    const loaded = { entries: yield* config.entries() }
+    yield* ctx.catalog.transform((catalog) => {
+      const configured = configuredModels(loaded.entries)
       for (const record of catalog.provider.list()) {
         for (const model of record.models.values()) {
           catalog.model.update(model.providerID, model.id, (draft) => {
-            const generation = catalog.model.variantGeneration.get(model.providerID, model.id)
-            if (generation === "suppress") return
-            const generated =
-              generation === "fallback" ? fallback(draft, record.provider) : generate(draft, record.provider)
-            if (generated.length === 0) return
-
-            const variants = draft.variants ?? []
-            const explicit = new Map(variants.map((variant) => [variant.id, variant]))
-            const generatedIDs = new Set<string>(generated.map((variant) => variant.id))
-            draft.variants = [
-              ...generated.map((variant) => explicit.get(variant.id) ?? variant),
-              ...variants.filter((variant) => !generatedIDs.has(variant.id)),
-            ]
+            const intent = configured.get(`${model.providerID}\0${model.id}`)
+            if (intent === "clear") {
+              draft.variants = []
+              return
+            }
+            if (intent === "suppress") return
+            if (intent === "fallback") {
+              if (draft.variants.length > 0) return
+              apply(draft, fallback(draft, record.provider))
+              return
+            }
+            apply(draft, generate(draft, record.provider))
           })
         }
       }
     })
+    yield* ctx.event.subscribe().pipe(
+      Stream.filter((event) => event.type === "config.updated"),
+      Stream.runForEach(() =>
+        config.entries().pipe(
+          Effect.tap((entries) => Effect.sync(() => (loaded.entries = entries))),
+          Effect.andThen(ctx.catalog.reload()),
+        ),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+    )
   }),
 })
+
+function apply(draft: Model.MutableInfo, generated: NonNullable<Model.Info["variants"]>) {
+  if (generated.length === 0) return
+  const variants = draft.variants ?? []
+  const explicit = new Map(variants.map((variant) => [variant.id, variant]))
+  const generatedIDs = new Set<string>(generated.map((variant) => variant.id))
+  draft.variants = [
+    ...generated.map((variant) => explicit.get(variant.id) ?? variant),
+    ...variants.filter((variant) => !generatedIDs.has(variant.id)),
+  ]
+}
+
+function configuredModels(entries: readonly Entry[]) {
+  const result = new Map<string, "fallback" | "clear" | "suppress">()
+  for (const entry of entries) {
+    if (entry.type !== "document") continue
+    for (const [providerID, provider] of Object.entries(entry.info.providers ?? {})) {
+      for (const [modelID, model] of Object.entries(provider.models ?? {})) {
+        const key = `${providerID}\0${modelID}`
+        if (!result.has(key)) result.set(key, "fallback")
+        if (model.variants !== undefined) result.set(key, model.variants.length === 0 ? "clear" : "suppress")
+      }
+    }
+  }
+  return result
+}
 
 export function generate(
   model: { readonly id: string; readonly modelID?: string; readonly package?: string },
