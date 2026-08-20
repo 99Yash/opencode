@@ -4,15 +4,18 @@ import { define } from "@opencode-ai/plugin/effect/plugin"
 import { Document, type Entry } from "@opencode-ai/schema/config"
 import { Money } from "@opencode-ai/schema/money"
 import { Effect, Stream } from "effect"
+import { Catalog } from "../../catalog.js"
 import { Config } from "../../config.js"
+import { Model } from "../../model.js"
 import { Provider } from "../../provider.js"
-import { VariantPlugin } from "../../plugin/variant.js"
 
 export const Plugin = define({
   id: "opencode.config.provider",
   effect: Effect.fn(function* (ctx) {
+    const catalog = yield* Catalog.Service
     const config = yield* Config.Service
     const loaded = { entries: yield* config.entries() }
+    const generation = new Map<string, { providerID: string; modelID: string; value: "fallback" | "suppress" }>()
     yield* ctx.integration.transform((integrations) => {
       for (const [id, provider] of configuredProviders(loaded.entries)) {
         const integrationID = id
@@ -35,6 +38,7 @@ export const Plugin = define({
     })
 
     yield* ctx.catalog.transform((catalog) => {
+      generation.clear()
       const fallback = new Map<string, { providerID: string; modelID: string }>()
       const explicit = new Map<string, { providerID: string; modelID: string }>()
       const configuredDefault = Config.latest(loaded.entries, "model")
@@ -110,11 +114,15 @@ export const Plugin = define({
       for (const item of fallback.values()) {
         const model = catalog.model.get(item.providerID, item.modelID)
         if (!model || model.variants.length > 0) continue
-        VariantPlugin.markFallback(model)
+        generation.set(`${item.providerID}\0${item.modelID}`, { ...item, value: "fallback" })
       }
       for (const item of explicit.values()) {
-        const model = catalog.model.get(item.providerID, item.modelID)
-        if (model) VariantPlugin.suppressFallback(model)
+        generation.set(`${item.providerID}\0${item.modelID}`, { ...item, value: "suppress" })
+      }
+    })
+    yield* catalog.transform((draft) => {
+      for (const item of generation.values()) {
+        draft.model.variantGeneration.set(Provider.ID.make(item.providerID), Model.ID.make(item.modelID), item.value)
       }
     })
     yield* ctx.event.subscribe().pipe(

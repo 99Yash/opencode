@@ -2,18 +2,22 @@ export * as VariantPlugin from "./variant.js"
 
 import { Effect } from "effect"
 import { define } from "@opencode-ai/plugin/effect/plugin"
+import { Catalog } from "../catalog.js"
 import { Model } from "../model.js"
 import { Provider } from "../provider.js"
 
 export const Plugin = define({
   id: "opencode.variant",
-  effect: Effect.fn(function* (ctx) {
-    yield* ctx.catalog.transform((catalog) => {
+  effect: Effect.fn(function* () {
+    const catalog = yield* Catalog.Service
+    yield* catalog.transform((catalog) => {
       for (const record of catalog.provider.list()) {
         for (const model of record.models.values()) {
           catalog.model.update(model.providerID, model.id, (draft) => {
-            if (suppressed.has(draft)) return
-            const generated = fallbacks.has(draft) ? fallback(draft, record.provider) : generate(draft, record.provider)
+            const generation = catalog.model.variantGeneration.get(model.providerID, model.id)
+            if (generation === "suppress") return
+            const generated =
+              generation === "fallback" ? fallback(draft, record.provider) : generate(draft, record.provider)
             if (generated.length === 0) return
 
             const variants = draft.variants ?? []
@@ -48,20 +52,6 @@ const OPENAI_EFFORTS = ["none", "low", "medium", "high", "xhigh", "max"]
 const COMMON_EFFORTS = ["low", "medium", "high"]
 const ENCRYPTED_REASONING = ["reasoning.encrypted_content"]
 const CLAUDE_MANUAL_THINKING_MAX = { haiku: [4, 5], sonnet: [4, 5], opus: [4, 5] } as const
-// Config runs immediately before this plugin over the same materialized model objects.
-// Weak markers retain omitted versus explicit empty variants without exposing provenance publicly.
-const fallbacks = new WeakSet<object>()
-const suppressed = new WeakSet<object>()
-
-export function markFallback(model: object) {
-  suppressed.delete(model)
-  fallbacks.add(model)
-}
-
-export function suppressFallback(model: object) {
-  fallbacks.delete(model)
-  suppressed.add(model)
-}
 
 export function fallback(
   model: {

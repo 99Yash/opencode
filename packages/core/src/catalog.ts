@@ -20,6 +20,7 @@ export { Event } from "@opencode-ai/schema/catalog"
 
 type Data = {
   providers: Map<Provider.ID, ProviderRecord>
+  variantGeneration: Map<string, "fallback" | "suppress">
   defaultModel?: DefaultModel
 }
 
@@ -34,6 +35,10 @@ export type Draft = {
     get: (providerID: Provider.ID, modelID: Model.ID) => Model.Info | undefined
     update: (providerID: Provider.ID, modelID: Model.ID, fn: (model: Model.MutableInfo) => void) => void
     remove: (providerID: Provider.ID, modelID: Model.ID) => void
+    variantGeneration: {
+      get: (providerID: Provider.ID, modelID: Model.ID) => "fallback" | "suppress" | undefined
+      set: (providerID: Provider.ID, modelID: Model.ID, value: "fallback" | "suppress") => void
+    }
     default: {
       get: () => DefaultModel | undefined
       set: (providerID: Provider.ID, modelID: Model.ID) => void
@@ -83,7 +88,7 @@ const layer = Layer.effect(
 
     const state = State.create<Data, Draft>({
       name: "catalog",
-      initial: () => ({ providers: new Map() }),
+      initial: () => ({ providers: new Map(), variantGeneration: new Map() }),
       draft: (draft) => {
         const result: Draft = {
           provider: {
@@ -123,6 +128,12 @@ const layer = Layer.effect(
             },
             remove: (providerID, modelID) => {
               draft.providers.get(providerID)?.models.delete(modelID)
+            },
+            variantGeneration: {
+              get: (providerID, modelID) => draft.variantGeneration.get(`${providerID}\0${modelID}`),
+              set: (providerID, modelID, value) => {
+                draft.variantGeneration.set(`${providerID}\0${modelID}`, value)
+              },
             },
             default: {
               get: () => draft.defaultModel,
