@@ -2,14 +2,17 @@ import { describe, expect } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
 import { Effect } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
+import { Agent } from "@opencode-ai/core/agent"
 import { Credential } from "@opencode-ai/core/credential"
 import { Bus } from "@opencode-ai/core/bus"
 import { Integration } from "@opencode-ai/core/integration"
 import { Model } from "@opencode-ai/core/model"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
+import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { OpencodePlugin } from "@opencode-ai/core/plugin/provider/opencode"
 import { Provider } from "@opencode-ai/core/provider"
+import { Session } from "@opencode-ai/core/session"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
@@ -89,6 +92,28 @@ describe("OpencodePlugin", () => {
         },
         { type: "key", label: "API key (service account)" },
       ])
+    }),
+  )
+
+  it.effect("sends OpenCode Anthropic credentials as x-api-key", () =>
+    Effect.gen(function* () {
+      yield* addPlugin()
+      const hooks = yield* PluginHooks.Service
+      const event = yield* hooks.trigger("session", "http.request", {
+        sessionID: Session.ID.make("ses_test"),
+        agent: Agent.ID.make("build"),
+        model: Model.Ref.make({ providerID: Provider.ID.opencode, id: Model.ID.make("claude-fable-5") }),
+        request: new Request("https://opencode.ai/inference/anthropic/v1/messages", {
+          method: "POST",
+          headers: {
+            authorization: "Bearer console-token",
+            "anthropic-version": "2023-06-01",
+          },
+        }),
+      })
+
+      expect(event.request.headers.get("x-api-key")).toBe("console-token")
+      expect(event.request.headers.get("authorization")).toBeNull()
     }),
   )
 

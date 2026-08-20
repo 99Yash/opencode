@@ -192,6 +192,21 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
       }
     })
 
+    yield* ctx.session.hook(
+      "http.request",
+      (event) =>
+        Effect.sync(() => {
+          if (!event.request.headers.has("anthropic-version")) return
+          if (event.request.headers.has("x-api-key")) return
+          const authorization = event.request.headers.get("authorization")
+          const match = authorization?.match(/^Bearer\s+(.+)$/i)
+          if (!match) return
+          event.request.headers.set("x-api-key", match[1])
+          event.request.headers.delete("authorization")
+        }),
+      { providerID: Provider.ID.opencode },
+    )
+
     const refresh = () => loading.withPermit(load().pipe(Effect.andThen(ctx.catalog.reload())))
     yield* bus.subscribe(Integration.Event.ConnectionUpdated).pipe(
       Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
