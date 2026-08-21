@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { isContextOverflow } from "../src/index.js"
+import { HttpContext, HttpRequestDetails, isContextOverflow } from "../src/index.js"
 import { classifyProviderFailure } from "../src/provider-error.js"
 
 describe("provider error classification", () => {
@@ -73,6 +73,21 @@ describe("provider error classification", () => {
         (message) => classifyProviderFailure({ message })._tag,
       ),
     ).toEqual(["ProviderInternal", "ProviderInternal", "ProviderInternal"])
+  })
+
+  test("classifies xAI capacity text as provider internal", () => {
+    const message =
+      "The model is currently at capacity due to high demand. Please try again in a few minutes, or use a higher service tier for priority processing: https://docs.x.ai/developers/advanced-api-usage/priority-processing"
+    const http = new HttpContext({
+      request: new HttpRequestDetails({ method: "POST", url: "https://api.x.ai/v1/responses", headers: {} }),
+      body: message,
+    })
+
+    expect(
+      [classifyProviderFailure({ message }), classifyProviderFailure({ message: "Provider request failed", http })].map(
+        (failure) => failure._tag,
+      ),
+    ).toEqual(["ProviderInternal", "ProviderInternal"])
   })
 
   test("classifies transient client statuses as provider internal", () => {
