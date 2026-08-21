@@ -8,7 +8,6 @@ import { Protocol } from "../route/protocol.js"
 import {
   AIError,
   LLMEvent,
-  Message,
   mergeJsonRecords,
   Usage,
   type CacheHint,
@@ -449,10 +448,7 @@ const lowerToolResultContent = Effect.fnUntraced(function* (part: ToolResultPart
   if (part.result.type !== "content") return ProviderShared.toolResultText(part)
   // Preserve the narrowed array element type when compiled through a consumer package.
   const content: ReadonlyArray<Tool.Content> = part.result.value
-  return yield* Effect.forEach(
-    content.filter((item) => item.type !== "text" || hasText(item)),
-    lowerToolResultContentItem,
-  )
+  return yield* Effect.forEach(content, lowerToolResultContentItem)
 })
 
 // Mid-conversation system messages became available with Opus 4.8 and version
@@ -469,8 +465,7 @@ const supportsNativeSystemUpdates = (request: LLMRequest) => {
   return match[3] !== undefined && match[3].length <= 2 && Number(match[3]) >= 8
 }
 
-const endsInServerToolUse = (message: LLMRequest["messages"][number] | undefined) => {
-  if (!message) return false
+const endsInServerToolUse = (message: LLMRequest["messages"][number]) => {
   const last = message.content.at(-1)
   return message.role === "assistant" && last?.type === "tool-call" && last.providerExecuted === true
 }
@@ -522,26 +517,13 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
 
   for (const [index, message] of request.messages.entries()) {
     if (message.role === "system") {
-      const content = (yield* ProviderShared.systemUpdateText("Anthropic Messages", message)).filter(hasText)
-      if (content.length === 0) continue
       if (splitsLocalToolResults(request.messages, index))
         return yield* invalid("Anthropic Messages system updates cannot split a local tool call from its tool result")
-      const normalized = Message.make({
-        id: message.id,
-        role: "system",
-        content,
-        metadata: message.metadata,
-        native: message.native,
-      })
-      if (
-        supportsNativeSystemUpdates(request) &&
-        canUseNativeSystemUpdate(request.messages, index) &&
-        (messages.at(-1)?.role === "user" || endsInServerToolUse(request.messages[index - 1]))
-      ) {
-        messages.push(yield* lowerNativeSystemUpdate(normalized, breakpoints))
+      if (supportsNativeSystemUpdates(request) && canUseNativeSystemUpdate(request.messages, index)) {
+        messages.push(yield* lowerNativeSystemUpdate(message, breakpoints))
         continue
       }
-      const part = yield* ProviderShared.wrappedSystemUpdate("Anthropic Messages", normalized)
+      const part = yield* ProviderShared.wrappedSystemUpdate("Anthropic Messages", message)
       const block = { type: "text" as const, text: part.text, cache_control: cacheControl(breakpoints, part.cache) }
       const previous = messages.at(-1)
       if (previous?.role === "user")
@@ -618,7 +600,6 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       })
     }
     const previous = messages.at(-1)
-    if (content.length === 0) continue
     if (previous?.role === "user" && previous.content.every((block) => block.type === "tool_result"))
       messages[messages.length - 1] = { role: "user", content: [...previous.content, ...content] }
     else messages.push({ role: "user", content })
@@ -678,11 +659,10 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
         )
   // Anthropic rejects tool_choice when tools are absent; "none" is only meaningful with tools present.
   const toolChoice = tools === undefined || !request.toolChoice ? undefined : yield* lowerToolChoice(request.toolChoice)
-  const systemParts = request.system.filter(hasText)
   const system =
-    systemParts.length === 0
+    request.system.length === 0
       ? undefined
-      : systemParts.map((part) => ({
+      : request.system.map((part) => ({
           type: "text" as const,
           text: part.text,
           cache_control: cacheControl(breakpoints, part.cache),

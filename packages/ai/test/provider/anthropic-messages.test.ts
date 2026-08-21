@@ -58,16 +58,13 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
-  it.effect("filters empty text blocks while preserving assistant replay state", () =>
+  it.effect("filters empty user and assistant text while preserving replay state", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
         LLM.request({
           model,
-          system: [
-            { type: "text", text: " \n\t" },
-            { type: "text", text: "  Keep this system prompt.  " },
-          ],
           messages: [
+            Message.user(" \n\t"),
             Message.user([
               { type: "text", text: "" },
               { type: "text", text: "  Use the tool.  " },
@@ -81,11 +78,8 @@ describe("Anthropic Messages route", () => {
             Message.tool({
               id: "call_1",
               name: "lookup",
-              resultType: "content",
-              result: [
-                { type: "text", text: " \n\t" },
-                { type: "text", text: " Tool result. " },
-              ],
+              resultType: "text",
+              result: "Tool result.",
             }),
             Message.assistant(" \n\t"),
             Message.user("Continue."),
@@ -95,7 +89,6 @@ describe("Anthropic Messages route", () => {
       )
 
       expect(prepared.body).toMatchObject({
-        system: [{ type: "text", text: "  Keep this system prompt.  " }],
         messages: [
           { role: "user", content: [{ type: "text", text: "  Use the tool.  " }] },
           {
@@ -111,36 +104,12 @@ describe("Anthropic Messages route", () => {
               {
                 type: "tool_result",
                 tool_use_id: "call_1",
-                content: [{ type: "text", text: " Tool result. " }],
+                content: "Tool result.",
               },
             ],
           },
           { role: "user", content: [{ type: "text", text: "Continue." }] },
         ],
-      })
-    }),
-  )
-
-  it.effect("filters empty native system update blocks", () =>
-    Effect.gen(function* () {
-      const prepared = yield* compileRequest(
-        LLM.request({
-          model: opus48,
-          messages: [
-            Message.user("Before."),
-            Message.system([
-              { type: "text", text: " \n\t" },
-              { type: "text", text: "Operator update." },
-            ]),
-            Message.assistant("After."),
-          ],
-          cache: "none",
-        }),
-      )
-
-      expect(prepared.body.messages[1]).toEqual({
-        role: "system",
-        content: [{ type: "text", text: "Operator update." }],
       })
     }),
   )
