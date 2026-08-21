@@ -54,7 +54,7 @@ type Active = {
 export interface Interface {
   readonly name: () => Effect.Effect<string>
   readonly create: <E = never, R = never>(
-    input: Shell.CreateInput,
+    input: CreateInput,
     before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
   ) => Effect.Effect<Shell.Info, E | AppProcess.AppProcessError, R>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
@@ -67,6 +67,10 @@ export interface Interface {
   readonly timeout: (id: Shell.ID, duration: number) => Effect.Effect<Shell.Info, NotFoundError>
   readonly output: (id: Shell.ID, input?: Shell.OutputInput) => Effect.Effect<Shell.Output, NotFoundError>
   readonly remove: (id: Shell.ID) => Effect.Effect<void, NotFoundError>
+}
+
+type CreateInput = Shell.CreateInput & {
+  readonly shell?: string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Shell") {}
@@ -218,7 +222,7 @@ const layer = () =>
       })
 
       const create = Effect.fn("Shell.create")(function* <E = never, R = never>(
-        input: Shell.CreateInput,
+        input: CreateInput,
         before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
       ) {
         const sessionID = input.metadata?.sessionID
@@ -230,7 +234,7 @@ const layer = () =>
           command: input.command,
           cwd: input.cwd ?? location.directory,
           timeout: input.timeout,
-          shell: yield* shell.preferred(),
+          shell: input.shell ?? (yield* shell.preferred()),
           env: {
             ...(sessionEnvironment ?? process.env),
             TERM: "xterm-256color",
