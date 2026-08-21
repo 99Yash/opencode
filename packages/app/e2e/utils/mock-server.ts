@@ -29,7 +29,7 @@ export interface MockServerConfig {
   forms?: unknown[] | (() => unknown[])
   fileList?: (path: string) => unknown | Promise<unknown>
   fileContent?: (path: string) => unknown | Promise<unknown>
-  findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown
+  findFiles?: (input: { query: string; dirs?: string; limit?: number }) => unknown | Promise<unknown>
   sessionStatus?: Record<string, unknown> | (() => Record<string, unknown>)
 }
 
