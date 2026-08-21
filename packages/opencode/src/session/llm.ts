@@ -29,6 +29,8 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { ProviderError } from "@/provider/error"
+import type { LanguageModelV3StreamPart } from "@ai-sdk/provider"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -337,6 +339,26 @@ const live: Layer.Layer<
                     )
                   }
                   return args.params
+                },
+                async wrapStream({ doStream }) {
+                  const result = await doStream()
+                  return {
+                    ...result,
+                    stream: result.stream.pipeThrough(
+                      new TransformStream<LanguageModelV3StreamPart, LanguageModelV3StreamPart>({
+                        transform(part, controller) {
+                          if (part.type === "finish" && part.finishReason.raw === "network_error") {
+                            controller.enqueue({
+                              type: "error",
+                              error: new ProviderError.ResponseStreamError("Provider finish_reason: network_error"),
+                            })
+                            return
+                          }
+                          controller.enqueue(part)
+                        },
+                      }),
+                    ),
+                  }
                 },
               },
             ],
