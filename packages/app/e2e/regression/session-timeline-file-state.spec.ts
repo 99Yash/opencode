@@ -37,6 +37,22 @@ test("labels single-file patches by operation", async ({ page }) => {
   await expect(removed.locator('[data-slot="diff-changes-deletions"]')).toHaveCount(0)
   await expect(modified.locator('[data-slot="diff-changes-additions"]')).toHaveText("+4")
   await expect(modified.locator('[data-slot="diff-changes-deletions"]')).toHaveText("-3")
+
+  const alignment = await page.locator('[data-timeline-part-id="prt_created_patch"]').evaluate((element) => {
+    const bounds = (selector: string) => {
+      const target = element.querySelector(selector)
+      if (!target) throw new Error(`Missing ${selector}`)
+      const range = document.createRange()
+      range.selectNodeContents(target)
+      const rect = range.getBoundingClientRect()
+      return { top: rect.top, bottom: rect.bottom }
+    }
+    return {
+      filename: bounds('[data-slot="message-part-title-filename"]'),
+      directory: bounds('[data-slot="message-part-directory"]'),
+    }
+  })
+  expect(alignment.directory).toEqual(alignment.filename)
 })
 
 test("preserves nested patch file state through outer collapse and reopen", async ({ page }) => {
