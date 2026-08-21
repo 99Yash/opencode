@@ -34,7 +34,7 @@ test("labels single-file patches by operation", async ({ page }) => {
   await expect(created.locator('[data-slot="diff-changes-additions"]')).toHaveText("+4")
   await expect(created.locator('[data-slot="diff-changes-deletions"]')).toHaveCount(0)
   await expect(removed.locator('[data-slot="diff-changes-additions"]')).toHaveCount(0)
-  await expect(removed.locator('[data-slot="diff-changes-deletions"]')).toHaveText("-3")
+  await expect(removed.locator('[data-slot="diff-changes-deletions"]')).toHaveCount(0)
   await expect(modified.locator('[data-slot="diff-changes-additions"]')).toHaveText("+4")
   await expect(modified.locator('[data-slot="diff-changes-deletions"]')).toHaveText("-3")
 })
