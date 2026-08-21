@@ -62,13 +62,15 @@ const isDecline = (
   error._tag === "Permission.DeclinedError" || error._tag === "QuestionTool.CancelledError"
 
 const shouldContinueAfterFailure = (failure: AIError, record: StepRecord) => {
-  if (failure.reason._tag === "InvalidProviderOutput") return failure.reason.classification === "incomplete-stream"
-  if (failure.reason._tag === "Transport") return failure.reason.operation === "read"
-  // A fresh generation can continue partial output, but not cross a tool boundary
-  // whose provider-side effects may be ambiguous.
-  if (failure.reason._tag === "ProviderInternal")
-    return SessionRunnerRetry.isRetryable(failure) && record.calls.length === 0
-  return false
+  const interrupted =
+    (failure.reason._tag === "InvalidProviderOutput" && failure.reason.classification === "incomplete-stream") ||
+    (failure.reason._tag === "Transport" && failure.reason.operation === "read")
+  const providerRetry =
+    (failure.reason._tag === "RateLimit" || failure.reason._tag === "ProviderInternal") &&
+    SessionRunnerRetry.isRetryable(failure)
+  // Settlement gives eager local executions durable outcomes. Hosted activity remains
+  // provider-side and is not uniformly replayable, so it cannot cross this boundary.
+  return (interrupted || providerRetry) && record.calls.every((call) => call.settled && !call.providerExecuted)
 }
 
 /**

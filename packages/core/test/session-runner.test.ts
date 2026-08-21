@@ -4795,9 +4795,10 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
-  it.effect("does not continue a provider failure after tool activity", () =>
+  it.effect("continues a provider failure after a settled local tool without repeating it", () =>
     Effect.gen(function* () {
       const session = yield* setup
+      yield* admit(session, "Continue without repeating tool activity")
       const failure = providerInternal()
       yield* TestLLM.push(
         TestLLM.failAfter(
@@ -4806,11 +4807,72 @@ describe("SessionRunnerLLM", () => {
           LLMEvent.toolCall({ id: "call-before-provider-failure", name: "echo", input: { text: "settled" } }),
         ),
       )
+      yield* TestLLM.push(TestLLM.text("Recovered", "provider-failure-tool-recovery"))
 
-      expect(yield* runPrompt(session, "Do not repeat tool activity").pipe(Effect.flip)).toBe(failure)
-      expect(requests).toHaveLength(1)
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      while (!(yield* recordedEventTypes(sessionID)).includes("session.retry.scheduled.1")) yield* Effect.yieldNow
+      yield* TestClock.adjust("2400 millis")
+      yield* Fiber.join(run)
+
+      expect(requests).toHaveLength(2)
       expect(executions).toEqual(["settled"])
+      expect(requests[1]?.messages.slice(-3)).toMatchObject([
+        {
+          role: "assistant",
+          content: [{ type: "tool-call", id: "call-before-provider-failure", name: "echo" }],
+        },
+        { role: "tool", content: [{ type: "tool-result", id: "call-before-provider-failure" }] },
+        { role: "user", content: [{ type: "text", text: PARTIAL_FAILURE_CONTINUATION }] },
+      ])
+      expect(yield* recordedEventTypes(sessionID)).toContain("session.retry.scheduled.1")
+    }),
+  )
+
+  it.effect("does not continue a provider failure after hosted tool activity", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const failure = providerInternal()
+      yield* TestLLM.push(
+        TestLLM.failAfter(
+          failure,
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.toolInputStart({ id: "hosted-before-provider-failure", name: "web_search", providerExecuted: true }),
+        ),
+      )
+
+      expect(yield* runPrompt(session, "Do not repeat hosted activity").pipe(Effect.flip)).toBe(failure)
+      expect(requests).toHaveLength(1)
       expect(yield* recordedEventTypes(sessionID)).not.toContain("session.retry.scheduled.1")
+    }),
+  )
+
+  it.effect("continues a retryable rate limit after partial output", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      yield* admit(session, "Recover after rate limit")
+      yield* TestLLM.push(
+        TestLLM.failAfter(
+          rateLimited(),
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "partial-rate-limit" }),
+          LLMEvent.textDelta({ id: "partial-rate-limit", text: "Partial" }),
+        ),
+      )
+      yield* TestLLM.push(TestLLM.text(" continuation", "rate-limit-recovery"))
+
+      const run = yield* session.resume(sessionID).pipe(Effect.forkChild)
+      yield* TestLLM.wait(1)
+      yield* TestClock.adjust("2400 millis")
+      yield* Fiber.join(run)
+
+      expect(requests).toHaveLength(2)
+      expect(yield* recordedEventTypes(sessionID)).toContain("session.retry.scheduled.1")
+      expect(yield* session.context(sessionID)).toMatchObject([
+        { type: "user" },
+        { type: "assistant", finish: "error", content: [{ type: "text", text: "Partial" }] },
+        { type: "synthetic", text: PARTIAL_FAILURE_CONTINUATION },
+        { type: "assistant", finish: "stop", content: [{ type: "text", text: " continuation" }] },
+      ])
     }),
   )
 
