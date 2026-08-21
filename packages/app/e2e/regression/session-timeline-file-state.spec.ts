@@ -28,15 +28,15 @@ test("labels single-file patches by operation", async ({ page }) => {
   for (const item of cases) {
     await expect(page.locator(`[data-timeline-part-id="${item.id}"]`).getByLabel(item.title, { exact: true })).toBeVisible()
   }
-  await expect(
-    page.locator('[data-timeline-part-id="prt_created_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
-  ).toHaveCount(0)
-  await expect(
-    page.locator('[data-timeline-part-id="prt_removed_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
-  ).toHaveCount(0)
-  await expect(
-    page.locator('[data-timeline-part-id="prt_modified_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
-  ).toHaveCount(1)
+  const created = page.locator('[data-timeline-part-id="prt_created_patch"] [data-slot="message-part-actions"]')
+  const removed = page.locator('[data-timeline-part-id="prt_removed_patch"] [data-slot="message-part-actions"]')
+  const modified = page.locator('[data-timeline-part-id="prt_modified_patch"] [data-slot="message-part-actions"]')
+  await expect(created.locator('[data-slot="diff-changes-additions"]')).toHaveText("+4")
+  await expect(created.locator('[data-slot="diff-changes-deletions"]')).toHaveCount(0)
+  await expect(removed.locator('[data-slot="diff-changes-additions"]')).toHaveCount(0)
+  await expect(removed.locator('[data-slot="diff-changes-deletions"]')).toHaveText("-3")
+  await expect(modified.locator('[data-slot="diff-changes-additions"]')).toHaveText("+4")
+  await expect(modified.locator('[data-slot="diff-changes-deletions"]')).toHaveText("-3")
 })
 
 test("preserves nested patch file state through outer collapse and reopen", async ({ page }) => {

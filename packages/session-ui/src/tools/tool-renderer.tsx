@@ -1543,9 +1543,10 @@ ToolRegistry.register({
                   </Show>
                 </div>
                 <div data-slot="message-part-actions">
-                  <Show when={!pending() && single()!.type === "update"}>
+                  <Show when={!pending()}>
                     <DiffChanges
                       appearance="standard"
+                      hideZero
                       changes={{ additions: single()!.additions, deletions: single()!.deletions }}
                     />
                   </Show>

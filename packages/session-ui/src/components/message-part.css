@@ -443,7 +443,7 @@
   [data-slot="message-part-title"] {
     flex: 1 1 auto;
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 8px;
     min-width: 0;
     font-family: var(--font-family-sans);
