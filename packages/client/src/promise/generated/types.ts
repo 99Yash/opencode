@@ -156,6 +156,8 @@ export type SessionStatus =
     }
   | { type: "busy" }
 
+export type PtyTicketConnectToken = { ticket: string; expires_in: number }
+
 export type ReferenceLocalSource = { type: "local"; path: string; description?: string; hidden?: boolean }
 
 export type ReferenceGitSource = {
@@ -244,7 +246,7 @@ export type PromptFileAttachment = {
 
 export type PromptAgentAttachment = { name: string; mention?: PromptMention }
 
-export type PromptSkillAttachment = { id: string; name: string; text: string; mention?: PromptMention }
+export type PromptSkillAttachment = { id: string; name: string; mention?: PromptMention }
 
 export type ToolFileContent = { type: "file"; uri: string; mime: string; name?: string | null }
 
@@ -1108,6 +1110,8 @@ export type SessionStepEnded = {
     sessionID: string
     assistantMessageID: string
     finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+    rawFinish?: string
+    providerState?: SessionMessageProviderState1
     cost: MoneyUSD
     tokens: TokenUsageInfo
     snapshot?: string
@@ -1145,6 +1149,9 @@ export type SessionStepFailed = {
     sessionID: string
     assistantMessageID: string
     error: SessionStructuredError
+    finish?: "content-filter"
+    rawFinish?: string
+    providerState?: SessionMessageProviderState1
     cost?: MoneyUSD
     tokens?: TokenUsageInfo
     snapshot?: string
@@ -1921,6 +1928,8 @@ export type SessionMessageAssistant = {
   content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>
   snapshot?: { start?: string; end?: string; files?: Array<string> }
   finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+  rawFinish?: string
+  providerState?: SessionMessageProviderState
   cost?: MoneyUSD
   tokens?: TokenUsageInfo
   error?: SessionStructuredError
@@ -2266,6 +2275,10 @@ export type PtyNotFoundError = { readonly _tag: "PtyNotFoundError"; readonly pty
 export const isPtyNotFoundError = (value: unknown): value is PtyNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "PtyNotFoundError"
 
+export type ForbiddenError = { readonly _tag: "ForbiddenError"; readonly message: string }
+export const isForbiddenError = (value: unknown): value is ForbiddenError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ForbiddenError"
+
 export type ShellNotFoundError = { readonly _tag: "ShellNotFoundError"; readonly id: string; readonly message: string }
 export const isShellNotFoundError = (value: unknown): value is ShellNotFoundError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "ShellNotFoundError"
@@ -2560,7 +2573,6 @@ export type SessionImportInput = {
           readonly skills?: ReadonlyArray<{
             readonly id: string
             readonly name: string
-            readonly text: string
             readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
           }>
           readonly type: "user"
@@ -2691,6 +2703,8 @@ export type SessionImportInput = {
           >
           readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
           readonly finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+          readonly rawFinish?: string
+          readonly providerState?: { readonly [x: string]: JsonValue }
           readonly cost?: number
           readonly tokens?: {
             readonly input: number
@@ -2827,7 +2841,6 @@ export type SessionImportInput = {
           readonly skills?: ReadonlyArray<{
             readonly id: string
             readonly name: string
-            readonly text: string
             readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
           }>
           readonly type: "user"
@@ -2958,6 +2971,8 @@ export type SessionImportInput = {
           >
           readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
           readonly finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+          readonly rawFinish?: string
+          readonly providerState?: { readonly [x: string]: JsonValue }
           readonly cost?: number
           readonly tokens?: {
             readonly input: number
@@ -3094,7 +3109,6 @@ export type SessionImportInput = {
           readonly skills?: ReadonlyArray<{
             readonly id: string
             readonly name: string
-            readonly text: string
             readonly mention?: { readonly start: number; readonly end: number; readonly text: string }
           }>
           readonly type: "user"
@@ -3225,6 +3239,8 @@ export type SessionImportInput = {
           >
           readonly snapshot?: { readonly start?: string; readonly end?: string; readonly files?: ReadonlyArray<string> }
           readonly finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
+          readonly rawFinish?: string
+          readonly providerState?: { readonly [x: string]: JsonValue }
           readonly cost?: number
           readonly tokens?: {
             readonly input: number
@@ -5456,6 +5472,19 @@ export type PtyRemoveInput = {
 }
 
 export type PtyRemoveOutput = void
+
+export type PtyConnectTokenInput = {
+  readonly ptyID: { readonly ptyID: string }["ptyID"]
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+  readonly "x-opencode-ticket"?: { readonly "x-opencode-ticket"?: string | undefined }["x-opencode-ticket"]
+}
+
+export type PtyConnectTokenOutput = {
+  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  data: PtyTicketConnectToken
+}
 
 export type ShellListInput = {
   readonly location?: {
