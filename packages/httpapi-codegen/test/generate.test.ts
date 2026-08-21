@@ -562,6 +562,52 @@ describe("HttpApiCodegen.generate", () => {
     expect(types).not.toContain("Brand")
   })
 
+  test("imports authoritative brands into Promise output types", () => {
+    const SessionID = Schema.String.pipe(Schema.brand("SessionID"))
+    const InternalID = Schema.String.pipe(Schema.brand("InternalID"))
+    const Info = Schema.Struct({ id: SessionID, internalID: InternalID }).annotate({ identifier: "Session.Info" })
+    class Missing extends Schema.TaggedError<Missing>()(
+      "Missing",
+      { sessionID: SessionID },
+      { httpApiStatus: 404 },
+    ) {}
+    const output = emitPromise(
+      compileContract(
+        api(
+          HttpApiEndpoint.get("get", "/session/:sessionID", {
+            params: { sessionID: SessionID },
+            success: Schema.Struct({ data: Info }),
+            error: Missing,
+          }),
+        ),
+      ),
+      {
+        typeReferences: [
+          {
+            schema: Info,
+            name: "Session.Info",
+            import: 'import type { Session } from "@example/schema/session"',
+          },
+          {
+            schema: SessionID,
+            name: "Session.ID",
+            import: 'import type { Session } from "@example/schema/session"',
+          },
+        ],
+      },
+    )
+    const types = output.files.find((file) => file.path === "types.ts")?.content
+
+    expect(types).toContain('import type { Session } from "@example/schema/session"')
+    expect(types).toContain('readonly "sessionID": string')
+    expect(types).toContain(
+      'export type SessionInfo = { readonly "id": Session.ID, readonly "internalID": string }',
+    )
+    expect(types).toContain('readonly "sessionID": Session.ID')
+    expect(types).not.toContain("Session.Info")
+    expect(types).not.toContain("Brand")
+  })
+
   test("preserves suggestions for open string unions in Promise wire types", () => {
     const Field = Schema.Union([Schema.Literals(["reasoning", "reasoning_content"]), Schema.String]).annotate({
       identifier: "Field",

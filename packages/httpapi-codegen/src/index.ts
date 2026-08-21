@@ -35,7 +35,7 @@ export type Contract = {
   readonly groups: ReadonlyArray<Group>
 }
 
-export type EffectTypeReference = {
+export type TypeReference = {
   readonly schema: Schema.Top
   readonly name: string
   readonly import: string
@@ -46,7 +46,7 @@ export type EffectOutputType = {
   readonly import: string
 }
 
-type ResolvedEffectTypeReference = Omit<EffectTypeReference, "schema"> & { readonly ast: SchemaAST.AST }
+type ResolvedTypeReference = Omit<TypeReference, "schema"> & { readonly ast: SchemaAST.AST }
 
 export class GenerationError extends Schema.TaggedError<GenerationError>()("GenerationError", {
   reason: Schema.String,
@@ -309,7 +309,7 @@ export function emitEffectImported(
 export function emitEffectShape(
   contract: Contract,
   options?: {
-    readonly typeReferences?: ReadonlyArray<EffectTypeReference>
+    readonly typeReferences?: ReadonlyArray<TypeReference>
     readonly outputTypes?: Readonly<Record<string, EffectOutputType>>
   },
 ): Output {
@@ -327,6 +327,7 @@ export function emitEffectShape(
 export function emitPromise(
   contract: Contract,
   options?: {
+    readonly typeReferences?: ReadonlyArray<TypeReference>
     readonly outputTypes?: Readonly<Record<string, { readonly name: string; readonly import: string }>>
     readonly mutableOutputs?: boolean
   },
@@ -338,7 +339,15 @@ export function emitPromise(
   return {
     operations: promiseOperations(groups),
     files: [
-      { path: "types.ts", content: renderPromiseTypes(groups, options?.outputTypes, options?.mutableOutputs ?? false) },
+      {
+        path: "types.ts",
+        content: renderPromiseTypes(
+          groups,
+          options?.typeReferences ?? [],
+          options?.outputTypes,
+          options?.mutableOutputs ?? false,
+        ),
+      },
       {
         path: "client-error.ts",
         content: `export type ClientErrorReason = "Transport" | "UnexpectedStatus" | "UnsupportedContentType" | "MalformedResponse" | "SseEventTooLarge"\n\nexport class ClientError extends Error {\n  override readonly name = "ClientError"\n  constructor(readonly reason: ClientErrorReason, options?: ErrorOptions) {\n    super(reason, options)\n  }\n}\n`,
@@ -358,10 +367,10 @@ export function emitPromise(
 
 function renderEffectShape(
   groups: ReadonlyArray<Group>,
-  typeReferences: ReadonlyArray<EffectTypeReference>,
+  typeReferences: ReadonlyArray<TypeReference>,
   outputTypes?: Readonly<Record<string, EffectOutputType>>,
 ) {
-  const references = effectTypeReferences(typeReferences)
+  const references = resolveTypeReferences(typeReferences)
   const imports = new Set<string>()
   const endpointTypes = groups.map((group, groupIndex) => {
     const endpoints = group.endpoints.map((endpoint, endpointIndex) => {
@@ -422,10 +431,10 @@ ${clientFields.join("\n")}
 `
 }
 
-function effectTypeReferences(input: ReadonlyArray<EffectTypeReference>) {
-  const names = new Map<string, ResolvedEffectTypeReference>()
-  const asts = new Map<SchemaAST.AST, ResolvedEffectTypeReference>()
-  const brands = new Map<string, ResolvedEffectTypeReference>()
+function resolveTypeReferences(input: ReadonlyArray<TypeReference>) {
+  const names = new Map<string, ResolvedTypeReference>()
+  const asts = new Map<SchemaAST.AST, ResolvedTypeReference>()
+  const brands = new Map<string, ResolvedTypeReference>()
   for (const reference of input) {
     const value = { name: reference.name, import: reference.import, ast: reference.schema.ast }
     const document = SchemaRepresentation.toCodeDocument(
@@ -436,7 +445,9 @@ function effectTypeReferences(input: ReadonlyArray<EffectTypeReference>) {
       name === undefined
         ? undefined
         : (document.references.nonRecursives.find((item) => item.$ref === name)?.code.Type ?? name)
-    if (type?.includes("Brand.Brand<") && !brands.has(type)) brands.set(type, value)
+    if (type?.includes("Brand.Brand<") && hasRootBrand(reference.schema.ast) && !brands.has(type)) {
+      brands.set(type, value)
+    }
     if (SchemaAST.resolveIdentifier(reference.schema.ast) !== undefined || type?.includes("Brand.Brand<")) {
       asts.set(reference.schema.ast, value)
       asts.set(Schema.toType(reference.schema).ast, value)
@@ -445,7 +456,7 @@ function effectTypeReferences(input: ReadonlyArray<EffectTypeReference>) {
     const previous = names.get(name)
     if (previous !== undefined) {
       if (previous.ast !== reference.schema.ast) {
-        throw new GenerationError({ reason: `Conflicting Effect type reference: ${name}` })
+        throw new GenerationError({ reason: `Conflicting type reference: ${name}` })
       }
       continue
     }
@@ -454,7 +465,23 @@ function effectTypeReferences(input: ReadonlyArray<EffectTypeReference>) {
   return { names, asts, brands }
 }
 
-function effectType(schema: Schema.Top, references: ReturnType<typeof effectTypeReferences>, imports: Set<string>) {
+function hasRootBrand(ast: SchemaAST.AST) {
+  const brands = ast.annotations?.brands
+  if (Array.isArray(brands) && brands.length > 0) return true
+  return checksHaveBrand(ast.checks)
+}
+
+function checksHaveBrand(checks: SchemaAST.Checks | undefined): boolean {
+  return (
+    checks?.some((check) => {
+      const brands = check.annotations?.brands
+      if (Array.isArray(brands) && brands.length > 0) return true
+      return check._tag === "FilterGroup" && checksHaveBrand(check.checks)
+    }) ?? false
+  )
+}
+
+function effectType(schema: Schema.Top, references: ReturnType<typeof resolveTypeReferences>, imports: Set<string>) {
   const projected = Schema.toType(schema)
   const direct = references.asts.get(schema.ast) ?? references.asts.get(projected.ast)
   if (direct !== undefined) {
@@ -484,14 +511,23 @@ function effectType(schema: Schema.Top, references: ReturnType<typeof effectType
     return type
   }
   let type = expand(document.codes[0].Type)
-  for (const [brand, reference] of references.brands) {
+  type = replaceBrandReferences(type, references.brands, imports)
+  if (type.includes("Brand.Brand<")) imports.add('import type { Brand } from "effect"')
+  if (type.includes("DateTime.")) imports.add('import type { DateTime } from "effect"')
+  if (type.includes("Schema.")) imports.add('import type { Schema } from "effect"')
+  return type
+}
+
+function replaceBrandReferences(
+  type: string,
+  references: ReadonlyMap<string, ResolvedTypeReference>,
+  imports: Set<string>,
+) {
+  for (const [brand, reference] of references) {
     if (!type.includes(brand)) continue
     imports.add(reference.import)
     type = type.replaceAll(brand, reference.name)
   }
-  if (type.includes("Brand.Brand<")) imports.add('import type { Brand } from "effect"')
-  if (type.includes("DateTime.")) imports.add('import type { DateTime } from "effect"')
-  if (type.includes("Schema.")) imports.add('import type { Schema } from "effect"')
   return type
 }
 
@@ -747,9 +783,12 @@ function renderImportedProjection(groups: ReadonlyArray<Group>, endpoints: Reado
 
 function renderPromiseTypes(
   groups: ReadonlyArray<Group>,
+  references: ReadonlyArray<TypeReference>,
   outputTypes?: Readonly<Record<string, { readonly name: string; readonly import: string }>>,
   mutableOutputs = false,
 ) {
+  const brands = resolveTypeReferences(references).brands
+  const imports = new Set(Object.values(outputTypes ?? {}).map((override) => override.import))
   const types = new Map<SchemaAST.AST, string>()
   const typeOf = (schema: Schema.Top, decoded = false) => {
     const projected = decoded ? Schema.toType(schema) : Schema.toEncoded(schema)
@@ -757,6 +796,15 @@ function renderPromiseTypes(
     if (cached !== undefined) return cached
     const type = structuralType(projected)
     types.set(projected.ast, type)
+    return type
+  }
+  const outputFieldTypes = new Map<SchemaAST.AST, string>()
+  const outputFieldTypeOf = (schema: Schema.Top) => {
+    const projected = Schema.toEncoded(schema)
+    const cached = outputFieldTypes.get(projected.ast)
+    if (cached !== undefined) return cached
+    const type = structuralType(projected, brands, imports)
+    outputFieldTypes.set(projected.ast, type)
     return type
   }
   const outputMarkers = new Map<SchemaAST.AST, string>()
@@ -782,7 +830,10 @@ function renderPromiseTypes(
   )
   const errorTypes = Array.from(errors.values()).map((error) => {
     const fields = error.fields
-      .map(([name, schema, optional]) => `readonly ${JSON.stringify(name)}${optional ? "?" : ""}: ${typeOf(schema)}`)
+      .map(
+        ([name, schema, optional]) =>
+          `readonly ${JSON.stringify(name)}${optional ? "?" : ""}: ${outputFieldTypeOf(schema)}`,
+      )
       .join("; ")
     return `export type ${error.identifier} = { readonly ${JSON.stringify(error.key)}: ${JSON.stringify(error.tag)}; ${fields} }\nexport const is${error.identifier} = (value: unknown): value is ${error.identifier} => typeof value === "object" && value !== null && ${JSON.stringify(error.key)} in value && value[${JSON.stringify(error.key)}] === ${JSON.stringify(error.tag)}`
   })
@@ -834,7 +885,7 @@ function renderPromiseTypes(
     ),
     ...Object.values(outputTypes ?? {}).map((output) => output.name),
   ])
-  const rendered = structuralTypes(outputSchemas, mutableOutputs, reservedNames)
+  const rendered = structuralTypes(outputSchemas, mutableOutputs, reservedNames, brands, imports)
   const resolve = (source: string) =>
     rendered.types.reduce((result, type, index) => result.replaceAll(`__PROMISE_TYPE_${index}__`, type), source)
   const resolvedErrors = errorTypes.map(resolve)
@@ -844,7 +895,6 @@ function renderPromiseTypes(
   )
     ? `export type JsonValue = null | boolean | number | string | ${mutableOutputs ? "Array<JsonValue> | { [key: string]: JsonValue }" : "ReadonlyArray<JsonValue> | { readonly [key: string]: JsonValue }"}`
     : ""
-  const imports = [...new Set(Object.values(outputTypes ?? {}).map((override) => override.import))]
   return [...imports, json, ...rendered.definitions, ...resolvedErrors, resolvedOperations].filter(Boolean).join("\n\n")
 }
 
@@ -982,7 +1032,13 @@ function identifierPart(value: string) {
     .join("")
 }
 
-function structuralTypes(schemas: ReadonlyArray<Schema.Top>, mutable: boolean, reservedNames: ReadonlySet<string>) {
+function structuralTypes(
+  schemas: ReadonlyArray<Schema.Top>,
+  mutable: boolean,
+  reservedNames: ReadonlySet<string>,
+  brandReferences: ReadonlyMap<string, ResolvedTypeReference>,
+  imports: Set<string>,
+) {
   if (schemas.length === 0) return { types: [], definitions: [] }
   const representations = SchemaRepresentation.toRepresentations(
     promiseTypeAsts(schemas) as [SchemaAST.AST, ...Array<SchemaAST.AST>],
@@ -1036,7 +1092,7 @@ function structuralTypes(schemas: ReadonlyArray<Schema.Top>, mutable: boolean, r
       const pattern = `(?<![A-Za-z0-9_$.'"])${reference.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$.'"])`
       type = type.replace(new RegExp(pattern, "g"), name)
     }
-    const output = type
+    const output = replaceBrandReferences(type, brandReferences, imports)
       .replaceAll(/ & Brand\.Brand<"[^"]+">/g, "")
       .replaceAll("Schema.Json", "JsonValue")
       .replaceAll(/(?<!["'])\bunknown\b(?!["'])/g, "any")
@@ -1074,7 +1130,11 @@ function uniqueTypeName(seed: string, used: ReadonlySet<string>, suffix = 1): st
   return used.has(name) ? uniqueTypeName(seed, used, suffix + 1) : name
 }
 
-function structuralType(schema: Schema.Top) {
+function structuralType(
+  schema: Schema.Top,
+  brandReferences?: ReadonlyMap<string, ResolvedTypeReference>,
+  imports?: Set<string>,
+) {
   const document = SchemaRepresentation.toCodeDocument(SchemaRepresentation.toRepresentations([promiseTypeAst(schema)]))
   if (
     document.artifacts.some(
@@ -1099,8 +1159,9 @@ function structuralType(schema: Schema.Top) {
     }
     return type
   }
+  const type = expand(document.codes[0].Type)
   return preserveStringSuggestions(
-    expand(document.codes[0].Type)
+    (brandReferences === undefined || imports === undefined ? type : replaceBrandReferences(type, brandReferences, imports))
       .replaceAll(/ & Brand\.Brand<"[^"]+">/g, "")
       .replaceAll("Schema.Json", "JsonValue"),
   )
