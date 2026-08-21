@@ -175,6 +175,68 @@ metadata:
 })
 
 describe("ConfigSkillPlugin.Plugin", () => {
+  it.live("loads an existing global agents skill through config discovery", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const global = path.join(tmp.path, "global")
+          const home = path.join(global, "home")
+          const directory = path.join(home, "project")
+          const skills = path.join(home, ".agents", "skills")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(skills, "hello"), { recursive: true })
+            await fs.mkdir(directory, { recursive: true })
+            await write(skills, "hello", "Global agents skill")
+          })
+
+          const entries = yield* discover(directory, global)
+          const skill = yield* startEntries(entries, directory, home)
+          const hello = (yield* skill.list()).find((item) => item.id === "hello")
+
+          expect(hello?.description).toBe("Global agents skill")
+          expect(hello?.location).toBe(AbsolutePath.make(path.join(skills, "hello", "SKILL.md")))
+        }),
+      ),
+    ),
+  )
+
+  it.live("loads a global agents skill created after config discovery", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const global = path.join(tmp.path, "global")
+          const home = path.join(global, "home")
+          const directory = path.join(home, "project")
+          const agents = path.join(home, ".agents")
+          const skills = path.join(agents, "skills")
+          yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+
+          const entries = yield* discover(directory, global)
+          const skill = yield* startEntries(entries, directory, home)
+          const watcher = yield* Watcher.Test
+          expect(yield* skill.list()).toEqual([])
+          expect(yield* watcher.subscriptions()).toContainEqual({ path: agents, type: "file" })
+
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(skills, "hello"), { recursive: true })
+            await write(skills, "hello", "Late global agents skill")
+          })
+          yield* emitAndWait({ type: "create", path: agents })
+
+          expect((yield* skill.list()).find((item) => item.id === "hello")?.description).toBe(
+            "Late global agents skill",
+          )
+        }),
+      ),
+    ),
+  )
+
   it.live("maps config entry types to skill directories", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
