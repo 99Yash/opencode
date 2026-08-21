@@ -130,20 +130,11 @@ export type SkillInfo = {
 
 export type PermissionReply = "once" | "always" | "reject"
 
-export type Pty = {
-  id: string
-  title: string
-  command: string
-  args: Array<string>
-  cwd: string
-  status: "running" | "exited"
-  pid: number
-  exitCode?: number
-}
-
 export type FormMetadata1 = { [x: string]: any }
 
 export type FormWhen1 = { key: string; op: "eq" | "neq"; value: string | number | boolean }
+
+export type GroupItem = { type: "session"; id: string } | { type: "terminal"; id: string }
 
 export type SessionStatus =
   | { type: "idle" }
@@ -1069,23 +1060,50 @@ export type PermissionReplied = {
   data: { sessionID: string; requestID: string; reply: PermissionReply }
 }
 
-export type PtyCreated = {
+export type Pty = {
   id: string
-  created: number
-  metadata?: { [x: string]: any }
-  type: "pty.created"
-  location?: LocationRef
-  data: { info: Pty }
+  title: string
+  command: string
+  args: Array<string>
+  cwd: string
+  status: "running" | "exited"
+  pid: number
+  exitCode?: number
 }
 
-export type PtyUpdated = {
+export type PersistentPtyInfo = {
+  id: string
+  title: string
+  command: string
+  args: Array<string>
+  cwd: string
+  status: "running" | "exited"
+  pid: number
+  exitCode?: number
+  groupID: string
+  size: { cols: number; rows: number }
+  output: { head: number; tail: number }
+}
+
+export type GroupItemAdded = {
   id: string
   created: number
   metadata?: { [x: string]: any }
-  type: "pty.updated"
+  type: "group.item.added"
   location?: LocationRef
-  data: { info: Pty }
+  data: { groupID: string; item: GroupItem }
 }
+
+export type GroupItemRemoved = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "group.item.removed"
+  location?: LocationRef
+  data: { groupID: string; item: GroupItem }
+}
+
+export type GroupInfo = { id: string; items: Array<GroupItem> }
 
 export type SessionStatus2 = {
   id: string
@@ -1401,6 +1419,31 @@ export type FormReplied = {
   type: "form.replied"
   location?: LocationRef
   data: { id: string; sessionID: string; answer: FormAnswer }
+}
+
+export type PtyCreated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "pty.created"
+  location?: LocationRef
+  data: { info: Pty }
+}
+
+export type PtyUpdated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "pty.updated"
+  location?: LocationRef
+  data: { info: Pty }
+}
+
+export type PersistentPtySnapshot = {
+  info: PersistentPtyInfo
+  text: string
+  checkpoint: string
+  cursor: { x: number; y: number }
 }
 
 export type FormStringField1 = {
@@ -2095,6 +2138,8 @@ export type V2Event =
   | FormCreated
   | FormReplied
   | FormCancelled
+  | GroupItemAdded
+  | GroupItemRemoved
   | WebsearchUpdated
   | SessionStatus2
   | SessionIdle
@@ -5490,6 +5535,133 @@ export type PtyConnectTokenOutput = {
   location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
   data: PtyTicketConnectToken
 }
+
+export type ServerPersistentPtyGroupListOutput = { data: Array<GroupInfo> }["data"]
+
+export type ServerPersistentPtyGroupCreateInput = {
+  readonly items?: {
+    readonly items?:
+      | ReadonlyArray<
+          { readonly type: "session"; readonly id: string } | { readonly type: "terminal"; readonly id: string }
+        >
+      | undefined
+  }["items"]
+}
+
+export type ServerPersistentPtyGroupCreateOutput = { data: GroupInfo }["data"]
+
+export type ServerPersistentPtyGroupGetInput = { readonly groupID: { readonly groupID: string }["groupID"] }
+
+export type ServerPersistentPtyGroupGetOutput = { data: GroupInfo }["data"]
+
+export type ServerPersistentPtyGroupSetInput = {
+  readonly groupID: { readonly groupID: string }["groupID"]
+  readonly items: {
+    readonly items: ReadonlyArray<
+      { readonly type: "session"; readonly id: string } | { readonly type: "terminal"; readonly id: string }
+    >
+  }["items"]
+}
+
+export type ServerPersistentPtyGroupSetOutput = { data: GroupInfo }["data"]
+
+export type ServerPersistentPtyGroupRemoveInput = { readonly groupID: { readonly groupID: string }["groupID"] }
+
+export type ServerPersistentPtyGroupRemoveOutput = void
+
+export type ServerPersistentPtyListInput = { readonly groupID: { readonly groupID: string }["groupID"] }
+
+export type ServerPersistentPtyListOutput = { data: Array<PersistentPtyInfo> }["data"]
+
+export type ServerPersistentPtyCreateInput = {
+  readonly groupID: { readonly groupID: string }["groupID"]
+  readonly command: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["command"]
+  readonly args: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["args"]
+  readonly cwd: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["cwd"]
+  readonly title: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["title"]
+  readonly env: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["env"]
+  readonly size?: {
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly title: string
+    readonly env: { readonly [x: string]: string }
+    readonly size?: { readonly cols: number; readonly rows: number }
+  }["size"]
+}
+
+export type ServerPersistentPtyCreateOutput = { data: PersistentPtyInfo }["data"]
+
+export type ServerPersistentPtyShutdownOutput = void
+
+export type ServerPersistentPtyGetInput = { readonly ptyID: { readonly ptyID: string }["ptyID"] }
+
+export type ServerPersistentPtyGetOutput = { data: PersistentPtyInfo }["data"]
+
+export type ServerPersistentPtyUpdateInput = {
+  readonly ptyID: { readonly ptyID: string }["ptyID"]
+  readonly attachmentID?: {
+    readonly attachmentID?: string
+    readonly size: { readonly cols: number; readonly rows: number }
+  }["attachmentID"]
+  readonly size: {
+    readonly attachmentID?: string
+    readonly size: { readonly cols: number; readonly rows: number }
+  }["size"]
+}
+
+export type ServerPersistentPtyUpdateOutput = { data: PersistentPtyInfo }["data"]
+
+export type ServerPersistentPtySnapshotInput = { readonly ptyID: { readonly ptyID: string }["ptyID"] }
+
+export type ServerPersistentPtySnapshotOutput = { data: PersistentPtySnapshot }["data"]
+
+export type ServerPersistentPtyRemoveInput = { readonly ptyID: { readonly ptyID: string }["ptyID"] }
+
+export type ServerPersistentPtyRemoveOutput = void
+
+export type ServerPersistentPtyConnectTokenInput = { readonly ptyID: { readonly ptyID: string }["ptyID"] }
+
+export type ServerPersistentPtyConnectTokenOutput = { data: PtyTicketConnectToken }["data"]
+
+export type ServerPersistentPtyConnectInput = { readonly ptyID: { readonly ptyID: string }["ptyID"] }
+
+export type ServerPersistentPtyConnectOutput = boolean
 
 export type ShellListInput = {
   readonly location?: {

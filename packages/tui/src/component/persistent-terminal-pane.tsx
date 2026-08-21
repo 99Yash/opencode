@@ -276,7 +276,7 @@ export function PersistentTerminalPane(props: {
       // TODO: Revisit when embedded terminal mouse handlers can compose without replacing its internal focus handler.
       onMouseDown={() => interact()}
     >
-      <Show when={!failure()} fallback={<text fg={theme.text.feedback.error.default}>{failure()}</text>}> 
+      <Show when={!failure()} fallback={<text fg={theme.text.feedback.error.default}>{failure()}</text>}>
         <>
           <embeddedTerminal
           ref={(value) => {
