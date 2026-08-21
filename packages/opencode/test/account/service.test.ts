@@ -100,6 +100,27 @@ it.live("login normalizes trailing slashes in the provided server URL", () =>
   }),
 )
 
+it.live("login resolves the verification URL against the server origin", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((req) =>
+      Effect.succeed(
+        json(req, {
+          device_code: "device-code",
+          user_code: "user-code",
+          verification_uri_complete: "/console/device?user_code=user-code",
+          expires_in: 600,
+          interval: 5,
+        }),
+      ),
+    )
+
+    const result = yield* Account.use.login("https://one.example.com/console").pipe(Effect.provide(live(client)))
+
+    expect(result.server).toBe("https://one.example.com/console")
+    expect(result.url).toBe("https://one.example.com/console/device?user_code=user-code")
+  }),
+)
+
 it.live("login maps transport failures to account transport errors", () =>
   Effect.gen(function* () {
     const client = HttpClient.make((req) =>

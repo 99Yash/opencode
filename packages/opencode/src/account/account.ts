@@ -399,7 +399,7 @@ const layer: Layer.Layer<Service, never, AccountRepo.Service | HttpClient.HttpCl
       return new Login({
         code: parsed.device_code,
         user: parsed.user_code,
-        url: `${normalizedServer}${parsed.verification_uri_complete}`,
+        url: new URL(parsed.verification_uri_complete, normalizedServer).href,
         server: normalizedServer,
         expiry: parsed.expires_in,
         interval: parsed.interval,
