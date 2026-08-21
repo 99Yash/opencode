@@ -139,15 +139,15 @@ export type Attachment = {
   readonly detach: () => void
 }
 
-export class UnavailableError extends Schema.TaggedErrorClass<UnavailableError>()("PersistentPty.UnavailableError", {
+export class UnavailableError extends Schema.TaggedError<UnavailableError>()("PersistentPty.UnavailableError", {
   message: Schema.String,
 }) {}
 
-export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("PersistentPty.NotFoundError", {
+export class NotFoundError extends Schema.TaggedError<NotFoundError>()("PersistentPty.NotFoundError", {
   ptyID: Pty.ID,
 }) {}
 
-export class GroupNotFoundError extends Schema.TaggedErrorClass<GroupNotFoundError>()(
+export class GroupNotFoundError extends Schema.TaggedError<GroupNotFoundError>()(
   "PersistentPty.GroupNotFoundError",
   { groupID: Group.ID },
 ) {}
