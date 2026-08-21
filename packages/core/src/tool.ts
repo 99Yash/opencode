@@ -37,6 +37,7 @@ export interface Snapshot {
     readonly agent: Agent.ID
     readonly messageID: SessionMessage.ID
     readonly call: ToolCall
+    readonly userRequests?: Tool.Context["userRequests"]
     readonly progress?: (update: Tool.Metadata) => Effect.Effect<void>
   }) => Effect.Effect<Tool.Result & { readonly content: ReadonlyArray<Tool.Content> }, Tool.Error>
 }
@@ -234,6 +235,7 @@ const layer = Layer.effect(
                 readonly agent: Agent.ID
                 readonly messageID: SessionMessage.ID
                 readonly call: ToolCall
+                readonly userRequests?: Tool.Context["userRequests"]
                 readonly progress?: (update: Tool.Metadata) => Effect.Effect<void>
               }) => {
                 const context: Tool.Context = {
@@ -241,6 +243,7 @@ const layer = Layer.effect(
                   agent: input.agent,
                   messageID: input.messageID,
                   id: Tool.CallID.make(input.call.id),
+                  ...(input.userRequests?.length ? { userRequests: input.userRequests } : {}),
                   progress: input.progress ?? (() => Effect.void),
                 }
                 if (input.call.name === "execute" && codemodeTool)

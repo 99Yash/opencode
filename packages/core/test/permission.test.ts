@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Cause, DateTime, Deferred, Effect, Fiber, Layer, Schema } from "effect"
+import { Cause, Deferred, Effect, Fiber, Layer } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -14,10 +14,8 @@ import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
-import { SessionMessage } from "@opencode-ai/core/session/message"
-import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { Skill } from "@opencode-ai/core/skill"
 import { eq } from "drizzle-orm"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
@@ -171,46 +169,6 @@ describe("Permission", () => {
       const blocked = yield* service.assert(assertion()).pipe(Effect.flip)
       expect(blocked).toBeInstanceOf(Permission.BlockedError)
       expect(yield* service.list()).toEqual([])
-    }),
-  )
-
-  it.effect("allows a denied skill explicitly activated by the user", () =>
-    Effect.gen(function* () {
-      yield* setup([{ action: "skill", resource: "*", effect: "deny" }])
-      const { db } = yield* Database.Service
-      const message = SessionMessage.User.make({
-        id: SessionMessage.ID.make("msg_user_skill"),
-        type: "user",
-        text: "Use @effect",
-        skills: [
-          {
-            id: Skill.ID.make("effect"),
-            name: Skill.Name.make("Effect"),
-            mention: { start: 4, end: 11, text: "@effect" },
-          },
-        ],
-        time: { created: DateTime.makeUnsafe(0) },
-      })
-      const encoded = Schema.encodeSync(SessionMessage.User)(message)
-      const { id: _, type: __, ...data } = encoded
-      const row: typeof SessionMessageTable.$inferInsert = {
-        id: message.id,
-        session_id: Session.ID.make("ses_test"),
-        type: message.type,
-        seq: 0,
-        time_created: 0,
-        data: data as typeof SessionMessageTable.$inferInsert.data,
-      }
-      yield* db.insert(SessionMessageTable).values(row).run().pipe(Effect.orDie)
-
-      const service = yield* Permission.Service
-      const source = { type: "tool" as const, messageID: SessionMessage.ID.make("msg_assistant"), id: "call_skill" }
-      expect(yield* service.ask(assertion({ action: "skill", resources: ["effect"], source }))).toMatchObject({
-        effect: "allow",
-      })
-      expect(yield* service.ask(assertion({ action: "skill", resources: ["other"], source }))).toMatchObject({
-        effect: "deny",
-      })
     }),
   )
 

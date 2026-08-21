@@ -185,17 +185,8 @@ const layer = Layer.effect(
       return rules.filter((rule) => Wildcard.match(input.action, rule.action))
     }
 
-    const userActivated = Effect.fnUntraced(function* (input: AssertInput) {
-      if (input.action !== "skill" || input.source?.type !== "tool" || input.resources.length === 0) return false
-      const user = (yield* sessions.context(input.sessionID).pipe(Effect.orDie)).findLast(
-        (message) => message.type === "user",
-      )
-      return input.resources.every((resource) => user?.skills?.some((skill) => skill.id === resource) === true)
-    })
-
     const evaluateInput = Effect.fnUntraced(function* (input: AssertInput) {
       const rules = yield* configured(input.sessionID, input.agent)
-      if (yield* userActivated(input)) return { effect: "allow" as const, rules }
       if (denied(input, rules)) return { effect: "deny" as const, rules }
       const all = [...rules, ...(yield* savedRules())]
       const effects = input.resources.map((resource) => evaluate(input.action, resource, all).effect)
