@@ -33,6 +33,7 @@ import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { SessionInbox } from "@opencode-ai/schema/session-inbox"
 import { Shell } from "@opencode-ai/schema/shell"
 import { Skill } from "@opencode-ai/schema/skill"
+import { Snapshot } from "@opencode-ai/schema/snapshot"
 import { Vcs } from "@opencode-ai/schema/vcs"
 import { WebSearch } from "@opencode-ai/schema/websearch"
 import { Workspace } from "@opencode-ai/schema/workspace"
@@ -83,12 +84,30 @@ const effectTypeReferences = [
   typeReference("PositiveInt", "@opencode-ai/schema/schema", PositiveInt),
   typeReference("RelativePath", "@opencode-ai/schema/schema", RelativePath),
 ]
+const promiseTypeReferences = [
+  ...effectTypeReferences.filter(
+    (reference) =>
+      reference.name.endsWith("ID") &&
+      !reference.name.startsWith("Project.") &&
+      !reference.name.startsWith("Pty."),
+  ),
+  ...namespaceTypes("ProjectSchema", "@opencode-ai/schema/project", Project, "Project").filter((reference) =>
+    reference.name.endsWith("ID"),
+  ),
+  ...namespaceTypes("PtySchema", "@opencode-ai/schema/pty", Pty, "Pty").filter((reference) =>
+    reference.name.endsWith("ID"),
+  ),
+  ...namespaceTypes("Snapshot", "@opencode-ai/schema/snapshot", Snapshot).filter((reference) =>
+    reference.name.endsWith("ID"),
+  ),
+]
 
 await Effect.runPromise(
   Effect.all(
     [
       write(
         emitPromise(promiseContract, {
+          typeReferences: promiseTypeReferences,
           mutableOutputs: true,
         }),
         fileURLToPath(new URL("../src/promise/generated", import.meta.url)),
@@ -118,16 +137,17 @@ await Effect.runPromise(
   ).pipe(Effect.provide(NodeFileSystem.layer)),
 )
 
-function namespaceTypes(namespace: string, module: string, values: object) {
+function namespaceTypes(namespace: string, module: string, values: object, importedName = namespace) {
   return Object.entries(values).flatMap(([name, schema]) =>
-    Schema.isSchema(schema) ? [typeReference(`${namespace}.${name}`, module, schema)] : [],
+    Schema.isSchema(schema) ? [typeReference(`${namespace}.${name}`, module, schema, importedName)] : [],
   )
 }
 
-function typeReference(name: string, module: string, schema: Schema.Top) {
+function typeReference(name: string, module: string, schema: Schema.Top, importedName = name.split(".")[0]) {
+  const namespace = name.split(".")[0]
   return {
     schema,
     name,
-    import: `import type { ${name.split(".")[0]} } from ${JSON.stringify(module)}`,
+    import: `import type { ${importedName === namespace ? importedName : `${importedName} as ${namespace}`} } from ${JSON.stringify(module)}`,
   }
 }

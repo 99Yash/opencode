@@ -1,8 +1,46 @@
+import type { Skill } from "@opencode-ai/schema/skill"
+
+import type { Model } from "@opencode-ai/schema/model"
+
+import type { Provider } from "@opencode-ai/schema/provider"
+
+import type { SessionMessage } from "@opencode-ai/schema/session-message"
+
+import type { Workspace } from "@opencode-ai/schema/workspace"
+
+import type { Integration } from "@opencode-ai/schema/integration"
+
+import type { Credential } from "@opencode-ai/schema/credential"
+
+import type { Project as ProjectSchema } from "@opencode-ai/schema/project"
+
+import type { PermissionSaved } from "@opencode-ai/schema/permission-saved"
+
+import type { Pty as PtySchema } from "@opencode-ai/schema/pty"
+
+import type { WebSearch } from "@opencode-ai/schema/websearch"
+
+import type { Agent } from "@opencode-ai/schema/agent"
+
+import type { Plugin } from "@opencode-ai/schema/plugin"
+
+import type { Event } from "@opencode-ai/schema/event"
+
+import type { Session } from "@opencode-ai/schema/session"
+
+import type { Snapshot } from "@opencode-ai/schema/snapshot"
+
+import type { Shell } from "@opencode-ai/schema/shell"
+
+import type { Form } from "@opencode-ai/schema/form"
+
+import type { Permission } from "@opencode-ai/schema/permission"
+
 export type JsonValue = null | boolean | number | string | Array<JsonValue> | { [key: string]: JsonValue }
 
 export type ServiceHealth = { healthy: true; version: string; pid: number }
 
-export type ModelRef = { id: string; providerID: string; variant?: string }
+export type ModelRef = { id: Model.ID; providerID: Provider.ID; variant?: Model.VariantID }
 
 export type ProviderSettings = { [x: string]: any }
 
@@ -16,11 +54,13 @@ export type PluginSource =
   | { type: "local"; path: string }
   | { type: "sdk" }
 
-export type SessionForkBoundary = { type: "before"; messageID: string } | { type: "through"; messageID: string }
+export type SessionForkBoundary =
+  | { type: "before"; messageID: SessionMessage.ID }
+  | { type: "through"; messageID: SessionMessage.ID }
 
 export type MoneyUSD = number
 
-export type LocationRef = { directory: string; workspaceID?: string }
+export type LocationRef = { directory: string; workspaceID?: Workspace.ID }
 
 export type FileDiffInfo = {
   file: string
@@ -72,11 +112,16 @@ export type FormOption = { value: string; label: string; description?: string }
 
 export type FormExternalField = { key: string; type: "external"; url: string; title?: string; description?: string }
 
-export type IntegrationCommandMethod = { id: string; type: "command"; label: string; command: Array<string> }
+export type IntegrationCommandMethod = {
+  id: Integration.MethodID
+  type: "command"
+  label: string
+  command: Array<string>
+}
 
 export type IntegrationEnvMethod = { type: "env"; names: Array<string> }
 
-export type ConnectionCredentialInfo = { type: "credential"; id: string; label: string }
+export type ConnectionCredentialInfo = { type: "credential"; id: Credential.ID; label: string }
 
 export type ConnectionEnvInfo = { type: "env"; name: string }
 
@@ -108,18 +153,23 @@ export type ProjectCommands = { start?: string }
 
 export type ProjectTime = { created: number; updated: number; initialized?: number }
 
-export type ProjectCurrent = { id: string; directory: string; canonical: string }
+export type ProjectCurrent = { id: ProjectSchema.ID; directory: string; canonical: string }
 
 export type FormValue = string | number | boolean | Array<string>
 
 export type PermissionSource = { type: "tool"; messageID: string; id: string }
 
-export type PermissionSavedInfo = { id: string; projectID: string; action: string; resource: string }
+export type PermissionSavedInfo = {
+  id: PermissionSaved.ID
+  projectID: ProjectSchema.ID
+  action: string
+  resource: string
+}
 
 export type FileSystemEntry = { path: string; type: "file" | "directory" }
 
 export type SkillInfo = {
-  id: string
+  id: Skill.ID
   name: string
   description?: string
   slash?: boolean
@@ -131,7 +181,7 @@ export type SkillInfo = {
 export type PermissionReply = "once" | "always" | "reject"
 
 export type Pty = {
-  id: string
+  id: PtySchema.ID
   title: string
   command: string
   args: Array<string>
@@ -181,7 +231,7 @@ export type VcsFileStatus = {
   status: "added" | "deleted" | "modified"
 }
 
-export type WebSearchProvider = { id: string; name: string }
+export type WebSearchProvider = { id: WebSearch.ID; name: string }
 
 export type WebSearchResult = { url: string; title?: string; content?: string; time: { published?: number } }
 
@@ -189,7 +239,7 @@ export type CommandInfo = {
   name: string
   template: string
   description?: string
-  agent?: string
+  agent?: Agent.ID
   model?: ModelRef
   subtask?: boolean
 }
@@ -203,8 +253,8 @@ export type ProviderRequest = {
 export type PermissionRule = { action: string; resource: string; effect: PermissionEffect }
 
 export type PluginInfo =
-  | { id: string; source: PluginSource; status: "active"; tui: boolean }
-  | { id?: string; source: PluginSource; status: "failed"; error: string; tui: boolean }
+  | { id: Plugin.ID; source: PluginSource; status: "active"; tui: boolean }
+  | { id?: Plugin.ID; source: PluginSource; status: "failed"; error: string; tui: boolean }
 
 export type TokenUsageInfo = {
   input: number
@@ -213,10 +263,10 @@ export type TokenUsageInfo = {
   cache: { read: number; write: number }
 }
 
-export type SessionInboxMovePayload = { location: LocationRef; projectID: string; subpath?: string }
+export type SessionInboxMovePayload = { location: LocationRef; projectID: ProjectSchema.ID; subpath?: string }
 
 export type V2EventServerConnected = {
-  id: string
+  id: Event.ID
   metadata?: { [x: string]: any } | undefined
   location?: LocationRef | undefined
   type: "server.connected"
@@ -246,15 +296,15 @@ export type PromptFileAttachment = {
 
 export type PromptAgentAttachment = { name: string; mention?: PromptMention }
 
-export type PromptSkillAttachment = { id: string; name: string; mention?: PromptMention }
+export type PromptSkillAttachment = { id: Skill.ID; name: string; mention?: PromptMention }
 
 export type ToolFileContent = { type: "file"; uri: string; mime: string; name?: string | null }
 
 export type SessionMessageAssistantRetry = { attempt: number; at: number; error: SessionStructuredError }
 
 export type SessionInboxCompaction = {
-  id: string
-  sessionID: string
+  id: SessionMessage.ID
+  sessionID: Session.ID
   timeCreated: number
   type: "compaction"
   payload: SessionInboxCompactionPayload
@@ -264,258 +314,275 @@ export type SessionInboxCompaction = {
 export type InstructionEntryInfo = { key: InstructionEntryKey; value: JsonValue }
 
 export type SessionCreated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.created"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    projectID: string
+    sessionID: Session.ID
+    projectID: ProjectSchema.ID
     location: LocationRef
     subpath?: string
-    parentID?: string
+    parentID?: Session.ID
     slug: string
     title?: string
-    agent?: string
+    agent?: Agent.ID
     model?: ModelRef
     version: string
   }
 }
 
 export type SessionAgentSelected = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.agent.selected"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; agent: string; previous?: string }
+  data: { sessionID: Session.ID; agent: Agent.ID; previous?: Agent.ID }
 }
 
 export type SessionModelSelected = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.model.selected"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; model: ModelRef; previous?: ModelRef }
+  data: { sessionID: Session.ID; model: ModelRef; previous?: ModelRef }
 }
 
 export type SessionMoved = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.moved"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; location: LocationRef; projectID: string; subpath?: string }
+  data: { sessionID: Session.ID; location: LocationRef; projectID: ProjectSchema.ID; subpath?: string }
 }
 
 export type SessionRenamed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.renamed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; title: string }
+  data: { sessionID: Session.ID; title: string }
 }
 
 export type SessionDeleted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.deleted"
   durable: { aggregateID: string; seq: number; version: 2 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type SessionForked = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.forked"
   durable: { aggregateID: string; seq: number; version: 2 }
   location?: LocationRef
-  data: { sessionID: string; parentID: string; boundary: SessionForkBoundary; instructions?: { [x: string]: string } }
+  data: {
+    sessionID: Session.ID
+    parentID: Session.ID
+    boundary: SessionForkBoundary
+    instructions?: { [x: string]: string }
+  }
 }
 
 export type SessionInboxDelivered = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.inbox.delivered"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; inboxID: string }
+  data: { sessionID: Session.ID; inboxID: SessionMessage.ID }
 }
 
 export type SessionInboxCancelled = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.inbox.cancelled"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; inboxID: string }
+  data: { sessionID: Session.ID; inboxID: SessionMessage.ID }
 }
 
 export type SessionInboxDeliveryChanged = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.inbox.delivery.changed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; inboxID: string; delivery: SessionInboxDelivery }
+  data: { sessionID: Session.ID; inboxID: SessionMessage.ID; delivery: SessionInboxDelivery }
 }
 
 export type SessionExecutionStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.execution.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type SessionExecutionSucceeded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.execution.succeeded"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type SessionExecutionFailed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.execution.failed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; error: SessionStructuredError }
+  data: { sessionID: Session.ID; error: SessionStructuredError }
 }
 
 export type SessionExecutionInterrupted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.execution.interrupted"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; reason: "user" | "shutdown" | "superseded" }
+  data: { sessionID: Session.ID; reason: "user" | "shutdown" | "superseded" }
 }
 
 export type SessionInstructionsUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.instructions.updated"
   durable: { aggregateID: string; seq: number; version: 2 }
   location?: LocationRef
-  data: { sessionID: string; delta: { [x: string]: string | "removed" }; text?: string }
+  data: { sessionID: Session.ID; delta: { [x: string]: string | "removed" }; text?: string }
 }
 
 export type SessionSynthetic = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.synthetic"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; text: string; description?: string; metadata?: { [x: string]: any } }
+  data: { sessionID: Session.ID; text: string; description?: string; metadata?: { [x: string]: any } }
 }
 
 export type SessionSkillActivated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.skill.activated"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; id: string; name: string; text: string }
+  data: { sessionID: Session.ID; id: Skill.ID; name: string; text: string }
 }
 
 export type SessionStepStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.step.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; agent: string; model: ModelRef; snapshot?: string }
+  data: {
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
+    agent: Agent.ID
+    model: ModelRef
+    snapshot?: Snapshot.ID
+  }
 }
 
 export type SessionTextStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.text.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; ordinal: number }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; ordinal: number }
 }
 
 export type SessionToolInputStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.input.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; id: string; name: string }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; id: string; name: string }
 }
 
 export type SessionToolInputEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.input.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; id: string; text: string }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; id: string; text: string }
 }
 
 export type SessionRetryScheduled = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.retry.scheduled"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; attempt: number; at: number; error: SessionStructuredError }
+  data: {
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
+    attempt: number
+    at: number
+    error: SessionStructuredError
+  }
 }
 
 export type SessionRevertCleared = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.revert.cleared"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type SessionRevertCommitted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.revert.committed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; to: string }
+  data: { sessionID: Session.ID; to: SessionMessage.ID }
 }
 
 export type ModelsDevRefreshed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "models-dev.refreshed"
@@ -524,7 +591,7 @@ export type ModelsDevRefreshed = {
 }
 
 export type IntegrationUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "integration.updated"
@@ -533,16 +600,16 @@ export type IntegrationUpdated = {
 }
 
 export type IntegrationConnectionUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "integration.connection.updated"
   location?: LocationRef
-  data: { integrationID: string }
+  data: { integrationID: Integration.ID }
 }
 
 export type CatalogUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "catalog.updated"
@@ -551,7 +618,7 @@ export type CatalogUpdated = {
 }
 
 export type AgentUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "agent.updated"
@@ -560,52 +627,57 @@ export type AgentUpdated = {
 }
 
 export type SessionTextDelta = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.text.delta"
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; ordinal: number; delta: string }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; ordinal: number; delta: string }
 }
 
 export type SessionReasoningDelta = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.reasoning.delta"
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; ordinal: number; delta: string }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; ordinal: number; delta: string }
 }
 
 export type SessionToolInputDelta = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.input.delta"
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; id: string; delta: string }
+  data: { sessionID: Session.ID; assistantMessageID: SessionMessage.ID; id: string; delta: string }
 }
 
 export type SessionToolProgress = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.progress"
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; id: string; metadata: { [x: string]: JsonValue } }
+  data: {
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
+    id: string
+    metadata: { [x: string]: JsonValue }
+  }
 }
 
 export type SessionCompactionDelta = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.compaction.delta"
   location?: LocationRef
-  data: { sessionID: string; text: string }
+  data: { sessionID: Session.ID; text: string }
 }
 
 export type FilesystemChanged = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "filesystem.changed"
@@ -614,7 +686,7 @@ export type FilesystemChanged = {
 }
 
 export type ReferenceUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "reference.updated"
@@ -623,16 +695,16 @@ export type ReferenceUpdated = {
 }
 
 export type PluginAdded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "plugin.added"
   location?: LocationRef
-  data: { id: string }
+  data: { id: Plugin.ID }
 }
 
 export type PluginUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "plugin.updated"
@@ -641,26 +713,26 @@ export type PluginUpdated = {
 }
 
 export type WorktreeUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "worktree.updated"
   location?: LocationRef
-  data: { projectID: string }
+  data: { projectID: ProjectSchema.ID }
 }
 
 export type WorktreeResolved = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "worktree.resolved"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { projectID: string; directory: string; previous: string }
+  data: { projectID: ProjectSchema.ID; directory: string; previous: ProjectSchema.ID }
 }
 
 export type CommandUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "command.updated"
@@ -669,7 +741,7 @@ export type CommandUpdated = {
 }
 
 export type ConfigUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "config.updated"
@@ -678,7 +750,7 @@ export type ConfigUpdated = {
 }
 
 export type SkillUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "skill.updated"
@@ -687,52 +759,52 @@ export type SkillUpdated = {
 }
 
 export type PtyExited = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "pty.exited"
   location?: LocationRef
-  data: { id: string; exitCode: number }
+  data: { id: PtySchema.ID; exitCode: number }
 }
 
 export type PtyDeleted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "pty.deleted"
   location?: LocationRef
-  data: { id: string }
+  data: { id: PtySchema.ID }
 }
 
 export type ShellExited = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "shell.exited"
   location?: LocationRef
-  data: { id: string; exit?: number; status: "running" | "exited" | "timeout" | "killed" }
+  data: { id: Shell.ID; exit?: number; status: "running" | "exited" | "timeout" | "killed" }
 }
 
 export type ShellDeleted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "shell.deleted"
   location?: LocationRef
-  data: { id: string }
+  data: { id: Shell.ID }
 }
 
 export type FormCancelled = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "form.cancelled"
   location?: LocationRef
-  data: { id: string; sessionID: string }
+  data: { id: Form.ID; sessionID: string }
 }
 
 export type WebsearchUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "websearch.updated"
@@ -741,16 +813,16 @@ export type WebsearchUpdated = {
 }
 
 export type SessionIdle = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.idle"
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type TuiPromptAppend = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "tui.prompt.append"
@@ -759,7 +831,7 @@ export type TuiPromptAppend = {
 }
 
 export type TuiCommandExecute = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "tui.command.execute"
@@ -788,7 +860,7 @@ export type TuiCommandExecute = {
 }
 
 export type TuiToastShow = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "tui.toast.show"
@@ -802,16 +874,16 @@ export type TuiToastShow = {
 }
 
 export type TuiSessionSelect = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "tui.session.select"
   location?: LocationRef
-  data: { sessionID: string }
+  data: { sessionID: Session.ID }
 }
 
 export type InstallationUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "installation.updated"
@@ -820,7 +892,7 @@ export type InstallationUpdated = {
 }
 
 export type InstallationUpdateAvailable = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "installation.update-available"
@@ -829,7 +901,7 @@ export type InstallationUpdateAvailable = {
 }
 
 export type VcsBranchUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "vcs.branch.updated"
@@ -838,7 +910,7 @@ export type VcsBranchUpdated = {
 }
 
 export type McpStatusChanged = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "mcp.status.changed"
@@ -847,7 +919,7 @@ export type McpStatusChanged = {
 }
 
 export type McpResourcesChanged = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "mcp.resources.changed"
@@ -856,7 +928,7 @@ export type McpResourcesChanged = {
 }
 
 export type ShellInfo = {
-  id: string
+  id: Shell.ID
   status: "running" | "exited" | "timeout" | "killed"
   command: string
   cwd: string
@@ -869,7 +941,7 @@ export type ShellInfo = {
 }
 
 export type ShellInfo1 = {
-  id: string
+  id: Shell.ID
   status: "running" | "exited" | "timeout" | "killed"
   command: string
   cwd: string
@@ -882,15 +954,15 @@ export type ShellInfo1 = {
 }
 
 export type SessionTextEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.text.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     ordinal: number
     text: string
     state?: SessionMessageProviderState1
@@ -898,25 +970,30 @@ export type SessionTextEnded = {
 }
 
 export type SessionReasoningStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.reasoning.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; assistantMessageID: string; ordinal: number; state?: SessionMessageProviderState1 }
+  data: {
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
+    ordinal: number
+    state?: SessionMessageProviderState1
+  }
 }
 
 export type SessionReasoningEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.reasoning.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     ordinal: number
     text: string
     state?: SessionMessageProviderState1
@@ -924,15 +1001,15 @@ export type SessionReasoningEnded = {
 }
 
 export type SessionToolCalled = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.called"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     id: string
     input: { [x: string]: any }
     executed: boolean
@@ -943,33 +1020,33 @@ export type SessionToolCalled = {
 export type ToolContent1 = ToolTextContent | ToolFileContent1
 
 export type SessionCompactionStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.compaction.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; reason: "auto" | "manual"; recent: string; inputID?: string }
+  data: { sessionID: Session.ID; reason: "auto" | "manual"; recent: string; inputID?: SessionMessage.ID }
 }
 
 export type SessionCompactionEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.compaction.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; reason: "auto" | "manual"; text: string; recent: string }
+  data: { sessionID: Session.ID; reason: "auto" | "manual"; text: string; recent: string }
 }
 
 export type SessionCompactionFailed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.compaction.failed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; reason: "auto" | "manual"; error: SessionStructuredError; inputID?: string }
+  data: { sessionID: Session.ID; reason: "auto" | "manual"; error: SessionStructuredError; inputID?: SessionMessage.ID }
 }
 
 export type ModelCompatibility = {
@@ -979,15 +1056,15 @@ export type ModelCompatibility = {
 }
 
 export type ModelVariant = {
-  id: string
+  id: Model.VariantID
   settings?: { [x: string]: any }
   headers?: { [x: string]: string }
   body?: { [x: string]: any }
 }
 
 export type ProviderInfo = {
-  id: string
-  integrationID?: string
+  id: Provider.ID
+  integrationID?: Integration.ID
   name: string
   activation: "auto" | "enabled" | "disabled"
   package: string
@@ -1015,13 +1092,13 @@ export type ConnectionInfo = ConnectionCredentialInfo | ConnectionEnvInfo
 export type McpServer = {
   name: string
   status: McpStatusConnected | McpStatusPending | McpStatusDisabled | McpStatusFailed | McpStatusNeedsAuth
-  integrationID?: string
+  integrationID?: Integration.ID
 }
 
 export type McpResourceCatalog = { resources: Array<McpResource>; templates: Array<McpResourceTemplate> }
 
 export type Project = {
-  id: string
+  id: ProjectSchema.ID
   canonical: string
   vcs?: ProjectVcs
   name?: string
@@ -1034,8 +1111,8 @@ export type Project = {
 export type FormAnswer = { [x: string]: FormValue }
 
 export type PermissionRequest = {
-  id: string
-  sessionID: string
+  id: Permission.ID
+  sessionID: Session.ID
   action: string
   resources: Array<string>
   save?: Array<string>
@@ -1044,14 +1121,14 @@ export type PermissionRequest = {
 }
 
 export type PermissionAsked = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "permission.asked"
   location?: LocationRef
   data: {
-    id: string
-    sessionID: string
+    id: Permission.ID
+    sessionID: Session.ID
     action: string
     resources: Array<string>
     save?: Array<string>
@@ -1061,16 +1138,16 @@ export type PermissionAsked = {
 }
 
 export type PermissionReplied = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "permission.replied"
   location?: LocationRef
-  data: { sessionID: string; requestID: string; reply: PermissionReply }
+  data: { sessionID: Session.ID; requestID: Permission.ID; reply: PermissionReply }
 }
 
 export type PtyCreated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "pty.created"
@@ -1079,7 +1156,7 @@ export type PtyCreated = {
 }
 
 export type PtyUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "pty.updated"
@@ -1088,12 +1165,12 @@ export type PtyUpdated = {
 }
 
 export type SessionStatus2 = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.status"
   location?: LocationRef
-  data: { sessionID: string; status: SessionStatus }
+  data: { sessionID: Session.ID; status: SessionStatus }
 }
 
 export type ReferenceSource = ReferenceLocalSource | ReferenceGitSource
@@ -1105,87 +1182,92 @@ export type VcsInfo = { branch: VcsBranch }
 export type PermissionRuleset = Array<PermissionRule>
 
 export type SessionStepEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.step.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     finish: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
     rawFinish?: string
     providerState?: SessionMessageProviderState1
     cost: MoneyUSD
     tokens: TokenUsageInfo
-    snapshot?: string
+    snapshot?: Snapshot.ID
     files?: Array<string>
   }
 }
 
 export type SessionUsageRecorded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.usage.recorded"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; source: "title" | "compaction"; cost: MoneyUSD; tokens: TokenUsageInfo }
+  data: { sessionID: Session.ID; source: "title" | "compaction"; cost: MoneyUSD; tokens: TokenUsageInfo }
 }
 
 export type SessionUsageUpdated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.usage.updated"
   location?: LocationRef
-  data: { sessionID: string; cost: MoneyUSD; tokens: TokenUsageInfo }
+  data: { sessionID: Session.ID; cost: MoneyUSD; tokens: TokenUsageInfo }
 }
 
 export type SessionStepFailed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.step.failed"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     error: SessionStructuredError
     finish?: "content-filter"
     rawFinish?: string
     providerState?: SessionMessageProviderState1
     cost?: MoneyUSD
     tokens?: TokenUsageInfo
-    snapshot?: string
+    snapshot?: Snapshot.ID
     files?: Array<string>
   }
 }
 
 export type SessionInboxMove = {
-  id: string
-  sessionID: string
+  id: SessionMessage.ID
+  sessionID: Session.ID
   timeCreated: number
   type: "move"
   payload: SessionInboxMovePayload
   delivery: SessionInboxDelivery
 }
 
-export type SessionRevert = { messageID: string; partID?: string; snapshot?: string; files?: Array<FileDiffInfo> }
+export type SessionRevert = {
+  messageID: SessionMessage.ID
+  partID?: string
+  snapshot?: Snapshot.ID
+  files?: Array<FileDiffInfo>
+}
 
 export type SessionMessageAgentSelected = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   type: "agent-switched"
-  agent: string
-  previous?: string
+  agent: Agent.ID
+  previous?: Agent.ID
 }
 
 export type SessionMessageModelSelected = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   type: "model-switched"
@@ -1194,18 +1276,18 @@ export type SessionMessageModelSelected = {
 }
 
 export type SessionMessageLocationSwitched = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   type: "location-switched"
   location: LocationRef
-  projectID?: string
+  projectID?: ProjectSchema.ID
   subpath?: string
-  previous?: { location: LocationRef; projectID?: string; subpath?: string }
+  previous?: { location: LocationRef; projectID?: ProjectSchema.ID; subpath?: string }
 }
 
 export type SessionMessageSynthetic = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   text: string
@@ -1214,7 +1296,7 @@ export type SessionMessageSynthetic = {
 }
 
 export type SessionMessageSystem = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   type: "system"
@@ -1223,21 +1305,21 @@ export type SessionMessageSystem = {
 }
 
 export type SessionMessageSkill = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   type: "skill"
-  skill: string
+  skill: Skill.ID
   name: string
   text: string
 }
 
 export type SessionMessageShell = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number; completed?: number }
   type: "shell"
-  shellID: string
+  shellID: Shell.ID
   command: string
   status: "running" | "exited" | "timeout" | "killed"
   exit?: number | ("Infinity" | "-Infinity" | "NaN")
@@ -1246,7 +1328,7 @@ export type SessionMessageShell = {
 
 export type SessionMessageCompactionRunning = {
   type: "compaction"
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   status: "running"
@@ -1257,7 +1339,7 @@ export type SessionMessageCompactionRunning = {
 
 export type SessionMessageCompactionCompleted = {
   type: "compaction"
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   status: "completed"
@@ -1268,7 +1350,7 @@ export type SessionMessageCompactionCompleted = {
 
 export type SessionMessageCompactionFailed = {
   type: "compaction"
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   status: "failed"
@@ -1286,8 +1368,8 @@ export type SessionMessageAssistantReasoning = {
 }
 
 export type SessionInboxSynthetic = {
-  id: string
-  sessionID: string
+  id: SessionMessage.ID
+  sessionID: Session.ID
   timeCreated: number
   type: "synthetic"
   payload: SessionInboxSyntheticPayload
@@ -1303,31 +1385,31 @@ export type FormWhen = {
 export type ToolContent = ToolTextContent | ToolFileContent
 
 export type SessionShellStarted = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.shell.started"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; shell: ShellInfo }
+  data: { sessionID: Session.ID; shell: ShellInfo }
 }
 
 export type SessionShellEnded = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.shell.ended"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
   data: {
-    sessionID: string
+    sessionID: Session.ID
     shell: ShellInfo
     output: { output: string; cursor: number; size: number; truncated: boolean }
   }
 }
 
 export type ShellCreated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "shell.created"
@@ -1336,15 +1418,15 @@ export type ShellCreated = {
 }
 
 export type SessionToolSuccess = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.success"
   durable: { aggregateID: string; seq: number; version: 2 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     id: string
     content: [ToolContent1, ...Array<ToolContent1>]
     metadata?: { [x: string]: JsonValue }
@@ -1354,15 +1436,15 @@ export type SessionToolSuccess = {
 }
 
 export type SessionToolFailed = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.tool.failed"
   durable: { aggregateID: string; seq: number; version: 2 }
   location?: LocationRef
   data: {
-    sessionID: string
-    assistantMessageID: string
+    sessionID: Session.ID
+    assistantMessageID: SessionMessage.ID
     id: string
     error: SessionStructuredError
     content?: [ToolContent1, ...Array<ToolContent1>]
@@ -1373,9 +1455,9 @@ export type SessionToolFailed = {
 }
 
 export type ModelInfo = {
-  id: string
-  modelID: string
-  providerID: string
+  id: Model.ID
+  modelID: Model.ID
+  providerID: Provider.ID
   family?: string
   name: string
   compatibility?: ModelCompatibility
@@ -1395,12 +1477,12 @@ export type ModelInfo = {
 export type FormState = { status: "pending" } | { status: "answered"; answer: FormAnswer } | { status: "cancelled" }
 
 export type FormReplied = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "form.replied"
   location?: LocationRef
-  data: { id: string; sessionID: string; answer: FormAnswer }
+  data: { id: Form.ID; sessionID: string; answer: FormAnswer }
 }
 
 export type FormStringField1 = {
@@ -1477,7 +1559,7 @@ export type ReferenceInfo = {
 }
 
 export type AgentInfo = {
-  id: string
+  id: Agent.ID
   name: string
   model?: ModelRef
   request: ProviderRequest
@@ -1497,7 +1579,7 @@ export type ConfigEntry =
       info: {
         $schema?: string
         shell?: string
-        model?: string | { providerID: string; model: string; variant?: string }
+        model?: string | { providerID: Provider.ID; model: Model.ID; variant?: Model.VariantID }
         default_agent?: string
         autoupdate?: boolean | "notify"
         share?: "manual" | "auto" | "disabled"
@@ -1506,7 +1588,7 @@ export type ConfigEntry =
         permissions?: PermissionRuleset
         agents?: {
           [x: string]: {
-            model?: string | { providerID: string; model: string; variant?: string }
+            model?: string | { providerID: Provider.ID; model: Model.ID; variant?: Model.VariantID }
             request?: { headers?: { [x: string]: string }; body?: { [x: string]: JsonValue } }
             system?: string
             description?: string
@@ -1586,7 +1668,7 @@ export type ConfigEntry =
             template: string
             description?: string
             agent?: string
-            model?: string | { providerID: string; model: string; variant?: string }
+            model?: string | { providerID: Provider.ID; model: Model.ID; variant?: Model.VariantID }
             subtask?: boolean
           }
         }
@@ -1597,7 +1679,7 @@ export type ConfigEntry =
             | { repository: string; branch?: string; description?: string; hidden?: boolean }
             | { path: string; description?: string; hidden?: boolean }
         }
-        websearch?: false | { provider: "random" | (string & {}) }
+        websearch?: false | { provider: "random" | WebSearch.ID }
         plugins?: Array<string | { package: string; options?: { [x: string]: JsonValue } }>
         warming?: boolean | { prompt?: string; interval?: string; duration?: string }
         providers?: {
@@ -1610,7 +1692,7 @@ export type ConfigEntry =
             body?: { [x: string]: JsonValue }
             models?: {
               [x: string]: {
-                modelID?: string
+                modelID?: Model.ID
                 family?: string
                 name?: string
                 compatibility?: ModelCompatibility
@@ -1620,7 +1702,7 @@ export type ConfigEntry =
                 body?: { [x: string]: JsonValue }
                 capabilities?: ModelCapabilities
                 variants?: Array<{
-                  id: string
+                  id: Model.VariantID
                   settings?: { [x: string]: JsonValue }
                   headers?: { [x: string]: string }
                   body?: { [x: string]: JsonValue }
@@ -1656,11 +1738,11 @@ export type ConfigEntry =
   | { type: "claude"; path: string }
 
 export type SessionInfo = {
-  id: string
-  parentID?: string
-  fork?: { sessionID: string; boundary: SessionForkBoundary }
-  projectID: string
-  agent?: string
+  id: Session.ID
+  parentID?: Session.ID
+  fork?: { sessionID: Session.ID; boundary: SessionForkBoundary }
+  projectID: ProjectSchema.ID
+  agent?: Agent.ID
   model?: ModelRef
   cost: MoneyUSD
   tokens: TokenUsageInfo
@@ -1672,13 +1754,13 @@ export type SessionInfo = {
 }
 
 export type SessionRevertStaged = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.revert.staged"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; revert: SessionRevert }
+  data: { sessionID: Session.ID; revert: SessionRevert }
 }
 
 export type SessionMessageCompaction =
@@ -1687,7 +1769,7 @@ export type SessionMessageCompaction =
   | SessionMessageCompactionFailed
 
 export type SessionMessageUser = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number }
   text: string
@@ -1745,7 +1827,7 @@ export type IntegrationAttemptStatus =
     }
 
 export type IntegrationCommandAttempt = {
-  attemptID: string
+  attemptID: Integration.AttemptID
   time: { created: number | ("Infinity" | "-Infinity" | "NaN"); expires: number | ("Infinity" | "-Infinity" | "NaN") }
 }
 
@@ -1807,8 +1889,8 @@ export type FormField1 =
 export type SessionsResponse = { data: Array<SessionInfo>; cursor: { previous?: string | null; next?: string | null } }
 
 export type SessionInboxUser = {
-  id: string
-  sessionID: string
+  id: SessionMessage.ID
+  sessionID: Session.ID
   timeCreated: number
   type: "user"
   payload: SessionInboxUserPayload
@@ -1906,13 +1988,13 @@ export type FormFields2 = [FormField1, ...Array<FormField1>]
 export type SessionInboxInfo = SessionInboxUser | SessionInboxSynthetic | SessionInboxCompaction | SessionInboxMove
 
 export type SessionInboxEnqueued = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "session.inbox.enqueued"
   durable: { aggregateID: string; seq: number; version: 1 }
   location?: LocationRef
-  data: { sessionID: string; inboxID: string; item: SessionInboxItem }
+  data: { sessionID: Session.ID; inboxID: SessionMessage.ID; item: SessionInboxItem }
 }
 
 export type FormField =
@@ -1924,14 +2006,14 @@ export type FormField =
   | FormExternalField
 
 export type SessionMessageAssistant = {
-  id: string
+  id: SessionMessage.ID
   metadata?: { [x: string]: JsonValue }
   time: { created: number; completed?: number }
   type: "assistant"
-  agent: string
+  agent: Agent.ID
   model: ModelRef
   content: Array<SessionMessageAssistantText | SessionMessageAssistantReasoning | SessionMessageAssistantTool>
-  snapshot?: { start?: string; end?: string; files?: Array<string> }
+  snapshot?: { start?: Snapshot.ID; end?: Snapshot.ID; files?: Array<string> }
   finish?: "stop" | "length" | "tool-calls" | "content-filter" | "error" | "unknown"
   rawFinish?: string
   providerState?: SessionMessageProviderState
@@ -1941,7 +2023,7 @@ export type SessionMessageAssistant = {
   retry?: SessionMessageAssistantRetry
 }
 
-export type FormInfo1 = { id: string; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields2 }
+export type FormInfo1 = { id: Form.ID; sessionID: string; title: string; metadata?: FormMetadata1; fields: FormFields2 }
 
 export type SessionEventDurable =
   | SessionCreated
@@ -2000,7 +2082,7 @@ export type SessionMessageInfo =
   | SessionMessageCompaction
 
 export type FormCreated = {
-  id: string
+  id: Event.ID
   created: number
   metadata?: { [x: string]: any }
   type: "form.created"
@@ -2010,11 +2092,11 @@ export type FormCreated = {
 
 export type SessionLogItem = SessionEventDurable | EventLogSynced
 
-export type IntegrationOAuthMethod = { id: string; type: "oauth"; label: string; form?: FormFields }
+export type IntegrationOAuthMethod = { id: Integration.MethodID; type: "oauth"; label: string; form?: FormFields }
 
 export type IntegrationKeyMethod = { type: "key"; label?: string; form?: FormFields }
 
-export type FormInfo = { id: string; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
+export type FormInfo = { id: Form.ID; sessionID: string; title: string; metadata?: FormMetadata; fields: FormFields }
 
 export type SessionTransferData = { info: SessionInfo; messages: Array<SessionMessageInfo> }
 
@@ -2116,7 +2198,7 @@ export type IntegrationMethod =
   | IntegrationEnvMethod
 
 export type IntegrationInfo = {
-  id: string
+  id: Integration.ID
   name: string
   methods: Array<IntegrationMethod>
   connections: Array<ConnectionInfo>
@@ -2198,7 +2280,7 @@ export const isCommandEvaluationError = (value: unknown): value is CommandEvalua
 
 export type SkillNotFoundError = {
   readonly _tag: "SkillNotFoundError"
-  readonly skill: string
+  readonly skill: Skill.ID
   readonly message: string
 }
 export const isSkillNotFoundError = (value: unknown): value is SkillNotFoundError =>
@@ -2307,8 +2389,8 @@ export type LocationGetInput = {
 
 export type LocationGetOutput = {
   directory: string
-  workspaceID?: string
-  project: { id: string; directory: string; canonical: string }
+  workspaceID?: Workspace.ID
+  project: { id: ProjectSchema.ID; directory: string; canonical: string }
 }
 
 export type AgentListInput = {
@@ -2318,7 +2400,11 @@ export type AgentListInput = {
 }
 
 export type AgentListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<AgentInfo>
 }
 
@@ -2330,7 +2416,11 @@ export type AgentGetInput = {
 }
 
 export type AgentGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: AgentInfo
 }
 
@@ -2341,7 +2431,11 @@ export type PluginListInput = {
 }
 
 export type PluginListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<PluginInfo>
 }
 
@@ -3305,7 +3399,7 @@ export type SessionExportInput = {
 
 export type SessionExportOutput = { data: SessionTransferData }["data"]
 
-export type SessionActiveOutput = { data: { [x: string]: SessionActive } }["data"]
+export type SessionActiveOutput = { data: { [x: Session.ID]: SessionActive } }["data"]
 
 export type SessionGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
@@ -4008,7 +4102,11 @@ export type ModelListInput = {
 }
 
 export type ModelListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<ModelInfo>
 }
 
@@ -4019,7 +4117,11 @@ export type ModelDefaultInput = {
 }
 
 export type ModelDefaultOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: ModelInfo | null
 }
 
@@ -4046,7 +4148,11 @@ export type ProviderListInput = {
 }
 
 export type ProviderListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<ProviderInfo>
 }
 
@@ -4058,7 +4164,11 @@ export type ProviderGetInput = {
 }
 
 export type ProviderGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: ProviderInfo
 }
 
@@ -4069,7 +4179,11 @@ export type IntegrationListInput = {
 }
 
 export type IntegrationListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<IntegrationInfo>
 }
 
@@ -4081,7 +4195,11 @@ export type IntegrationGetInput = {
 }
 
 export type IntegrationGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: IntegrationInfo | null
 }
 
@@ -4141,9 +4259,13 @@ export type IntegrationOauthConnectInput = {
 }
 
 export type IntegrationOauthConnectOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: {
-    attemptID: string
+    attemptID: Integration.AttemptID
     url: string
     instructions: string
     mode: "auto" | "code"
@@ -4160,7 +4282,11 @@ export type IntegrationOauthStatusInput = {
 }
 
 export type IntegrationOauthStatusOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: IntegrationAttemptStatus
 }
 
@@ -4195,7 +4321,11 @@ export type IntegrationCommandConnectInput = {
 }
 
 export type IntegrationCommandConnectOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: IntegrationCommandAttempt
 }
 
@@ -4208,7 +4338,11 @@ export type IntegrationCommandStatusInput = {
 }
 
 export type IntegrationCommandStatusOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: IntegrationCommandAttemptStatus
 }
 
@@ -4229,7 +4363,11 @@ export type McpListInput = {
 }
 
 export type McpListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<McpServer>
 }
 
@@ -4305,7 +4443,11 @@ export type McpResourceCatalogInput = {
 }
 
 export type McpResourceCatalogOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: McpResourceCatalog
 }
 
@@ -4345,7 +4487,11 @@ export type FormRequestListInput = {
 }
 
 export type FormRequestListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<FormInfo>
 }
 
@@ -5201,7 +5347,11 @@ export type PermissionRequestListInput = {
 }
 
 export type PermissionRequestListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<PermissionRequest>
 }
 
@@ -5280,7 +5430,7 @@ export type PermissionCreateInput = {
   }["agent"]
 }
 
-export type PermissionCreateOutput = { data: { id: string; effect: PermissionEffect } }["data"]
+export type PermissionCreateOutput = { data: { id: Permission.ID; effect: PermissionEffect } }["data"]
 
 export type PermissionListInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
@@ -5323,7 +5473,11 @@ export type FileListInput = {
 }
 
 export type FileListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<FileSystemEntry>
 }
 
@@ -5355,7 +5509,11 @@ export type FileFindInput = {
 }
 
 export type FileFindOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<FileSystemEntry>
 }
 
@@ -5366,7 +5524,11 @@ export type CommandListInput = {
 }
 
 export type CommandListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<CommandInfo>
 }
 
@@ -5377,7 +5539,11 @@ export type SkillListInput = {
 }
 
 export type SkillListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<SkillInfo>
 }
 
@@ -5390,7 +5556,11 @@ export type PtyListInput = {
 }
 
 export type PtyListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<Pty>
 }
 
@@ -5436,7 +5606,11 @@ export type PtyCreateInput = {
 }
 
 export type PtyCreateOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Pty
 }
 
@@ -5448,7 +5622,11 @@ export type PtyGetInput = {
 }
 
 export type PtyGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Pty
 }
 
@@ -5465,7 +5643,11 @@ export type PtyUpdateInput = {
 }
 
 export type PtyUpdateOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Pty
 }
 
@@ -5487,7 +5669,11 @@ export type PtyConnectTokenInput = {
 }
 
 export type PtyConnectTokenOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: PtyTicketConnectToken
 }
 
@@ -5498,7 +5684,11 @@ export type ShellListInput = {
 }
 
 export type ShellListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<ShellInfo1>
 }
 
@@ -5533,7 +5723,11 @@ export type ShellCreateInput = {
 }
 
 export type ShellCreateOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: ShellInfo1
 }
 
@@ -5545,7 +5739,11 @@ export type ShellGetInput = {
 }
 
 export type ShellGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: ShellInfo1
 }
 
@@ -5558,7 +5756,11 @@ export type ShellTimeoutInput = {
 }
 
 export type ShellTimeoutOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: ShellInfo1
 }
 
@@ -5582,7 +5784,11 @@ export type ShellOutputInput = {
 }
 
 export type ShellOutputOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: { output: string; cursor: number; size: number; truncated: boolean }
 }
 
@@ -5602,7 +5808,11 @@ export type ReferenceListInput = {
 }
 
 export type ReferenceListOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<ReferenceInfo>
 }
 
@@ -5659,7 +5869,11 @@ export type VcsGetInput = {
 }
 
 export type VcsGetOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: VcsInfo
 }
 
@@ -5670,7 +5884,11 @@ export type VcsStatusInput = {
 }
 
 export type VcsStatusOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<VcsFileStatus>
 }
 
@@ -5693,7 +5911,11 @@ export type VcsDiffInput = {
 }
 
 export type VcsDiffOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<FileDiffInfo>
 }
 
@@ -5719,7 +5941,11 @@ export type WebsearchProvidersInput = {
 }
 
 export type WebsearchProvidersOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
   data: Array<WebSearchProvider>
 }
 
@@ -5732,8 +5958,12 @@ export type WebsearchQueryInput = {
 }
 
 export type WebsearchQueryOutput = {
-  location: { directory: string; workspaceID?: string; project: { id: string; directory: string; canonical: string } }
-  data: { providerID: string; results: Array<WebSearchResult> }
+  location: {
+    directory: string
+    workspaceID?: Workspace.ID
+    project: { id: ProjectSchema.ID; directory: string; canonical: string }
+  }
+  data: { providerID: WebSearch.ID; results: Array<WebSearchResult> }
 }
 
 export type ConfigGetInput = {

@@ -59,8 +59,6 @@ export type CreateDataInput = {
   }
 }
 
-const messageIDFromEvent = (eventID: string) => eventID.replace(/^evt_/, "msg_")
-
 // Global MCP elicitations temporarily use "global" instead of a real session ID, so the
 // server cannot recover their Location when settling them. Preserve the event Location
 // until MCP elicitations carry session ownership.
@@ -490,7 +488,7 @@ export function createData(config: CreateDataInput) {
           setStore("session", "info", event.data.sessionID, "agent", event.data.agent)
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "agent-switched",
             agent: event.data.agent,
             previous,
@@ -505,14 +503,14 @@ export function createData(config: CreateDataInput) {
         if (!store.session.message[event.data.sessionID]) return
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "model-switched",
             model: event.data.model,
             time: { created: event.created },
           })
         })
         void api()
-          .session.message({ sessionID: event.data.sessionID, messageID: messageIDFromEvent(event.id) })
+          .session.message({ sessionID: event.data.sessionID, messageID: SessionMessage.ID.fromEvent(event.id) })
           .then((item) => {
             message.update(event.data.sessionID, (draft, index) => {
               const position = index.get(item.id)
@@ -542,7 +540,7 @@ export function createData(config: CreateDataInput) {
           setStore("session", "info", event.data.sessionID, "subpath", event.data.subpath)
           message.update(event.data.sessionID, (draft, index) => {
             message.append(draft, index, {
-              id: messageIDFromEvent(event.id),
+              id: SessionMessage.ID.fromEvent(event.id),
               type: "location-switched",
               location: event.data.location,
               projectID: event.data.projectID,
@@ -602,7 +600,7 @@ export function createData(config: CreateDataInput) {
         if (updateText === undefined) return
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "system",
             text: updateText,
             description: `Instructions updated: ${Object.keys(event.data.delta).join(", ")}`,
@@ -614,7 +612,7 @@ export function createData(config: CreateDataInput) {
       case "session.synthetic":
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "synthetic",
             text: event.data.text,
             description: event.data.description,
@@ -626,7 +624,7 @@ export function createData(config: CreateDataInput) {
       case "session.shell.started":
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "shell",
             shellID: event.data.shell.id,
             command: event.data.shell.command,
@@ -864,7 +862,7 @@ export function createData(config: CreateDataInput) {
         if (event.data.inputID) removePending(event.data.sessionID, event.data.inputID)
         message.update(event.data.sessionID, (draft, index) => {
           message.append(draft, index, {
-            id: event.data.inputID ?? messageIDFromEvent(event.id),
+            id: event.data.inputID ?? SessionMessage.ID.fromEvent(event.id),
             type: "compaction",
             status: "running",
             reason: event.data.reason,
@@ -927,7 +925,7 @@ export function createData(config: CreateDataInput) {
             return
           }
           message.append(draft, index, {
-            id: messageIDFromEvent(event.id),
+            id: SessionMessage.ID.fromEvent(event.id),
             type: "compaction",
             status: "completed",
             reason: event.data.reason,
@@ -943,7 +941,7 @@ export function createData(config: CreateDataInput) {
           const position = draft.findLastIndex((item) => item.type === "compaction" && item.status === "running")
           const current = draft[position]
           const failed: Extract<SessionMessageInfo, { type: "compaction"; status: "failed" }> = {
-            id: current?.id ?? event.data.inputID ?? messageIDFromEvent(event.id),
+            id: current?.id ?? event.data.inputID ?? SessionMessage.ID.fromEvent(event.id),
             type: "compaction",
             status: "failed",
             reason: event.data.reason ?? "manual",
@@ -1214,8 +1212,8 @@ export function createData(config: CreateDataInput) {
         if (fresh) {
           outbox.add(id)
           admitLocal({
-            id,
-            sessionID: request.sessionID,
+            id: SessionMessage.ID.make(id),
+            sessionID: SessionID.make(request.sessionID),
             timeCreated: Date.now(),
             type: "user",
             delivery: request.delivery ?? "steer",

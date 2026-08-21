@@ -24,6 +24,23 @@ test("generated Effect API names canonical and composed outputs", async () => {
   expect(source).not.toContain("HttpApiClient.ForApi")
 })
 
+test("generated Promise outputs preserve canonical ID brands", async () => {
+  const source = await Bun.file(new URL("../src/promise/generated/types.ts", import.meta.url)).text()
+
+  expect(source).toContain('import type { Project as ProjectSchema } from "@opencode-ai/schema/project"')
+  expect(source).toContain('import type { Pty as PtySchema } from "@opencode-ai/schema/pty"')
+  expect(source).toContain("export type SessionInfo = {")
+  expect(source).toContain("id: Session.ID")
+  expect(source).toContain("export type Project = {")
+  expect(source).toContain("id: ProjectSchema.ID")
+  expect(source).toContain("export type Pty = {")
+  expect(source).toContain("id: PtySchema.ID")
+  expect(source).toContain(
+    'export type SessionGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }',
+  )
+  expect(source).not.toContain("Brand.Brand")
+})
+
 test("shared DTO schemas construct and decode plain objects", () => {
   const made = Prompt.make({ text: "hello" })
   const decoded = Schema.decodeUnknownSync(Prompt)({ text: "hello" })
