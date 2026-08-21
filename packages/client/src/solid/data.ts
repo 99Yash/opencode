@@ -34,6 +34,8 @@ import type {
   OpenCodeClient,
   WebSearchProvider,
 } from "../promise"
+import { Agent } from "@opencode-ai/schema/agent"
+import { ProjectID } from "@opencode-ai/schema/project-id"
 import { Worktree } from "@opencode-ai/schema/worktree"
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
@@ -1162,9 +1164,9 @@ export function createData(config: CreateDataInput) {
           const now = Date.now()
           sessionOutbox.add(id)
           result.session.remember({
-            id,
-            projectID: projectID ?? store.location[locationKey(location)]?.info?.project.id ?? "",
-            agent: payload.agent,
+            id: SessionID.make(id),
+            projectID: ProjectID.make(projectID ?? store.location[locationKey(location)]?.info?.project.id ?? ""),
+            agent: payload.agent === undefined ? undefined : Agent.ID.make(payload.agent),
             model: payload.model,
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },

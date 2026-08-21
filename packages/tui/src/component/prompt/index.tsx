@@ -33,6 +33,8 @@ import { createStore, produce, unwrap } from "solid-js/store"
 import { emptyPrompt, usePromptHistory, type PromptInfo, type PromptPartRef } from "../../prompt/history"
 import { saveDraft, takeDraft } from "./draft-stash"
 import { Skill } from "@opencode-ai/schema/skill"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 import { computePromptTraits } from "../../prompt/traits"
 import { expandPastedTextPlaceholders, expandTrackedPastedText } from "../../prompt/part"
 import { usePromptStash } from "../../prompt/stash"
@@ -1219,9 +1221,9 @@ export function Prompt(props: PromptProps) {
         location: directory ? { directory } : location,
         agent: agent.id,
         model: {
-          providerID: selection.providerID,
-          id: selection.modelID,
-          variant,
+          providerID: Provider.ID.make(selection.providerID),
+          id: Model.ID.make(selection.modelID),
+          variant: variant === undefined ? undefined : Model.VariantID.make(variant),
         },
       })
       sessionID = created.id
