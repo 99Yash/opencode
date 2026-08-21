@@ -71,7 +71,7 @@ describe("Anthropic Messages route", () => {
               { type: "text", text: " \n\t" },
             ]),
             Message.assistant([
-              { type: "text", text: "", providerMetadata: { anthropic: { itemId: "ignored" } } },
+              { type: "text", text: "" },
               { type: "reasoning", text: "", providerMetadata: { anthropic: { signature: "sig_1" } } },
               ToolCallPart.make({ id: "call_1", name: "lookup", input: {} }),
             ]),
@@ -111,6 +111,23 @@ describe("Anthropic Messages route", () => {
           { role: "user", content: [{ type: "text", text: "Continue." }] },
         ],
       })
+    }),
+  )
+
+  it.effect("rejects empty assistant text carrying provider state", () =>
+    Effect.gen(function* () {
+      const error = yield* compileRequest(
+        LLM.request({
+          model,
+          messages: [
+            Message.assistant([
+              { type: "text", text: "", providerMetadata: { anthropic: { encryptedContent: "opaque" } } },
+            ]),
+          ],
+        }),
+      ).pipe(Effect.flip)
+
+      expect(error.message).toContain("cannot discard provider state attached to empty assistant text")
     }),
   )
 

@@ -554,7 +554,11 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       const content: AnthropicAssistantBlock[] = []
       for (const part of message.content) {
         if (part.type === "text") {
-          if (!hasText(part)) continue
+          if (!hasText(part)) {
+            if (part.providerMetadata !== undefined && Object.keys(part.providerMetadata).length > 0)
+              return yield* invalid("Anthropic Messages cannot discard provider state attached to empty assistant text")
+            continue
+          }
           content.push({ type: "text", text: part.text, cache_control: cacheControl(breakpoints, part.cache) })
           continue
         }
