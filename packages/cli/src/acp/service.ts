@@ -8,6 +8,7 @@ import {
   type SessionMessageInfo,
   type SkillInfo,
 } from "@opencode-ai/client/promise"
+import { Model } from "@opencode-ai/schema/model"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
 import type {
   AgentSideConnection,
@@ -286,7 +287,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
           )
           if (!model?.variants.some((variant) => variant.id === params.value))
             throw new ACPError.InvalidEffortError({ effort: params.value })
-          state.model = { ...state.model, variant: params.value }
+          state.model = { ...state.model, variant: Model.VariantID.make(params.value) }
           await input.client.session.switchModel({ sessionID: state.id, model: state.model })
           break
         }
@@ -456,7 +457,11 @@ function requireModel(catalog: Catalog, modelID: string): ModelRef {
   if (!model) throw new ACPError.InvalidModelError({ providerId: selected.model.providerID, modelId: modelID })
   if (selected.variant && !model.variants.some((variant) => variant.id === selected.variant))
     throw new ACPError.InvalidEffortError({ effort: selected.variant })
-  return { providerID: model.providerID, id: model.id, variant: selected.variant }
+  return {
+    providerID: model.providerID,
+    id: model.id,
+    variant: selected.variant === undefined ? undefined : Model.VariantID.make(selected.variant),
+  }
 }
 
 async function selectMode(client: OpenCodeClient, state: Attached, modeID: string) {

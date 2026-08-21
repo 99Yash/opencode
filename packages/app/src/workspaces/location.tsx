@@ -1,5 +1,6 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import type { LocationGetOutput, LocationRef } from "@opencode-ai/client/promise"
+import type { Workspace } from "@opencode-ai/schema/workspace"
 import { type Accessor, createEffect, createMemo, createSignal } from "solid-js"
 import { type LocationContext, useServerSDK } from "@/runtime/server/client"
 import { useData } from "@/runtime/server/current"
@@ -13,13 +14,19 @@ export type WorkspaceLocation = LocationContext & {
 
 const context = createSimpleContext({
   name: "Location",
-  init: (props: { directory: string | Accessor<string>; workspaceID?: string | Accessor<string | undefined> }) => {
+  init: (props: {
+    directory: string | Accessor<string>
+    workspaceID?: Workspace.ID | Accessor<Workspace.ID | undefined>
+  }) => {
     const serverSDK = useServerSDK()
     const data = useData()
-    const ref = createMemo(() => ({
-      directory: typeof props.directory === "function" ? props.directory() : props.directory,
-      workspaceID: typeof props.workspaceID === "function" ? props.workspaceID() : props.workspaceID,
-    }))
+    const ref = createMemo<LocationRef>(() => {
+      const workspaceID = typeof props.workspaceID === "function" ? props.workspaceID() : props.workspaceID
+      return {
+        directory: typeof props.directory === "function" ? props.directory() : props.directory,
+        workspaceID,
+      }
+    })
     const current = createMemo(() => data.location.info(ref()))
     const [error, setError] = createSignal<{ readonly location: LocationRef; readonly cause: unknown }>()
     let generation = 0

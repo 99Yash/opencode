@@ -1,5 +1,7 @@
 import { Service, type Endpoint } from "@opencode-ai/client/effect/service"
 import { ClientError, OpenCode, type OpenCodeClient } from "@opencode-ai/client/promise"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 import type { MiniFrontendInput } from "@opencode-ai/tui/mini"
 import { setTimeout } from "node:timers/promises"
 import { readStdin } from "./util/io"
@@ -94,7 +96,11 @@ export async function runMini(input: MiniCommandInput) {
           agent: next.agent,
           environment,
           model: next.model
-            ? { providerID: next.model.providerID, id: next.model.modelID, variant: next.variant }
+            ? {
+                providerID: Provider.ID.make(next.model.providerID),
+                id: Model.ID.make(next.model.modelID),
+                variant: next.variant === undefined ? undefined : Model.VariantID.make(next.variant),
+              }
             : undefined,
           prepare,
           signal,

@@ -8,6 +8,8 @@ import {
 } from "@/session/composer/session-composer-region"
 import { SessionPanelFrame, SessionRouteFrame } from "@/session/session-frame"
 import type { FormInfo, PermissionRequest, SessionStatus } from "@opencode-ai/client/promise"
+import { Form } from "@opencode-ai/schema/form"
+import { Session } from "@opencode-ai/schema/session"
 import type { SessionDocument } from "@opencode-ai/session-ui/document"
 import { CurrentSessionProviders, STORY_MODEL } from "@opencode-ai/session-ui/storybook"
 import { SessionTimeline } from "@opencode-ai/session-ui/timeline"
@@ -103,7 +105,7 @@ export function SessionPreview(props: SessionPreviewProps) {
                 props.request?.type === "question"
                   ? {
                       type: "question",
-                      value: { ...props.request.value, id: `${props.request.value.id}:${revision}` },
+                      value: { ...props.request.value, id: Form.ID.make(`${props.request.value.id}:${revision}`) },
                     }
                   : props.request
               }
@@ -213,7 +215,7 @@ function SessionSurfaceState(props: SessionPreviewProps & { onReset: () => void 
     openParent: () => setState("activity", "Opened the parent Session locally"),
     setPromptRef() {},
     setDockRef() {},
-    parentID: () => props.child?.parentID,
+    parentID: () => (props.child ? Session.ID.make(props.child.parentID) : undefined),
     child: () => !!props.child,
     showComposer: () => true,
     handoffPrompt: () => undefined,

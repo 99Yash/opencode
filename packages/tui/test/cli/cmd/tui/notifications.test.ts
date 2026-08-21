@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import Notifications from "../../../../src/feature-plugins/system/notifications"
 import type { OpenCodeEvent, PermissionAsked } from "@opencode-ai/client"
 import type { AttentionNotifyOptions, Context } from "@opencode-ai/plugin/tui/context"
+import { wire, type Wire } from "../../../fixture/wire"
 
 type Session = { id: string; title: string; parentID?: string }
 
@@ -52,30 +53,31 @@ async function setup() {
 
   return {
     notifications,
-    emit(event: OpenCodeEvent) {
-      for (const handler of handlers.get(event.type) ?? []) handler(event)
+    emit(event: Wire<OpenCodeEvent>) {
+      const value = wire<OpenCodeEvent>(event)
+      for (const handler of handlers.get(value.type) ?? []) handler(value)
     },
   }
 }
 
 function form(id: string, sessionID = "session"): Extract<OpenCodeEvent, { type: "form.created" }>["data"]["form"] {
-  return {
+  return wire<Extract<OpenCodeEvent, { type: "form.created" }>["data"]["form"]>({
     id,
     sessionID,
     title: "Input requested",
     fields: [{ key: "authorization", type: "external", url: "https://example.com" }],
-  }
+  })
 }
 
 function permission(id: string, sessionID = "session"): PermissionAsked["data"] {
-  return {
+  return wire<PermissionAsked["data"]>({
     id,
     sessionID,
     action: "edit",
     resources: [],
     metadata: {},
     save: [],
-  }
+  })
 }
 
 function durable(sessionID: string): { aggregateID: string; seq: number; version: 1 } {
@@ -83,27 +85,27 @@ function durable(sessionID: string): { aggregateID: string; seq: number; version
 }
 
 function executionStarted(id: string, sessionID = "session"): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     id,
     created: 0,
     type: "session.execution.started",
     durable: durable(sessionID),
     data: { sessionID },
-  }
+  })
 }
 
 function executionSucceeded(id: string, sessionID = "session"): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     id,
     created: 0,
     type: "session.execution.succeeded",
     durable: durable(sessionID),
     data: { sessionID },
-  }
+  })
 }
 
 function executionFailed(id: string, sessionID = "session"): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     id,
     created: 0,
     type: "session.execution.failed",
@@ -112,7 +114,7 @@ function executionFailed(id: string, sessionID = "session"): OpenCodeEvent {
       sessionID,
       error: { type: "unknown", message: "boom" },
     },
-  }
+  })
 }
 
 const formNotification: AttentionNotifyOptions = {

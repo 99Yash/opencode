@@ -462,7 +462,11 @@ function resolveTypeReferences(input: ReadonlyArray<TypeReference>) {
     }
     names.set(name, value)
   }
-  return { names, asts, brands }
+  return {
+    names,
+    asts,
+    brands: new Map([...brands].sort(([left], [right]) => right.length - left.length)),
+  }
 }
 
 function hasRootBrand(ast: SchemaAST.AST) {
@@ -1161,7 +1165,10 @@ function structuralType(
   }
   const type = expand(document.codes[0].Type)
   return preserveStringSuggestions(
-    (brandReferences === undefined || imports === undefined ? type : replaceBrandReferences(type, brandReferences, imports))
+    (brandReferences === undefined || imports === undefined
+      ? type
+      : replaceBrandReferences(type, brandReferences, imports)
+    )
       .replaceAll(/ & Brand\.Brand<"[^"]+">/g, "")
       .replaceAll("Schema.Json", "JsonValue"),
   )

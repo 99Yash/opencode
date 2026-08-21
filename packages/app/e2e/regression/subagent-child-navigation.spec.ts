@@ -1,6 +1,7 @@
 import { base64Encode } from "@opencode-ai/util/encode"
 import type { OpenCodeEvent, SessionMessageInfo } from "@opencode-ai/client/promise"
 import { expect, test, type Page } from "@playwright/test"
+import { wire, type Wire } from "@/test-fixture"
 import { currentSession, mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
@@ -56,14 +57,15 @@ test("shows the not found fallback when the viewed session is deleted", async ({
   await openChildFromParent(page)
   await expectSessionTitle(page, taskDescription)
 
-  events.push({
+  const deleted: Wire<OpenCodeEvent> = {
     id: "evt_session_deleted",
     created: 1700000003000,
     type: "session.deleted",
     durable: { aggregateID: childID, seq: 1, version: 2 },
     location: { directory },
     data: { sessionID: childID },
-  })
+  }
+  events.push(wire<OpenCodeEvent>(deleted))
 
   await expect(page.getByText("This session cannot be found")).toBeVisible()
   await expect(page.getByRole("button", { name: "Close Tab" })).toBeVisible()
@@ -148,7 +150,7 @@ function childSession() {
 function parentMessages(): SessionMessageInfo[] {
   const userID = "msg_user_0001"
   const assistantID = "msg_assistant_0001"
-  return [
+  return wire<SessionMessageInfo[]>([
     {
       id: userID,
       type: "user",
@@ -179,7 +181,7 @@ function parentMessages(): SessionMessageInfo[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 async function configurePage(page: Page) {

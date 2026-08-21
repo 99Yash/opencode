@@ -1,25 +1,30 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageAssistant, SessionMessageInfo, SessionMessageUser } from "@opencode-ai/client/promise"
 import { loadOlderTimeline, selectUserMessages, selectVisibleUserMessages } from "./model"
+import { wire } from "../../test-fixture"
+import { SessionMessage } from "@opencode-ai/schema/session-message"
 
-const user = (id: string): SessionMessageUser => ({ id, type: "user", text: id, time: { created: 1 } })
-const assistant = (id: string): SessionMessageAssistant => ({
-  id,
-  type: "assistant",
-  agent: "build",
-  model: { id: "model", providerID: "provider" },
-  content: [],
-  time: { created: 1 },
-})
+const user = (id: string) => wire<SessionMessageUser>({ id, type: "user", text: id, time: { created: 1 } })
+const assistant = (id: string) =>
+  wire<SessionMessageAssistant>({
+    id,
+    type: "assistant",
+    agent: "build",
+    model: { id: "model", providerID: "provider" },
+    content: [],
+    time: { created: 1 },
+  })
 
 describe("timeline model", () => {
   test("selects users and applies the revert boundary", () => {
     const messages: SessionMessageInfo[] = [user("msg_a"), assistant("msg_ab"), user("msg_b"), user("msg_c")]
     const users = selectUserMessages(messages)
 
-    expect(users.map((message) => message.id)).toEqual(["msg_a", "msg_b", "msg_c"])
-    expect(selectVisibleUserMessages(users, "msg_b").map((message) => message.id)).toEqual(["msg_a"])
-    expect(selectVisibleUserMessages(users.slice(2), "msg_b")).toEqual([])
+    expect(users.map((message) => String(message.id))).toEqual(["msg_a", "msg_b", "msg_c"])
+    expect(
+      selectVisibleUserMessages(users, SessionMessage.ID.make("msg_b")).map((message) => String(message.id)),
+    ).toEqual(["msg_a"])
+    expect(selectVisibleUserMessages(users.slice(2), SessionMessage.ID.make("msg_b"))).toEqual([])
     expect(selectVisibleUserMessages(users)).toBe(users)
   })
 

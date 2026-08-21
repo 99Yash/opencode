@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
+import type { SessionInfo } from "@opencode-ai/client"
 import { testRender } from "@opentui/solid"
 import { onMount } from "solid-js"
 import { DialogOpen, DialogOpenKey, loadDialogOpen } from "../../../src/component/dialog-open"
@@ -20,9 +21,10 @@ import { emptyThemeSource } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { tmpdir } from "../../fixture/fixture"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
+import { wire } from "../../fixture/wire"
 
 test("selecting an unhydrated session preserves its location", async () => {
-  const remote = { directory: "/tmp/opencode/remote", workspaceID: "ws_remote" }
+  const remote = wire<SessionInfo["location"]>({ directory: "/tmp/opencode/remote", workspaceID: "ws_remote" })
   const fixture = await renderOpen((url) => {
     if (url.pathname !== "/api/session") return undefined
     return json({
@@ -57,7 +59,7 @@ test("selecting an unhydrated session preserves its location", async () => {
 
 test("finds and opens an exact session ID outside the recent list", async () => {
   const sessionID = "ses_04a7a3d82ffeIphUJgd3SnEqiv"
-  const remote = { directory: "/tmp/opencode/archive", workspaceID: "ws_archive" }
+  const remote = wire<SessionInfo["location"]>({ directory: "/tmp/opencode/archive", workspaceID: "ws_archive" })
   const fixture = await renderOpen((url) => {
     if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
     if (url.pathname !== `/api/session/${sessionID}`) return undefined

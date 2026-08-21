@@ -16,6 +16,9 @@
 // the synthetic tool parts through the same callbacks used by the live footer.
 import path from "path"
 import type { JsonValue, SessionMessageAssistantTool } from "@opencode-ai/client/promise"
+import { Form } from "@opencode-ai/schema/form"
+import { Permission } from "@opencode-ai/schema/permission"
+import { Session } from "@opencode-ai/schema/session"
 import { parseSlashHead } from "../prompt/parse"
 import { writeSessionOutput } from "./stream"
 import { toolCommit, toolFinalPhase } from "./stream-v2.subagent"
@@ -251,7 +254,7 @@ function split(text: string): string[] {
   return [text.slice(0, size), text.slice(size, size * 2), text.slice(size * 2)]
 }
 
-function take(state: State, key: "msg" | "part" | "call" | "perm", prefix: string): string {
+function take(state: State, key: "msg" | "part" | "call", prefix: string): string {
   state[key] += 1
   return `demo_${prefix}_${state[key]}`
 }
@@ -358,7 +361,7 @@ function startTool(state: State, ref: Ref, metadata: Record<string, JsonValue> =
 function askPermission(state: State, item: Permit): void {
   const tool = startTool(state, item.ref)
 
-  const id = take(state, "perm", "perm")
+  const id = `per_demo_${++state.perm}`
   state.perms.set(id, {
     ref: item.ref,
     done: item.done,
@@ -367,8 +370,8 @@ function askPermission(state: State, item: Permit): void {
   present(state, [], {
     type: "permission",
     request: {
-      id,
-      sessionID: state.id,
+      id: Permission.ID.make(id),
+      sessionID: Session.ID.make(state.id),
       action: item.permission,
       resources: item.patterns,
       metadata: item.metadata ?? {},
@@ -800,7 +803,7 @@ function emitForm(state: State, kind: FormKind = "question"): void {
   startTool(state, ref)
   state.form++
   const request: MiniFormRequest = {
-    id: `frm_demo_${state.form}`,
+    id: Form.ID.make(`frm_demo_${state.form}`),
     sessionID: state.id,
     title: form.title,
     metadata:

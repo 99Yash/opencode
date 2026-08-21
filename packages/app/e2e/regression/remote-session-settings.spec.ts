@@ -1,5 +1,7 @@
 import { base64Encode } from "@opencode-ai/util/encode"
+import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import { expect, test, type Page, type Route } from "@playwright/test"
+import { wire, type Wire } from "@/test-fixture"
 import { installSseTransport } from "../utils/sse-transport"
 import { currentSession } from "../utils/mock-server"
 
@@ -81,7 +83,7 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
   await expect(page.getByRole("heading", { name: sessionB.title, exact: true })).toBeVisible()
   await transport.waitForConnection()
 
-  await transport.send({
+  const backgroundPermission: Wire<OpenCodeEvent> = {
     id: "evt_permission_background_a",
     created: 1700000001000,
     type: "permission.asked",
@@ -94,7 +96,8 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
       metadata: {},
       save: [],
     },
-  })
+  }
+  await transport.send(wire<OpenCodeEvent>(backgroundPermission))
 
   await expect
     .poll(() => permissionResponses)
@@ -108,7 +111,7 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
       },
     ])
 
-  await transport.send({
+  const childBackgroundPermission: Wire<OpenCodeEvent> = {
     id: "evt_permission_background_a_child",
     created: 1700000002000,
     type: "permission.asked",
@@ -121,7 +124,8 @@ test("auto-accept responds for an unfocused server session", async ({ page }) =>
       metadata: {},
       save: [],
     },
-  })
+  }
+  await transport.send(wire<OpenCodeEvent>(childBackgroundPermission))
 
   await expect
     .poll(() => permissionResponses)

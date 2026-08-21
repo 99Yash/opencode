@@ -1,16 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageInfo } from "@opencode-ai/client"
 import { lastAssistantWithUsage, sessionFamily } from "../../src/util/session"
+import { wire } from "../fixture/wire"
 
-const assistant = (id: string, input: number): SessionMessageInfo => ({
-  id,
-  type: "assistant",
-  agent: "build",
-  model: { id: "model", providerID: "provider" },
-  content: [],
-  tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: 0 },
-})
+const assistant = (id: string, input: number) =>
+  wire<SessionMessageInfo>({
+    id,
+    type: "assistant",
+    agent: "build",
+    model: { id: "model", providerID: "provider" },
+    content: [],
+    tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 0 },
+  })
 
 describe("util.session", () => {
   test("flattens nested subagents from any session in the family", () => {
@@ -44,7 +46,7 @@ describe("util.session", () => {
   })
 
   test("resets usage at completed compaction until the next assistant reports it", () => {
-    const compaction: SessionMessageInfo = {
+    const compaction = wire<SessionMessageInfo>({
       id: "msg_compaction",
       type: "compaction",
       status: "completed",
@@ -52,7 +54,7 @@ describe("util.session", () => {
       summary: "Current state",
       recent: "",
       time: { created: 0 },
-    }
+    })
     const messages = [assistant("msg_before", 30), compaction]
 
     expect(lastAssistantWithUsage(messages)).toBeUndefined()

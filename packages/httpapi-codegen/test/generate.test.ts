@@ -566,11 +566,7 @@ describe("HttpApiCodegen.generate", () => {
     const SessionID = Schema.String.pipe(Schema.brand("SessionID"))
     const InternalID = Schema.String.pipe(Schema.brand("InternalID"))
     const Info = Schema.Struct({ id: SessionID, internalID: InternalID }).annotate({ identifier: "Session.Info" })
-    class Missing extends Schema.TaggedError<Missing>()(
-      "Missing",
-      { sessionID: SessionID },
-      { httpApiStatus: 404 },
-    ) {}
+    class Missing extends Schema.TaggedError<Missing>()("Missing", { sessionID: SessionID }, { httpApiStatus: 404 }) {}
     const output = emitPromise(
       compileContract(
         api(
@@ -600,11 +596,37 @@ describe("HttpApiCodegen.generate", () => {
 
     expect(types).toContain('import type { Session } from "@example/schema/session"')
     expect(types).toContain('readonly "sessionID": string')
-    expect(types).toContain(
-      'export type SessionInfo = { readonly "id": Session.ID, readonly "internalID": string }',
-    )
+    expect(types).toContain('export type SessionInfo = { readonly "id": Session.ID, readonly "internalID": string }')
     expect(types).toContain('readonly "sessionID": Session.ID')
     expect(types).not.toContain("Session.Info")
+    expect(types).not.toContain("Brand")
+  })
+
+  test("prefers the most specific registered Promise output brand", () => {
+    const EntityID = Schema.String.pipe(Schema.brand("EntityID"))
+    const SessionID = EntityID.pipe(Schema.brand("SessionID"))
+    const output = emitPromise(
+      compileContract(api(HttpApiEndpoint.get("get", "/session", { success: Schema.Struct({ id: SessionID }) }))),
+      {
+        typeReferences: [
+          {
+            schema: EntityID,
+            name: "Entity.ID",
+            import: 'import type { Entity } from "@example/schema/entity"',
+          },
+          {
+            schema: SessionID,
+            name: "Session.ID",
+            import: 'import type { Session } from "@example/schema/session"',
+          },
+        ],
+      },
+    )
+    const types = output.files.find((file) => file.path === "types.ts")?.content
+
+    expect(types).toContain('import type { Session } from "@example/schema/session"')
+    expect(types).toContain('export type SessionGetOutput = { readonly "id": Session.ID }')
+    expect(types).not.toContain('import type { Entity } from "@example/schema/entity"')
     expect(types).not.toContain("Brand")
   })
 

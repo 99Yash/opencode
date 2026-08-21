@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
 import { Timeline, TimelineRow } from "./projection"
+import { wire } from "../test-fixture"
 
 describe("current session timeline rows", () => {
   test("derives turns and tagged rows from chronological current messages", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_1", type: "user", text: "first", time: { created: 1 } },
       {
         id: "msg_2",
@@ -23,7 +24,7 @@ describe("current session timeline rows", () => {
         content: [{ type: "reasoning", text: "working" }],
         time: { created: 5 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
     const result = Timeline.constructSessionMessageRows(source, true, { type: "busy" })
 
     expect(result.activeMessageID).toBe("msg_3")
@@ -37,7 +38,7 @@ describe("current session timeline rows", () => {
   })
 
   test("renders a current shell message as a standalone turn", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       {
         id: "msg_shell",
         type: "shell",
@@ -48,7 +49,7 @@ describe("current session timeline rows", () => {
         output: { output: "/repo", cursor: 5, size: 5, truncated: false },
         time: { created: 1, completed: 2 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
     const result = Timeline.constructSessionMessageRows(source, true, { type: "idle" })
 
     expect(result.activeMessageID).toBe("msg_shell")
@@ -56,7 +57,7 @@ describe("current session timeline rows", () => {
   })
 
   test("keeps assistant content when no user root is available", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       {
         id: "msg_notice",
         type: "synthetic",
@@ -72,7 +73,7 @@ describe("current session timeline rows", () => {
         content: [{ type: "text", text: "result" }],
         time: { created: 2, completed: 3 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
 
     const result = Timeline.constructSessionMessageRows(source, true, { type: "idle" })
 
@@ -84,7 +85,7 @@ describe("current session timeline rows", () => {
   })
 
   test("keeps CLI notice messages between the assistant steps they surround", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_user", type: "user", text: "run", time: { created: 1 } },
       { id: "msg_agent", type: "agent-switched", agent: "explore", time: { created: 2 } },
       {
@@ -134,7 +135,7 @@ describe("current session timeline rows", () => {
         recent: "recent",
         time: { created: 11 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
     const result = Timeline.constructSessionMessageRows(source, true, { type: "idle" })
 
     expect(result.rows.map(TimelineRow.key)).toEqual([
@@ -151,10 +152,10 @@ describe("current session timeline rows", () => {
   })
 
   test("renders an optimistic user turn and thinking before the protocol message arrives", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_z", type: "user", text: "existing", time: { created: 1 } },
       { id: "msg_a", type: "user", text: "pending", time: { created: 2 } },
-    ] satisfies SessionMessageInfo[]
+    ])
     const result = Timeline.constructSessionMessageRows(source, true, { type: "busy" })
 
     expect(result.activeMessageID).toBe("msg_a")
@@ -167,7 +168,7 @@ describe("current session timeline rows", () => {
   })
 
   test("renders retry state from the current assistant message", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_user", type: "user", text: "retry", time: { created: 1 } },
       {
         id: "msg_assistant",
@@ -178,7 +179,7 @@ describe("current session timeline rows", () => {
         retry: { attempt: 2, at: 10, error: { type: "ProviderError", message: "rate limited" } },
         time: { created: 2 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
 
     const result = Timeline.constructSessionMessageRows(source, true, { type: "busy" })
 
@@ -186,7 +187,7 @@ describe("current session timeline rows", () => {
   })
 
   test("removes a failed assistant error when the turn continues streaming", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_user", type: "user", text: "recover", time: { created: 1 } },
       {
         id: "msg_failed",
@@ -205,14 +206,14 @@ describe("current session timeline rows", () => {
         content: [{ type: "text", text: "streaming again" }],
         time: { created: 4 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
     const result = Timeline.constructSessionMessageRows(source, true, { type: "busy" })
 
     expect(result.rows.map((row) => row._tag)).toEqual(["UserMessage", "AssistantPart"])
   })
 
   test("keeps content IDs and groups adjacent context tools", () => {
-    const source = [
+    const source = wire<SessionMessageInfo[]>([
       { id: "msg_user", type: "user", text: "inspect", time: { created: 1 } },
       {
         id: "msg_assistant",
@@ -254,7 +255,7 @@ describe("current session timeline rows", () => {
         ],
         time: { created: 2 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
 
     const result = Timeline.constructSessionMessageRows(source, false, { type: "idle" })
     const groups = result.rows.flatMap((row) => (row._tag === "AssistantPart" ? [row.group] : []))
@@ -277,7 +278,7 @@ describe("current session timeline rows", () => {
   })
 
   test("places a divider after interrupted output unless the turn compacts", () => {
-    const messages = [
+    const messages = wire<SessionMessageInfo[]>([
       { id: "msg_user", type: "user", text: "continue", time: { created: 1 } },
       {
         id: "msg_interrupted",
@@ -296,7 +297,7 @@ describe("current session timeline rows", () => {
         content: [{ type: "text", text: "after" }],
         time: { created: 4, completed: 5 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
 
     expect(Timeline.constructSessionMessageRows(messages, true, { type: "idle" }).rows.map((row) => row._tag)).toEqual([
       "UserMessage",
@@ -305,7 +306,7 @@ describe("current session timeline rows", () => {
       "AssistantPart",
     ])
 
-    const compacted = [
+    const compacted = wire<SessionMessageInfo[]>([
       messages[0],
       messages[1],
       {
@@ -318,7 +319,7 @@ describe("current session timeline rows", () => {
         time: { created: 4 },
       },
       messages[2],
-    ] satisfies SessionMessageInfo[]
+    ])
 
     expect(Timeline.constructSessionMessageRows(compacted, true, { type: "idle" }).rows.map((row) => row._tag)).toEqual(
       ["UserMessage", "AssistantPart", "Notice", "AssistantPart"],

@@ -1,4 +1,5 @@
 import { createTwoFilesPatch } from "diff"
+import { wire } from "@/test-fixture"
 
 const words = [
   "alpha",
@@ -64,13 +65,13 @@ function id(prefix: string, value: number) {
 
 function userMessage(_sessionID: string, index: number, textLength: number, diffs: unknown[] = []): SessionMessageInfo {
   const messageID = id("msg_user", index)
-  return {
+  return wire<SessionMessageInfo>({
     id: messageID,
     type: "user",
     time: { created: 1700000000000 + index * 10_000 },
     text: lorem(index, textLength),
     metadata: diffs.length ? { diffs: diffs as JsonValue } : undefined,
-  }
+  })
 }
 
 function assistantMessage(
@@ -80,7 +81,7 @@ function assistantMessage(
   parts: MessagePart[],
 ): SessionMessageInfo {
   const messageID = id("msg_assistant", index)
-  return {
+  return wire<SessionMessageInfo>({
     id: messageID,
     type: "assistant",
     time: { created: 1700000000000 + index * 10_000 + 1_000, completed: 1700000000000 + index * 10_000 + 8_000 },
@@ -90,7 +91,7 @@ function assistantMessage(
     tokens: { input: 100, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
     finish: "stop",
     content: parts.map(messageContent),
-  }
+  })
 }
 
 function messageContent(part: MessagePart): SessionMessageAssistant["content"][number] {
@@ -140,10 +141,7 @@ function toolPart(
   const metadata =
     tool === "patch"
       ? {
-          files: [
-            patchFile(index, "modified"),
-            patchFile(index + 1, index % 2 === 0 ? "added" : "deleted"),
-          ],
+          files: [patchFile(index, "modified"), patchFile(index + 1, index % 2 === 0 ? "added" : "deleted")],
         }
       : tool === "edit" || tool === "write"
         ? { files: [fileDiff(String(input.path ?? `src/generated/file-${index}.ts`), index)] }
@@ -214,14 +212,20 @@ function turn(index: number): SessionMessageInfo[] {
       : []),
     textPart(index, 2, 160 + (index % 6) * 90),
     ...(index % 4 === 0
-      ? [toolPart(index, 3, "edit", { path: `src/generated/file-${index}.ts`, oldString: "before", newString: "after" }, 700)]
+      ? [
+          toolPart(
+            index,
+            3,
+            "edit",
+            { path: `src/generated/file-${index}.ts`, oldString: "before", newString: "after" },
+            700,
+          ),
+        ]
       : []),
     ...(index % 6 === 0
       ? [toolPart(index, 7, "write", { path: `src/generated/write-${index}.ts`, content: code(index, 28) }, 560)]
       : []),
-    ...(index % 8 === 0
-      ? [toolPart(index, 8, "patch", { patchText: `Update generated patch ${index}` }, 620)]
-      : []),
+    ...(index % 8 === 0 ? [toolPart(index, 8, "patch", { patchText: `Update generated patch ${index}` }, 620)] : []),
     ...(index % 7 === 0 ? [toolPart(index, 4, "shell", { command: "bun typecheck" }, 620)] : []),
     ...(index % 10 === 0 ? [toolPart(index, 9, "webfetch", { url: "https://example.com/docs/sample" }, 120)] : []),
     ...(index % 11 === 0 ? [toolPart(index, 10, "websearch", { query: "sample movement notes" }, 240)] : []),

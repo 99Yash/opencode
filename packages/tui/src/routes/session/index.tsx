@@ -210,7 +210,9 @@ export function Session(props: { verticalTabsWidth: number }) {
   const pendingUsers = createMemo(() =>
     data.session.pending.list(route.sessionID).flatMap((item) => (item.type === "user" ? [item] : [])),
   )
-  const pendingDeliveries = createMemo(() => new Map(pendingUsers().map((item) => [item.id, item.delivery])))
+  const pendingDeliveries = createMemo(
+    () => new Map<string, SessionInbox.Delivery>(pendingUsers().map((item) => [item.id, item.delivery])),
+  )
   const queuedPrompts = createMemo(() =>
     pendingUsers().flatMap((item) => (item.delivery === "queue" ? [{ id: item.id, text: item.payload.text }] : [])),
   )
@@ -273,8 +275,8 @@ export function Session(props: { verticalTabsWidth: number }) {
       if (id === sessionID) setRowsSynced(true)
     },
   )
-  const boundaries = createMemo(() => messageBoundaryIDs(rows, messages()))
-  const boundaryIDs = createMemo(() => new Set(boundaries().filter((id) => id !== undefined)))
+  const boundaries = createMemo<string[]>(() => messageBoundaryIDs(rows, messages()).filter((id) => id !== undefined))
+  const boundaryIDs = createMemo(() => new Set<string>(boundaries()))
   const [navigationMessage, setNavigationMessage] = createSignal<string>()
   const [navigationSlack, setNavigationSlack] = createSignal(0)
   const [synced, setSynced] = createSignal(false)

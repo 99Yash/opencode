@@ -6,6 +6,8 @@ import type {
   SessionMessageUser,
   SessionStatus,
 } from "@opencode-ai/client/promise"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 import { Option, Schema } from "effect"
 import { createMemo, type Accessor } from "solid-js"
 import { TimelineRow, type PartGroup, type PartRef, type TimelineRowMap } from "./timeline-row"
@@ -20,6 +22,7 @@ type PriorContext = { index: number; row: ContextRow }
 
 const contextTools = new Set(["read", "glob", "grep", "list"])
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const emptyModel: ModelRef = { id: Model.ID.make(""), providerID: Provider.ID.make("") }
 
 export type TimelineProjectionInput = {
   sessionMessages: SessionMessageInfo[]
@@ -29,7 +32,9 @@ export type TimelineProjectionInput = {
 }
 
 export function createTimelineProjection(input: TimelineProjectionInput) {
-  const sessionMessageByID = new Map(input.sessionMessages.map((message) => [message.id, message] as const))
+  const sessionMessageByID = new Map<string, SessionMessageInfo>(
+    input.sessionMessages.map((message) => [message.id, message]),
+  )
   const projection = Timeline.constructSessionMessageRows(
     input.sessionMessages,
     input.showReasoningSummaries,
@@ -67,7 +72,7 @@ export function createReactiveTimelineProjection(input: {
   showReasoningSummaries: Accessor<boolean>
 }) {
   const sessionMessageByID = createMemo(
-    () => new Map(input.sessionMessages().map((message) => [message.id, message] as const)),
+    () => new Map<string, SessionMessageInfo>(input.sessionMessages().map((message) => [message.id, message])),
   )
   const userContextByID = createMemo(() => indexUserContext(input.sessionMessages()))
   const assistantMessagesByParent = createMemo(() => indexAssistantMessages(input.sessionMessages()))
@@ -334,7 +339,7 @@ export function reuseTimelineRows(previous: TimelineRow.TimelineRow[] | undefine
 function indexUserContext(messages: SessionMessageInfo[]) {
   const result = new Map<string, { agent: string; model: ModelRef }>()
   let agent = ""
-  let model: ModelRef = { id: "", providerID: "" }
+  let model: ModelRef = emptyModel
   let userID: string | undefined
 
   messages.forEach((message) => {
@@ -362,9 +367,9 @@ function indexUserContext(messages: SessionMessageInfo[]) {
           localModelID &&
           typeof localModel.providerID === "string"
             ? {
-                id: localModelID,
-                providerID: localModel.providerID,
-                variant: typeof localModel.variant === "string" ? localModel.variant : undefined,
+                id: Model.ID.make(localModelID),
+                providerID: Provider.ID.make(localModel.providerID),
+                variant: typeof localModel.variant === "string" ? Model.VariantID.make(localModel.variant) : undefined,
               }
             : model,
       })

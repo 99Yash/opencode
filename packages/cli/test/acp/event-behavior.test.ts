@@ -3,6 +3,7 @@ import type { AgentSideConnection } from "@agentclientprotocol/sdk"
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
 import { resolve } from "node:path"
 import { replayMessages, streamTurn, type ChildSessionUpdate, type TurnControl } from "../../src/acp/event"
+import { wire } from "../fixture/wire"
 import { createSseFixture, durableEvent, ephemeralEvent, withTimeout } from "./sse-fixture"
 
 type SessionUpdateParams = Parameters<AgentSideConnection["sessionUpdate"]>[0]
@@ -15,51 +16,66 @@ describe("acp event behavior", () => {
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
         send(
-          ephemeralEvent("session.text.delta", {
-            sessionID: "ses_a",
-            assistantMessageID: "msg_before",
-            ordinal: 0,
-            delta: "before admission",
-          }),
+          ephemeralEvent(
+            "session.text.delta",
+            wire({
+              sessionID: "ses_a",
+              assistantMessageID: "msg_before",
+              ordinal: 0,
+              delta: "before admission",
+            }),
+          ),
         )
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_b", inboxID: id }))
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_a", inboxID: "input_other" }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_b", inboxID: id })))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_a", inboxID: "input_other" })))
         send(
-          ephemeralEvent("session.text.delta", {
-            sessionID: "ses_a",
-            assistantMessageID: "msg_wrong_input",
-            ordinal: 0,
-            delta: "wrong input",
-          }),
+          ephemeralEvent(
+            "session.text.delta",
+            wire({
+              sessionID: "ses_a",
+              assistantMessageID: "msg_wrong_input",
+              ordinal: 0,
+              delta: "wrong input",
+            }),
+          ),
         )
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_a", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_a", inboxID: id })))
         send(
-          ephemeralEvent("session.text.delta", {
-            sessionID: "ses_b",
-            assistantMessageID: "msg_b",
-            ordinal: 0,
-            delta: "other session",
-          }),
-        )
-        send(
-          ephemeralEvent("session.text.delta", {
-            sessionID: "ses_a",
-            assistantMessageID: "msg_a",
-            ordinal: 0,
-            delta: "accepted",
-          }),
+          ephemeralEvent(
+            "session.text.delta",
+            wire({
+              sessionID: "ses_b",
+              assistantMessageID: "msg_b",
+              ordinal: 0,
+              delta: "other session",
+            }),
+          ),
         )
         send(
-          durableEvent("session.step.ended", {
-            sessionID: "ses_a",
-            assistantMessageID: "msg_a",
-            finish: "stop",
-            cost: 0,
-            tokens: tokens(),
-          }),
+          ephemeralEvent(
+            "session.text.delta",
+            wire({
+              sessionID: "ses_a",
+              assistantMessageID: "msg_a",
+              ordinal: 0,
+              delta: "accepted",
+            }),
+          ),
         )
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_b" }))
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_a" }))
+        send(
+          durableEvent(
+            "session.step.ended",
+            wire({
+              sessionID: "ses_a",
+              assistantMessageID: "msg_a",
+              finish: "stop",
+              cost: 0,
+              tokens: tokens(),
+            }),
+          ),
+        )
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_b" })))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_a" })))
       },
     })
 
@@ -99,41 +115,53 @@ describe("acp event behavior", () => {
     const updates: SessionUpdateParams[] = []
     const fixture = createSseFixture({
       async onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_order", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_order", inboxID: id })))
         send(
-          ephemeralEvent("session.reasoning.delta", {
-            sessionID: "ses_order",
-            assistantMessageID: "msg_order",
-            ordinal: 0,
-            delta: "think-1",
-          }),
+          ephemeralEvent(
+            "session.reasoning.delta",
+            wire({
+              sessionID: "ses_order",
+              assistantMessageID: "msg_order",
+              ordinal: 0,
+              delta: "think-1",
+            }),
+          ),
         )
         send(
-          ephemeralEvent("session.text.delta", {
-            sessionID: "ses_order",
-            assistantMessageID: "msg_order",
-            ordinal: 1,
-            delta: "answer",
-          }),
+          ephemeralEvent(
+            "session.text.delta",
+            wire({
+              sessionID: "ses_order",
+              assistantMessageID: "msg_order",
+              ordinal: 1,
+              delta: "answer",
+            }),
+          ),
         )
         send(
-          ephemeralEvent("session.reasoning.delta", {
-            sessionID: "ses_order",
-            assistantMessageID: "msg_order",
-            ordinal: 2,
-            delta: "think-2",
-          }),
+          ephemeralEvent(
+            "session.reasoning.delta",
+            wire({
+              sessionID: "ses_order",
+              assistantMessageID: "msg_order",
+              ordinal: 2,
+              delta: "think-2",
+            }),
+          ),
         )
         send(
-          durableEvent("session.step.ended", {
-            sessionID: "ses_order",
-            assistantMessageID: "msg_order",
-            finish: "stop",
-            cost: 0,
-            tokens: tokens(),
-          }),
+          durableEvent(
+            "session.step.ended",
+            wire({
+              sessionID: "ses_order",
+              assistantMessageID: "msg_order",
+              finish: "stop",
+              cost: 0,
+              tokens: tokens(),
+            }),
+          ),
         )
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_order" }))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_order" })))
         await releaseSubmit.promise
       },
     })
@@ -195,43 +223,55 @@ describe("acp event behavior", () => {
     const updates: SessionUpdateParams[] = []
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_parent", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_parent", inboxID: id })))
         send(
-          durableEvent("session.created", {
-            sessionID: "ses_child",
-            ...childSession("ses_child", "ses_parent", "Explore code"),
-          }),
+          durableEvent(
+            "session.created",
+            wire({
+              sessionID: "ses_child",
+              ...childSession("ses_child", "ses_parent", "Explore code"),
+            }),
+          ),
         )
-        send(durableEvent("session.execution.started", { sessionID: "ses_child" }))
+        send(durableEvent("session.execution.started", wire({ sessionID: "ses_child" })))
         send(
-          durableEvent("session.tool.input.started", {
-            sessionID: "ses_child",
-            assistantMessageID: "msg_child",
-            id: "call_read",
-            name: "read",
-          }),
-        )
-        send(
-          durableEvent("session.tool.called", {
-            sessionID: "ses_child",
-            assistantMessageID: "msg_child",
-            id: "call_read",
-            input: { path: "/workspace/src/index.ts" },
-            executed: false,
-          }),
+          durableEvent(
+            "session.tool.input.started",
+            wire({
+              sessionID: "ses_child",
+              assistantMessageID: "msg_child",
+              id: "call_read",
+              name: "read",
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.success", {
-            sessionID: "ses_child",
-            assistantMessageID: "msg_child",
-            id: "call_read",
-            metadata: {},
-            content: [{ type: "text", text: "source" }],
-            executed: true,
-          }),
+          durableEvent(
+            "session.tool.called",
+            wire({
+              sessionID: "ses_child",
+              assistantMessageID: "msg_child",
+              id: "call_read",
+              input: { path: "/workspace/src/index.ts" },
+              executed: false,
+            }),
+          ),
         )
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_child" }))
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_parent" }))
+        send(
+          durableEvent(
+            "session.tool.success",
+            wire({
+              sessionID: "ses_child",
+              assistantMessageID: "msg_child",
+              id: "call_read",
+              metadata: {},
+              content: [{ type: "text", text: "source" }],
+              executed: true,
+            }),
+          ),
+        )
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_child" })))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_parent" })))
       },
     })
 
@@ -276,14 +316,17 @@ describe("acp event behavior", () => {
     const completed = Promise.withResolvers<void>()
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_parent", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_parent", inboxID: id })))
         send(
-          durableEvent("session.created", {
-            sessionID: "ses_background",
-            ...childSession("ses_background", "ses_parent", "Background research"),
-          }),
+          durableEvent(
+            "session.created",
+            wire({
+              sessionID: "ses_background",
+              ...childSession("ses_background", "ses_parent", "Background research"),
+            }),
+          ),
         )
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_parent" }))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_parent" })))
       },
     })
 
@@ -301,41 +344,53 @@ describe("acp event behavior", () => {
       expect(response.stopReason).toBe("end_turn")
 
       fixture.send(
-        durableEvent("session.created", {
-          sessionID: "ses_future",
-          ...childSession("ses_future", "ses_parent", "Later turn child"),
-        }),
+        durableEvent(
+          "session.created",
+          wire({
+            sessionID: "ses_future",
+            ...childSession("ses_future", "ses_parent", "Later turn child"),
+          }),
+        ),
       )
-      fixture.send(durableEvent("session.execution.started", { sessionID: "ses_future" }))
-      fixture.send(durableEvent("session.execution.started", { sessionID: "ses_background" }))
+      fixture.send(durableEvent("session.execution.started", wire({ sessionID: "ses_future" })))
+      fixture.send(durableEvent("session.execution.started", wire({ sessionID: "ses_background" })))
       fixture.send(
-        durableEvent("session.tool.input.started", {
-          sessionID: "ses_background",
-          assistantMessageID: "msg_background",
-          id: "call_shell",
-          name: "shell",
-        }),
-      )
-      fixture.send(
-        durableEvent("session.tool.called", {
-          sessionID: "ses_background",
-          assistantMessageID: "msg_background",
-          id: "call_shell",
-          input: { command: "pwd" },
-          executed: false,
-        }),
+        durableEvent(
+          "session.tool.input.started",
+          wire({
+            sessionID: "ses_background",
+            assistantMessageID: "msg_background",
+            id: "call_shell",
+            name: "shell",
+          }),
+        ),
       )
       fixture.send(
-        durableEvent("session.tool.success", {
-          sessionID: "ses_background",
-          assistantMessageID: "msg_background",
-          id: "call_shell",
-          metadata: { exit: 0 },
-          content: [{ type: "text", text: "/workspace" }],
-          executed: true,
-        }),
+        durableEvent(
+          "session.tool.called",
+          wire({
+            sessionID: "ses_background",
+            assistantMessageID: "msg_background",
+            id: "call_shell",
+            input: { command: "pwd" },
+            executed: false,
+          }),
+        ),
       )
-      fixture.send(durableEvent("session.execution.succeeded", { sessionID: "ses_background" }))
+      fixture.send(
+        durableEvent(
+          "session.tool.success",
+          wire({
+            sessionID: "ses_background",
+            assistantMessageID: "msg_background",
+            id: "call_shell",
+            metadata: { exit: 0 },
+            content: [{ type: "text", text: "/workspace" }],
+            executed: true,
+          }),
+        ),
+      )
+      fixture.send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_background" })))
       await withTimeout(completed.promise, "background child completion was not delivered")
 
       expect(updates).toEqual([])
@@ -370,88 +425,115 @@ describe("acp event behavior", () => {
     const updates: SessionUpdateParams[] = []
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_tools", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_tools", inboxID: id })))
         send(
-          durableEvent("session.tool.input.started", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_ok",
-            name: "shell",
-          }),
+          durableEvent(
+            "session.tool.input.started",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_ok",
+              name: "shell",
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.called", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_ok",
-            input: { command: "printf done", workdir: "sub" },
-            executed: false,
-          }),
+          durableEvent(
+            "session.tool.called",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_ok",
+              input: { command: "printf done", workdir: "sub" },
+              executed: false,
+            }),
+          ),
         )
         send(
-          ephemeralEvent("session.tool.progress", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_ok",
-            metadata: { phase: 1 },
-          }),
+          ephemeralEvent(
+            "session.tool.progress",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_ok",
+              metadata: { phase: 1 },
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.success", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_ok",
-            metadata: { exit: 0 },
-            content: [{ type: "text", text: "done" }],
-            executed: true,
-          }),
+          durableEvent(
+            "session.tool.success",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_ok",
+              metadata: { exit: 0 },
+              content: [{ type: "text", text: "done" }],
+              executed: true,
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.input.started", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_fail",
-            name: "read",
-          }),
+          durableEvent(
+            "session.tool.input.started",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_fail",
+              name: "read",
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.called", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_fail",
-            input: { path: "/workspace/missing.ts" },
-            executed: false,
-          }),
+          durableEvent(
+            "session.tool.called",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_fail",
+              input: { path: "/workspace/missing.ts" },
+              executed: false,
+            }),
+          ),
         )
         send(
-          ephemeralEvent("session.tool.progress", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_fail",
-            metadata: { bytes: 0 },
-          }),
+          ephemeralEvent(
+            "session.tool.progress",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_fail",
+              metadata: { bytes: 0 },
+            }),
+          ),
         )
         send(
-          durableEvent("session.tool.failed", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            id: "call_fail",
-            error: { type: "tool.error", message: "not found" },
-            metadata: { bytes: 0 },
-            content: [{ type: "text", text: "opening" }],
-            executed: true,
-          }),
+          durableEvent(
+            "session.tool.failed",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              id: "call_fail",
+              error: { type: "tool.error", message: "not found" },
+              metadata: { bytes: 0 },
+              content: [{ type: "text", text: "opening" }],
+              executed: true,
+            }),
+          ),
         )
         send(
-          durableEvent("session.step.ended", {
-            sessionID: "ses_tools",
-            assistantMessageID: "msg_tools",
-            finish: "stop",
-            cost: 0,
-            tokens: tokens(),
-          }),
+          durableEvent(
+            "session.step.ended",
+            wire({
+              sessionID: "ses_tools",
+              assistantMessageID: "msg_tools",
+              finish: "stop",
+              cost: 0,
+              tokens: tokens(),
+            }),
+          ),
         )
-        send(durableEvent("session.execution.succeeded", { sessionID: "ses_tools" }))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID: "ses_tools" })))
       },
     })
 
@@ -597,10 +679,10 @@ describe("acp event behavior", () => {
     const control: TurnControl = { cancelled: false, admission: new AbortController() }
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_cancel", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_cancel", inboxID: id })))
       },
       onInterrupt({ sessionID, send }) {
-        send(durableEvent("session.execution.interrupted", { sessionID, reason: "user" }))
+        send(durableEvent("session.execution.interrupted", wire({ sessionID, reason: "user" })))
       },
     })
     const result = streamTurn({
@@ -680,22 +762,25 @@ describe("acp event behavior", () => {
   test("cancels unsupported session forms so execution can continue", async () => {
     const fixture = createSseFixture({
       onPrompt({ id, send }) {
-        send(durableEvent("session.inbox.delivered", { sessionID: "ses_form", inboxID: id }))
+        send(durableEvent("session.inbox.delivered", wire({ sessionID: "ses_form", inboxID: id })))
         send(
-          ephemeralEvent("form.created", {
-            form: {
-              id: "frm_question",
-              sessionID: "ses_form",
-              title: "Questions",
-              metadata: { kind: "question" },
-              fields: [{ key: "q0", title: "Choice", type: "string" }],
-            },
-          }),
+          ephemeralEvent(
+            "form.created",
+            wire({
+              form: {
+                id: "frm_question",
+                sessionID: "ses_form",
+                title: "Questions",
+                metadata: { kind: "question" },
+                fields: [{ key: "q0", title: "Choice", type: "string" }],
+              },
+            }),
+          ),
         )
       },
       onFormCancel({ sessionID, formID, send }) {
-        send(ephemeralEvent("form.cancelled", { sessionID, id: formID }))
-        send(durableEvent("session.execution.succeeded", { sessionID }))
+        send(ephemeralEvent("form.cancelled", wire({ sessionID, id: formID })))
+        send(durableEvent("session.execution.succeeded", wire({ sessionID })))
       },
     })
 
@@ -763,7 +848,7 @@ function tokens() {
 }
 
 function replayFixtureMessages(): SessionMessageInfo[] {
-  return [
+  return wire<SessionMessageInfo[]>([
     {
       id: "msg_user",
       type: "user",
@@ -841,11 +926,11 @@ function replayFixtureMessages(): SessionMessageInfo[] {
         },
       ],
     },
-  ]
+  ])
 }
 
 function replayToolMessage(id: string) {
-  return {
+  return wire<SessionMessageInfo>({
     id: `msg_${id}`,
     type: "assistant",
     agent: "build",
@@ -865,5 +950,5 @@ function replayToolMessage(id: string) {
         },
       },
     ],
-  } satisfies SessionMessageInfo
+  })
 }

@@ -52,7 +52,7 @@ describe("query keys", () => {
 
     const result = await new QueryClient().fetchQuery(loadProjectsQuery(ServerScope.local, projects, worktrees))
 
-    expect(result.map((project) => project.id)).toEqual(["a", "b"])
+    expect(result.map((project) => String(project.id))).toEqual(["a", "b"])
     expect(result.map((project) => project.sandboxes)).toEqual([
       ["/a/clone", "/a/copy"],
       ["/b/clone", "/b/copy"],
@@ -80,7 +80,7 @@ describe("query keys", () => {
 
     const result = await new QueryClient().fetchQuery(loadProjectsQuery(ServerScope.local, projects, worktrees))
 
-    expect(result.map((project) => ({ id: project.id, sandboxes: project.sandboxes }))).toEqual([
+    expect(result.map((project) => ({ id: String(project.id), sandboxes: project.sandboxes }))).toEqual([
       { id: "a", sandboxes: ["/a/copy"] },
       { id: "b", sandboxes: [] },
     ])

@@ -87,9 +87,7 @@ const effectTypeReferences = [
 const promiseTypeReferences = [
   ...effectTypeReferences.filter(
     (reference) =>
-      reference.name.endsWith("ID") &&
-      !reference.name.startsWith("Project.") &&
-      !reference.name.startsWith("Pty."),
+      reference.name.endsWith("ID") && !reference.name.startsWith("Project.") && !reference.name.startsWith("Pty."),
   ),
   ...namespaceTypes("ProjectSchema", "@opencode-ai/schema/project", Project, "Project").filter((reference) =>
     reference.name.endsWith("ID"),

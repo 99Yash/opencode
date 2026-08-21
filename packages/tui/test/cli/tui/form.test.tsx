@@ -13,6 +13,7 @@ import { emptyThemeSource, tmpdir } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { createApi, createEventStream, createFetch } from "../../fixture/tui-client"
+import { wire } from "../../fixture/wire"
 
 async function mountForm(
   root: string,
@@ -38,7 +39,7 @@ async function mountForm(
     events,
   )
   const config = createTuiResolvedConfig()
-  const form = {
+  const form = wire<FormWithLocation>({
     id: "frm_test",
     sessionID: "ses_test",
     title: "Authorization required",
@@ -50,7 +51,7 @@ async function mountForm(
         title: "Authorize access",
       },
     ],
-  } satisfies FormWithLocation
+  })
   const { FormPrompt } = await import("../../../src/routes/session/form")
 
   function Harness() {

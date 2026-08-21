@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionConfigOption } from "@agentclientprotocol/sdk"
+import type { ModelInfo } from "@opencode-ai/client/promise"
+import { wire } from "../fixture/wire"
 import { makeACPFixture, makeSession, secondModel } from "./service-fixture"
 
 describe("acp service lifecycle", () => {
   test("does not persist the first catalog variant when no explicit default exists", async () => {
-    const model = { ...secondModel, variants: [{ id: "none" }, { id: "high" }] }
+    const model = wire<ModelInfo>({ ...secondModel, variants: [{ id: "none" }, { id: "high" }] })
     await using fixture = makeACPFixture({
       models: [model],
       defaultModel: model,

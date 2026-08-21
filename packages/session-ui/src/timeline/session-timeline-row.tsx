@@ -4,6 +4,8 @@ import type {
   SessionMessageUser,
   SessionStatus,
 } from "@opencode-ai/client/promise"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 import { Card } from "@opencode-ai/ui/card"
 import { useI18n } from "@opencode-ai/ui/context/i18n"
 import { TextReveal } from "@opencode-ai/ui/text-reveal"
@@ -22,6 +24,7 @@ import { SessionRetry } from "../components/session-retry"
 import { createReactiveTimelineProjection, Timeline, TimelineRow } from "./projection"
 
 const emptyAssistantMessages: SessionMessageAssistant[] = []
+const emptyModel = { id: Model.ID.make(""), providerID: Provider.ID.make("") }
 type Projection = ReturnType<typeof createReactiveTimelineProjection>
 type FramedTimelineRow = Exclude<TimelineRow.TimelineRow, TimelineRow.TurnGap>
 
@@ -220,7 +223,7 @@ export function createSessionTimelineRowRenderer(input: {
                       displayText={presentation()?.displayText}
                       comments={presentation()?.comments}
                       historicalAgent={context()?.agent ?? ""}
-                      historicalModel={context()?.model ?? { id: "", providerID: "" }}
+                      historicalModel={context()?.model ?? emptyModel}
                       actions={input.actions}
                     />
                   </div>

@@ -10,6 +10,7 @@ import type {
   FormFields,
   FormValue,
 } from "@opencode-ai/client"
+import type { Provider } from "@opencode-ai/schema/provider"
 import open from "open"
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show } from "solid-js"
 import { useClipboard } from "../context/clipboard"
@@ -36,7 +37,7 @@ const INTEGRATION_PRIORITY: Record<string, number> = {
 type ConnectMethod = Exclude<IntegrationInfo["methods"][number], { type: "env" }>
 type IntegrationAttempt = IntegrationOauthConnectOutput["data"]
 type CommandAttempt = IntegrationCommandConnectOutput["data"]
-type OnIntegrationConnected = (providerID?: string) => void
+type OnIntegrationConnected = (providerID?: Provider.ID) => void
 const CANCELLED = Symbol("cancelled")
 const CUSTOM = Symbol("custom")
 const OPEN = Symbol("open")
@@ -95,7 +96,7 @@ export function DialogIntegration(
 
   const options = createMemo(() => {
     const providers = data.location.websearch.list() ?? []
-    const providersByID = new Map(providers.map((provider) => [provider.id, provider]))
+    const providersByID = new Map(providers.map((provider) => [String(provider.id), provider]))
     return integrations().map((integration) => {
       const methods = connectMethods(integration)
       const provider = providersByID.get(integration.id)
@@ -914,7 +915,7 @@ async function connected(
 function providerID(data: ReturnType<typeof useData>, integrationID: string) {
   const models = data.location.model.list() ?? []
   const matches = (data.location.provider.list() ?? []).filter(
-    (provider) => provider.integrationID === integrationID || provider.id === integrationID,
+    (provider) => provider.integrationID === integrationID || String(provider.id) === integrationID,
   )
   return (
     matches.find((provider) =>

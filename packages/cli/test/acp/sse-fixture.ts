@@ -1,4 +1,5 @@
 import { OpenCode, type OpenCodeEvent, type SessionMessageInfo } from "@opencode-ai/client/promise"
+import { wire, type Wire } from "../fixture/wire"
 
 type DurableEvent = Extract<OpenCodeEvent, { durable: unknown }>
 type EphemeralEvent = Exclude<OpenCodeEvent, DurableEvent>
@@ -39,7 +40,7 @@ const ids = { next: 0 }
 
 export function durableEvent<Type extends DurableEvent["type"]>(
   type: Type,
-  data: Extract<DurableEvent, { type: Type }>["data"],
+  data: Extract<DurableEvent, { type: Type }>["data"] | Wire<Extract<DurableEvent, { type: Type }>["data"]>,
 ) {
   ids.next++
   return {
@@ -53,7 +54,7 @@ export function durableEvent<Type extends DurableEvent["type"]>(
 
 export function ephemeralEvent<Type extends EphemeralEvent["type"]>(
   type: Type,
-  data: Extract<EphemeralEvent, { type: Type }>["data"],
+  data: Extract<EphemeralEvent, { type: Type }>["data"] | Wire<Extract<EphemeralEvent, { type: Type }>["data"]>,
 ) {
   ids.next++
   return { id: `evt_${ids.next}`, created: ids.next, type, data }
@@ -194,7 +195,7 @@ function stringField(value: unknown, key: string) {
 }
 
 function assistantMessage(id: string) {
-  return {
+  return wire<SessionMessageInfo>({
     id,
     type: "assistant",
     agent: "build",
@@ -203,5 +204,5 @@ function assistantMessage(id: string) {
     finish: "stop",
     tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
     time: { created: 1, completed: 2 },
-  } satisfies SessionMessageInfo
+  })
 }

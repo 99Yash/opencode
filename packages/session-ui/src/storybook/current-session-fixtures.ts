@@ -10,21 +10,30 @@ import type {
   SessionMessageUser,
   SessionStatus,
 } from "@opencode-ai/client/promise"
+import { Agent } from "@opencode-ai/schema/agent"
+import { Form } from "@opencode-ai/schema/form"
+import { Model } from "@opencode-ai/schema/model"
+import { Permission } from "@opencode-ai/schema/permission"
+import { Provider } from "@opencode-ai/schema/provider"
+import { Session } from "@opencode-ai/schema/session"
+import { SessionMessage } from "@opencode-ai/schema/session-message"
+import { Shell } from "@opencode-ai/schema/shell"
+import { Skill } from "@opencode-ai/schema/skill"
 import type { SessionDocument } from "../document"
 import type { SessionUserPresentation } from "../timeline/session-timeline"
 
-export const CURRENT_SESSION_ID = "session_current_story"
+export const CURRENT_SESSION_ID = Session.ID.make("session_current_story")
 export const STORY_TIME = 1_735_689_600_000
 
 export const STORY_MODEL = {
-  id: "claude-sonnet-4",
-  providerID: "anthropic",
-  variant: "balanced",
+  id: Model.ID.make("claude-sonnet-4"),
+  providerID: Provider.ID.make("anthropic"),
+  variant: Model.VariantID.make("balanced"),
 } satisfies ModelRef
 
 function user(id: string, text: string, offset: number): SessionMessageUser {
   return {
-    id,
+    id: SessionMessage.ID.make(id),
     type: "user",
     text,
     time: { created: STORY_TIME + offset },
@@ -42,9 +51,9 @@ function assistant(input: {
   agent?: string
 }): SessionMessageAssistant {
   return {
-    id: input.id,
+    id: SessionMessage.ID.make(input.id),
     type: "assistant",
-    agent: input.agent ?? "build",
+    agent: Agent.ID.make(input.agent ?? "build"),
     model: STORY_MODEL,
     content: input.content,
     error: input.error,
@@ -316,9 +325,9 @@ export const editThenTestDocument = {
 export const standaloneShellRunningDocument = document(
   [
     {
-      id: "msg_shell_running",
+      id: SessionMessage.ID.make("msg_shell_running"),
       type: "shell",
-      shellID: "shell_running",
+      shellID: Shell.ID.make("sh_running"),
       command: "bun run storybook --ci",
       status: "running",
       output: {
@@ -335,9 +344,9 @@ export const standaloneShellRunningDocument = document(
 
 export const standaloneShellCompletedDocument = document([
   {
-    id: "msg_shell_completed",
+    id: SessionMessage.ID.make("msg_shell_completed"),
     type: "shell",
-    shellID: "shell_completed",
+    shellID: Shell.ID.make("sh_completed"),
     command: "git status --short",
     status: "exited",
     exit: 0,
@@ -730,16 +739,16 @@ export const webResearchDocument = document([
 
 export const skillWorkflowDocument = document([
   {
-    id: "msg_agent_switched_review",
+    id: SessionMessage.ID.make("msg_agent_switched_review"),
     type: "agent-switched",
-    agent: "review",
-    previous: "build",
+    agent: Agent.ID.make("review"),
+    previous: Agent.ID.make("build"),
     time: { created: STORY_TIME + 78_000 },
   },
   {
-    id: "msg_skill_loaded_rtl",
+    id: SessionMessage.ID.make("msg_skill_loaded_rtl"),
     type: "skill",
-    skill: "rtl-aware-development",
+    skill: Skill.ID.make("rtl-aware-development"),
     name: "RTL-aware development",
     text: "Verify direction independently from language.",
     time: { created: STORY_TIME + 78_500 },
@@ -817,7 +826,7 @@ export const questionPendingDocument = document(
 )
 
 export const activeQuestionRequest = {
-  id: "form_session_layout",
+  id: Form.ID.make("frm_session_layout"),
   sessionID: CURRENT_SESSION_ID,
   title: "Session layout",
   metadata: { kind: "question" },
@@ -874,7 +883,7 @@ export const compactionDocument = document([
     error: { type: "ExecutionInterrupted", message: "Context compaction started" },
   }),
   {
-    id: "msg_compaction_complete",
+    id: SessionMessage.ID.make("msg_compaction_complete"),
     type: "compaction",
     status: "completed",
     reason: "auto",
@@ -1039,7 +1048,7 @@ export const largeCompletedDocument = {
 } satisfies SessionDocument
 
 export const activePermissionRequest = {
-  id: "permission_publish_canary",
+  id: Permission.ID.make("permission_publish_canary"),
   sessionID: CURRENT_SESSION_ID,
   action: "shell",
   resources: ["npm publish --tag canary"],

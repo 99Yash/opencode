@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { base64Encode } from "@opencode-ai/util/encode"
+import type { SessionMessageInfo } from "@opencode-ai/client/promise"
+import { wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../utils/waits"
 
@@ -108,14 +110,14 @@ async function openReview(page: Page) {
       return []
     },
     pageMessages: () => ({
-      items: [
+      items: wire<SessionMessageInfo[]>([
         {
           id: "msg_review_image_flash_regression",
           type: "user",
           time: { created: 1700000000000 },
           text: "Review this change.",
         },
-      ],
+      ]),
     }),
   })
 

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { ModelRef, SessionMessageInfo } from "@opencode-ai/client/promise"
 import { createTimelineProjection, reuseTimelineRows, TimelineRow, type PartGroup } from "./projection"
+import { wire } from "../test-fixture"
 
 const context = (key: string, partIDs: string[], userMessageID = "user-1") =>
   new TimelineRow.AssistantPart({
@@ -96,9 +97,9 @@ describe("reuseTimelineRows", () => {
 
 describe("createTimelineProjection", () => {
   test("builds current message, parent, context, and row indexes", () => {
-    const selectedModel = { id: "selected", providerID: "provider" } satisfies ModelRef
-    const assistantModel = { id: "assistant", providerID: "provider", variant: "fast" } satisfies ModelRef
-    const messages = [
+    const selectedModel = wire<ModelRef>({ id: "selected", providerID: "provider" })
+    const assistantModel = wire<ModelRef>({ id: "assistant", providerID: "provider", variant: "fast" })
+    const messages = wire<SessionMessageInfo[]>([
       { id: "agent", type: "agent-switched", agent: "explore", time: { created: 1 } },
       { id: "model", type: "model-switched", model: selectedModel, time: { created: 2 } },
       { id: "user-1", type: "user", text: "first", time: { created: 3 } },
@@ -120,7 +121,7 @@ describe("createTimelineProjection", () => {
         },
         time: { created: 6 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
 
     const result = createTimelineProjection({
       sessionMessages: messages,
@@ -130,14 +131,16 @@ describe("createTimelineProjection", () => {
 
     expect(result.activeMessageID).toBe("user-2")
     expect(result.messageByID).toBe(result.sessionMessageByID)
-    expect(result.sessionMessageByID.get("assistant-1")).toBe(messages[3])
-    expect(result.assistantMessagesByParent.get("user-1")?.map((message) => message.id)).toEqual(["assistant-1"])
+    expect(result.sessionMessageByID.get(messages[3].id)).toBe(messages[3])
+    expect(result.assistantMessagesByParent.get(messages[2].id)?.map((message) => message.id)).toEqual([messages[3].id])
     expect(result.assistantMessagesByParent.has("user-2")).toBe(false)
     expect(result.userContextByID.get("user-1")).toEqual({ agent: "build", model: assistantModel })
-    expect(result.userContextByID.get("user-2")).toEqual({
-      agent: "review",
-      model: { id: "override", providerID: "custom", variant: "precise" },
-    })
+    expect(result.userContextByID.get("user-2")).toEqual(
+      wire<{ agent: string; model: ModelRef }>({
+        agent: "review",
+        model: { id: "override", providerID: "custom", variant: "precise" },
+      }),
+    )
     expect(result.messageRowIndex.get("user-1")).toBe(0)
     expect(result.messageLastRowIndex.get("user-1")).toBe(3)
     expect(result.lastAssistantGroupKey.get("user-1")).toBe("part:assistant-1:assistant-1:text:0")
@@ -145,7 +148,7 @@ describe("createTimelineProjection", () => {
   })
 
   test("reuses a stable projected row array", () => {
-    const messages = [
+    const messages = wire<SessionMessageInfo[]>([
       { id: "user-1", type: "user", text: "first", time: { created: 1 } },
       {
         id: "assistant-1",
@@ -155,7 +158,7 @@ describe("createTimelineProjection", () => {
         content: [{ type: "text", text: "answer" }],
         time: { created: 2, completed: 3 },
       },
-    ] satisfies SessionMessageInfo[]
+    ])
     const first = createTimelineProjection({
       sessionMessages: messages,
       status: { type: "idle" },

@@ -1,5 +1,6 @@
-import type { SessionMessageAssistant, SessionMessageInfo, SessionMessageUser } from "@opencode-ai/client/promise"
+import type { SessionMessageAssistant, SessionMessageUser } from "@opencode-ai/client/promise"
 import type { Page } from "@playwright/test"
+import { wire } from "@/test-fixture"
 import { expectSessionTitle } from "../../utils/waits"
 import { mockOpenCodeServer } from "../../utils/mock-server"
 import { benchmark, expect, withBenchmarkPage } from "../benchmark"
@@ -12,16 +13,19 @@ type ParentHydrationBenchmarkMode = "natural" | "candidate"
 const mode = process.env.SESSION_PARENT_HYDRATION_BENCHMARK_MODE ?? "natural"
 if (mode !== "natural" && mode !== "candidate") throw new Error(`Unknown parent hydration benchmark mode: ${mode}`)
 const userID = "msg_parent_hydration_user"
-const userSeed = fixture.messages[fixture.targetID][0] as SessionMessageUser
-const user = {
+const userSeed = fixture.messages[fixture.targetID][0]
+if (userSeed?.type !== "user") throw new Error("Expected the first target fixture message to be a user message")
+const user = wire<SessionMessageUser>({
   ...userSeed,
   id: userID,
   time: { created: 1700001000000 },
-} satisfies SessionMessageInfo
-const assistantSeed = fixture.messages[fixture.targetID][3] as SessionMessageAssistant
+})
+const assistantSeed = fixture.messages[fixture.targetID][3]
+if (assistantSeed?.type !== "assistant")
+  throw new Error("Expected the fourth target fixture message to be an assistant message")
 const assistants = Array.from({ length: 14 }, (_, index) => {
   const messageID = `msg_parent_hydration_${String(index).padStart(2, "0")}`
-  return {
+  return wire<SessionMessageAssistant>({
     ...assistantSeed,
     id: messageID,
     time: { created: 1700001001000 + index * 1_000, completed: 1700001001500 + index * 1_000 },
@@ -30,7 +34,7 @@ const assistants = Array.from({ length: 14 }, (_, index) => {
         ? { ...part, id: `call_parent_hydration_${String(index).padStart(2, "0")}_${partIndex}` }
         : part,
     ),
-  } satisfies SessionMessageInfo
+  })
 })
 const messages = [user, ...assistants]
 const target = fixture.sessions.find((session) => session.id === fixture.targetID)!

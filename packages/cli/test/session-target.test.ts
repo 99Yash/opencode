@@ -1,13 +1,18 @@
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import { OpenCode, type LocationGetOutput, type ModelRef, type SessionInfo } from "@opencode-ai/client/promise"
 import { resolveSessionTarget, SessionTargetMutationError } from "../src/session-target"
+import { type Wire, wire } from "./fixture/wire"
 
 function location(directory: string, workspaceID?: string): LocationGetOutput {
-  return { directory, workspaceID, project: { id: "project", directory, canonical: directory } }
+  return wire<LocationGetOutput>({
+    directory,
+    workspaceID,
+    project: { id: "project", directory, canonical: directory },
+  })
 }
 
-function session(id: string, directory: string, workspaceID?: string, model?: ModelRef): SessionInfo {
-  return {
+function session(id: string, directory: string, workspaceID?: string, model?: Wire<ModelRef>): SessionInfo {
+  return wire<SessionInfo>({
     id,
     projectID: "project",
     title: id,
@@ -16,7 +21,7 @@ function session(id: string, directory: string, workspaceID?: string, model?: Mo
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     time: { created: 1, updated: 1 },
-  }
+  })
 }
 
 const prepare = async (input: { model: ModelRef | undefined; agent: string | undefined }) => ({
@@ -52,7 +57,7 @@ describe("session target resolver", () => {
 
     const target = await resolveSessionTarget({ client, location: { directory: "/project" }, continue: true, prepare })
     expect(list).toHaveBeenCalledTimes(2)
-    expect(target.session.id).toBe("ses_implicit")
+    expect(String(target.session.id)).toBe("ses_implicit")
   })
 
   test("attaches the terminal environment to the resolved local Session", async () => {
@@ -90,7 +95,7 @@ describe("session target resolver", () => {
       agent: "requested",
       prepare: async (input) => {
         order.push("prepare")
-        expect(input.location.workspaceID).toBe("work_1")
+        expect(String(input.location.workspaceID)).toBe("work_1")
         return { model: input.model, agent: "prepared" }
       },
     })
@@ -101,7 +106,9 @@ describe("session target resolver", () => {
   test("uses the agent resolved by the server for a fresh Session", async () => {
     const client = OpenCode.make({ baseUrl: "https://opencode.test" })
     spyOn(client.location, "get").mockResolvedValue(location("/project"))
-    spyOn(client.session, "create").mockResolvedValue({ ...session("ses_fresh", "/project"), agent: "review" })
+    spyOn(client.session, "create").mockResolvedValue(
+      wire<SessionInfo>({ ...session("ses_fresh", "/project"), agent: "review" }),
+    )
 
     const target = await resolveSessionTarget({ client, prepare })
     expect(target.agent).toBe("review")

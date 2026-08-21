@@ -17,11 +17,12 @@ import {
 } from "./helpers"
 import { pathKey } from "@/workspaces/path-key"
 import { ServerConnection } from "@/runtime/server/registry"
+import { wire, type Wire } from "@/test-fixture"
 
 const serverKey = ServerConnection.Key.make
 
-const session = (input: Partial<SessionInfo> & Pick<SessionInfo, "id"> & { directory: string }) =>
-  ({
+const session = (input: Partial<Wire<SessionInfo>> & Pick<Wire<SessionInfo>, "id"> & { directory: string }) =>
+  wire<SessionInfo>({
     projectID: "project",
     title: "",
     cost: 0,
@@ -30,8 +31,7 @@ const session = (input: Partial<SessionInfo> & Pick<SessionInfo, "id"> & { direc
     time: { created: 0, updated: 0, archived: undefined },
     ...input,
     location: { directory: input.directory },
-    directory: undefined,
-  }) as SessionInfo
+  })
 
 describe("layout workspace helpers", () => {
   test("normalizes trailing slash in workspace key", () => {
@@ -73,7 +73,7 @@ describe("layout workspace helpers", () => {
       120_000,
     )
 
-    expect(result?.id).toBe("workspace")
+    expect(String(result?.id)).toBe("workspace")
   })
 
   test("sorts recent sessions by persisted update time instead of id", () => {
@@ -88,7 +88,7 @@ describe("layout workspace helpers", () => {
       3,
     )
 
-    expect(result.map((item) => item.id)).toEqual(["ses_a", "ses_z"])
+    expect(result.map((item) => String(item.id))).toEqual(["ses_a", "ses_z"])
   })
 
   test("uses id only to break equal session timestamps", () => {
@@ -97,7 +97,7 @@ describe("layout workspace helpers", () => {
       session({ id: "ses_a", directory: "/workspace", time: { created: 1, updated: 2, archived: undefined } }),
     ]
 
-    expect(sessions.sort(compareSessionTime).map((item) => item.id)).toEqual(["ses_a", "ses_z"])
+    expect(sessions.sort(compareSessionTime).map((item) => String(item.id))).toEqual(["ses_a", "ses_z"])
   })
 
   test("detects project permissions with a filter", () => {
@@ -151,7 +151,7 @@ describe("layout workspace helpers", () => {
       120_000,
     )
 
-    expect(result?.id).toBe("root")
+    expect(String(result?.id)).toBe("root")
   })
 
   test("finds the direct child on the active session path", () => {
@@ -161,8 +161,8 @@ describe("layout workspace helpers", () => {
       session({ id: "leaf", directory: "/workspace", parentID: "child" }),
     ]
 
-    expect(childSessionOnPath(list, "root", "leaf")?.id).toBe("child")
-    expect(childSessionOnPath(list, "child", "leaf")?.id).toBe("leaf")
+    expect(String(childSessionOnPath(list, "root", "leaf")?.id)).toBe("child")
+    expect(String(childSessionOnPath(list, "child", "leaf")?.id)).toBe("leaf")
     expect(childSessionOnPath(list, "root", "root")).toBeUndefined()
     expect(childSessionOnPath(list, "root", "other")).toBeUndefined()
   })

@@ -39,6 +39,7 @@ import type {
 import { selectedCommand } from "../../src/mini/footer.prompt"
 import { RejectField } from "../../src/mini/footer.permission"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
+import { wire } from "../fixture/wire"
 
 const tuiConfig = createTuiResolvedConfig()
 
@@ -228,7 +229,7 @@ test("direct footer shows the default model without the fallback agent", async (
 })
 
 test("direct footer preserves a partial multi-field form draft across permission preemption", async () => {
-  const request: FormInfo = {
+  const request = wire<FormInfo>({
     id: "frm_preempted",
     sessionID: "ses_child",
     title: "Deployment",
@@ -236,7 +237,7 @@ test("direct footer preserves a partial multi-field form draft across permission
       { key: "service", type: "string", title: "Service", required: true },
       { key: "notes", type: "string", title: "Notes", required: true },
     ],
-  }
+  })
   const app = await renderFooter({
     height: 16,
     view: { type: "form", request },
@@ -250,15 +251,17 @@ test("direct footer preserves a partial multi-field form draft across permission
     "keep this draft".split("").forEach((key) => app.mockInput.pressKey(key))
     expect(app.renderer.currentFocusedEditor?.plainText).toBe("keep this draft")
 
-    app.setView({
-      type: "permission",
-      request: {
-        id: "per_preempting",
-        sessionID: "ses_child",
-        action: "read",
-        resources: ["src/index.ts"],
-      },
-    })
+    app.setView(
+      wire<FooterView>({
+        type: "permission",
+        request: {
+          id: "per_preempting",
+          sessionID: "ses_child",
+          action: "read",
+          resources: ["src/index.ts"],
+        },
+      }),
+    )
     await app.renderOnce()
     expect(app.captureCharFrame()).toContain("Permission required")
 

@@ -1,6 +1,13 @@
 import { base64Encode } from "@opencode-ai/util/encode"
-import type { JsonValue, OpenCodeEvent, SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client/promise"
+import type {
+  JsonValue,
+  OpenCodeEvent,
+  SessionMessageAssistant,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from "@opencode-ai/client/promise"
 import type { Page } from "@playwright/test"
+import { wire, type Wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../../utils/waits"
 import { expect } from "../benchmark"
@@ -17,13 +24,16 @@ const title = "Timeline collapse state regression"
 const model = { providerID: "opencode", modelID: "claude-opus-4-6", variant: "max" }
 
 type EventPayload = OpenCodeEvent
+type TextStartedEvent = Extract<OpenCodeEvent, { type: "session.text.started" }>
+type TextDeltaEvent = Extract<OpenCodeEvent, { type: "session.text.delta" }>
+type TimelineEventSeed = Pick<Wire<TextStartedEvent>, "type" | "data"> | Pick<Wire<TextDeltaEvent>, "type" | "data">
 
-const userMessage = {
+const userMessage = wire<SessionMessageUser>({
   id: userMessageID,
   type: "user",
   time: { created: 1700000000000 },
   text: "Please edit the file.",
-} satisfies SessionMessageInfo
+})
 
 const editPart: ToolSeed = {
   id: editPartID,
@@ -39,20 +49,14 @@ const editPart: ToolSeed = {
     content: [{ type: "text", text: "Edited src/regression.ts" }],
     metadata: {
       files: [
-        currentFile(
-          "src/regression.ts",
-          "export const value = 'before'\n",
-          "export const value = 'after'\n",
-          1,
-          1,
-        ),
+        currentFile("src/regression.ts", "export const value = 'before'\n", "export const value = 'after'\n", 1, 1),
       ],
     },
   },
   time: { created: 1700000001000, ran: 1700000001000, completed: 1700000002000 },
 }
 
-const assistantMessage = {
+const assistantMessage = wire<SessionMessageAssistant>({
   id: assistantMessageID,
   type: "assistant",
   time: { created: 1700000001000 },
@@ -61,7 +65,7 @@ const assistantMessage = {
   cost: 0.01,
   tokens: { input: 100, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
   content: [toolContent(editPart)],
-} satisfies SessionMessageInfo
+})
 
 export async function setupTimelineBenchmark(
   page: Page,
@@ -155,23 +159,29 @@ export async function setupTimelineBenchmark(
 
 export function buildInitialStreamEvent(deltaCount: number): EventPayload[] {
   return [
-    timelineEvent("session.text.started", { sessionID, assistantMessageID, ordinal: 0 }, true),
-    timelineEvent("session.text.delta", {
-      sessionID,
-      assistantMessageID,
-      ordinal: 0,
-      delta: `Streaming${streamChunk(0, deltaCount + 1)}\n\n\`\`\`ts\nconst initial = true\n\`\`\``,
+    timelineEvent({ type: "session.text.started", data: { sessionID, assistantMessageID, ordinal: 0 } }),
+    timelineEvent({
+      type: "session.text.delta",
+      data: {
+        sessionID,
+        assistantMessageID,
+        ordinal: 0,
+        delta: `Streaming${streamChunk(0, deltaCount + 1)}\n\n\`\`\`ts\nconst initial = true\n\`\`\``,
+      },
     }),
   ]
 }
 
 export function buildStreamDeltaEvents(deltaCount: number): EventPayload[] {
   return Array.from({ length: deltaCount }, (_, index) =>
-    timelineEvent("session.text.delta", {
-      sessionID,
-      assistantMessageID,
-      ordinal: 0,
-      delta: streamChunk(index + 1, deltaCount + 1),
+    timelineEvent({
+      type: "session.text.delta",
+      data: {
+        sessionID,
+        assistantMessageID,
+        ordinal: 0,
+        delta: streamChunk(index + 1, deltaCount + 1),
+      },
     }),
   )
 }
@@ -182,7 +192,7 @@ function performanceTurn(index: number) {
   const assistantID = `msg_0000_${suffix}_b_assistant`
   const before = historicalSource(index, false)
   const after = historicalSource(index, true)
-  const parts = [
+  const parts: ContentSeed[] = [
     ...(index % 5 === 0
       ? [
           {
@@ -192,7 +202,7 @@ function performanceTurn(index: number) {
             type: "reasoning",
             text: `Reviewing the existing implementation. ${"constraint analysis ".repeat(20)}`,
             time: { start: 1690000001000 + index * 2_000, end: 1690000001200 + index * 2_000 },
-          },
+          } satisfies ContentSeed,
         ]
       : []),
     {
@@ -201,7 +211,7 @@ function performanceTurn(index: number) {
       messageID: assistantID,
       type: "text",
       text: historicalMarkdown(index),
-    },
+    } satisfies ContentSeed,
     ...(index % 8 === 0
       ? [
           {
@@ -221,7 +231,7 @@ function performanceTurn(index: number) {
               ran: 1690000001200 + index * 2_000,
               completed: 1690000001400 + index * 2_000,
             },
-          },
+          } satisfies ContentSeed,
         ]
       : []),
     ...(index % 12 === 0
@@ -241,7 +251,7 @@ function performanceTurn(index: number) {
               ran: 1690000001400 + index * 2_000,
               completed: 1690000001500 + index * 2_000,
             },
-          },
+          } satisfies ContentSeed,
         ]
       : []),
     ...(index % 16 === 0
@@ -267,11 +277,11 @@ function performanceTurn(index: number) {
               ran: 1690000001500 + index * 2_000,
               completed: 1690000001700 + index * 2_000,
             },
-          },
+          } satisfies ContentSeed,
         ]
       : []),
-  ] as unknown as ContentSeed[]
-  return [
+  ]
+  return wire<SessionMessageInfo[]>([
     {
       id: userID,
       type: "user",
@@ -298,7 +308,7 @@ function performanceTurn(index: number) {
         return toolContent(part)
       }),
     },
-  ] satisfies SessionMessageInfo[]
+  ])
 }
 
 type ToolSeed = {
@@ -338,20 +348,22 @@ function toolContent(part: ToolSeed): SessionMessageAssistant["content"][number]
 
 let eventSequence = 0
 
-function timelineEvent<Type extends "session.text.started" | "session.text.delta">(
-  type: Type,
-  data: Extract<OpenCodeEvent, { type: Type }>["data"],
-  durable = false,
-): Extract<OpenCodeEvent, { type: Type }> {
+function timelineEvent(seed: TimelineEventSeed): TextStartedEvent | TextDeltaEvent {
   eventSequence++
-  return {
+  if (seed.type === "session.text.started")
+    return wire<TextStartedEvent>({
+      id: `evt_timeline_benchmark_${eventSequence}`,
+      created: 1700000002000 + eventSequence,
+      ...seed,
+      location: { directory },
+      durable: { aggregateID: sessionID, seq: eventSequence, version: 1 },
+    })
+  return wire<TextDeltaEvent>({
     id: `evt_timeline_benchmark_${eventSequence}`,
     created: 1700000002000 + eventSequence,
-    type,
-    data,
+    ...seed,
     location: { directory },
-    ...(durable ? { durable: { aggregateID: sessionID, seq: eventSequence, version: 1 } } : {}),
-  } as unknown as Extract<OpenCodeEvent, { type: Type }>
+  })
 }
 
 function historicalMarkdown(index: number) {

@@ -1,10 +1,18 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import type { OpenCodeEvent } from "@opencode-ai/client"
+import type { OpenCodeEvent, SessionInboxInfo } from "@opencode-ai/client"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Bus } from "@opencode-ai/core/bus"
+import { Agent } from "@opencode-ai/schema/agent"
 import { Event } from "@opencode-ai/schema/event"
+import { Form } from "@opencode-ai/schema/form"
+import { Permission } from "@opencode-ai/schema/permission"
+import { Project } from "@opencode-ai/schema/project"
+import { Session } from "@opencode-ai/schema/session"
+import { Shell } from "@opencode-ai/schema/shell"
+import { WebSearch } from "@opencode-ai/schema/websearch"
+import { Workspace } from "@opencode-ai/schema/workspace"
 import { createEffect, onMount, type ParentProps } from "solid-js"
 import { ConfigProvider } from "../../../src/config"
 import { ClientProvider, useClient } from "../../../src/context/client"
@@ -19,6 +27,7 @@ import { createApi, createEventStream, createFetch, directory, json, worktree } 
 import { emptyThemeSource } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
+import { wire, type Wire } from "../../fixture/wire"
 
 const formFields = [{ key: "authorization", type: "external", url: "https://example.com" }] satisfies [
   {
@@ -36,8 +45,8 @@ async function wait(fn: () => boolean, timeout = 2000) {
   }
 }
 
-function emitEvent(events: ReturnType<typeof createEventStream>, event: OpenCodeEvent) {
-  events.emit({ ...event, location: { directory } })
+function emitEvent(events: ReturnType<typeof createEventStream>, event: Wire<OpenCodeEvent>) {
+  events.emit(wire<OpenCodeEvent>({ ...event, location: { directory } }))
 }
 
 const config = createTuiResolvedConfig()
@@ -194,14 +203,14 @@ test("proactively syncs project metadata newest first", async () => {
     await wait(() => data.project.get("proj_test") !== undefined)
     expect(data.project.list()).toEqual([
       {
-        id: "proj_test",
+        id: Project.ID.make("proj_test"),
         canonical: worktree,
         name: "OpenCode",
         time: { created: 1, updated: 2 },
         sandboxes: [],
       },
       {
-        id: "proj_old",
+        id: Project.ID.make("proj_old"),
         canonical: "/old/project",
         name: "Old project",
         time: { created: 1, updated: 1 },
@@ -366,13 +375,20 @@ test("refreshes resources into reactive getters", async () => {
     await data.location.websearch.refresh()
 
     expect(data.session.get("ses_test")?.title).toBe("Test session")
-    expect(data.session.message.list("ses_test").map((message) => message.id)).toEqual(["msg_first", "msg_second"])
-    expect(data.session.message.get("ses_test", "msg_second")?.id).toBe("msg_second")
+    expect(data.session.message.list("ses_test").map((message) => message.id)).toEqual([
+      SessionMessage.ID.make("msg_first"),
+      SessionMessage.ID.make("msg_second"),
+    ])
+    expect(data.session.message.get("ses_test", SessionMessage.ID.make("msg_second"))?.id).toBe(
+      SessionMessage.ID.make("msg_second"),
+    )
     await app.renderOnce()
     expect(app.captureCharFrame()).toContain("msg_second")
     expect(data.location.default()).toEqual({ directory, workspaceID: undefined })
-    expect(data.location.agent.list(location)?.map((agent) => agent.id)).toEqual(["build"])
-    expect(data.location.websearch.list(location)).toEqual([{ id: "standalone", name: "Standalone" }])
+    expect(data.location.agent.list(location)?.map((agent) => agent.id)).toEqual([Agent.ID.make("build")])
+    expect(data.location.websearch.list(location)).toEqual([
+      { id: WebSearch.ID.make("standalone"), name: "Standalone" },
+    ])
   } finally {
     app.renderer.destroy()
   }
@@ -588,7 +604,9 @@ test("truncates committed revert messages without changing lifetime usage", asyn
     })
     await wait(() => data.session.message.list(sessionID).length === 1)
     expect(data.session.get(sessionID)?.cost).toBe(0.75)
-    expect(data.session.message.list(sessionID).map((message) => message.id)).toEqual(["msg_revert_boundary"])
+    expect(data.session.message.list(sessionID).map((message) => message.id)).toEqual([
+      SessionMessage.ID.make("msg_revert_boundary"),
+    ])
     expect(data.session.get(sessionID)?.revert).toBeUndefined()
     expect(data.session.get(sessionID)?.tokens).toEqual(tokens)
   } finally {
@@ -653,17 +671,17 @@ test("updates session location when moved", async () => {
       },
     })
     await wait(() => data.session.get("ses_test")?.location.directory === destination)
-    expect(data.session.get("ses_test")?.projectID).toBe("project-moved")
+    expect(data.session.get("ses_test")?.projectID).toBe(Project.ID.make("project-moved"))
     expect(data.session.get("ses_test")?.subpath).toBe("packages/cli")
     expect(data.session.message.list("ses_test")).toContainEqual({
-      id: "msg_moved_1",
+      id: SessionMessage.ID.make("msg_moved_1"),
       type: "location-switched",
       location: { directory: destination },
-      projectID: "project-moved",
+      projectID: Project.ID.make("project-moved"),
       subpath: "packages/cli",
       previous: {
         location: { directory },
-        projectID: "proj_test",
+        projectID: Project.ID.make("proj_test"),
       },
       time: { created: 1 },
     })
@@ -736,6 +754,8 @@ test("restores running manual compaction before applying live deltas", async () 
 
 test("reconnects the event stream and resyncs active data", async () => {
   const events = createEventStream()
+  const staleMessageID = wire<SessionMessage.ID>("message-stale")
+  const freshMessageID = wire<SessionMessage.ID>("message-fresh")
   const requests = { active: 0, event: 0, message: 0, model: 0 }
   let resolveActive!: (response: Response) => void
   let resolveMessages!: (response: Response) => void
@@ -755,7 +775,7 @@ test("reconnects the event stream and resyncs active data", async () => {
       requests.message++
       if (requests.message === 1)
         return json({
-          data: [{ id: "message-stale", type: "user", text: "Stale", time: { created: 1 } }],
+          data: [{ id: staleMessageID, type: "user", text: "Stale", time: { created: 1 } }],
           cursor: {},
         })
       return new Promise<Response>((resolve) => {
@@ -808,7 +828,7 @@ test("reconnects the event stream and resyncs active data", async () => {
     await wait(() => data.location.model.list()?.[0]?.id === "model-1")
     await wait(() => data.session.status("session-stale") === "running")
     await data.session.message.sync("session-stale")
-    expect(data.session.message.get("session-stale", "message-stale")?.id).toBe("message-stale")
+    expect(data.session.message.get("session-stale", staleMessageID)?.id).toBe(staleMessageID)
     expect(client.connection.status()).toBe("connected")
     expect(client.connection.attempt()).toBe(0)
 
@@ -824,15 +844,15 @@ test("reconnects the event stream and resyncs active data", async () => {
     await wait(() => data.location.model.list()?.[0]?.id === "model-2", 4000)
     await wait(() => data.session.status("session-stale") === "idle")
     await wait(() => requests.message === 2)
-    expect(data.session.message.get("session-stale", "message-stale")?.id).toBe("message-stale")
+    expect(data.session.message.get("session-stale", staleMessageID)?.id).toBe(staleMessageID)
     resolveMessages(
       json({
-        data: [{ id: "message-fresh", type: "user", text: "Fresh", time: { created: 2 } }],
+        data: [{ id: freshMessageID, type: "user", text: "Fresh", time: { created: 2 } }],
         cursor: {},
       }),
     )
-    await wait(() => data.session.message.get("session-stale", "message-fresh") !== undefined)
-    expect(data.session.message.get("session-stale", "message-stale")).toBeUndefined()
+    await wait(() => data.session.message.get("session-stale", freshMessageID) !== undefined)
+    expect(data.session.message.get("session-stale", staleMessageID)).toBeUndefined()
     await wait(() => data.session.status("session-new") === "running")
     expect(requests.event).toBe(2)
     expect(requests.message).toBe(2)
@@ -933,6 +953,8 @@ test("completes exploration when a queued prompt is promoted", async () => {
 test("updates and removes queued inputs from durable lifecycle events", async () => {
   const events = createEventStream()
   const sessionID = "session-queue-management"
+  const queuedID = wire<SessionMessage.ID>("message-queued")
+  const cancelledID = wire<SessionMessage.ID>("message-cancelled")
   const calls = createFetch((url) => {
     if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
   }, events)
@@ -968,40 +990,40 @@ test("updates and removes queued inputs from durable lifecycle events", async ()
       durable: durable(sessionID),
       data: {
         sessionID,
-        inboxID: "message-queued",
+        inboxID: queuedID,
         item: { type: "user", payload: { text: "Steer me" }, delivery: "queue" },
       },
     })
     await wait(() => data.session.pending.list(sessionID).length === 1)
-    expect(rows).not.toContainEqual({ type: "message", messageID: "message-queued" })
+    expect(rows).not.toContainEqual({ type: "message", messageID: queuedID })
 
     emitEvent(events, {
       id: "evt_queue_steered",
       created: 2,
       type: "session.inbox.delivery.changed",
       durable: durable(sessionID, 1),
-      data: { sessionID, inboxID: "message-queued", delivery: "steer" },
+      data: { sessionID, inboxID: queuedID, delivery: "steer" },
     })
     await wait(() =>
       data.session.pending
         .list(sessionID)
-        .some((item) => item.id === "message-queued" && item.type !== "compaction" && item.delivery === "steer"),
+        .some((item) => item.id === queuedID && item.type !== "compaction" && item.delivery === "steer"),
     )
-    expect(rows).toContainEqual({ type: "message", messageID: "message-queued" })
+    expect(rows).toContainEqual({ type: "message", messageID: queuedID })
 
     emitEvent(events, {
       id: "evt_queue_restored",
       created: 3,
       type: "session.inbox.delivery.changed",
       durable: durable(sessionID, 2),
-      data: { sessionID, inboxID: "message-queued", delivery: "queue" },
+      data: { sessionID, inboxID: queuedID, delivery: "queue" },
     })
     await wait(() =>
       data.session.pending
         .list(sessionID)
-        .some((item) => item.id === "message-queued" && item.type !== "compaction" && item.delivery === "queue"),
+        .some((item) => item.id === queuedID && item.type !== "compaction" && item.delivery === "queue"),
     )
-    expect(rows).not.toContainEqual({ type: "message", messageID: "message-queued" })
+    expect(rows).not.toContainEqual({ type: "message", messageID: queuedID })
 
     emitEvent(events, {
       id: "evt_cancel_admitted",
@@ -1010,7 +1032,7 @@ test("updates and removes queued inputs from durable lifecycle events", async ()
       durable: durable(sessionID, 3),
       data: {
         sessionID,
-        inboxID: "message-cancelled",
+        inboxID: cancelledID,
         item: { type: "user", payload: { text: "Delete me" }, delivery: "queue" },
       },
     })
@@ -1020,11 +1042,11 @@ test("updates and removes queued inputs from durable lifecycle events", async ()
       created: 5,
       type: "session.inbox.cancelled",
       durable: durable(sessionID, 4),
-      data: { sessionID, inboxID: "message-cancelled" },
+      data: { sessionID, inboxID: cancelledID },
     })
-    await wait(() => !data.session.input.has(sessionID, "message-cancelled"))
-    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual(["message-queued"])
-    expect(data.session.message.get(sessionID, "message-cancelled")).toBeUndefined()
+    await wait(() => !data.session.input.has(sessionID, cancelledID))
+    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual([queuedID])
+    expect(data.session.message.get(sessionID, cancelledID)).toBeUndefined()
   } finally {
     app.renderer.destroy()
   }
@@ -1125,7 +1147,9 @@ test("removes committed revert messages from local state", async () => {
     })
 
     await wait(() => data.session.message.list(sessionID).length === 1)
-    expect(data.session.message.list(sessionID).map((message) => message.id)).toEqual(["msg_001"])
+    expect(data.session.message.list(sessionID).map((message) => message.id)).toEqual([
+      SessionMessage.ID.make("msg_001"),
+    ])
     expect(data.session.message.get(sessionID, "msg_002")).toBeUndefined()
     expect(data.session.message.get(sessionID, "msg_003")).toBeUndefined()
   } finally {
@@ -1575,9 +1599,11 @@ test("tracks session status from active sessions and execution events", async ()
 test("restores queued compaction from durable pending input", async () => {
   const events = createEventStream()
   const sessionID = "session-compaction-queued"
-  let pending = [
+  const queuedID = wire<SessionMessage.ID>("message-compaction-queued")
+  const laterID = wire<SessionMessage.ID>("message-compaction-later")
+  let pending = wire<SessionInboxInfo[]>([
     {
-      id: "message-compaction-queued",
+      id: queuedID,
       sessionID,
       timeCreated: 1,
       type: "compaction" as const,
@@ -1585,14 +1611,14 @@ test("restores queued compaction from durable pending input", async () => {
       delivery: "queue" as const,
     },
     {
-      id: "message-compaction-later",
+      id: laterID,
       sessionID,
       timeCreated: 2,
       type: "compaction" as const,
       payload: {},
       delivery: "queue" as const,
     },
-  ]
+  ])
   const calls = createFetch((url) => {
     if (url.pathname !== `/api/session/${sessionID}/inbox`) return
     return json({ data: pending })
@@ -1623,10 +1649,7 @@ test("restores queued compaction from durable pending input", async () => {
   try {
     await wait(() => client.connection.status() === "connected")
     await wait(() => data.session.pending.list(sessionID).length === 2)
-    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual([
-      "message-compaction-queued",
-      "message-compaction-later",
-    ])
+    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual([queuedID, laterID])
     await wait(() => rows.filter((row) => row.type === "compaction-queued").length === 2)
     expect(rows.filter((row) => row.type === "compaction-queued")).toEqual([
       { type: "compaction-queued", inboxID: "message-compaction-queued" },
@@ -1680,11 +1703,11 @@ test("restores queued compaction from durable pending input", async () => {
         sessionID,
         reason: "manual",
         recent: "",
-        inputID: "message-compaction-queued",
+        inputID: queuedID,
       },
     })
     await wait(() => data.session.pending.list(sessionID).length === 1)
-    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual(["message-compaction-later"])
+    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual([laterID])
 
     emitEvent(events, {
       id: "evt_compaction_ended",
@@ -1693,7 +1716,7 @@ test("restores queued compaction from durable pending input", async () => {
       durable: durable(sessionID, 7),
       data: { sessionID, reason: "manual", text: "Summary", recent: "" },
     })
-    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual(["message-compaction-later"])
+    expect(data.session.pending.list(sessionID).map((item) => item.id)).toEqual([laterID])
 
     pending = []
     data.session.pending.invalidate(sessionID)
@@ -1967,7 +1990,7 @@ test("refreshes references after updates", async () => {
 test("keeps shell state scoped to location", async () => {
   const events = createEventStream()
   const other = "/tmp/opencode/other"
-  const workspace = "ws_other"
+  const workspace = wire<Workspace.ID>("ws_other")
   let removed: URL | undefined
   const calls = createFetch((url, request) => {
     if (url.pathname === "/api/shell/sh_other" && request.method === "DELETE") {
@@ -2028,8 +2051,10 @@ test("keeps shell state scoped to location", async () => {
     await wait(() => data.shell.list().some((shell) => shell.id === "sh_default"))
     await data.shell.sync({ directory: other, workspaceID: workspace })
 
-    expect(data.shell.list().map((shell) => shell.id)).toEqual(["sh_default"])
-    expect(data.shell.list({ directory: other, workspaceID: workspace }).map((shell) => shell.id)).toEqual(["sh_other"])
+    expect(data.shell.list().map((shell) => shell.id)).toEqual([Shell.ID.make("sh_default")])
+    expect(data.shell.list({ directory: other, workspaceID: workspace }).map((shell) => shell.id)).toEqual([
+      Shell.ID.make("sh_other"),
+    ])
     expect(data.shell.listBySession("ses_shared").map((shell) => [shell.id, shell.location.directory])).toEqual([
       ["sh_default", directory],
       ["sh_other", other],
@@ -2042,28 +2067,30 @@ test("keeps shell state scoped to location", async () => {
     expect(removed?.searchParams.get("location[directory]")).toBe(other)
     expect(removed?.searchParams.get("location[workspace]")).toBe(workspace)
 
-    events.emit({
-      id: "evt_shell_created",
-      created: 0,
-      type: "shell.created",
-      location: { directory: other, workspaceID: workspace },
-      data: {
-        info: {
-          id: "sh_live_other",
-          status: "running",
-          command: "npm run watch",
-          cwd: other,
-          shell: "/bin/sh",
-          file: "/tmp/opencode-shell-live",
-          metadata: { sessionID: "ses_shared" },
-          time: { started: 2 },
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_shell_created",
+        created: 0,
+        type: "shell.created",
+        location: { directory: other, workspaceID: workspace },
+        data: {
+          info: {
+            id: "sh_live_other",
+            status: "running",
+            command: "npm run watch",
+            cwd: other,
+            shell: "/bin/sh",
+            file: "/tmp/opencode-shell-live",
+            metadata: { sessionID: "ses_shared" },
+            time: { started: 2 },
+          },
         },
-      },
-    })
+      }),
+    )
     await wait(() =>
       data.shell.list({ directory: other, workspaceID: workspace }).some((shell) => shell.id === "sh_live_other"),
     )
-    expect(data.shell.list().map((shell) => shell.id)).toEqual(["sh_default"])
+    expect(data.shell.list().map((shell) => shell.id)).toEqual([Shell.ID.make("sh_default")])
     expect(
       data.shell.listBySession("ses_shared").find((shell) => shell.id === "sh_live_other")?.location.directory,
     ).toBe(other)
@@ -2129,7 +2156,7 @@ test("adds and dismisses permission requests from live events", async () => {
       data: { sessionID: "ses_1", requestID: "per_1", reply: "once" },
     })
     await wait(() => data.session.permission.list("ses_1")?.length === 1)
-    expect(data.session.permission.list("ses_1")?.[0]?.id).toBe("per_2")
+    expect(data.session.permission.list("ses_1")?.[0]?.id).toBe(Permission.ID.make("per_2"))
 
     emitEvent(events, {
       id: "evt_permission_replied_2",
@@ -2317,7 +2344,7 @@ test("adds, dismisses, and refreshes form requests", async () => {
     await wait(() => data.session.form.list("ses_1")?.length === 0)
 
     await data.session.form.sync("ses_1")
-    expect(data.session.form.list("ses_1")?.map((form) => form.id)).toEqual(["frm_remote"])
+    expect(data.session.form.list("ses_1")?.map((form) => form.id)).toEqual([Form.ID.make("frm_remote")])
   } finally {
     app.renderer.destroy()
   }
@@ -2326,7 +2353,10 @@ test("adds, dismisses, and refreshes form requests", async () => {
 test("tracks global forms by location", async () => {
   const events = createEventStream()
   const calls = createFetch(undefined, events)
-  const other = { directory: "/tmp/opencode-other", workspaceID: "wrk_other" }
+  const other = wire<{ directory: string; workspaceID: Workspace.ID }>({
+    directory: "/tmp/opencode-other",
+    workspaceID: "wrk_other",
+  })
   let data!: ReturnType<typeof useData>
   let client!: ReturnType<typeof useClient>
 
@@ -2350,39 +2380,47 @@ test("tracks global forms by location", async () => {
 
   try {
     await wait(() => client.connection.status() === "connected")
-    events.emit({
-      id: "evt_form_created_global_other",
-      created: 0,
-      location: other,
-      type: "form.created",
-      data: {
-        form: { id: "frm_other", sessionID: "global", title: "Input requested", fields: formFields },
-      },
-    })
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_form_created_global_other",
+        created: 0,
+        location: other,
+        type: "form.created",
+        data: {
+          form: { id: "frm_other", sessionID: "global", title: "Input requested", fields: formFields },
+        },
+      }),
+    )
 
     await wait(() => data.session.form.list("global", other)?.length === 1)
     expect(data.session.form.list("global", { directory }) ?? []).toEqual([])
 
-    events.emit({
-      id: "evt_form_created_global_default",
-      created: 1,
-      location: { directory },
-      type: "form.created",
-      data: {
-        form: { id: "frm_default", sessionID: "global", title: "Input requested", fields: formFields },
-      },
-    })
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_form_created_global_default",
+        created: 1,
+        location: { directory },
+        type: "form.created",
+        data: {
+          form: { id: "frm_default", sessionID: "global", title: "Input requested", fields: formFields },
+        },
+      }),
+    )
     await wait(() => data.session.form.list("global", { directory })?.length === 1)
 
-    events.emit({
-      id: "evt_form_replied_global_other",
-      created: 2,
-      location: other,
-      type: "form.replied",
-      data: { id: "frm_other", sessionID: "global", answer: {} },
-    })
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_form_replied_global_other",
+        created: 2,
+        location: other,
+        type: "form.replied",
+        data: { id: "frm_other", sessionID: "global", answer: {} },
+      }),
+    )
     await wait(() => data.session.form.list("global", other)?.length === 0)
-    expect(data.session.form.list("global", { directory })?.map((form) => form.id)).toEqual(["frm_default"])
+    expect(data.session.form.list("global", { directory })?.map((form) => form.id)).toEqual([
+      Form.ID.make("frm_default"),
+    ])
   } finally {
     app.renderer.destroy()
   }
@@ -2391,7 +2429,10 @@ test("tracks global forms by location", async () => {
 test("syncs global forms once for each requested location", async () => {
   const events = createEventStream()
   const requests: URL[] = []
-  const other = { directory: "/tmp/opencode-other", workspaceID: "wrk_other" }
+  const other = wire<{ directory: string; workspaceID: Workspace.ID }>({
+    directory: "/tmp/opencode-other",
+    workspaceID: "wrk_other",
+  })
   const calls = createFetch((url) => {
     if (url.pathname !== "/api/form/request") return
     requests.push(url)
@@ -2444,8 +2485,10 @@ test("syncs global forms once for each requested location", async () => {
     expect(requests).toHaveLength(1)
     expect(requests[0]?.searchParams.get("location[directory]")).toBe(other.directory)
     expect(requests[0]?.searchParams.get("location[workspace]")).toBe(other.workspaceID)
-    expect(data.session.form.list("global", other)?.map((form) => form.id)).toEqual(["frm_other"])
-    expect(data.session.form.list("global", { directory })?.map((form) => form.id)).toEqual(["frm_default"])
+    expect(data.session.form.list("global", other)?.map((form) => form.id)).toEqual([Form.ID.make("frm_other")])
+    expect(data.session.form.list("global", { directory })?.map((form) => form.id)).toEqual([
+      Form.ID.make("frm_default"),
+    ])
 
     data.session.form.invalidate("global", other)
     await data.session.form.sync("global", other)
@@ -2460,7 +2503,10 @@ test("resyncs global forms only for the active location after reconnect", async 
   const requests: URL[] = []
   const counts = new Map<string, number>()
   const home = { directory: process.cwd() }
-  const other = { directory: "/tmp/opencode-other", workspaceID: "wrk_other" }
+  const other = wire<{ directory: string; workspaceID: Workspace.ID }>({
+    directory: "/tmp/opencode-other",
+    workspaceID: "wrk_other",
+  })
   const calls = createFetch((url) => {
     if (url.pathname === "/api/location")
       return json({ ...home, project: { id: "proj_test", directory: home.directory } })
@@ -2517,14 +2563,14 @@ test("resyncs global forms only for the active location after reconnect", async 
   try {
     await wait(() => data.session.form.list("global", home)?.[0]?.id === "frm_default_1")
     await data.session.form.sync("global", other)
-    expect(data.session.form.list("global", other)?.[0]?.id).toBe("frm_other_1")
+    expect(data.session.form.list("global", other)?.[0]?.id).toBe(Form.ID.make("frm_other_1"))
     expect(requests).toHaveLength(2)
     requests.length = 0
 
     events.disconnect()
 
     await wait(() => data.session.form.list("global", home)?.[0]?.id === "frm_default_2", 4000)
-    expect(data.session.form.list("global", other)?.[0]?.id).toBe("frm_other_1")
+    expect(data.session.form.list("global", other)?.[0]?.id).toBe(Form.ID.make("frm_other_1"))
     expect(requests).toHaveLength(1)
     expect(
       requests.map((url) => [
@@ -2734,7 +2780,7 @@ test("settles pending tools when a live failure arrives", async () => {
     const assistant = sync.session.message.get("session-1", "msg_explicit_assistant_9")
     expect(assistant?.type).toBe("assistant")
     if (assistant?.type !== "assistant") return
-    expect(assistant.id).toBe("msg_explicit_assistant_9")
+    expect(assistant.id).toBe(SessionMessage.ID.make("msg_explicit_assistant_9"))
     const tool = assistant.content[0]
     expect(tool?.type).toBe("tool")
     if (tool?.type !== "tool") return
@@ -2764,8 +2810,8 @@ test("settles pending tools when a live failure arrives", async () => {
 
 test("renders admitted prompts immediately and tracks them until promoted", async () => {
   const events = createEventStream()
-  const sessionID = "session-1"
-  const messageID = "msg_user_1"
+  const sessionID = Session.ID.make("session-1")
+  const messageID = SessionMessage.ID.make("msg_user_1")
   const calls = createFetch((url) => {
     if (url.pathname === `/api/session/${sessionID}/message`)
       return json({
@@ -2997,9 +3043,9 @@ test("syncs direct child session info with a navigated root", async () => {
   const { data, app } = await mountData({ child: "root", sibling: "root", grandchild: "child" })
   try {
     await data.session.sync("root", { children: true })
-    expect(data.session.get("root")?.id).toBe("root")
-    expect(data.session.get("child")?.parentID).toBe("root")
-    expect(data.session.get("sibling")?.parentID).toBe("root")
+    expect(data.session.get("root")?.id).toBe(wire<Session.ID>("root"))
+    expect(data.session.get("child")?.parentID).toBe(wire<Session.ID>("root"))
+    expect(data.session.get("sibling")?.parentID).toBe(wire<Session.ID>("root"))
     expect(data.session.get("grandchild")).toBeUndefined()
     expect(data.session.family("root")).toEqual(["root", "child", "sibling"])
   } finally {
@@ -3097,7 +3143,7 @@ test("stops at the last non-repeating ancestor on a parent cycle", async () => {
 
 test("admits prompts optimistically and reconciles with the durable echo", async () => {
   const events = createEventStream()
-  const sessionID = "session-1"
+  const sessionID = Session.ID.make("session-1")
   let release!: (response: Response) => void
   const deferred = new Promise<Response>((resolve) => {
     release = resolve
@@ -3199,14 +3245,14 @@ test("admits prompts optimistically and reconciles with the durable echo", async
 
 test("hydrates durable pending prompts into the visible transcript", async () => {
   const sessionID = "session-1"
-  const item = {
+  const item = wire<SessionInboxInfo>({
     id: "msg_pending_1",
     sessionID,
     timeCreated: 5,
     type: "user" as const,
     payload: { text: "waiting" },
     delivery: "steer" as const,
-  }
+  })
   const calls = createFetch((url) => {
     if (url.pathname === `/api/session/${sessionID}/inbox`) return json({ data: [item] })
     if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
@@ -3252,7 +3298,7 @@ test("hydrates durable pending prompts into the visible transcript", async () =>
 test("keeps the row when the response lands before the echo", async () => {
   const events = createEventStream()
   const sessionID = "session-1"
-  const messageID = "msg_early_1"
+  const messageID = SessionMessage.ID.make("msg_early_1")
   const admission = {
     id: messageID,
     sessionID,
@@ -3359,7 +3405,7 @@ test("rolls back an optimistic prompt the server rejected", async () => {
 test("a retry under the same client-minted ID cannot duplicate rows", async () => {
   const events = createEventStream()
   const sessionID = "session-1"
-  const messageID = "msg_retry_1"
+  const messageID = SessionMessage.ID.make("msg_retry_1")
   const admission = {
     id: messageID,
     sessionID,

@@ -1,36 +1,39 @@
 import { expect, test } from "@playwright/test"
-import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client/promise"
+import type {
+  OpenCodeEvent,
+  SessionMessageAssistant,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from "@opencode-ai/client/promise"
+import { Session } from "@opencode-ai/schema/session"
+import { wire } from "@/test-fixture"
 import { event, session, sessionID, setupTimeline } from "../performance/timeline-stability/fixture"
 
-const user = { id: "msg_user", type: "user", text: "Run it", time: { created: 1 } } satisfies SessionMessageInfo
+const user = wire<SessionMessageUser>({ id: "msg_user", type: "user", text: "Run it", time: { created: 1 } })
 
-const assistant = (
-  completed: boolean,
-  tool = false,
-  childID?: string,
-  background = false,
-): SessionMessageAssistant => ({
-  id: "msg_assistant",
-  type: "assistant",
-  agent: "build",
-  model: { id: "model", providerID: "provider" },
-  content: tool
-    ? [
-        {
-          type: "tool",
-          id: "call_subagent",
-          name: "subagent",
-          state: {
-            status: "running",
-            input: { description: "Inspect code", ...(background ? { background: true } : {}) },
-            metadata: { status: "running", ...(childID ? { sessionID: childID } : {}) },
+const assistant = (completed: boolean, tool = false, childID?: string, background = false): SessionMessageAssistant =>
+  wire<SessionMessageAssistant>({
+    id: "msg_assistant",
+    type: "assistant",
+    agent: "build",
+    model: { id: "model", providerID: "provider" },
+    content: tool
+      ? [
+          {
+            type: "tool",
+            id: "call_subagent",
+            name: "subagent",
+            state: {
+              status: "running",
+              input: { description: "Inspect code", ...(background ? { background: true } : {}) },
+              metadata: { status: "running", ...(childID ? { sessionID: childID } : {}) },
+            },
+            time: { created: 2 },
           },
-          time: { created: 2 },
-        },
-      ]
-    : [{ type: "text", text: "Working" }],
-  time: { created: 2, ...(completed ? { completed: 3 } : {}) },
-})
+        ]
+      : [{ type: "text", text: "Working" }],
+    time: { created: 2, ...(completed ? { completed: 3 } : {}) },
+  })
 
 test("renders current protocol notices in CLI order", async ({ page }) => {
   const ownerWarnings: string[] = []
@@ -39,7 +42,7 @@ test("renders current protocol notices in CLI order", async ({ page }) => {
       ownerWarnings.push(message.text())
   })
   await setupTimeline(page, {
-    sessionMessages: [
+    sessionMessages: wire<SessionMessageInfo[]>([
       user,
       { id: "msg_agent", type: "agent-switched", agent: "explore", time: { created: 2 } },
       assistant(true),
@@ -59,7 +62,7 @@ test("renders current protocol notices in CLI order", async ({ page }) => {
         time: { created: 5 },
       },
       { id: "msg_skill", type: "skill", skill: "review", name: "Review", text: "instructions", time: { created: 6 } },
-    ],
+    ]),
   })
 
   const notices = page.locator('[data-slot="session-timeline-notice"]')
@@ -97,10 +100,10 @@ test("waits for completion before labeling requested background work", async ({ 
 })
 
 test("navigates from a running subagent card and hides background controls in the child", async ({ page }) => {
-  const childID = "ses_running_child"
+  const childID = Session.ID.make("ses_running_child")
   await setupTimeline(page, {
     sessionMessages: [user, assistant(false, true, childID)],
-    sessions: [session(), session({ id: childID, parentID: sessionID, title: "Sleep for 5 minutes" })],
+    sessions: [session(), session({ id: childID, parentID: Session.ID.make(sessionID), title: "Sleep for 5 minutes" })],
     sessionStatus: { [sessionID]: { type: "busy" }, [childID]: { type: "busy" } },
   })
 
@@ -111,10 +114,10 @@ test("navigates from a running subagent card and hides background controls in th
 })
 
 test("shows a badge for active background work", async ({ page }) => {
-  const childID = "ses_background_child"
+  const childID = Session.ID.make("ses_background_child")
   await setupTimeline(page, {
     sessionMessages: [user, assistant(true)],
-    sessions: [session(), session({ id: childID, parentID: sessionID })],
+    sessions: [session(), session({ id: childID, parentID: Session.ID.make(sessionID) })],
     sessionStatus: { [childID]: { type: "busy" } },
   })
 
@@ -122,10 +125,10 @@ test("shows a badge for active background work", async ({ page }) => {
 })
 
 test("separates blocking and already-backgrounded work into two rows", async ({ page }) => {
-  const backgroundID = "ses_background_existing"
-  const blockingID = "ses_background_blocking"
+  const backgroundID = Session.ID.make("ses_background_existing")
+  const blockingID = Session.ID.make("ses_background_blocking")
   const timeline = await setupTimeline(page, {
-    sessionMessages: [
+    sessionMessages: wire<SessionMessageInfo[]>([
       user,
       {
         id: "msg_backgrounded",
@@ -180,11 +183,11 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
         ],
         time: { created: 4 },
       },
-    ],
+    ]),
     sessions: [
       session(),
-      session({ id: backgroundID, parentID: sessionID, title: "Background task" }),
-      session({ id: blockingID, parentID: sessionID, title: "Foreground task" }),
+      session({ id: backgroundID, parentID: Session.ID.make(sessionID), title: "Background task" }),
+      session({ id: blockingID, parentID: Session.ID.make(sessionID), title: "Foreground task" }),
     ],
     sessionStatus: {
       [sessionID]: { type: "busy" },
@@ -203,12 +206,15 @@ test("separates blocking and already-backgrounded work into two rows", async ({ 
     page.locator('[data-timeline-part-id="call_shell_backgrounded"] [data-component="text-shimmer"]'),
   ).toHaveAttribute("data-active", "true")
 
-  await timeline.transport.send({
-    id: "evt_background_succeeded",
-    created: Date.now(),
-    type: "session.execution.succeeded",
-    data: { sessionID: backgroundID },
-  } as never)
+  await timeline.transport.send(
+    wire<OpenCodeEvent>({
+      id: "evt_background_succeeded",
+      created: Date.now(),
+      type: "session.execution.succeeded",
+      data: { sessionID: backgroundID },
+      durable: { aggregateID: backgroundID, seq: 0, version: 1 },
+    }),
+  )
   await expect(backgroundCard.locator('[data-component="session-progress-indicator-v2"]')).toHaveCount(0)
   await expect(backgroundCard).toContainText("Background task (background)")
 })

@@ -10,6 +10,7 @@ import {
   type TokenUsageInfo,
 } from "@opencode-ai/client/promise"
 import { ACPService } from "../../src/acp/service"
+import { wire, type Wire } from "../fixture/wire"
 
 export type FixtureRequest = {
   readonly method: string
@@ -37,7 +38,7 @@ type FixtureOptions = {
   readonly skills?: readonly SkillInfo[]
 }
 
-export const testModel = {
+export const testModel = wire<ModelInfo>({
   id: "test-model",
   modelID: "test-model",
   providerID: "test",
@@ -49,9 +50,9 @@ export const testModel = {
   status: "active",
   enabled: true,
   limit: { context: 100_000, output: 10_000 },
-} satisfies ModelInfo
+})
 
-export const secondModel = {
+export const secondModel = wire<ModelInfo>({
   id: "second-model",
   modelID: "second-model",
   providerID: "test",
@@ -63,18 +64,18 @@ export const secondModel = {
   status: "active",
   enabled: true,
   limit: { context: 200_000, output: 20_000 },
-} satisfies ModelInfo
+})
 
-export const buildAgent = {
+export const buildAgent = wire<AgentInfo>({
   id: "build",
   name: "Build",
   request: { settings: {}, headers: {}, body: {} },
   mode: "primary",
   hidden: false,
   permissions: [],
-} satisfies AgentInfo
+})
 
-export const planAgent = {
+export const planAgent = wire<AgentInfo>({
   id: "plan",
   name: "Plan",
   description: "Plan first",
@@ -82,36 +83,36 @@ export const planAgent = {
   mode: "primary",
   hidden: false,
   permissions: [],
-} satisfies AgentInfo
+})
 
-export const reviewCommand = {
+export const reviewCommand = wire<CommandInfo>({
   name: "review",
   description: "Review changes",
   template: "",
-} satisfies CommandInfo
+})
 
-export const verifySkill = {
+export const verifySkill = wire<SkillInfo>({
   id: "verify",
   name: "verify",
   description: "Verify work",
   slash: true,
   location: "/skills/verify.md",
   content: "verify",
-} satisfies SkillInfo
+})
 
 export function makeSession(
   id: string,
   input: {
     readonly cwd?: string
     readonly agent?: string
-    readonly model?: ModelRef
+    readonly model?: Wire<ModelRef>
     readonly cost?: number
     readonly tokens?: TokenUsageInfo
     readonly time?: SessionInfo["time"]
     readonly title?: string
   } = {},
 ): SessionInfo {
-  return {
+  return wire<SessionInfo>({
     id,
     projectID: "global",
     agent: input.agent ?? "build",
@@ -121,7 +122,7 @@ export function makeSession(
     time: input.time ?? { created: 0, updated: 0 },
     title: input.title ?? `Session ${id}`,
     location: { directory: input.cwd ?? "/workspace" },
-  }
+  })
 }
 
 export function makeACPFixture(options: FixtureOptions = {}) {

@@ -17,6 +17,7 @@ import { createApi, createEventStream, createFetch, directory, json } from "../f
 import { TestTuiContexts } from "../fixture/tui-environment"
 import { tmpdir } from "../fixture/fixture"
 import { createTuiResolvedConfig } from "../fixture/tui-runtime"
+import { wire, type Wire } from "../fixture/wire"
 
 async function wait(fn: () => boolean | Promise<boolean>, timeout = 2_000, label = "condition") {
   const start = Date.now()
@@ -141,7 +142,7 @@ async function renderSessionTabs(
     locations,
     vcsLocations,
     state,
-    emit: (event: OpenCodeEvent) => events.emit({ ...event, location: { directory } }),
+    emit: (event: Wire<OpenCodeEvent>) => events.emit(wire<OpenCodeEvent>({ ...event, location: { directory } })),
     focus: () => app.renderer.emit("focus"),
     blur: () => app.renderer.emit("blur"),
     flush: () => storage.flush(),
@@ -153,7 +154,7 @@ async function renderSessionTabs(
   }
 }
 
-const executionSucceeded = (sessionID: string): OpenCodeEvent => ({
+const executionSucceeded = (sessionID: string): Wire<OpenCodeEvent> => ({
   id: `evt_done_${sessionID}`,
   created: Date.now(),
   type: "session.execution.succeeded",
@@ -347,7 +348,7 @@ test("concurrent TUIs do not alternate shared tab titles from divergent session 
 
 test("user prompt admissions pulse an already-busy background tab", async () => {
   const setup = await renderSessionTabs("background")
-  const admitted = (sessionID: string, inboxID: string): OpenCodeEvent => ({
+  const admitted = (sessionID: string, inboxID: string): Wire<OpenCodeEvent> => ({
     id: `evt_${inboxID}`,
     created: Date.now(),
     type: "session.inbox.enqueued",

@@ -1,15 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import { invalidateFromWatcher } from "./watcher"
+import { wire } from "../../test-fixture"
 
 type FilesystemEvent = Extract<OpenCodeEvent, { type: "filesystem.changed" }>
 
-const filesystemEvent = (file: string, event: FilesystemEvent["data"]["event"]): FilesystemEvent => ({
-  id: `evt_${file}`,
-  created: 1,
-  type: "filesystem.changed",
-  data: { file, event },
-})
+const filesystemEvent = (file: string, event: FilesystemEvent["data"]["event"]) =>
+  wire<FilesystemEvent>({
+    id: `evt_${file}`,
+    created: 1,
+    type: "filesystem.changed",
+    data: { file, event },
+  })
 
 describe("file watcher invalidation", () => {
   test("reloads open files and refreshes loaded parent on add", () => {

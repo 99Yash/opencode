@@ -13,6 +13,7 @@ import { EventManifest } from "@opencode-ai/schema/event-manifest"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { expect, type Page } from "@playwright/test"
 import { Schema } from "effect"
+import { wire, type Wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../../utils/mock-server"
 import { installSseTransport } from "../../utils/sse-transport"
 import { expectSessionReady } from "../../utils/waits"
@@ -254,7 +255,7 @@ function describeEvent(event: OpenCodeEvent) {
 
 export function event(
   type: "session.status",
-  data: Extract<OpenCodeEvent, { type: "session.status" }>["data"],
+  data: Wire<Extract<OpenCodeEvent, { type: "session.status" }>["data"]>,
 ): OpenCodeEvent {
   return makeEvent(type, data)
 }
@@ -465,7 +466,7 @@ export function userMessage(
 ): SessionMessageUser {
   const id = input.id ?? userID
   const seeds = parts ?? [userText("Build the timeline stability matrix.", { id: `prt_${id}_text` })]
-  return {
+  return wire<SessionMessageUser>({
     id,
     type: "user",
     time: { created: input.created ?? 1700000000000 },
@@ -499,7 +500,7 @@ export function userMessage(
       ]
     }),
     ...(input.summary === undefined ? {} : { metadata: { summary: input.summary as JsonValue } }),
-  }
+  })
 }
 
 export function assistantMessage(
@@ -519,7 +520,7 @@ export function assistantMessage(
   const ordinals = { text: 0, reasoning: 0 }
   const content = parts.map((part) => messageContent(part, id, ordinals))
   nextOrdinals.set(id, ordinals)
-  return {
+  return wire<SessionMessageAssistant>({
     id,
     type: "assistant",
     metadata: { parentID: input.parentID ?? userID },
@@ -531,7 +532,7 @@ export function assistantMessage(
     tokens,
     ...(input.completed === false ? {} : { finish: "stop" as const }),
     ...(input.error ? { error: input.error } : {}),
-  }
+  })
 }
 
 export function userText(text: string, input: Partial<Omit<TextSeed, "type" | "text">> = {}): TextSeed {
@@ -643,8 +644,8 @@ export function project() {
   }
 }
 
-export function session(input: Partial<Session> = {}): Session {
-  return {
+export function session(input: Partial<Wire<Session>> = {}): Session {
+  return wire<Session>({
     id: sessionID,
     projectID,
     location: { directory },
@@ -653,7 +654,7 @@ export function session(input: Partial<Session> = {}): Session {
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     time: { created: 1700000000000, updated: 1700000000000 },
     ...input,
-  }
+  })
 }
 
 function messageContent(
@@ -829,7 +830,7 @@ function partRef(id: string, messageID: string, type: PartRef["type"]): PartRef 
 
 function makeEvent<Type extends OpenCodeEvent["type"]>(
   type: Type,
-  data: Extract<OpenCodeEvent, { type: Type }>["data"],
+  data: Wire<Extract<OpenCodeEvent, { type: Type }>["data"]>,
 ): OpenCodeEvent {
   const id = `evt_timeline_${String(++eventSequence).padStart(4, "0")}`
   const base = { id, created: 1700000002000 + eventSequence, type, data, location: { directory } }

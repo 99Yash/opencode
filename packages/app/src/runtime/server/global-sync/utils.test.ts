@@ -1,22 +1,25 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentListOutput, ModelListOutput, ProviderListOutput } from "@opencode-ai/client/promise"
 import { directoryKey, normalizeAgentList, normalizeProviderList } from "./utils"
+import { wire } from "../../../test-fixture"
 
 describe("normalizeAgentList", () => {
   test("adapts current agents to the app agent shape", () => {
-    const result = normalizeAgentList([
-      {
-        id: "build",
-        name: "Build",
-        mode: "primary",
-        hidden: false,
-        color: "primary",
-        model: { id: "gpt-5", providerID: "openai", variant: "high" },
-        request: { settings: { temperature: 0.2, topP: 0.9 }, headers: {}, body: {} },
-        system: "Build software",
-        permissions: [{ action: "read", resource: "*", effect: "allow" }],
-      },
-    ] as AgentListOutput["data"])
+    const result = normalizeAgentList(
+      wire<AgentListOutput["data"]>([
+        {
+          id: "build",
+          name: "Build",
+          mode: "primary",
+          hidden: false,
+          color: "primary",
+          model: { id: "gpt-5", providerID: "openai", variant: "high" },
+          request: { settings: { temperature: 0.2, topP: 0.9 }, headers: {}, body: {} },
+          system: "Build software",
+          permissions: [{ action: "read", resource: "*", effect: "allow" }],
+        },
+      ]),
+    )
 
     expect(result).toEqual([
       {
@@ -41,8 +44,10 @@ describe("normalizeAgentList", () => {
 describe("normalizeProviderList", () => {
   test("groups current models into the app provider catalog", () => {
     const result = normalizeProviderList(
-      [{ id: "openai", name: "OpenAI", package: "@ai-sdk/openai" }] as ProviderListOutput["data"],
-      [
+      wire<ProviderListOutput["data"]>([
+        { id: "openai", name: "OpenAI", activation: "auto", package: "@ai-sdk/openai" },
+      ]),
+      wire<ModelListOutput["data"]>([
         {
           id: "gpt-5",
           modelID: "gpt-5",
@@ -69,7 +74,7 @@ describe("normalizeProviderList", () => {
           enabled: true,
           limit: { context: 1, output: 1 },
         },
-      ] as ModelListOutput["data"],
+      ]),
     )
 
     expect(result.connected).toEqual(["openai"])

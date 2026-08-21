@@ -12,10 +12,11 @@ import {
 } from "@opencode-ai/client/promise"
 import { createSessionTransport } from "../../src/mini/stream-v2.transport"
 import { entryBody } from "../../src/mini/entry.body"
-import type { StreamCommit } from "../../src/mini/types"
+import type { FooterEvent, StreamCommit } from "../../src/mini/types"
 import { createFooterApiFixture } from "./fixture/footer-api"
 import { canonicalToolPart } from "./fixture/tool-part"
 import { tmpdir } from "../fixture/fixture"
+import { wire, type Wire } from "../fixture/wire"
 
 type RunV2Event = EventSubscribeOutput
 
@@ -37,8 +38,8 @@ function feed() {
   })()
   return {
     stream,
-    push(value: RunV2Event) {
-      values.push(value)
+    push(value: Wire<RunV2Event>) {
+      values.push(wire<RunV2Event>(value))
       wake?.()
       wake = undefined
     },
@@ -63,7 +64,7 @@ function defer<T = void>() {
 }
 
 function connected(id = "evt_connected") {
-  return { id, type: "server.connected", data: {} } satisfies RunV2Event
+  return wire<RunV2Event>({ id, type: "server.connected", data: {} })
 }
 
 function durable(sessionID: string, seq?: number): { aggregateID: string; seq: number; version: 1 }
@@ -77,19 +78,17 @@ function durable(sessionID: string, seq = 0, version: 1 | 2 = 1) {
 }
 
 function promptAdmission(input: Parameters<OpenCodeClient["session"]["prompt"]>[0], sessionID = "ses_1") {
-  return {
+  return wire<Awaited<ReturnType<OpenCodeClient["session"]["prompt"]>>>({
     id: input.id ?? "msg_prompt",
     sessionID,
     type: "user" as const,
     payload: {
       text: input.text,
-      files: input.files,
-      agents: input.agents,
       metadata: input.metadata,
     },
     delivery: input.delivery ?? ("steer" as const),
     timeCreated: 2,
-  }
+  })
 }
 
 function footer() {
@@ -97,6 +96,14 @@ function footer() {
 }
 
 type SessionMessages = MessageListOutput["data"]
+
+function messageList(data: Wire<SessionMessages>) {
+  return ok(wire<MessageListOutput>({ data, cursor: {} }))
+}
+
+function location(directory: string, workspaceID: string) {
+  return wire<NonNullable<Parameters<typeof createSessionTransport>[0]["location"]>>({ directory, workspaceID })
+}
 
 function compaction(status: "running" | "completed", summary: string): SessionMessages[number] {
   const message = {
@@ -107,12 +114,12 @@ function compaction(status: "running" | "completed", summary: string): SessionMe
     recent: "",
     time: { created: 1 },
   }
-  if (status === "running") return { ...message, status }
-  return { ...message, status }
+  if (status === "running") return wire<SessionMessages[number]>({ ...message, status })
+  return wire<SessionMessages[number]>({ ...message, status })
 }
 
 function form(id: string, sessionID: string, title = id): FormInfo {
-  return {
+  return wire<FormInfo>({
     id,
     sessionID,
     title,
@@ -124,7 +131,7 @@ function form(id: string, sessionID: string, title = id): FormInfo {
         custom: true,
       },
     ],
-  }
+  })
 }
 
 function eventForm(info: FormInfo): Extract<RunV2Event, { type: "form.created" }>["data"]["form"] {
@@ -134,55 +141,67 @@ function eventForm(info: FormInfo): Extract<RunV2Event, { type: "form.created" }
 function sdk(input: {
   streams: ReturnType<typeof feed>[]
   active?: () => Record<string, { type: "running" }>
-  messages?: Record<string, SessionMessages>
+  messages?: Record<string, Wire<SessionMessages>>
   sessions?: Array<{ id: string; parentID?: string; title?: string; agent?: string; time: { updated: number } }>
-  forms?: Record<string, FormInfo[]>
-  globals?: FormInfo[]
+  forms?: Record<string, Array<Wire<FormInfo>>>
+  globals?: Array<Wire<FormInfo>>
   globalLocation?: { directory: string; workspaceID?: string }
-  permissions?: Record<string, PermissionRequest[]>
-  pending?: Record<string, Awaited<ReturnType<OpenCodeClient["session"]["inbox"]["list"]>>>
+  permissions?: Record<string, Array<Wire<PermissionRequest>>>
+  pending?: Record<string, Wire<Awaited<ReturnType<OpenCodeClient["session"]["inbox"]["list"]>>>>
   wait?: () => Promise<void>
 }) {
   const client = OpenCode.make({ baseUrl: "https://opencode.test" })
   let subscription = 0
   spyOn(client.event, "subscribe").mockImplementation(() => input.streams[subscription++]?.stream ?? feed().stream)
   spyOn(client.message, "list").mockImplementation((request) =>
-    ok({
-      data: input.messages?.[request.sessionID] ?? [
-        {
-          id: "msg_old",
-          type: "user" as const,
-          text: "previous prompt",
-          files: [],
-          agents: [],
-          time: { created: 1 },
-        },
-      ],
-      cursor: {},
-    }),
+    ok(
+      wire<MessageListOutput>({
+        data: input.messages?.[request.sessionID] ?? [
+          {
+            id: "msg_old",
+            type: "user" as const,
+            text: "previous prompt",
+            files: [],
+            agents: [],
+            time: { created: 1 },
+          },
+        ],
+        cursor: {},
+      }),
+    ),
   )
-  spyOn(client.permission, "list").mockImplementation((request) => ok(input.permissions?.[request.sessionID] ?? []))
-  spyOn(client.form, "list").mockImplementation((request) => ok(input.forms?.[request.sessionID] ?? []))
+  spyOn(client.permission, "list").mockImplementation((request) =>
+    ok(wire<PermissionRequest[]>(input.permissions?.[request.sessionID] ?? [])),
+  )
+  spyOn(client.form, "list").mockImplementation((request) =>
+    ok(wire<FormInfo[]>(input.forms?.[request.sessionID] ?? [])),
+  )
   spyOn(client.form.request, "list").mockImplementation(() =>
-    ok({
-      location: {
-        directory: input.globalLocation?.directory ?? "/tmp",
-        workspaceID: input.globalLocation?.workspaceID,
-        project: {
-          id: "proj_1",
+    ok(
+      wire<Awaited<ReturnType<OpenCodeClient["form"]["request"]["list"]>>>({
+        location: {
           directory: input.globalLocation?.directory ?? "/tmp",
-          canonical: input.globalLocation?.directory ?? "/tmp",
+          workspaceID: input.globalLocation?.workspaceID,
+          project: {
+            id: "proj_1",
+            directory: input.globalLocation?.directory ?? "/tmp",
+            canonical: input.globalLocation?.directory ?? "/tmp",
+          },
         },
-      },
-      data: input.globals ?? [],
-    }),
+        data: input.globals ?? [],
+      }),
+    ),
   )
   spyOn(client.session, "active").mockImplementation(() => ok(input.active?.() ?? {}))
-  spyOn(client.session.inbox, "list").mockImplementation((request) => ok(input.pending?.[request.sessionID] ?? []))
+  spyOn(client.session.inbox, "list").mockImplementation((request) =>
+    ok(wire<Awaited<ReturnType<OpenCodeClient["session"]["inbox"]["list"]>>>(input.pending?.[request.sessionID] ?? [])),
+  )
   spyOn(client.session, "wait").mockImplementation(() => input.wait?.() ?? ok(undefined))
   spyOn(client.session, "message").mockImplementation((request) => {
     const message = input.messages?.[request.sessionID]?.find((item) => item.id === request.messageID)
-    return message ? (ok(message) as never) : Promise.reject(new Error(`message not found: ${request.messageID}`))
+    return message
+      ? (ok(wire<SessionMessages[number]>(message)) as never)
+      : Promise.reject(new Error(`message not found: ${request.messageID}`))
   })
   spyOn(client.session, "switchAgent").mockImplementation(() => ok(undefined))
   spyOn(client.session, "switchModel").mockImplementation(() => ok(undefined))
@@ -374,7 +393,7 @@ describe("V2 mini transport", () => {
     const snapshots = ui.events.flatMap((event) => (event.type === "stream.subagent" ? [event.state] : []))
 
     expect(snapshots.at(-1)?.tabs.map((item) => item.sessionID)).toEqual(["ses_child", "ses_grandchild"])
-    expect(snapshots.at(-1)?.forms.map((item) => item.id)).toEqual(["frm_child", "frm_grandchild"])
+    expect(snapshots.at(-1)?.forms.map((item) => String(item.id))).toEqual(["frm_child", "frm_grandchild"])
     expect(
       ui.events.find(
         (event) => event.type === "stream.view" && event.view.type === "form" && event.view.request.id === "frm_child",
@@ -394,7 +413,7 @@ describe("V2 mini transport", () => {
   test("resolves a pre-existing child permission from its exact source message at startup", async () => {
     const events = feed()
     events.push(connected())
-    const sourceMessage = {
+    const sourceMessage = wire<SessionMessages[number]>({
       id: "msg_child_source",
       type: "assistant" as const,
       agent: "build",
@@ -411,14 +430,14 @@ describe("V2 mini transport", () => {
         ),
       ],
       time: { created: 1 },
-    }
-    const permission: PermissionRequest = {
+    })
+    const permission = wire<PermissionRequest>({
       id: "per_child_startup",
       sessionID: "ses_child",
       action: "shell",
       resources: ["git status --short"],
       source: { type: "tool", messageID: "msg_child_source", id: "call_child_source" },
-    }
+    })
     const client = sdk({
       streams: [events],
       sessions: [{ id: "ses_child", parentID: "ses_1", title: "Child", time: { updated: 1 } }],
@@ -497,7 +516,7 @@ describe("V2 mini transport", () => {
     const ui = footer()
     const transport = await createSessionTransport({
       sdk: client,
-      location: { directory: "/work", workspaceID: "wrk_1" },
+      location: location("/work", "wrk_1"),
       sessionID: "ses_1",
       thinking: false,
       footer: ui.api,
@@ -574,7 +593,7 @@ describe("V2 mini transport", () => {
     const events = feed()
     events.push(connected())
     const settled = defer()
-    const messages: SessionMessages = []
+    const messages: Wire<SessionMessages> = []
     const client = sdk({
       streams: [events],
       messages: { ses_1: messages },
@@ -824,7 +843,7 @@ describe("V2 mini transport", () => {
     const events = feed()
     events.push(connected())
     const idle = defer()
-    const messages: SessionMessages = []
+    const messages: Wire<SessionMessages> = []
     const client = sdk({ streams: [events], messages: { ses_1: messages }, wait: () => idle.promise })
     const ui = footer()
     const transport = await createSessionTransport({
@@ -1168,18 +1187,20 @@ describe("V2 mini transport", () => {
     })
 
     await Bun.sleep(0)
-    expect(ui.events).toContainEqual({
-      type: "stream.view",
-      view: {
-        type: "permission",
-        request: {
-          id: "per_1",
-          sessionID: "ses_1",
-          action: "read",
-          resources: ["/tmp/file"],
+    expect(ui.events).toContainEqual(
+      wire<FooterEvent>({
+        type: "stream.view",
+        view: {
+          type: "permission",
+          request: {
+            id: "per_1",
+            sessionID: "ses_1",
+            action: "read",
+            resources: ["/tmp/file"],
+          },
         },
-      },
-    })
+      }),
+    )
     await transport.close()
   })
 
@@ -1201,8 +1222,8 @@ describe("V2 mini transport", () => {
     })
     let projected = false
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: projected
+      messageList(
+        projected
           ? [
               {
                 id: "msg_prompt",
@@ -1214,8 +1235,7 @@ describe("V2 mini transport", () => {
               },
             ]
           : [],
-        cursor: {},
-      }),
+      ),
     )
     const ui = footer()
     const transport = await createSessionTransport({
@@ -1281,8 +1301,8 @@ describe("V2 mini transport", () => {
       },
     })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: projected
+      messageList(
+        projected
           ? [
               {
                 id: "msg_prompt",
@@ -1294,8 +1314,7 @@ describe("V2 mini transport", () => {
               },
             ]
           : [],
-        cursor: {},
-      }),
+      ),
     )
     const ui = footer()
     ui.commits.push({ kind: "user", source: "system", text: "hello", phase: "start", messageID: "msg_prompt" })
@@ -1345,19 +1364,16 @@ describe("V2 mini transport", () => {
     const firstPrompt = spyOn(first.session, "prompt")
     const firstInterrupt = spyOn(first.session, "interrupt")
     spyOn(first.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text", text: "partial" }],
-            time: { created: 1 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text", text: "partial" }],
+          time: { created: 1 },
+        },
+      ]),
     )
     let releaseHydration!: () => void
     let replacementHydrating = false
@@ -1370,22 +1386,19 @@ describe("V2 mini transport", () => {
       releaseCatalog = resolve
     })
     spyOn(second.message, "list").mockImplementation(async (request) => {
-      if (request.sessionID !== "ses_1") return ok({ data: [], cursor: {} })
+      if (request.sessionID !== "ses_1") return messageList([])
       replacementHydrating = true
       await hydration
-      return ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text", text: "partial replacement" }],
-            time: { created: 1 },
-          },
-        ],
-        cursor: {},
-      })
+      return messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text", text: "partial replacement" }],
+          time: { created: 1 },
+        },
+      ])
     })
     const current: OpenCodeClient[] = []
     const ui = footer()
@@ -1516,19 +1529,16 @@ describe("V2 mini transport", () => {
       footer: ui.api,
     })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text", text: "the answer" }],
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text", text: "the answer" }],
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
     let reset!: () => void
     const resetting = new Promise<void>((resolve) => {
@@ -1571,19 +1581,16 @@ describe("V2 mini transport", () => {
     events.push(connected())
     const client = sdk({ streams: [events] })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text", text: "partial" }],
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text", text: "partial" }],
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
     const ui = footer()
     const live: StreamCommit[] = []
@@ -1638,19 +1645,16 @@ describe("V2 mini transport", () => {
     events.push(connected())
     const client = sdk({ streams: [events] })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text", text: "partial" }],
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text", text: "partial" }],
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
     const ui = footer()
     const live: StreamCommit[] = []
@@ -1698,7 +1702,7 @@ describe("V2 mini transport", () => {
     const events = feed()
     events.push(connected())
     const client = sdk({ streams: [events] })
-    spyOn(client.message, "list").mockImplementation(() => ok({ data: [], cursor: {} }))
+    spyOn(client.message, "list").mockImplementation(() => messageList([]))
     const ui = footer()
     const live: StreamCommit[] = []
     const transport = await createSessionTransport({
@@ -1838,20 +1842,17 @@ describe("V2 mini transport", () => {
     events.push(connected())
     const client = sdk({ streams: [events] })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [],
-            error: { type: "provider.transport", message: "provider failed" },
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [],
+          error: { type: "provider.transport", message: "provider failed" },
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
     const ui = footer()
     const transport = await createSessionTransport({
@@ -1906,20 +1907,17 @@ describe("V2 mini transport", () => {
     await Bun.sleep(0)
     expect(live[0]?.messageID).toBe("msg_assistant")
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_assistant",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [],
-            error: { type: "provider.transport", message: "provider failed" },
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_assistant",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [],
+          error: { type: "provider.transport", message: "provider failed" },
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
 
     await transport.replayOnResize({
@@ -1944,19 +1942,16 @@ describe("V2 mini transport", () => {
       footer: ui.api,
     })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_prompt",
-            type: "user",
-            text: "hello",
-            files: [],
-            agents: [],
-            time: { created: 2 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_prompt",
+          type: "user",
+          text: "hello",
+          files: [],
+          agents: [],
+          time: { created: 2 },
+        },
+      ]),
     )
 
     await transport.replayOnResize({
@@ -1983,33 +1978,30 @@ describe("V2 mini transport", () => {
     events.push(connected())
     const client = sdk({ streams: [events] })
     spyOn(client.message, "list").mockImplementation(() =>
-      ok({
-        data: [
-          {
-            id: "msg_b",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [
-              { type: "reasoning", text: "second thought" },
-              { type: "text", text: "second answer" },
-            ],
-            time: { created: 4, completed: 5 },
-          },
-          {
-            id: "msg_a",
-            type: "assistant",
-            agent: "build",
-            model: { providerID: "test", id: "model" },
-            content: [
-              { type: "reasoning", text: "first thought" },
-              { type: "text", text: "first answer" },
-            ],
-            time: { created: 2, completed: 3 },
-          },
-        ],
-        cursor: {},
-      }),
+      messageList([
+        {
+          id: "msg_b",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [
+            { type: "reasoning", text: "second thought" },
+            { type: "text", text: "second answer" },
+          ],
+          time: { created: 4, completed: 5 },
+        },
+        {
+          id: "msg_a",
+          type: "assistant",
+          agent: "build",
+          model: { providerID: "test", id: "model" },
+          content: [
+            { type: "reasoning", text: "first thought" },
+            { type: "text", text: "first answer" },
+          ],
+          time: { created: 2, completed: 3 },
+        },
+      ]),
     )
 
     const ui = footer()
@@ -2283,7 +2275,7 @@ describe("V2 mini transport", () => {
     const ui = footer()
     const transport = await createSessionTransport({
       sdk: client,
-      location: { directory: "/project", workspaceID: "wrk_1" },
+      location: location("/project", "wrk_1"),
       sessionID: "ses_1",
       thinking: false,
       footer: ui.api,
@@ -2814,14 +2806,16 @@ describe("V2 mini transport", () => {
           data: { sessionID: "ses_1" },
         })
       })
-      return ok({
-        id: input.id ?? "msg_cmd",
-        sessionID: "ses_1",
-        type: "user" as const,
-        payload: { text: "evaluated template" },
-        delivery: "steer" as const,
-        timeCreated: 2,
-      })
+      return ok(
+        wire<Awaited<ReturnType<OpenCodeClient["session"]["command"]>>>({
+          id: input.id ?? "msg_cmd",
+          sessionID: "ses_1",
+          type: "user" as const,
+          payload: { text: "evaluated template" },
+          delivery: "steer" as const,
+          timeCreated: 2,
+        }),
+      )
     })
 
     await transport.runPromptTurn({
@@ -2968,14 +2962,16 @@ describe("V2 mini transport", () => {
           data: { sessionID: "ses_1" },
         })
       })
-      return ok({
-        id: input.id ?? "msg_skill_attachment",
-        sessionID: "ses_1",
-        type: "user" as const,
-        payload: { text: input.text },
-        delivery: "steer" as const,
-        timeCreated: 2,
-      })
+      return ok(
+        wire<Awaited<ReturnType<OpenCodeClient["session"]["prompt"]>>>({
+          id: input.id ?? "msg_skill_attachment",
+          sessionID: "ses_1",
+          type: "user" as const,
+          payload: { text: input.text },
+          delivery: "steer" as const,
+          timeCreated: 2,
+        }),
+      )
     })
 
     await transport.runPromptTurn({
@@ -3015,10 +3011,7 @@ describe("V2 mini transport", () => {
     let refreshes = 0
     const transport = await createSessionTransport({
       sdk: client,
-      location: {
-        directory: "/project",
-        workspaceID: "work-1",
-      },
+      location: location("/project", "work-1"),
       sessionID: "ses_1",
       thinking: false,
       footer: ui.api,
@@ -3528,7 +3521,7 @@ describe("V2 mini transport", () => {
         childHydrating = true
         await hydration
       }
-      return ok({ data: [], cursor: {} })
+      return messageList([])
     })
     const ui = footer()
     const transport = await createSessionTransport({
@@ -3592,34 +3585,31 @@ describe("V2 mini transport", () => {
       releaseRetry = resolve
     })
     spyOn(client.message, "list").mockImplementation(async (request) => {
-      if (request.sessionID !== "ses_child") return ok({ data: [], cursor: {} })
+      if (request.sessionID !== "ses_child") return messageList([])
       childRequests++
       if (childRequests === 1) {
         await stale
-        return ok({ data: [], cursor: {} })
+        return messageList([])
       }
       await retry
-      return ok({
-        data: [
-          {
-            id: "msg_overflow_assistant",
-            type: "assistant" as const,
-            agent: "explore",
-            model: { providerID: "test", id: "model" },
-            content: [{ type: "text" as const, id: "txt_overflow_64", text: "live 64" }],
-            time: { created: 2, completed: 3 },
-          },
-          {
-            id: "msg_overflow_baseline",
-            type: "user" as const,
-            text: "baseline history",
-            files: [],
-            agents: [],
-            time: { created: 1 },
-          },
-        ],
-        cursor: {},
-      })
+      return messageList([
+        {
+          id: "msg_overflow_assistant",
+          type: "assistant" as const,
+          agent: "explore",
+          model: { providerID: "test", id: "model" },
+          content: [{ type: "text" as const, text: "live 64" }],
+          time: { created: 2, completed: 3 },
+        },
+        {
+          id: "msg_overflow_baseline",
+          type: "user" as const,
+          text: "baseline history",
+          files: [],
+          agents: [],
+          time: { created: 1 },
+        },
+      ])
     })
     const ui = footer()
     const transport = await createSessionTransport({
@@ -3687,35 +3677,32 @@ describe("V2 mini transport", () => {
       releaseHydration = resolve
     })
     spyOn(client.message, "list").mockImplementation(async (request) => {
-      if (request.sessionID !== "ses_child") return ok({ data: [], cursor: {} })
+      if (request.sessionID !== "ses_child") return messageList([])
       childHydrating = true
       await hydration
-      return ok({
-        data: [
-          {
-            id: "msg_tool_projected",
-            type: "assistant" as const,
-            agent: "explore",
-            model: { providerID: "test", id: "model" },
-            content: [
-              {
-                type: "tool" as const,
-                id: "call_overlap",
-                name: "shell",
-                state: {
-                  status: "completed" as const,
-                  input: { command: "projected" },
-                  content: [{ type: "text" as const, text: "projected result" }],
-                  metadata: {},
-                },
-                time: { created: 1, ran: 1, completed: 2 },
+      return messageList([
+        {
+          id: "msg_tool_projected",
+          type: "assistant" as const,
+          agent: "explore",
+          model: { providerID: "test", id: "model" },
+          content: [
+            {
+              type: "tool" as const,
+              id: "call_overlap",
+              name: "shell",
+              state: {
+                status: "completed" as const,
+                input: { command: "projected" },
+                content: [{ type: "text" as const, text: "projected result" }],
+                metadata: {},
               },
-            ],
-            time: { created: 1, completed: 2 },
-          },
-        ],
-        cursor: {},
-      })
+              time: { created: 1, ran: 1, completed: 2 },
+            },
+          ],
+          time: { created: 1, completed: 2 },
+        },
+      ])
     })
     const ui = footer()
     const transport = await createSessionTransport({

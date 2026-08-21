@@ -8,6 +8,7 @@ import { useEvent } from "../../../src/context/event"
 import { createApi, createEventStream, createFetch } from "../../fixture/tui-client"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import type { LogLevel, LogSink } from "../../../src/context/log"
+import { wire, type Wire } from "../../fixture/wire"
 
 const projectID = "proj_test"
 
@@ -20,35 +21,35 @@ async function wait(fn: () => boolean, timeout = 2000) {
 }
 
 function event(
-  payload: OpenCodeEvent,
+  payload: Wire<OpenCodeEvent>,
   input: { directory: string; project?: string; workspace?: string },
 ): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     ...payload,
     location: { directory: input.directory, workspaceID: input.workspace },
-  }
+  })
 }
 
 function vcs(branch: string): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     id: `evt_vcs_${branch}`,
     created: 0,
     type: "vcs.branch.updated",
     data: {
       branch,
     },
-  }
+  })
 }
 
 function update(version: string): OpenCodeEvent {
-  return {
+  return wire<OpenCodeEvent>({
     id: `evt_update_${version}`,
     created: 0,
     type: "installation.update-available",
     data: {
       version,
     },
-  }
+  })
 }
 
 async function mount(reconnect?: (signal: AbortSignal) => Promise<{ api: OpenCodeClient }>, log?: LogSink) {

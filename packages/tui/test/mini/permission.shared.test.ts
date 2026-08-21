@@ -9,10 +9,11 @@ import {
   permissionRun,
 } from "../../src/mini/permission.shared"
 import type { MiniPermissionRequest } from "../../src/mini/types"
+import { wire } from "../fixture/wire"
 import { canonicalToolPart } from "./fixture/tool-part"
 
 function req(input: Partial<MiniPermissionRequest> = {}): MiniPermissionRequest {
-  return {
+  return wire<MiniPermissionRequest>({
     id: "perm-1",
     sessionID: "session-1",
     action: "read",
@@ -20,7 +21,7 @@ function req(input: Partial<MiniPermissionRequest> = {}): MiniPermissionRequest 
     metadata: {},
     save: [],
     ...input,
-  }
+  })
 }
 
 function body() {

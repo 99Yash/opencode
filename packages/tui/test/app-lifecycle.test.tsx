@@ -1,9 +1,14 @@
 import { expect, test } from "bun:test"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
+import type { OpenCodeEvent } from "@opencode-ai/client"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { Session } from "@opencode-ai/schema/session"
 import { Global } from "@opencode-ai/util/global"
 import { createEventStream, createFetch, directory, json } from "./fixture/tui-client"
+import { wire } from "./fixture/wire"
+
+const sessionID = Session.ID.make("ses_dummy")
 
 test("SIGHUP clears title and disposes scoped resources once", async () => {
   const setup = await createTestRenderer({ width: 80, height: 24, useThread: false })
@@ -68,7 +73,7 @@ test("session lifecycle updates the terminal title and prints the epilogue after
   let promptRequests = 0
   const calls = createFetch((url) => {
     const session = {
-      id: "dummy",
+      id: sessionID,
       title: "Demo session",
       projectID: "project",
       location: { directory },
@@ -81,11 +86,11 @@ test("session lifecycle updates the terminal title and prints the epilogue after
         data: [session],
         cursor: {},
       })
-    if (url.pathname === "/api/session/dummy") return json({ data: session })
-    if (url.pathname === "/api/session/dummy/message") return json({ data: [], cursor: {} })
-    if (url.pathname === "/api/session/dummy/inbox") return json({ data: [] })
-    if (url.pathname === "/api/session/dummy/permission") return json({ data: [] })
-    if (url.pathname === "/api/session/dummy/prompt") {
+    if (url.pathname === `/api/session/${sessionID}`) return json({ data: session })
+    if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
+    if (url.pathname === `/api/session/${sessionID}/inbox`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/permission`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/prompt`) {
       promptRequests++
       return json({ data: {} })
     }
@@ -107,25 +112,27 @@ test("session lifecycle updates the terminal title and prints the epilogue after
         config: { get: async () => ({}), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: () => {} }),
-        args: { sessionID: "dummy" },
+        args: { sessionID },
         log: () => {},
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
     )
 
     await initialTitleSet
-    events.emit({
-      id: "evt_renamed",
-      created: 1,
-      type: "session.renamed",
-      durable: { aggregateID: "dummy", seq: 1, version: 1 },
-      data: { sessionID: "dummy", title: "Renamed session" },
-    })
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_renamed",
+        created: 1,
+        type: "session.renamed",
+        durable: { aggregateID: sessionID, seq: 1, version: 1 },
+        data: { sessionID, title: "Renamed session" },
+      }),
+    )
     await renamedTitleSet
     setup.renderer.destroy()
     await task
 
     expect(stdout).toContain("Renamed session")
-    expect(stdout).toContain("opencode2 -s dummy")
+    expect(stdout).toContain(`opencode2 -s ${sessionID}`)
     expect(promptRequests).toBe(0)
   } finally {
     process.stdout.write = originalWrite
@@ -149,7 +156,7 @@ test("session title generated while an untitled session is loading remains visib
   const releaseSession = Promise.withResolvers<void>()
   let sessionRequests = 0
   const session = {
-    id: "dummy",
+    id: sessionID,
     projectID: "project",
     location: { directory },
     cost: 0,
@@ -159,16 +166,16 @@ test("session title generated while an untitled session is loading remains visib
   const events = createEventStream()
   const calls = createFetch(async (url) => {
     if (url.pathname === "/api/session") return json({ data: [], cursor: {} })
-    if (url.pathname === "/api/session/dummy") {
+    if (url.pathname === `/api/session/${sessionID}`) {
       sessionRequests++
       sessionRequested.resolve()
       if (sessionRequests === 2) renameSyncRequested.resolve()
       await releaseSession.promise
       return json({ data: session })
     }
-    if (url.pathname === "/api/session/dummy/message") return json({ data: [], cursor: {} })
-    if (url.pathname === "/api/session/dummy/inbox") return json({ data: [] })
-    if (url.pathname === "/api/session/dummy/permission") return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
+    if (url.pathname === `/api/session/${sessionID}/inbox`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/permission`) return json({ data: [] })
   }, events)
   const server = Bun.serve({ port: 0, fetch: (request) => calls.fetch(request) })
 
@@ -181,19 +188,21 @@ test("session title generated while an untitled session is loading remains visib
         config: { get: async () => ({}), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: () => {} }),
-        args: { sessionID: "dummy" },
+        args: { sessionID },
         log: () => {},
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
     )
 
     await sessionRequested.promise
-    events.emit({
-      id: "evt_renamed",
-      created: 1,
-      type: "session.renamed",
-      durable: { aggregateID: "dummy", seq: 1, version: 1 },
-      data: { sessionID: "dummy", title: "Generated title" },
-    })
+    events.emit(
+      wire<OpenCodeEvent>({
+        id: "evt_renamed",
+        created: 1,
+        type: "session.renamed",
+        durable: { aggregateID: sessionID, seq: 1, version: 1 },
+        data: { sessionID, title: "Generated title" },
+      }),
+    )
     await Promise.race([
       renameSyncRequested.promise,
       Bun.sleep(2_000).then(() => {
@@ -226,7 +235,7 @@ test("session startup prompt is submitted exactly once", async () => {
   const cwd = process.cwd()
   const location = { directory: cwd, project: { id: "project", directory: cwd } }
   const session = {
-    id: "dummy",
+    id: sessionID,
     title: "Demo session",
     projectID: "project",
     location: { directory: cwd },
@@ -241,10 +250,10 @@ test("session startup prompt is submitted exactly once", async () => {
   const calls = createFetch(async (url, request) => {
     if (url.pathname === "/api/location") return json(location)
     if (url.pathname === "/api/session") return json({ data: [session], cursor: {} })
-    if (url.pathname === "/api/session/dummy") return json({ data: session })
-    if (url.pathname === "/api/session/dummy/message") return json({ data: [], cursor: {} })
-    if (url.pathname === "/api/session/dummy/inbox") return json({ data: [] })
-    if (url.pathname === "/api/session/dummy/permission") return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}`) return json({ data: session })
+    if (url.pathname === `/api/session/${sessionID}/message`) return json({ data: [], cursor: {} })
+    if (url.pathname === `/api/session/${sessionID}/inbox`) return json({ data: [] })
+    if (url.pathname === `/api/session/${sessionID}/permission`) return json({ data: [] })
     if (url.pathname === "/api/agent")
       return json({
         location,
@@ -255,7 +264,7 @@ test("session startup prompt is submitted exactly once", async () => {
         location,
         data: [{ id: "model", providerID: "provider", name: "Model", variants: [] }],
       })
-    if (url.pathname === "/api/session/dummy/prompt") {
+    if (url.pathname === `/api/session/${sessionID}/prompt`) {
       bodies.push(await request.json())
       promptSubmitted.resolve()
       return json({ data: {} })
@@ -272,7 +281,7 @@ test("session startup prompt is submitted exactly once", async () => {
         config: { get: async () => ({}), update: async () => ({}) },
         packages: { resolve: async () => undefined },
         terminalHandoff: async () => ({ renderer: setup.renderer, mode: "dark", complete: () => {} }),
-        args: { sessionID: "dummy", prompt: "RESUME_READY" },
+        args: { sessionID, prompt: "RESUME_READY" },
         log: () => {},
       }).pipe(Effect.provide(AppNodeBuilder.build(Global.node)), Effect.provide(FileSystem.layerNoop({}))),
     )

@@ -35,7 +35,7 @@ export function hasProjectPermissions<T>(
 
 export const childSessionOnPath = (sessions: SessionInfo[] | undefined, rootID: string, activeID?: string) => {
   if (!activeID || activeID === rootID) return
-  const map = new Map((sessions ?? []).map((session) => [session.id, session]))
+  const map = new Map<string, SessionInfo>((sessions ?? []).map((session) => [session.id, session]))
   let id = activeID
 
   while (id) {

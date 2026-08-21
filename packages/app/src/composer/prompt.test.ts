@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionMessageUser } from "@opencode-ai/client/promise"
 import { extractPromptComments, extractPromptFromMessage } from "./prompt"
+import { wire } from "../test-fixture"
 
 describe("extractPromptFromMessage", () => {
   test("restores multiple uploaded attachments", () => {
-    const message = {
+    const message = wire<SessionMessageUser>({
       id: "msg_1",
       type: "user",
       text: "check these",
@@ -13,7 +14,7 @@ describe("extractPromptFromMessage", () => {
         { data: "BBB", mime: "application/pdf", source: { type: "inline" }, name: "b.pdf" },
       ],
       time: { created: 1 },
-    } satisfies SessionMessageUser
+    })
 
     const result = extractPromptFromMessage(message)
 
@@ -36,7 +37,7 @@ describe("extractPromptFromMessage", () => {
   })
 
   test("restores optimistic data URLs and review comments", () => {
-    const message = {
+    const message = wire<SessionMessageUser>({
       id: "msg_1",
       type: "user",
       text: "model text",
@@ -60,7 +61,7 @@ describe("extractPromptFromMessage", () => {
         },
       ],
       time: { created: 1 },
-    } satisfies SessionMessageUser
+    })
 
     expect(extractPromptFromMessage(message)).toMatchObject([
       { type: "text", content: "visible text" },
@@ -72,7 +73,7 @@ describe("extractPromptFromMessage", () => {
   })
 
   test("keeps the directory of a file mention without an at-sign", () => {
-    const message = {
+    const message = wire<SessionMessageUser>({
       id: "msg_1",
       type: "user",
       text: "inspect src/client.ts",
@@ -86,7 +87,7 @@ describe("extractPromptFromMessage", () => {
         },
       ],
       time: { created: 1 },
-    } satisfies SessionMessageUser
+    })
 
     expect(extractPromptFromMessage(message)).toMatchObject([
       { type: "text", content: "inspect " },
@@ -95,25 +96,25 @@ describe("extractPromptFromMessage", () => {
   })
 
   test("uses model text when presentation metadata is incomplete", () => {
-    const message = {
+    const message = wire<SessionMessageUser>({
       id: "msg_1",
       type: "user",
       text: "model text",
       metadata: { displayText: "partial display text" },
       time: { created: 1 },
-    } satisfies SessionMessageUser
+    })
 
     expect(extractPromptFromMessage(message)[0]).toMatchObject({ type: "text", content: "model text" })
   })
 
   test("restores skill mentions as structured Composer parts", () => {
-    const message = {
+    const message = wire<SessionMessageUser>({
       id: "msg_1",
       type: "user",
       text: "Use @review",
       skills: [{ id: "review", name: "Review", mention: { text: "@review", start: 4, end: 11 } }],
       time: { created: 1 },
-    } satisfies SessionMessageUser
+    })
 
     expect(extractPromptFromMessage(message)).toMatchObject([
       { type: "text", content: "Use " },

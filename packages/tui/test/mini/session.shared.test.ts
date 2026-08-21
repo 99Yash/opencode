@@ -8,6 +8,7 @@ import {
   type RunSession,
   type SessionMessages,
 } from "../../src/mini/session.shared"
+import { wire } from "../fixture/wire"
 
 const model = {
   providerID: "openai",
@@ -19,13 +20,13 @@ afterEach(() => {
 })
 
 function userMessage(id: string, text: string, input: Partial<SessionMessageUser> = {}): SessionMessageUser {
-  return {
+  return wire<SessionMessageUser>({
     id,
     type: "user",
     text,
     time: { created: 1 },
     ...input,
-  }
+  })
 }
 
 describe("run session shared", () => {
@@ -158,39 +159,43 @@ describe("run session shared", () => {
   test("restores current prompt history from stored text and file references", async () => {
     const client = OpenCode.make({ baseUrl: "https://opencode.test" })
     spyOn(client.message, "list").mockImplementation(() =>
-      Promise.resolve({
-        data: [
-          {
-            id: "msg_prompt",
-            type: "user",
-            text: "Review @note.ts",
-            files: [
-              {
-                data: "",
-                mime: "text/plain",
-                name: "note.ts",
-                source: { type: "uri", uri: "file:///tmp/note.ts" },
-                mention: { start: 7, end: 15, text: "@note.ts" },
-              },
-            ],
-            agents: [],
-            time: { created: 1 },
-          },
-        ],
-        cursor: {},
-      }),
+      Promise.resolve(
+        wire<Awaited<ReturnType<typeof client.message.list>>>({
+          data: [
+            {
+              id: "msg_prompt",
+              type: "user",
+              text: "Review @note.ts",
+              files: [
+                {
+                  data: "",
+                  mime: "text/plain",
+                  name: "note.ts",
+                  source: { type: "uri", uri: "file:///tmp/note.ts" },
+                  mention: { start: 7, end: 15, text: "@note.ts" },
+                },
+              ],
+              agents: [],
+              time: { created: 1 },
+            },
+          ],
+          cursor: {},
+        }),
+      ),
     )
     spyOn(client.session, "get").mockImplementation(() =>
-      Promise.resolve({
-        id: "ses_1",
-        title: "Session",
-        projectID: "proj_1",
-        location: { directory: "/tmp" },
-        time: { created: 1, updated: 1 },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        model: { providerID: "openai", id: "gpt-5", variant: "high" },
-      }),
+      Promise.resolve(
+        wire<Awaited<ReturnType<typeof client.session.get>>>({
+          id: "ses_1",
+          title: "Session",
+          projectID: "proj_1",
+          location: { directory: "/tmp" },
+          time: { created: 1, updated: 1 },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          model: { providerID: "openai", id: "gpt-5", variant: "high" },
+        }),
+      ),
     )
 
     const controller = new AbortController()

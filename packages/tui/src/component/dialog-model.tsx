@@ -9,8 +9,10 @@ import { useConnected } from "./use-connected"
 import { useData } from "../context/data"
 import { modelPreferenceKey } from "../model-preference"
 import { useLocation } from "../context/location"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 
-export function DialogModel(props: { providerID?: string }) {
+export function DialogModel(props: { providerID?: Provider.ID }) {
   const local = useLocal()
   const data = useData()
   const dialog = useDialog()
@@ -19,9 +21,10 @@ export function DialogModel(props: { providerID?: string }) {
   const favoritePriority = new Set(local.model.favorite().map(modelPreferenceKey))
 
   const connected = useConnected()
-  const providers = createMemo(
-    () => new Map((data.location.provider.list(location.ref) ?? []).map((item) => [item.id, item])),
-  )
+  const providers = createMemo(() => {
+    const values = data.location.provider.list(location.ref) ?? []
+    return new Map(values.map((item) => [item.id, item]))
+  })
   const models = createMemo(() => data.location.model.list(location.ref) ?? [])
 
   const showExtra = createMemo(() => connected() && !props.providerID)
@@ -118,12 +121,17 @@ export function DialogModel(props: { providerID?: string }) {
     if (!value) return "Select model"
     return value.name
   })
+  const current = createMemo(() => {
+    const value = local.model.current()
+    if (!value) return
+    return { providerID: Provider.ID.make(value.providerID), modelID: Model.ID.make(value.modelID) }
+  })
 
-  function onSelect(providerID: string, modelID: string) {
+  function onSelect(providerID: Provider.ID, modelID: Model.ID) {
     local.model.set({ providerID, modelID }, { recent: true })
     const list = local.model.variant.list()
     const cur = local.model.variant.current()
-    if (cur && list.includes(cur)) {
+    if (cur && list.some((variant) => variant === cur)) {
       dialog.clear()
       return
     }
@@ -163,7 +171,7 @@ export function DialogModel(props: { providerID?: string }) {
       flat={true}
       skipFilter={true}
       title={title()}
-      current={local.model.current()}
+      current={current()}
       focusCurrent={false}
     />
   )

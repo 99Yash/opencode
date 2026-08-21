@@ -1,6 +1,7 @@
 import type { SessionMessageInfo } from "@opencode-ai/client/promise"
 import { base64Encode } from "@opencode-ai/util/encode"
 import { expect, test } from "@playwright/test"
+import { wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectSessionTitle } from "../utils/waits"
 
@@ -8,7 +9,7 @@ const directory = "C:/OpenCode/SessionMessageRevert"
 const projectID = "proj_session_message_revert"
 const sessionID = "ses_session_message_revert"
 const server = `http://${process.env.PLAYWRIGHT_SERVER_HOST ?? "127.0.0.1"}:${process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"}`
-const messages = [
+const messages = wire<SessionMessageInfo[]>([
   { id: "msg_first", type: "user", text: "First prompt", time: { created: 1 } },
   {
     id: "msg_first_reply",
@@ -19,7 +20,7 @@ const messages = [
     time: { created: 2, completed: 3 },
   },
   { id: "msg_second", type: "user", text: "Second prompt", time: { created: 4 } },
-] satisfies SessionMessageInfo[]
+])
 
 test("reverts directly to the selected user message", async ({ page }) => {
   const staged: { sessionID: string; messageID: string }[] = []

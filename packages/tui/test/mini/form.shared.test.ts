@@ -13,9 +13,11 @@ import {
   formUnsupported,
   formValidate,
 } from "../../src/mini/form.shared"
+import type { FormReply, MiniFormRequest } from "../../src/mini/types"
+import { wire } from "../fixture/wire"
 
 function request(fields: FormField[]): FormInfo {
-  return { id: "frm_1", sessionID: "ses_1", title: "Input", fields: fields as FormInfo["fields"] }
+  return wire<FormInfo>({ id: "frm_1", sessionID: "ses_1", title: "Input", fields })
 }
 
 describe("Mini form state", () => {
@@ -39,12 +41,16 @@ describe("Mini form state", () => {
 
     const answer = { choice: "fast", count: 1.5, whole: 2, enabled: false, tags: ["custom"], external: true }
     expect(formAnswer(form, state)).toEqual(answer)
-    expect(formReply({ ...form, location: { directory: "/tmp", workspaceID: "wrk_1" } }, state)).toEqual({
-      sessionID: "ses_1",
-      formID: "frm_1",
-      answer,
-      location: { directory: "/tmp", workspaceID: "wrk_1" },
-    })
+    expect(
+      formReply(wire<MiniFormRequest>({ ...form, location: { directory: "/tmp", workspaceID: "wrk_1" } }), state),
+    ).toEqual(
+      wire<FormReply>({
+        sessionID: "ses_1",
+        formID: "frm_1",
+        answer,
+        location: { directory: "/tmp", workspaceID: "wrk_1" },
+      }),
+    )
   })
 
   test("rejects invalid and deliberately unsupported shapes", () => {

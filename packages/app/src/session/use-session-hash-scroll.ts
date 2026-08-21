@@ -23,7 +23,9 @@ export const useSessionHashScroll = (input: {
   consumePendingMessage: (key: string) => string | undefined
 }) => {
   const visibleUserMessages = createMemo(() => input.visibleUserMessages())
-  const messageById = createMemo(() => new Map(visibleUserMessages().map((m) => [m.id, m])))
+  const messageById = createMemo(
+    () => new Map<string, SessionMessageUser>(visibleUserMessages().map((message) => [message.id, message])),
+  )
   let pendingKey = ""
   let clearing = false
 

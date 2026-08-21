@@ -2,62 +2,70 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import {
   OpenCode,
   type EventSubscribeOutput,
+  type LocationRef,
   type SessionMessageAssistantTool,
   type SessionMessageInfo,
 } from "@opencode-ai/client/promise"
 import { runNonInteractivePrompt } from "../../src/run/noninteractive"
+import { type Wire, wire } from "../fixture/wire"
 
 type V2Event = EventSubscribeOutput
 type FormInfo = Extract<V2Event, { type: "form.created" }>["data"]["form"]
-const location = { directory: "/work tree", workspaceID: "wrk_1" }
+const location = wire<LocationRef>({ directory: "/work tree", workspaceID: "wrk_1" })
 
 function ok<T>(data: T) {
   return Promise.resolve(data)
 }
 
 function form(id: string, sessionID: string): FormInfo {
-  return {
+  return wire<FormInfo>({
     id,
     sessionID,
     title: "Input requested",
     fields: [{ key: "authorization", type: "external", url: "https://example.com/form" }],
-  }
+  })
 }
 
 function formCreated(info: FormInfo, eventLocation = location): V2Event {
-  return { id: `evt_${info.id}`, created: 0, type: "form.created", location: eventLocation, data: { form: info } }
+  return wire<V2Event>({
+    id: `evt_${info.id}`,
+    created: 0,
+    type: "form.created",
+    location: eventLocation,
+    data: { form: info },
+  })
 }
 
 function prompted(inboxID: string): V2Event {
-  return {
+  return wire<V2Event>({
     id: "evt_prompted",
     created: 0,
     type: "session.inbox.delivered",
     durable: { aggregateID: "ses_1", seq: 0, version: 1 },
     data: { sessionID: "ses_1", inboxID },
-  }
+  })
 }
 
 function settled(outcome: "success" | "interrupted" = "success"): V2Event {
   if (outcome === "interrupted")
-    return {
+    return wire<V2Event>({
       id: "evt_interrupted",
       created: 0,
       type: "session.execution.interrupted",
       durable: { aggregateID: "ses_1", seq: 1, version: 1 },
       data: { sessionID: "ses_1", reason: "user" },
-    }
-  return {
+    })
+  return wire<V2Event>({
     id: "evt_succeeded",
     created: 0,
     type: "session.execution.succeeded",
     durable: { aggregateID: "ses_1", seq: 1, version: 1 },
     data: { sessionID: "ses_1" },
-  }
+  })
 }
 
 function stepStarted(): V2Event {
-  return {
+  return wire<V2Event>({
     id: "evt_step_started",
     created: 1,
     type: "session.step.started",
@@ -68,11 +76,11 @@ function stepStarted(): V2Event {
       agent: "build",
       model: { providerID: "test", id: "test-model" },
     },
-  }
+  })
 }
 
 function stepFailed(message: string): V2Event {
-  return {
+  return wire<V2Event>({
     id: "evt_step_failed",
     created: 2,
     type: "session.step.failed",
@@ -82,11 +90,11 @@ function stepFailed(message: string): V2Event {
       assistantMessageID: "msg_assistant",
       error: { type: "provider.transport", message },
     },
-  }
+  })
 }
 
 function executionFailed(message: string): V2Event {
-  return {
+  return wire<V2Event>({
     id: "evt_execution_failed",
     created: 3,
     type: "session.execution.failed",
@@ -95,11 +103,11 @@ function executionFailed(message: string): V2Event {
       sessionID: "ses_1",
       error: { type: "provider.transport", message },
     },
-  }
+  })
 }
 
 function failedTool(inboxID: string): V2Event[] {
-  return [
+  return wire<V2Event[]>([
     prompted(inboxID),
     {
       id: "evt_failed_tool_input",
@@ -153,12 +161,12 @@ function failedTool(inboxID: string): V2Event[] {
       },
     },
     settled(),
-  ]
+  ])
 }
 
 function successfulGrep(inboxID: string): V2Event[] {
   const text = "Found 2 matches\n/src/a.ts:\n  Line 1: needle\n/src/b.ts:\n  Line 2: needle"
-  return [
+  return wire<V2Event[]>([
     prompted(inboxID),
     {
       id: "evt_grep_input",
@@ -200,7 +208,7 @@ function successfulGrep(inboxID: string): V2Event[] {
       },
     },
     settled(),
-  ]
+  ])
 }
 
 // Runs one non-interactive prompt against a mocked SDK. `turn` produces the
@@ -214,12 +222,12 @@ async function run(input: {
   cancel?: (input: { sessionID: string; formID: string }) => Promise<void>
   renderTool?: (part: SessionMessageAssistantTool) => Promise<void>
   renderToolError?: (part: SessionMessageAssistantTool) => Promise<void>
-  messages?: (inboxID: string) => SessionMessageInfo[]
+  messages?: (inboxID: string) => Wire<SessionMessageInfo[]>
   wait?: () => Promise<void>
   terminalDelay?: number
 }) {
   const sdk = OpenCode.make({ baseUrl: "https://opencode.test" })
-  const values: V2Event[] = [{ id: "evt_connected", type: "server.connected", data: {} }]
+  const values: V2Event[] = [wire<V2Event>({ id: "evt_connected", type: "server.connected", data: {} })]
   let wake: (() => void) | undefined
   const wait = Promise.withResolvers<void>()
   const stream = (async function* (): AsyncGenerator<V2Event, void, unknown> {
@@ -254,10 +262,12 @@ async function run(input: {
   let promptID = "msg_prompt"
   spyOn(sdk.session, "wait").mockImplementation(() => input.wait?.() ?? wait.promise)
   spyOn(sdk.message, "list").mockImplementation(() =>
-    ok({
-      data: input.messages?.(promptID) ?? [{ id: promptID, type: "user", text: "hello", time: { created: 1 } }],
-      cursor: {},
-    }),
+    ok(
+      wire<Awaited<ReturnType<typeof sdk.message.list>>>({
+        data: input.messages?.(promptID) ?? [{ id: promptID, type: "user", text: "hello", time: { created: 1 } }],
+        cursor: {},
+      }),
+    ),
   )
   spyOn(sdk.session, "prompt").mockImplementation((request) => {
     const messageID = request.id ?? "msg_prompt"
@@ -265,7 +275,16 @@ async function run(input: {
     values.push(...input.turn(messageID))
     wake?.()
     wake = undefined
-    return ok({ id: messageID, sessionID: "ses_1", timeCreated: 1 }) as never
+    return ok(
+      wire<Awaited<ReturnType<typeof sdk.session.prompt>>>({
+        id: messageID,
+        sessionID: "ses_1",
+        timeCreated: 1,
+        type: "user",
+        payload: { text: "hello" },
+        delivery: "steer",
+      }),
+    )
   })
   await runNonInteractivePrompt({
     client: sdk,

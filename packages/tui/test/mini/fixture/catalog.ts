@@ -1,13 +1,14 @@
 import { spyOn } from "bun:test"
 import type { LocationRef, ModelListOutput, OpenCodeClient, ProviderListOutput } from "@opencode-ai/client/promise"
+import { wire } from "../../fixture/wire"
 
 export function catalogProvider(id: string, name: string): ProviderListOutput["data"][number] {
-  return {
+  return wire<ProviderListOutput["data"][number]>({
     id,
     name,
     activation: "auto",
     package: "",
-  }
+  })
 }
 
 export function catalogModel(input: {
@@ -18,7 +19,7 @@ export function catalogModel(input: {
   context?: number
   variants?: string[]
 }): ModelListOutput["data"][number] {
-  return {
+  return wire<ModelListOutput["data"][number]>({
     id: input.id,
     modelID: input.modelID ?? input.id,
     providerID: input.providerID,
@@ -34,7 +35,7 @@ export function catalogModel(input: {
     status: "active",
     enabled: true,
     limit: { context: input.context ?? 128_000, output: 8_192 },
-  }
+  })
 }
 
 export function stubCatalogLists(

@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test"
 import { EOL } from "node:os"
 import { format } from "../src/commands/handlers/plugin/list"
+import { wire } from "./fixture/wire"
 
 test("formats server and TUI plugins in sections without builtins", () => {
   expect(
     format(
-      [
+      wire<Parameters<typeof format>[0]>([
         { id: "opencode.agent", source: { type: "builtin" }, status: "active", tui: false },
         {
           id: "acme.dual",
@@ -19,7 +20,7 @@ test("formats server and TUI plugins in sections without builtins", () => {
           error: "broken",
           tui: false,
         },
-      ],
+      ]),
       [
         { target: "tui-only", source: "configured" },
         { target: "/tmp/local.ts", source: "discovered" },
@@ -41,6 +42,12 @@ test("formats server and TUI plugins in sections without builtins", () => {
 
 test("includes builtins when requested", () => {
   expect(
-    format([{ id: "opencode.agent", source: { type: "builtin" }, status: "active", tui: false }], [], true),
+    format(
+      wire<Parameters<typeof format>[0]>([
+        { id: "opencode.agent", source: { type: "builtin" }, status: "active", tui: false },
+      ]),
+      [],
+      true,
+    ),
   ).toBe(["Server", "opencode.agent (active)"].join(EOL))
 })

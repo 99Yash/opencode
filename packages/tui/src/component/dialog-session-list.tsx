@@ -143,14 +143,14 @@ export function DialogSessionList() {
 
   const options = createMemo(() => {
     const today = new Date().toDateString()
-    const sessionMap = new Map(
+    const sessionMap = new Map<string, SessionInfo>(
       sessions()
         .filter((session) => !session.parentID)
         .map((session) => [session.id, session]),
     )
     const pinned = sessionTabs.enabled() ? [] : local.session.pinned().filter((sessionID) => sessionMap.has(sessionID))
-    const pinnedSet = new Set(pinned)
-    const slotByID = new Map(local.session.slots().map((sessionID, index) => [sessionID, index + 1]))
+    const pinnedSet = new Set<string>(pinned)
+    const slotByID = new Map<string, number>(local.session.slots().map((sessionID, index) => [sessionID, index + 1]))
 
     const option = (session: SessionInfo, category: string) => {
       const directory = session.location.directory

@@ -423,7 +423,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           },
           current() {
             const v = this.selected()
-            if (v && this.list().includes(v)) return v
+            if (v && this.list().some((variant) => variant === v)) return v
             return undefined
           },
           list() {
@@ -494,7 +494,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         })
 
       const slots = createMemo(() => {
-        const existing = new Set(
+        const existing = new Set<string>(
           data.session
             .list()
             .filter((x) => x.parentID === undefined)

@@ -2,6 +2,8 @@ import { expect, test } from "bun:test"
 import { SESSION_TABS_REMOVED_EVENT, readSessionTabsRemovedDetail } from "@/shell/titlebar/session-events"
 import { archiveHomeSession } from "./archive"
 import type { ServerConnection } from "@/runtime/server/registry"
+import type { SessionInfo } from "@opencode-ai/client/promise"
+import { wire } from "@/test-fixture"
 
 const remote = "remote" as ServerConnection.Key
 
@@ -18,7 +20,7 @@ test("archiving a Home session removes its open titlebar tab", async () => {
 
   await archiveHomeSession({
     server: remote,
-    session: { id: "ses_1", location: { directory: "/workspace" } },
+    session: wire<Pick<SessionInfo, "id" | "location">>({ id: "ses_1", location: { directory: "/workspace" } }),
     archive: async () => undefined,
     remove: () => {
       removed = true
@@ -36,7 +38,7 @@ test("reports archive failures without removing the session", async () => {
 
   await archiveHomeSession({
     server: remote,
-    session: { id: "ses_1", location: { directory: "/workspace" } },
+    session: wire<Pick<SessionInfo, "id" | "location">>({ id: "ses_1", location: { directory: "/workspace" } }),
     archive: async () => Promise.reject(failure),
     remove: () => {
       removed = true

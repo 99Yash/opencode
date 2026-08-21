@@ -1,6 +1,7 @@
 export * as ConfigCommandPlugin from "./command.js"
 
 import { define } from "@opencode-ai/plugin/effect/plugin"
+import { Agent } from "@opencode-ai/schema/agent"
 import { Info, type Entry } from "@opencode-ai/schema/config"
 import { ConfigCommand } from "@opencode-ai/schema/config/command"
 import path from "path"
@@ -54,7 +55,7 @@ export const Plugin = define({
           draft.update(name, (item) => {
             item.template = command.template
             if (command.description !== undefined) item.description = command.description
-            if (command.agent !== undefined) item.agent = command.agent
+            if (command.agent !== undefined) item.agent = Agent.ID.make(command.agent)
             if (command.model !== undefined)
               item.model = {
                 id: command.model.model,

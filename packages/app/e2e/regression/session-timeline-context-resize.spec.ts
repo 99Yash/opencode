@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import type { JsonValue, OpenCodeEvent, SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client/promise"
+import { wire, type Wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../utils/waits"
 import {
@@ -209,13 +210,7 @@ function turn(index: number, target: boolean, status: "running" | "completed" = 
   const content: SessionMessageAssistant["content"] = target
     ? [
         toolContent(
-          contextTool(
-            contextIDs[0]!,
-            assistantID,
-            "read",
-            { path: "src/recent-a.ts", offset: 0, limit: 120 },
-            status,
-          ),
+          contextTool(contextIDs[0]!, assistantID, "read", { path: "src/recent-a.ts", offset: 0, limit: 120 }, status),
         ),
         toolContent(contextTool(contextIDs[1]!, assistantID, "glob", { path: directory, pattern: "**/*.ts" }, status)),
         toolContent(
@@ -231,7 +226,7 @@ function turn(index: number, target: boolean, status: "running" | "completed" = 
         { type: "text", text: "This assistant text is immediately after the explored context group." },
       ]
     : [{ type: "text", text: `Assistant filler ${index}. ${"filler ".repeat(60)}` }]
-  return [
+  return wire<SessionMessageInfo[]>([
     {
       id: userID,
       type: "user",
@@ -249,7 +244,7 @@ function turn(index: number, target: boolean, status: "running" | "completed" = 
       finish: "stop",
       content,
     },
-  ]
+  ])
 }
 
 function contextTool(
@@ -314,9 +309,10 @@ let eventSequence = -1
 
 function toolEvents(part: ContextTool): OpenCodeEvent[] {
   return [
-    eventValue(
-      "session.tool.success",
-      {
+    eventValue(2, (envelope) => ({
+      ...envelope,
+      type: "session.tool.success",
+      data: {
         sessionID,
         assistantMessageID: part.messageID,
         id: part.callID,
@@ -324,25 +320,30 @@ function toolEvents(part: ContextTool): OpenCodeEvent[] {
         metadata: part.state.metadata,
         executed: true,
       },
-      2,
-    ),
+    })),
   ]
 }
 
-function eventValue<Type extends OpenCodeEvent["type"]>(
-  type: Type,
-  data: Extract<OpenCodeEvent, { type: Type }>["data"],
-  version: 1 | 2,
-): Extract<OpenCodeEvent, { type: Type }> {
+type EventEnvelope<Version extends 1 | 2> = {
+  id: string
+  created: number
+  location: { directory: string }
+  durable: { aggregateID: string; seq: number; version: Version }
+}
+
+function eventValue<Version extends 1 | 2>(
+  version: Version,
+  build: (envelope: EventEnvelope<Version>) => Wire<OpenCodeEvent>,
+): OpenCodeEvent {
   eventSequence++
-  return {
-    id: `evt_context_resize_${eventSequence}`,
-    created: 1700000002000 + eventSequence,
-    type,
-    data,
-    location: { directory },
-    durable: { aggregateID: sessionID, seq: eventSequence, version },
-  } as unknown as Extract<OpenCodeEvent, { type: Type }>
+  return wire<OpenCodeEvent>(
+    build({
+      id: `evt_context_resize_${eventSequence}`,
+      created: 1700000002000 + eventSequence,
+      location: { directory },
+      durable: { aggregateID: sessionID, seq: eventSequence, version },
+    }),
+  )
 }
 
 async function mockServer(page: Page, events: OpenCodeEvent[] = [], fixtureMessages = messages) {

@@ -120,7 +120,7 @@ test("groups nested non-archived workspace sessions by latest activity", () => {
     ],
     "/workspace",
   )
-  expect(sessions.map((item) => item.id)).toEqual(["nested", "old"])
+  expect(sessions.map((item) => String(item.id))).toEqual(["nested", "old"])
 })
 
 test("merges workspace placement by freshness with authoritative server ties", () => {

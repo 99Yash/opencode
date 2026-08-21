@@ -1,5 +1,12 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
-import type { JsonValue, OpenCodeEvent, SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client/promise"
+import type {
+  JsonValue,
+  OpenCodeEvent,
+  SessionMessageAssistant,
+  SessionMessageInfo,
+  SessionMessageUser,
+} from "@opencode-ai/client/promise"
+import { wire, type Wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { expectAppVisible, expectSessionTitle } from "../utils/waits"
 import { createTwoFilesPatch } from "diff"
@@ -25,12 +32,12 @@ declare global {
   }
 }
 
-const userMessage = {
+const userMessage = wire<SessionMessageUser>({
   id: userMessageID,
   type: "user",
   time: { created: 1700000000000 },
   text: "Please edit the file.",
-} satisfies SessionMessageInfo
+})
 
 const editPart = {
   id: editPartID,
@@ -72,7 +79,7 @@ const streamedTextPart = {
   text: "Streaming added a later assistant text part.",
 }
 
-const assistantMessage = {
+const assistantMessage = wire<SessionMessageAssistant>({
   id: assistantMessageID,
   type: "assistant",
   time: { created: 1700000001000 },
@@ -81,7 +88,7 @@ const assistantMessage = {
   cost: 0.01,
   tokens: { input: 100, output: 200, reasoning: 0, cache: { read: 0, write: 0 } },
   content: [toolContent(editPart)],
-} satisfies SessionMessageInfo
+})
 
 test.describe("regression: session timeline local row state", () => {
   test("keeps a manually collapsed tool collapsed when later assistant content streams", async ({ page }) => {
@@ -330,56 +337,61 @@ let eventSequence = -1
 
 function textEvents(): OpenCodeEvent[] {
   return [
-    eventValue("session.text.started", { sessionID, assistantMessageID, ordinal: 0 }, 1),
-    eventValue(
-      "session.text.ended",
-      {
+    eventValue(1, (envelope) => ({
+      ...envelope,
+      type: "session.text.started",
+      data: { sessionID, assistantMessageID, ordinal: 0 },
+    })),
+    eventValue(1, (envelope) => ({
+      ...envelope,
+      type: "session.text.ended",
+      data: {
         sessionID,
         assistantMessageID,
         ordinal: 0,
         text: streamedTextPart.text,
       },
-      1,
-    ),
+    })),
   ]
 }
 
 function toolEvents(part: typeof editPart): OpenCodeEvent[] {
   return [
-    eventValue(
-      "session.tool.input.started",
-      {
+    eventValue(1, (envelope) => ({
+      ...envelope,
+      type: "session.tool.input.started",
+      data: {
         sessionID,
         assistantMessageID,
         id: part.callID,
         name: part.tool,
       },
-      1,
-    ),
-    eventValue(
-      "session.tool.input.ended",
-      {
+    })),
+    eventValue(1, (envelope) => ({
+      ...envelope,
+      type: "session.tool.input.ended",
+      data: {
         sessionID,
         assistantMessageID,
         id: part.callID,
         text: JSON.stringify(part.state.input),
       },
-      1,
-    ),
-    eventValue(
-      "session.tool.called",
-      {
+    })),
+    eventValue(1, (envelope) => ({
+      ...envelope,
+      type: "session.tool.called",
+      data: {
         sessionID,
         assistantMessageID,
         id: part.callID,
         input: part.state.input,
         executed: true,
       },
-      1,
-    ),
-    eventValue(
-      "session.tool.success",
-      {
+    })),
+    eventValue(2, (envelope) => ({
+      ...envelope,
+      type: "session.tool.success",
+      data: {
         sessionID,
         assistantMessageID,
         id: part.callID,
@@ -387,25 +399,30 @@ function toolEvents(part: typeof editPart): OpenCodeEvent[] {
         metadata: part.state.metadata as Record<string, JsonValue>,
         executed: true,
       },
-      2,
-    ),
+    })),
   ]
 }
 
-function eventValue<Type extends OpenCodeEvent["type"]>(
-  type: Type,
-  data: Extract<OpenCodeEvent, { type: Type }>["data"],
-  version: 1 | 2,
-): Extract<OpenCodeEvent, { type: Type }> {
+type EventEnvelope<Version extends 1 | 2> = {
+  id: string
+  created: number
+  location: { directory: string }
+  durable: { aggregateID: string; seq: number; version: Version }
+}
+
+function eventValue<Version extends 1 | 2>(
+  version: Version,
+  build: (envelope: EventEnvelope<Version>) => Wire<OpenCodeEvent>,
+): OpenCodeEvent {
   eventSequence++
-  return {
-    id: `evt_collapse_${eventSequence}`,
-    created: 1700000002000 + eventSequence,
-    type,
-    data,
-    location: { directory },
-    durable: { aggregateID: sessionID, seq: eventSequence, version },
-  } as unknown as Extract<OpenCodeEvent, { type: Type }>
+  return wire<OpenCodeEvent>(
+    build({
+      id: `evt_collapse_${eventSequence}`,
+      created: 1700000002000 + eventSequence,
+      location: { directory },
+      durable: { aggregateID: sessionID, seq: eventSequence, version },
+    }),
+  )
 }
 
 function readExpanded(element: Element) {

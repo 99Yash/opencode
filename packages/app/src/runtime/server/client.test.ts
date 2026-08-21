@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test"
 import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import { createRoot } from "solid-js"
 import { createOpenCodeEventSource } from "./client"
+import { wire } from "../../test-fixture"
 
-const permission = {
+const permission = wire<Extract<OpenCodeEvent, { type: "permission.asked" }>>({
   id: "evt_permission",
   created: 1,
   type: "permission.asked",
@@ -15,7 +16,7 @@ const permission = {
     resources: ["src/**"],
     source: { type: "tool", messageID: "msg_1", id: "call_1" },
   },
-} satisfies Extract<OpenCodeEvent, { type: "permission.asked" }>
+})
 
 function setup() {
   return createRoot((dispose) => ({ ...createOpenCodeEventSource(), dispose }))
@@ -45,11 +46,11 @@ describe("server event stream", () => {
     const other: OpenCodeEvent[] = []
     const all: OpenCodeEvent[] = []
     let workspaceID: string | undefined
-    const global = {
+    const global = wire<Extract<OpenCodeEvent, { type: "server.connected" }>>({
       id: "evt_connected",
       type: "server.connected",
       data: {},
-    } satisfies Extract<OpenCodeEvent, { type: "server.connected" }>
+    })
 
     const repoEvents = server.event.location("/repo")
     repoEvents.on("permission.asked", (event) => {

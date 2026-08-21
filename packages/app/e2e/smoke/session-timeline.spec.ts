@@ -144,7 +144,7 @@ test.describe("smoke: session timeline", () => {
     await expectSessionTitle(page, fixture.expected.targetTitle)
     await switchTitlebarSession(page, fixture.sourceID, fixture.expected.sourceTitle)
 
-    const destination = fixture.messages[fixture.targetID].map((message) => message.id)
+    const destination = fixture.messages[fixture.targetID].map((message) => String(message.id))
     const last = fixture.expected.targetMessageIDs.at(-1)!
     await page.evaluate(
       ({ destination, last }) => {
@@ -284,7 +284,7 @@ test.describe("smoke: session timeline", () => {
     await page.goto(`/server/${base64Encode(fixture.serverKey)}/session/${fixture.sourceID}`)
     await expectSessionTitle(page, fixture.expected.sourceTitle)
     const last = fixture.expected.targetMessageIDs.at(-1)!
-    const destination = fixture.messages[fixture.targetID].map((message) => message.id)
+    const destination = fixture.messages[fixture.targetID].map((message) => String(message.id))
     await page.evaluate(
       ({ destination, last }) => {
         const ids = new Set(destination)

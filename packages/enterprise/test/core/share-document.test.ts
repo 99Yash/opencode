@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import type { SessionInfo, SessionMessageInfo } from "@opencode-ai/client/promise"
 import { readShareDocument } from "../../src/core/share-document"
 import { Share } from "../../src/core/share"
+import { wire } from "../wire"
 
 describe("share document", () => {
   test("rejects malformed current message batches", () => {
@@ -32,8 +34,10 @@ describe("share document", () => {
 
     const result = await readShareDocument(data)
 
-    expect(result.session.id).toBe("ses_current")
-    expect(result.messages).toEqual([{ id: "msg_current", type: "user", text: "Current prompt", time: { created: 1 } }])
+    expect(result.session.id).toBe(wire<SessionInfo["id"]>("ses_current"))
+    expect(result.messages).toEqual(
+      wire<SessionMessageInfo[]>([{ id: "msg_current", type: "user", text: "Current prompt", time: { created: 1 } }]),
+    )
   })
 
   test("maps a legacy Session without changing its blob", async () => {
@@ -149,31 +153,33 @@ describe("share document", () => {
     expect(data).toEqual(snapshot)
     expect(result.session).toMatchObject({ id: sessionID, location: { directory: "/workspace" } })
     expect(result.session).toMatchObject({ model: { id: "model", providerID: "provider" }, cost: 0 })
-    expect(result.messages).toEqual([
-      {
-        id: messageID,
-        type: "user",
-        text: "Stored prompt\n\nVisible ignored text",
-        metadata: { agent: "build", model: { id: "model", providerID: "provider" } },
-        time: { created: 1 },
-      },
-      {
-        id: assistantID,
-        type: "assistant",
-        agent: "build",
-        model: { id: "model", providerID: "provider" },
-        content: [
-          { type: "text", text: "Stored response" },
-          {
-            type: "tool",
-            id: "call_read",
-            name: "read",
-            state: { status: "completed", input: { path: "README.md" }, content: [{ type: "text", text: "hello" }] },
-            time: { created: 2 },
-          },
-        ],
-        time: { created: 2, completed: 4 },
-      },
-    ])
+    expect(result.messages).toEqual(
+      wire<SessionMessageInfo[]>([
+        {
+          id: messageID,
+          type: "user",
+          text: "Stored prompt\n\nVisible ignored text",
+          metadata: { agent: "build", model: { id: "model", providerID: "provider" } },
+          time: { created: 1 },
+        },
+        {
+          id: assistantID,
+          type: "assistant",
+          agent: "build",
+          model: { id: "model", providerID: "provider" },
+          content: [
+            { type: "text", text: "Stored response" },
+            {
+              type: "tool",
+              id: "call_read",
+              name: "read",
+              state: { status: "completed", input: { path: "README.md" }, content: [{ type: "text", text: "hello" }] },
+              time: { created: 2 },
+            },
+          ],
+          time: { created: 2, completed: 4 },
+        },
+      ]),
+    )
   })
 })

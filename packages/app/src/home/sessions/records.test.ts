@@ -2,15 +2,18 @@ import { describe, expect, test } from "bun:test"
 import type { SessionInfo } from "@opencode-ai/client/promise"
 import type { LocalProject } from "@/shell/state/layout"
 import { buildHomeSessionRecords } from "./records"
+import { wire } from "@/test-fixture"
 
 const session = (id: string, directory: string, projectID: string) =>
-  ({
+  wire<SessionInfo>({
     id,
     projectID,
     title: id,
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     location: { directory },
     time: { created: 1, updated: 1 },
-  }) as SessionInfo
+  })
 
 describe("buildHomeSessionRecords", () => {
   const opened = { id: "project-a", worktree: "/repo/a", expanded: true } as LocalProject
@@ -23,7 +26,7 @@ describe("buildHomeSessionRecords", () => {
       projects: () => [opened],
     })
 
-    expect(records.map((record) => record.session.id)).toEqual(["a", "b"])
+    expect(records.map((record) => String(record.session.id))).toEqual(["a", "b"])
     expect(records[1]?.project).toMatchObject({ id: "project-b", worktree: "/repo/b", expanded: false })
   })
 
@@ -34,6 +37,6 @@ describe("buildHomeSessionRecords", () => {
       projects: () => [opened],
     })
 
-    expect(records.map((record) => record.session.id)).toEqual(["a"])
+    expect(records.map((record) => String(record.session.id))).toEqual(["a"])
   })
 })

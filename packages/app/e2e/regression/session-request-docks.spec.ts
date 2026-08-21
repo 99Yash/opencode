@@ -1,5 +1,7 @@
 import { base64Encode } from "@opencode-ai/util/encode"
+import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import { expect, test, type Page } from "@playwright/test"
+import { wire, type Wire } from "@/test-fixture"
 import { mockOpenCodeServer } from "../utils/mock-server"
 import { installSseTransport } from "../utils/sse-transport"
 import { expectSessionTitle } from "../utils/waits"
@@ -138,7 +140,7 @@ test("restores the draft caret before typing after a request dock closes", async
       }),
     )
     .toBe(cursor)
-  await transport.send({
+  const created: Wire<OpenCodeEvent> = {
     id: "evt_form_created",
     created: 1700000001000,
     type: "form.created",
@@ -161,18 +163,20 @@ test("restores the draft caret before typing after a request dock closes", async
         ],
       },
     },
-  })
+  }
+  await transport.send(wire<OpenCodeEvent>(created))
   const question = page.locator('[data-component="dock-prompt"][data-kind="question"]')
   await expect(question).toBeVisible()
   await expect(editor).toHaveCount(0)
 
-  await transport.send({
+  const cancelled: Wire<OpenCodeEvent> = {
     id: "evt_form_cancelled",
     created: 1700000002000,
     type: "form.cancelled",
     location: { directory },
     data: { sessionID, id: "frm_question_caret" },
-  })
+  }
+  await transport.send(wire<OpenCodeEvent>(cancelled))
   await expect(question).toHaveCount(0)
   await expect(editor).toBeVisible()
   await page.keyboard.press("x")

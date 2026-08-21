@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentSideConnection } from "@agentclientprotocol/sdk"
-import { OpenCode } from "@opencode-ai/client/promise"
+import { OpenCode, type AgentInfo, type ModelInfo, type SessionInfo, type SkillInfo } from "@opencode-ai/client/promise"
 import { ACPService } from "../../src/acp/service"
 import { ChildSessionUpdatesCapability } from "../../src/acp/event"
+import { wire } from "../fixture/wire"
 
 describe("acp service", () => {
   test("creates a v2 session, registers mcp, and publishes commands", async () => {
@@ -72,7 +73,7 @@ describe("acp service", () => {
   })
 })
 
-const model = {
+const model = wire<ModelInfo>({
   id: "test-model",
   modelID: "test-model",
   providerID: "test",
@@ -81,30 +82,30 @@ const model = {
   variants: [{ id: "default" }, { id: "high" }],
   time: { released: 0 },
   cost: [],
-  status: "active" as const,
+  status: "active",
   enabled: true,
   limit: { context: 100_000, output: 10_000 },
-}
+})
 
-const agent = {
+const agent = wire<AgentInfo>({
   id: "build",
   name: "Build",
   request: { settings: {}, headers: {}, body: {} },
-  mode: "primary" as const,
+  mode: "primary",
   hidden: false,
   permissions: [],
-}
+})
 
-const skill = {
+const skill = wire<SkillInfo>({
   id: "verify",
   name: "verify",
   description: "Verify work",
   slash: true,
   location: "/skills/verify.md",
   content: "verify",
-}
+})
 
-const session = {
+const session = wire<SessionInfo>({
   id: "ses_acp",
   projectID: "global",
   agent: "build",
@@ -114,4 +115,4 @@ const session = {
   time: { created: 0, updated: 0 },
   title: "New session",
   location: { directory: "/workspace" },
-}
+})

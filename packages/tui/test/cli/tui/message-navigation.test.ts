@@ -1,12 +1,13 @@
 import { expect, test } from "bun:test"
 import type { SessionMessageAssistant, SessionMessageInfo } from "@opencode-ai/client"
 import { findMessageBoundary, messageNavigationSlack } from "../../../src/routes/session/message-navigation"
+import { wire } from "../../fixture/wire"
 
-const messages: SessionMessageInfo[] = [
+const messages = wire<SessionMessageInfo[]>([
   { type: "user", id: "user-1", text: "First", time: { created: 0 } },
   assistant("assistant-1", "Response"),
   { type: "user", id: "user-2", text: "Second", time: { created: 2 } },
-]
+])
 const children = [
   { id: "user-1", y: 0 },
   { id: "assistant-1", y: 20 },
@@ -153,12 +154,12 @@ test("stops at the first and last message", () => {
 })
 
 function assistant(id: string, text: string): SessionMessageAssistant {
-  return {
+  return wire<SessionMessageAssistant>({
     type: "assistant",
     id,
     agent: "build",
     model: { providerID: "test", id: "test" },
     content: [{ type: "text", text }],
     time: { created: 1, completed: 1 },
-  }
+  })
 }

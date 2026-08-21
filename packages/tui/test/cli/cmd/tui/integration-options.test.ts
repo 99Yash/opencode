@@ -6,12 +6,14 @@ import {
   credentialConnections,
   integrationOptions,
 } from "../../../../src/component/dialog-integration"
+import { wire, type Wire } from "../../../fixture/wire"
 
-const integration = (value: Partial<IntegrationInfo> & Pick<IntegrationInfo, "id" | "name">): IntegrationInfo => ({
-  methods: [],
-  connections: [],
-  ...value,
-})
+const integration = (value: Wire<Partial<IntegrationInfo> & Pick<IntegrationInfo, "id" | "name">>): IntegrationInfo =>
+  wire<IntegrationInfo>({
+    methods: [],
+    connections: [],
+    ...value,
+  })
 
 describe("integrationOptions", () => {
   test("keeps popular integrations first and sorts the rest alphabetically", () => {
@@ -22,7 +24,7 @@ describe("integrationOptions", () => {
         integration({ id: "custom-z", name: "Zebra" }),
         integration({ id: "anthropic", name: "Anthropic" }),
       ]).map((item) => item.id),
-    ).toEqual(["openai", "anthropic", "mistral", "custom-z"])
+    ).toEqual(wire<IntegrationInfo["id"][]>(["openai", "anthropic", "mistral", "custom-z"]))
   })
 })
 
@@ -57,7 +59,7 @@ describe("credentialConnections", () => {
           ],
         }),
       ),
-    ).toEqual([{ type: "credential", id: "cred_1", label: "Work" }])
+    ).toEqual(wire<ReturnType<typeof credentialConnections>>([{ type: "credential", id: "cred_1", label: "Work" }]))
   })
 })
 

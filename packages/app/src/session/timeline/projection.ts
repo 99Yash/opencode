@@ -1,8 +1,12 @@
 import type { ModelRef, SessionMessageInfo, SessionStatus } from "@opencode-ai/client/promise"
+import { Model } from "@opencode-ai/schema/model"
+import { Provider } from "@opencode-ai/schema/provider"
 import { reuseTimelineRows, Timeline, TimelineRow } from "@opencode-ai/session-ui/timeline/projection"
 import { createMemo, type Accessor } from "solid-js"
 
 export { reuseTimelineRows } from "@opencode-ai/session-ui/timeline/projection"
+
+const emptyModel: ModelRef = { id: Model.ID.make(""), providerID: Provider.ID.make("") }
 
 export function createTimelineProjection(input: {
   sessionMessages: Accessor<SessionMessageInfo[]>
@@ -10,12 +14,12 @@ export function createTimelineProjection(input: {
   showReasoningSummaries: Accessor<boolean>
 }) {
   const sessionMessageByID = createMemo(
-    () => new Map(input.sessionMessages().map((message) => [message.id, message] as const)),
+    () => new Map<string, SessionMessageInfo>(input.sessionMessages().map((message) => [message.id, message])),
   )
   const userContextByID = createMemo(() => {
     const result = new Map<string, { agent: string; model: ModelRef }>()
     let agent = ""
-    let model: ModelRef = { id: "", providerID: "" }
+    let model: ModelRef = emptyModel
     let userID: string | undefined
     input.sessionMessages().forEach((message) => {
       if (message.type === "agent-switched") agent = message.agent
@@ -42,9 +46,10 @@ export function createTimelineProjection(input: {
             localModelID &&
             typeof localModel.providerID === "string"
               ? {
-                  id: localModelID,
-                  providerID: localModel.providerID,
-                  variant: typeof localModel.variant === "string" ? localModel.variant : undefined,
+                  id: Model.ID.make(localModelID),
+                  providerID: Provider.ID.make(localModel.providerID),
+                  variant:
+                    typeof localModel.variant === "string" ? Model.VariantID.make(localModel.variant) : undefined,
                 }
               : model,
         })

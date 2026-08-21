@@ -1,16 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionInfo } from "@opencode-ai/client/promise"
 import { HOME_V2_SESSION_PAGE_LIMIT, loadHomeSessionIndex, parseHomeSessionIndex, retainHomeSessions } from "./index"
+import { wire, type Wire } from "@/test-fixture"
 
-const session = (id: string, input: Partial<SessionInfo> = {}) =>
-  ({
+const session = (id: string, input: Partial<Wire<SessionInfo>> = {}) =>
+  wire<SessionInfo>({
     id,
     projectID: "project",
     title: id,
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     time: { created: 1, updated: 1 },
     location: { directory: "/repo" },
     ...input,
-  }) as SessionInfo
+  })
 
 describe("Home session index", () => {
   test("loads all pages", async () => {
@@ -33,7 +36,7 @@ describe("Home session index", () => {
         session("root"),
         session("child", { parentID: "root" }),
         session("archived", { time: { created: 1, updated: 1, archived: 2 } }),
-      ]).map((item) => item.id),
+      ]).map((item) => String(item.id)),
     ).toEqual(["root"])
   })
 
@@ -44,6 +47,6 @@ describe("Home session index", () => {
       1,
       now,
     )
-    expect(result.map((item) => item.id)).toEqual(["b"])
+    expect(result.map((item) => String(item.id))).toEqual(["b"])
   })
 })
