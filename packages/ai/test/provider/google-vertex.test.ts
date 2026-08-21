@@ -54,6 +54,46 @@ describe("Google Vertex providers", () => {
     }),
   )
 
+  it.effect("sends Gemini requests to the US Vertex multi-region endpoint", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(
+        LLM.request({
+          model: GoogleVertex.configure({
+            accessToken: "vertex-token",
+            location: "us",
+            project: "vertex-project",
+          }).model("gemini-3.5-flash"),
+          prompt: "Say hello.",
+        }),
+      ).pipe(
+        Effect.provide(
+          dynamicResponse((input) =>
+            Effect.gen(function* () {
+              const request = yield* HttpClientRequest.toWeb(input.request).pipe(Effect.orDie)
+              expect(request.url).toBe(
+                "https://aiplatform.us.rep.googleapis.com/v1beta1/projects/vertex-project/locations/us/publishers/google/models/gemini-3.5-flash:streamGenerateContent?alt=sse",
+              )
+              expect(request.headers.get("authorization")).toBe("Bearer vertex-token")
+              return input.respond(
+                sseEvents({
+                  candidates: [
+                    {
+                      content: { role: "model", parts: [{ text: "Hello." }] },
+                      finishReason: "STOP",
+                    },
+                  ],
+                }),
+                { headers: { "content-type": "text/event-stream" } },
+              )
+            }),
+          ),
+        ),
+      )
+
+      expect(response.text).toBe("Hello.")
+    }),
+  )
+
   it.effect("adds billing labels to Vertex Gemini requests", () =>
     Effect.gen(function* () {
       const prepared = yield* compileRequest(
