@@ -26,9 +26,7 @@ test("labels single-file patches by operation", async ({ page }) => {
   })
 
   for (const item of cases) {
-    await expect(page.locator(`[data-timeline-part-id="${item.id}"] [data-slot="message-part-title-text"]`)).toHaveText(
-      item.title,
-    )
+    await expect(page.locator(`[data-timeline-part-id="${item.id}"]`).getByLabel(item.title, { exact: true })).toBeVisible()
   }
 })
 
