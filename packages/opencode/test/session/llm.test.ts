@@ -882,7 +882,7 @@ describe("session.llm.stream", () => {
         }).pipe(Effect.flip)
         yield* Effect.promise(() => request)
 
-        expect(error).toBeInstanceOf(ProviderError.ResponseStreamError)
+        if (!(error instanceof ProviderError.ResponseStreamError)) throw error
         expect(error.message).toBe("Provider finish_reason: network_error")
       }),
     {
