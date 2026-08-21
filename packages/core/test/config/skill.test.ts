@@ -270,7 +270,12 @@ describe("ConfigSkillPlugin.Plugin", () => {
             home,
           )
           const watcher = yield* Watcher.Test
-          expect(yield* watcher.subscriptions()).toEqual(expected.map((item) => ({ path: item, type: "directory" })))
+          expect(yield* watcher.subscriptions()).toEqual([
+            { path: path.join(home, ".claude"), type: "file" },
+            { path: expected[0], type: "directory" },
+            { path: path.join(home, ".agents"), type: "file" },
+            ...expected.slice(1).map((item) => ({ path: item, type: "directory" as const })),
+          ])
         }),
       ),
     ),
@@ -322,8 +327,9 @@ describe("ConfigSkillPlugin.Plugin", () => {
             await write(worktreeSkills, "review", "Worktree")
           })
 
-          const entries = yield* discover(worktree, path.join(tmp.path, "global"))
-          const skill = yield* startEntries(entries, worktree)
+          const global = path.join(tmp.path, "global")
+          const entries = yield* discover(worktree, global)
+          const skill = yield* startEntries(entries, worktree, path.join(global, "home"))
           const review = (yield* skill.list()).find((item) => item.id === "review")
 
           expect(review?.description).toBe("Worktree")
@@ -444,6 +450,8 @@ describe("ConfigSkillPlugin.Plugin", () => {
           const watcher = yield* Watcher.Test
           expect((yield* skill.list()).find((item) => item.id === "bro")?.description).toBe("First")
           expect(yield* watcher.subscriptions()).toEqual([
+            { path: path.join(tmp.path, ".claude"), type: "file" },
+            { path: path.join(tmp.path, ".agents"), type: "file" },
             { path: first, type: "directory" },
             { path: source, type: "file" },
           ])
@@ -456,8 +464,12 @@ describe("ConfigSkillPlugin.Plugin", () => {
 
           expect((yield* skill.list()).find((item) => item.id === "bro")?.description).toBe("Second")
           expect(yield* watcher.subscriptions()).toEqual([
+            { path: path.join(tmp.path, ".claude"), type: "file" },
+            { path: path.join(tmp.path, ".agents"), type: "file" },
             { path: first, type: "directory" },
             { path: source, type: "file" },
+            { path: path.join(tmp.path, ".claude"), type: "file" },
+            { path: path.join(tmp.path, ".agents"), type: "file" },
             { path: second, type: "directory" },
             { path: source, type: "file" },
           ])
@@ -477,7 +489,11 @@ describe("ConfigSkillPlugin.Plugin", () => {
           const skill = yield* start([source], tmp.path)
           const watcher = yield* Watcher.Test
           expect(yield* skill.list()).toEqual([])
-          expect(yield* watcher.subscriptions()).toEqual([{ path: path.join(tmp.path, "generated"), type: "file" }])
+          expect(yield* watcher.subscriptions()).toEqual([
+            { path: path.join(tmp.path, ".claude"), type: "file" },
+            { path: path.join(tmp.path, ".agents"), type: "file" },
+            { path: path.join(tmp.path, "generated"), type: "file" },
+          ])
 
           yield* Effect.promise(() => fs.mkdir(path.join(tmp.path, "generated")))
           yield* emitAndWait({ type: "create", path: path.join(tmp.path, "generated") })
