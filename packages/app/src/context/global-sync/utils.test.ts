@@ -36,6 +36,26 @@ describe("normalizeAgentList", () => {
       },
     ])
   })
+
+  test("adapts agents returned by servers without request settings", () => {
+    const result = normalizeAgentList([
+      {
+        id: "build",
+        name: "Build",
+        mode: "primary",
+        hidden: false,
+        request: { headers: {}, body: {} },
+        permissions: [],
+      },
+    ] as unknown as AgentListOutput["data"])
+
+    expect(result[0]).toMatchObject({
+      name: "build",
+      temperature: undefined,
+      topP: undefined,
+      options: {},
+    })
+  })
 })
 
 describe("normalizeProviderList", () => {
