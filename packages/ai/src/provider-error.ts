@@ -128,13 +128,10 @@ export function classifyProviderFailure(input: ProviderFailure): AIError["reason
       retryAfterMs: input.retryAfterMs,
       rateLimit: input.rateLimit,
     })
-  if (codes.some((code) => SERVER_CODES.has(code) || code.includes("exhausted") || code.includes("unavailable")))
-    return new ProviderInternalReason({
-      ...common,
-      status: input.status,
-      retryAfterMs: input.retryAfterMs,
-    })
-  if (TRANSIENT_TEXT.test(text))
+  if (
+    TRANSIENT_TEXT.test(text) ||
+    codes.some((code) => SERVER_CODES.has(code) || code.includes("exhausted") || code.includes("unavailable"))
+  )
     return new ProviderInternalReason({
       ...common,
       status: input.status,
