@@ -28,6 +28,15 @@ test("labels single-file patches by operation", async ({ page }) => {
   for (const item of cases) {
     await expect(page.locator(`[data-timeline-part-id="${item.id}"]`).getByLabel(item.title, { exact: true })).toBeVisible()
   }
+  await expect(
+    page.locator('[data-timeline-part-id="prt_created_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
+  ).toHaveCount(0)
+  await expect(
+    page.locator('[data-timeline-part-id="prt_removed_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
+  ).toHaveCount(0)
+  await expect(
+    page.locator('[data-timeline-part-id="prt_modified_patch"] [data-slot="message-part-actions"] [data-component="diff-changes"]'),
+  ).toHaveCount(1)
 })
 
 test("preserves nested patch file state through outer collapse and reopen", async ({ page }) => {
