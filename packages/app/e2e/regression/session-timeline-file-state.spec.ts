@@ -2,6 +2,36 @@ import { expect, test } from "@playwright/test"
 import { assistantMessage, setupTimeline, toolPart, userMessage } from "../performance/timeline-stability/fixture"
 import { createTwoFilesPatch } from "diff"
 
+test("labels single-file patches by operation", async ({ page }) => {
+  const cases = [
+    { id: "prt_created_patch", file: "src/new.ts", status: "added" as const, title: "Created" },
+    { id: "prt_removed_patch", file: "src/old.ts", status: "deleted" as const, title: "Removed" },
+    { id: "prt_modified_patch", file: "src/current.ts", status: "modified" as const, title: "Patch" },
+  ]
+  await setupTimeline(page, {
+    messages: [
+      userMessage(),
+      assistantMessage(
+        cases.map((item) =>
+          toolPart(
+            item.id,
+            "patch",
+            "completed",
+            { patchText: `Update ${item.file}` },
+            { metadata: { files: [patchFile(item.file, item.status)] } },
+          ),
+        ),
+      ),
+    ],
+  })
+
+  for (const item of cases) {
+    await expect(page.locator(`[data-timeline-part-id="${item.id}"] [data-slot="message-part-title-text"]`)).toHaveText(
+      item.title,
+    )
+  }
+})
+
 test("preserves nested patch file state through outer collapse and reopen", async ({ page }) => {
   const patchID = "prt_nested_patch"
   const files = [patchFile("src/a.ts", "modified"), patchFile("src/b.ts", "added"), patchFile("src/old.ts", "deleted")]

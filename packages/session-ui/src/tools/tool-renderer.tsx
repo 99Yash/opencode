@@ -1397,6 +1397,11 @@ ToolRegistry.register({
       if (list.length !== 1) return undefined
       return list[0]
     })
+    const title = createMemo(() => {
+      if (pending() || !single() || single()!.type === "update") return i18n.t("ui.tool.patch")
+      if (single()?.type === "add") return i18n.t("ui.patch.action.created")
+      return i18n.t("ui.patch.action.removed")
+    })
     const [expanded, setExpanded] = createSignal<string[]>([])
     let seeded = false
 
@@ -1525,7 +1530,7 @@ ToolRegistry.register({
                 <div data-slot="message-part-title-area">
                   <div data-slot="message-part-title">
                     <span data-slot="message-part-title-text">
-                      <TextShimmer text={i18n.t("ui.tool.patch")} active={pending()} />
+                      <TextShimmer text={title()} active={pending()} />
                     </span>
                     <Show when={!pending()}>
                       <span data-slot="message-part-title-filename">{getFilename(single()!.path)}</span>
