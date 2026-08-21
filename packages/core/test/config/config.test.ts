@@ -4,7 +4,7 @@ import { describe, expect } from "bun:test"
 import { Effect, Fiber, Layer, Logger, PubSub, Schema, Stream } from "effect"
 import { FastCheck } from "effect/testing"
 import { Config } from "@opencode-ai/core/config"
-import { AgentsDirectory, Directory, Document, Event, Info } from "@opencode-ai/schema/config"
+import { AgentsDirectory, ClaudeDirectory, Directory, Document, Event, Info } from "@opencode-ai/schema/config"
 import { ConfigModel } from "@opencode-ai/schema/config/model"
 import { ConfigProvider } from "@opencode-ai/schema/config/provider"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -793,7 +793,7 @@ describe("Config", () => {
     }),
   )
 
-  it.live("returns an empty configuration when directory files do not exist", () =>
+  it.live("includes global compatibility directories before they exist", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
@@ -804,6 +804,14 @@ describe("Config", () => {
           const entries = yield* config.entries()
 
           expect(entries).toEqual([
+            new ClaudeDirectory({
+              type: "claude",
+              path: AbsolutePath.make(path.join(tmp.path, "global", "home", ".claude")),
+            }),
+            new AgentsDirectory({
+              type: "agents",
+              path: AbsolutePath.make(path.join(tmp.path, "global", "home", ".agents")),
+            }),
             new Directory({ type: "directory", path: AbsolutePath.make(path.join(tmp.path, "global")) }),
           ])
         }).pipe(Effect.provide(testLayer(tmp.path))),
