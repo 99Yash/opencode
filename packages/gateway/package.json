@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@opencode-ai/gateway",
+  "version": "1.18.4",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./backend": "./src/backend.ts",
+    "./control": "./src/control.ts",
+    "./credentials": "./src/credentials.ts",
+    "./database": "./src/database.ts",
+    "./handler": "./src/handler.ts",
+    "./modal": "./src/modal.ts",
+    "./process": "./src/process.ts",
+    "./provision": "./src/provision.ts",
+    "./registry": "./src/registry.ts",
+    "./reconcile": "./src/reconcile.ts",
+    "./router": "./src/router.ts"
+  },
+  "scripts": {
+    "drive:gateway": "bun run script/drive-gateway.ts",
+    "drive:check": "bun run script/drive-check.ts",
+    "modal:check": "bun run script/modal-check.ts",
+    "spike:modal": "bun run script/modal-spike.ts",
+    "test": "bun test --only-failures",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@effect/sql-sqlite-bun": "catalog:",
+    "@opencode-ai/client": "workspace:*",
+    "@opencode-ai/protocol": "workspace:*",
+    "@opencode-ai/schema": "workspace:*",
+    "@opencode-ai/util": "workspace:*",
+    "effect": "catalog:",
+    "modal": "0.9.0"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "@typescript/native-preview": "catalog:"
+  }
+}

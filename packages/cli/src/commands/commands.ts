@@ -266,6 +266,26 @@ const Root = Spec.make(typeof OPENCODE_CLI_NAME === "string" ? OPENCODE_CLI_NAME
         }),
       ],
     }),
+    Spec.make("gateway", {
+      description: "Run the Modal sandbox gateway",
+      commands: [
+        Spec.make("serve", {
+          description: "Start the gateway server",
+          params: {
+            hostname: Flag.string("hostname").pipe(Flag.optional),
+            port: Flag.integer("port").pipe(Flag.optional),
+            database: Flag.string("database").pipe(Flag.optional),
+            app: Flag.string("app").pipe(Flag.withDefault("opencode-gateway-dev")),
+            volume: Flag.string("volume").pipe(Flag.withDefault("opencode-gateway-workspaces-dev")),
+            environment: Flag.string("environment").pipe(Flag.optional),
+            root: Flag.string("root").pipe(Flag.withDefault("/persist/project")),
+            image: Flag.string("image").pipe(Flag.withDefault("oven/bun:1.3.14")),
+            repository: Flag.string("repository").pipe(Flag.withDefault("https://github.com/anomalyco/opencode.git")),
+            branch: Flag.string("branch").pipe(Flag.withDefault("v2")),
+          },
+        }),
+      ],
+    }),
     Spec.make("pair", { description: "Show server pairing information" }),
     Spec.make("serve", {
       description: "Start the v2 API and web server",
