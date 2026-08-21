@@ -181,20 +181,23 @@ export function createComposerModel(adapter: ComposerAdapter): ComposerModel {
   const skills = createMemo(() => data.location.skill.list({ directory: sdk().directory }) ?? [])
   const context = createMemo<ComposerSuggestion[]>(() => [
     ...references(),
-    ...skills().map((skill) => ({
-      id: `skill:${skill.id}`,
-      kind: "skill" as const,
-      label: `@${skill.id}`,
-      description: skill.description,
-      mention: {
-        type: "skill" as const,
-        id: Skill.ID.make(skill.id),
-        name: Skill.Name.make(skill.name),
-        content: `@${skill.id}`,
-        start: 0,
-        end: 0,
-      },
-    })),
+    ...skills().map((skill) => {
+      const id = skill.id ?? skill.name
+      return {
+        id: `skill:${id}`,
+        kind: "skill" as const,
+        label: `@${id}`,
+        description: skill.description,
+        mention: {
+          type: "skill" as const,
+          id: Skill.ID.make(id),
+          name: Skill.Name.make(skill.name),
+          content: `@${id}`,
+          start: 0,
+          end: 0,
+        },
+      }
+    }),
     ...adapter
       .controls()
       .agents.available.filter((agent) => !agent.hidden && agent.mode !== "primary")
