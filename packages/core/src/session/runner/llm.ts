@@ -61,10 +61,13 @@ const isDecline = (
 ): error is Permission.DeclinedError | QuestionTool.CancelledError =>
   error._tag === "Permission.DeclinedError" || error._tag === "QuestionTool.CancelledError"
 
-const isInterruptedStream = (failure: AIError) => {
-  if (failure.reason._tag === "InvalidProviderOutput")
-    return failure.reason.classification === "incomplete-stream"
+const shouldContinueAfterFailure = (failure: AIError, record: StepRecord) => {
+  if (failure.reason._tag === "InvalidProviderOutput") return failure.reason.classification === "incomplete-stream"
   if (failure.reason._tag === "Transport") return failure.reason.operation === "read"
+  // A fresh generation can continue partial output, but not cross a tool boundary
+  // whose provider-side effects may be ambiguous.
+  if (failure.reason._tag === "ProviderInternal")
+    return SessionRunnerRetry.isRetryable(failure) && record.calls.length === 0
   return false
 }
 
@@ -120,7 +123,7 @@ const classifyToolExits = (
 const TOOLS_INTERRUPTED = { type: "aborted", message: "Tool execution interrupted" } as const
 const STEP_INTERRUPTED = { type: "aborted", message: "Step interrupted" } as const
 const RESULT_MISSING = { type: "tool.result-missing", message: "Provider did not return a tool result" } as const
-const CONTINUE_AFTER_INCOMPLETE_STREAM =
+const CONTINUE_AFTER_PARTIAL_FAILURE =
   "The previous response was interrupted. Continue from where you left off without repeating completed content."
 
 const layer = Layer.effect(
@@ -302,7 +305,7 @@ const layer = Layer.effect(
           ).pipe(Pull.catchDone(() => Effect.fail(outcome.cause)))
           yield* bus.publish(SessionEvent.Synthetic, {
             sessionID,
-            text: CONTINUE_AFTER_INCOMPLETE_STREAM,
+            text: CONTINUE_AFTER_PARTIAL_FAILURE,
           })
           assistantMessageID = SessionMessage.ID.create()
         }
@@ -597,7 +600,7 @@ const layer = Layer.effect(
           if (
             llmFailure &&
             llmError &&
-            isInterruptedStream(llmFailure) &&
+            shouldContinueAfterFailure(llmFailure, record) &&
             record.outputStarted &&
             tools.declines.length === 0 &&
             !tools.interrupted
