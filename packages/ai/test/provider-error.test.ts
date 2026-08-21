@@ -75,7 +75,7 @@ describe("provider error classification", () => {
     ).toEqual(["ProviderInternal", "ProviderInternal", "ProviderInternal"])
   })
 
-  test("classifies xAI capacity text as provider internal", () => {
+  test("classifies transient provider text as provider internal", () => {
     const message =
       "The model is currently at capacity due to high demand. Please try again in a few minutes, or use a higher service tier for priority processing: https://docs.x.ai/developers/advanced-api-usage/priority-processing"
     const http = new HttpContext({
@@ -84,10 +84,14 @@ describe("provider error classification", () => {
     })
 
     expect(
-      [classifyProviderFailure({ message }), classifyProviderFailure({ message: "Provider request failed", http })].map(
-        (failure) => failure._tag,
-      ),
-    ).toEqual(["ProviderInternal", "ProviderInternal"])
+      [
+        message,
+        "The service is temporarily at capacity.",
+        "Please try again later.",
+        "Please retry your request shortly.",
+      ].map((message) => classifyProviderFailure({ message })._tag),
+    ).toEqual(["ProviderInternal", "ProviderInternal", "ProviderInternal", "ProviderInternal"])
+    expect(classifyProviderFailure({ message: "Provider request failed", http })._tag).toBe("ProviderInternal")
   })
 
   test("classifies transient client statuses as provider internal", () => {
