@@ -86,6 +86,25 @@ export async function handler(
   type ProviderInfo = Awaited<ReturnType<typeof selectProvider>>
   type CostInfo = ReturnType<typeof calculateCost>
 
+  const proxyUrl = new URL(input.request.url)
+  if (proxyUrl.pathname.startsWith("/zen/")) {
+    const protocol = opts.format === "anthropic" ? "anthropic" : opts.format === "google" ? "google" : "openai"
+    proxyUrl.pathname = proxyUrl.pathname.replace(
+      /^\/zen(?:\/go)?\/v1/,
+      `/inference/${opts.modelList === "lite" ? "go/" : ""}${protocol}/${protocol === "google" ? "v1beta" : "v1"}`,
+    )
+    const request = new Request(proxyUrl, input.request)
+    const ip = request.headers.get("x-real-ip")
+    if (ip) request.headers.set("x-zen-ip", ip)
+    const requestID = request.headers.get("x-opencode-request")
+    if (requestID) request.headers.set("x-opencode-request-id", requestID)
+    if (request.headers.get("authorization")?.toLowerCase() === "bearer public")
+      request.headers.delete("authorization")
+    if (request.headers.get("x-api-key") === "public") request.headers.delete("x-api-key")
+    if (request.headers.get("x-goog-api-key") === "public") request.headers.delete("x-goog-api-key")
+    return fetch(request)
+  }
+
   const MAX_FAILOVER_RETRIES = 3
   const MAX_RETRYABLE_STATUS_RETRIES = 3
   const dict = i18n(localeFromRequest(input.request))
