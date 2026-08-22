@@ -10,6 +10,7 @@ import { Account } from "../../src/account/account"
 import {
   AccessToken,
   AccountID,
+  AccountServiceError,
   AccountTransportError,
   DeviceCode,
   Login,
@@ -118,6 +119,72 @@ it.live("login resolves the verification URL against the server origin", () =>
 
     expect(result.server).toBe("https://one.example.com/console")
     expect(result.url).toBe("https://one.example.com/console/device?user_code=user-code")
+  }),
+)
+
+it.live("login resolves relative verification URLs beneath the server path", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((req) =>
+      Effect.succeed(
+        json(req, {
+          device_code: "device-code",
+          user_code: "user-code",
+          verification_uri_complete: "device?user_code=user-code",
+          expires_in: 600,
+          interval: 5,
+        }),
+      ),
+    )
+
+    const result = yield* Account.use.login("https://one.example.com/console").pipe(Effect.provide(live(client)))
+
+    expect(result.url).toBe("https://one.example.com/console/device?user_code=user-code")
+  }),
+)
+
+it.live("login rejects malformed verification URLs", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((req) =>
+      Effect.succeed(
+        json(req, {
+          device_code: "device-code",
+          user_code: "user-code",
+          verification_uri_complete: "http://[::1",
+          expires_in: 600,
+          interval: 5,
+        }),
+      ),
+    )
+
+    const error = yield* Effect.flip(
+      Account.use.login("https://one.example.com/console").pipe(Effect.provide(live(client))),
+    )
+
+    expect(error).toBeInstanceOf(AccountServiceError)
+    expect(error.message).toContain("Invalid device verification URL")
+  }),
+)
+
+it.live("login rejects non-HTTP verification URLs", () =>
+  Effect.gen(function* () {
+    const client = HttpClient.make((req) =>
+      Effect.succeed(
+        json(req, {
+          device_code: "device-code",
+          user_code: "user-code",
+          verification_uri_complete: "file:///tmp/device",
+          expires_in: 600,
+          interval: 5,
+        }),
+      ),
+    )
+
+    const error = yield* Effect.flip(
+      Account.use.login("https://one.example.com/console").pipe(Effect.provide(live(client))),
+    )
+
+    expect(error).toBeInstanceOf(AccountServiceError)
+    expect(error.message).toContain("Invalid device verification URL: expected HTTP(S)")
   }),
 )
 
