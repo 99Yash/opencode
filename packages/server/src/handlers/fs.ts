@@ -12,11 +12,14 @@ export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handler
       .handleRaw("fs.read", (ctx) =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.Service
-          const file = yield* fs.read({
-            path: RelativePath.make(
-              decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13)),
-            ),
-          })
+          const file = yield* fs
+            .read({
+              path: RelativePath.make(
+                decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13)),
+              ),
+            })
+            .pipe(Effect.catchTag("FileSystem.NotFoundError", () => Effect.succeed(undefined)))
+          if (!file) return HttpServerResponse.empty({ status: 404 })
           return HttpServerResponse.uint8Array(file.content, { contentType: file.mime })
         }),
       )
