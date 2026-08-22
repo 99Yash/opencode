@@ -19,6 +19,15 @@ const lookup = ToolDefinition.make({
     required: ["city"],
   },
 })
+const clock = ToolDefinition.make({
+  name: "lookup_time",
+  description: "Return the benign local time for a city.",
+  inputSchema: {
+    type: "object",
+    properties: { city: { type: "string" } },
+    required: ["city"],
+  },
+})
 const recorded = recordedTests({
   prefix: "gemini-recovery",
   provider: "google",
@@ -46,6 +55,36 @@ describe("Gemini interrupted recovery recorded", () => {
               Message.user(continuation),
             ],
             tools: [lookup],
+            toolChoice: "none",
+            generation: { maxTokens: 256, temperature: 0 },
+          }),
+        )
+
+        expect(response.text.trim().length).toBeGreaterThan(0)
+      }),
+  )
+
+  recorded.effect.with(
+    "accepts unsigned settled parallel tools followed by continuation",
+    { tags: ["tool", "parallel", "recovery"] },
+    () =>
+      Effect.gen(function* () {
+        const response = yield* LLMClient.generate(
+          LLM.request({
+            id: "recorded_gemini_interrupted_parallel_recovery",
+            model,
+            messages: [
+              Message.user("Look up the weather and local time in Paris."),
+              Message.assistant([
+                { type: "text", text: "I should use both lookup tools." },
+                ToolCallPart.make({ id: "call_weather", name: "lookup_weather", input: { city: "Paris" } }),
+                ToolCallPart.make({ id: "call_time", name: "lookup_time", input: { city: "Paris" } }),
+              ]),
+              Message.tool({ id: "call_weather", name: "lookup_weather", result: "sunny", resultType: "text" }),
+              Message.tool({ id: "call_time", name: "lookup_time", result: "12:00", resultType: "text" }),
+              Message.user(continuation),
+            ],
+            tools: [lookup, clock],
             toolChoice: "none",
             generation: { maxTokens: 256, temperature: 0 },
           }),
