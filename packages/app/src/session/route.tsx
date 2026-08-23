@@ -87,15 +87,19 @@ function ResolvedTargetSessionRoute() {
         </SessionRouteFrame>
       }
     >
-      <Show when={directory()}>
-        {(value) => (
-          <LocationProvider directory={value()}>
-            <SessionUIProvider directory={value()} server={server.key}>
-              <TargetSessionPage />
-            </SessionUIProvider>
-          </LocationProvider>
-        )}
-      </Show>
+      <SessionRouteFrame padded passthrough={!!directory()}>
+        <SessionPanelFrame raised passthrough={!!directory()}>
+          <Show when={directory()}>
+            {(value) => (
+              <LocationProvider directory={value()}>
+                <SessionUIProvider directory={value()} server={server.key}>
+                  <TargetSessionPage />
+                </SessionUIProvider>
+              </LocationProvider>
+            )}
+          </Show>
+        </SessionPanelFrame>
+      </SessionRouteFrame>
     </Show>
   )
 }
