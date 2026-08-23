@@ -571,7 +571,9 @@ it.instance(
   Effect.gen(function* () {
     yield* set("REQUESTY_API_KEY", "test-api-key")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("requesty")].models["google/gemini-2.5-pro"].cost.tiers).toEqual([
+    const provider = providers[ProviderV2.ID.make("requesty")]
+    const model = provider.models["google/gemini-2.5-pro"]
+    expect(model.cost.tiers).toEqual([
       {
         input: 2.5,
         output: 15,
@@ -579,6 +581,12 @@ it.instance(
         tier: { type: "context", size: 200_000 },
       },
     ])
+    expect(model.cost.experimentalOver200K).toBeUndefined()
+    expect(Provider.toPublicInfo(provider).models["google/gemini-2.5-pro"].cost.experimentalOver200K).toEqual({
+      input: 2.5,
+      output: 15,
+      cache: { read: 0.25, write: 0 },
+    })
   }),
   {
     config: {

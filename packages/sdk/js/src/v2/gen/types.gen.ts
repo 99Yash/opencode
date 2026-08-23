@@ -2083,6 +2083,14 @@ export type Model = {
         size: number
       }
     }>
+    experimentalOver200K?: {
+      input: number
+      output: number
+      cache: {
+        read: number
+        write: number
+      }
+    }
   }
   limit: {
     context: number

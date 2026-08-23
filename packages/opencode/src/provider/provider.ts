@@ -1035,6 +1035,13 @@ const ProviderCost = Schema.Struct({
   output: Schema.Finite,
   cache: ProviderCacheCost,
   tiers: optional(Schema.Array(ProviderCostTier)),
+  experimentalOver200K: optional(
+    Schema.Struct({
+      input: Schema.Finite,
+      output: Schema.Finite,
+      cache: ProviderCacheCost,
+    }),
+  ),
 })
 
 const ProviderLimit = Schema.Struct({
@@ -1087,6 +1094,21 @@ export const ConfigProvidersResult = Schema.Struct({
 export type ConfigProvidersResult = Types.DeepMutable<Schema.Schema.Type<typeof ConfigProvidersResult>>
 
 export function toPublicInfo(provider: Info): Info {
+  const result = cloneInfo(provider)
+  for (const model of Object.values(result.models)) {
+    if (model.cost.experimentalOver200K) continue
+    if (model.cost.tiers?.length !== 1) continue
+    const [tier] = model.cost.tiers
+    model.cost.experimentalOver200K = {
+      input: tier.input,
+      output: tier.output,
+      cache: { ...tier.cache },
+    }
+  }
+  return result
+}
+
+function cloneInfo(provider: Info): Info {
   return JSON.parse(
     JSON.stringify(
       {
@@ -1372,7 +1394,7 @@ const layer = Layer.effect(
         const cfg = yield* config.get()
         const modelsDev = yield* modelsDevSvc.get()
         const catalog = mapValues(modelsDev, fromModelsDevProvider)
-        const database = mapValues(catalog, toPublicInfo)
+        const database = mapValues(catalog, cloneInfo)
 
         const providers: Record<ProviderV2.ID, Info> = {} as Record<ProviderV2.ID, Info>
         const languages = new Map<string, LanguageModelV3>()

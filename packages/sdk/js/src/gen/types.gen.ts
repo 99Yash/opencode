@@ -1489,18 +1489,14 @@ export type Model = {
       read: number
       write: number
     }
-    tiers?: Array<{
+    experimentalOver200K?: {
       input: number
       output: number
       cache: {
         read: number
         write: number
       }
-      tier: {
-        type: "context"
-        size: number
-      }
-    }>
+    }
   }
   limit: {
     context: number

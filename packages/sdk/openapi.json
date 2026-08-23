@@ -21738,6 +21738,32 @@
                   "required": ["input", "output", "cache", "tier"],
                   "additionalProperties": false
                 }
+              },
+              "experimentalOver200K": {
+                "type": "object",
+                "properties": {
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  },
+                  "cache": {
+                    "type": "object",
+                    "properties": {
+                      "read": {
+                        "type": "number"
+                      },
+                      "write": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["read", "write"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["input", "output", "cache"],
+                "additionalProperties": false
               }
             },
             "required": ["input", "output", "cache"],
