@@ -6,4 +6,8 @@ describe("projectName", () => {
     expect(projectName({ canonical: "/" }, "/home/user/Prabha")).toBe("Prabha")
     expect(projectName({ canonical: "C:\\" }, "C:\\Users\\user\\Desktop\\Prabha")).toBe("Prabha")
   })
+
+  test("preserves backslashes in POSIX folder names", () => {
+    expect(projectName({ canonical: "/tmp/foo\\bar" })).toBe("foo\\bar")
+  })
 })
