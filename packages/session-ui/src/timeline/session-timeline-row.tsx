@@ -11,6 +11,7 @@ import { TextShimmer } from "@opencode-ai/ui/text-shimmer"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { For, Show, createMemo, type Accessor, type JSX } from "solid-js"
 import type { SessionUserActions, SessionUserComment } from "../actions"
+import { BasicTool } from "../components/basic-tool"
 import {
   MessageDivider,
   SessionAssistantContent,
@@ -354,7 +355,7 @@ export function createSessionTimelineRowRenderer(input: {
                       <div class="flex min-h-5 min-w-0 items-center gap-2 overflow-hidden">
                         <bdi
                           dir="auto"
-                          class="shrink-0 text-[13px] font-[530] leading-none tracking-[-0.04px] text-v2-text-text-faint"
+                          class="shrink-0 text-[13px] font-[530] leading-text-compact tracking-[-0.04px] text-v2-text-text-faint"
                         >
                           {content().label}
                         </bdi>
@@ -362,7 +363,7 @@ export function createSessionTimelineRowRenderer(input: {
                           {(item) => (
                             <bdi
                               dir="auto"
-                              class="min-w-0 truncate text-[13px] font-[440] leading-none tracking-[-0.04px] text-v2-text-text-faint"
+                              class="min-w-0 truncate text-[13px] font-[440] leading-text-compact tracking-[-0.04px] text-v2-text-text-faint"
                             >
                               {item}
                             </bdi>
@@ -379,7 +380,7 @@ export function createSessionTimelineRowRenderer(input: {
               <div
                 data-slot="session-timeline-notice"
                 data-type="location-switched"
-                class={`flex h-7 w-full min-w-0 items-center gap-2 py-1 text-[13px] leading-none tracking-[-0.04px] text-v2-text-text-faint ${padding()}`}
+                class={`flex h-7 w-full min-w-0 items-center gap-2 py-1 text-[13px] leading-text-compact tracking-[-0.04px] text-v2-text-text-faint ${padding()}`}
               >
                 <Tooltip
                   appearance="compact"
@@ -442,16 +443,35 @@ export function createSessionTimelineRowRenderer(input: {
       return (
         <Frame row={current()}>
           <div data-slot="session-turn-message-container" class={`w-full ${padding()}`}>
-            <div data-slot="session-turn-thinking">
-              <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
-              <Show when={!input.showReasoningSummaries()}>
-                <TextReveal
-                  text={current().reasoningHeading}
-                  class="session-turn-thinking-heading"
-                  travel={25}
-                  duration={700}
-                />
-              </Show>
+            <div data-slot="session-turn-thinking-row">
+              <BasicTool
+                icon="mcp"
+                status="running"
+                compact
+                locked
+                hideDetails
+                trigger={
+                  <div data-slot="session-turn-thinking">
+                    <div data-slot="basic-tool-tool-info-structured">
+                      <div data-slot="basic-tool-tool-info-main">
+                        <span data-slot="basic-tool-tool-title">
+                          <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
+                        </span>
+                        <Show when={!input.showReasoningSummaries()}>
+                          <span data-slot="basic-tool-tool-subtitle">
+                            <TextReveal
+                              text={current().reasoningHeading}
+                              class="session-turn-thinking-heading"
+                              travel={25}
+                              duration={700}
+                            />
+                          </span>
+                        </Show>
+                      </div>
+                    </div>
+                  </div>
+                }
+              />
             </div>
           </div>
         </Frame>
