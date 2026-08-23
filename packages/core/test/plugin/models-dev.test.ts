@@ -67,7 +67,12 @@ describe("ModelsDevPlugin", () => {
                   experimental: {
                     modes: {
                       fast: {
-                        cost: { input: 5, output: 30, cache_read: 0.5 },
+                        cost: {
+                          input: 5,
+                          output: 30,
+                          cache_read: 0.5,
+                          context_over_200k: { input: 100, output: 100 },
+                        },
                         provider: {
                           headers: { "x-mode": "fast" },
                           body: { service_tier: "priority" },

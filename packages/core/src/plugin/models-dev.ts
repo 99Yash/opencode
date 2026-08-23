@@ -51,8 +51,10 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
 
 function mergeCost(base: ModelV2Info["cost"], override: ModelsDev.Model["cost"] | undefined) {
   if (!override) return base
-  const next = cost(override)
   const [baseDefault, ...baseTiers] = base
+  const next = cost(
+    baseTiers.length > 0 && !override.tiers?.length ? { ...override, context_over_200k: undefined } : override,
+  )
   const [nextDefault, ...nextTiers] = next
   const tierKey = (item: ModelV2Info["cost"][number]) => `${item.tier?.type ?? "base"}:${item.tier?.size ?? 0}`
   const merge = (left: ModelV2Info["cost"][number], right: ModelV2Info["cost"][number]) => ({

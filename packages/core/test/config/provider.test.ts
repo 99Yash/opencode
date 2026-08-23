@@ -55,6 +55,71 @@ function request(headers: Record<string, string>, variant?: string) {
 const decode = Schema.decodeUnknownSync(Config.Info)
 
 describe("ConfigProviderPlugin.Plugin", () => {
+  it.effect("prefers catalog tiers over legacy config pricing", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const providerID = ProviderV2.ID.opencode
+      const modelID = ModelV2.ID.make("alpha-gpt-next")
+      const config = Config.Service.of({
+        entries: () =>
+          Effect.succeed([
+            new Config.Document({
+              type: "document",
+              info: decode({
+                providers: {
+                  opencode: {
+                    models: {
+                      "alpha-gpt-next": {
+                        cost: [
+                          { input: 1, output: 2 },
+                          {
+                            tier: { type: "context", size: 272_000 },
+                            input: 3,
+                            output: 4,
+                            cache: { read: 0.3 },
+                          },
+                        ],
+                      },
+                    },
+                  },
+                },
+              }),
+            }),
+            new Config.Document({
+              type: "document",
+              info: decode({
+                providers: {
+                  opencode: {
+                    models: {
+                      "alpha-gpt-next": {
+                        cost: {
+                          input: 5,
+                          output: 6,
+                          context_over_200k: { input: 100, output: 100 },
+                        },
+                      },
+                    },
+                  },
+                },
+              }),
+            }),
+          ]),
+      })
+
+      yield* addPlugin(config)
+
+      expect(required(yield* catalog.model.get(providerID, modelID)).cost).toEqual([
+        { input: 5, output: 6, cache: { read: 0, write: 0 }, tier: undefined },
+        {
+          tier: { type: "context", size: 272_000 },
+          input: 3,
+          output: 4,
+          cache: { read: 0.3, write: 0 },
+        },
+      ])
+    }),
+  )
+
   it.effect("keeps configured model variant bodies unchanged", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

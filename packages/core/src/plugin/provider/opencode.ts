@@ -2,7 +2,7 @@ import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/v2/effect/integration"
 import { define } from "@opencode-ai/plugin/v2/effect/plugin"
-import type { CredentialValue } from "@opencode-ai/sdk/v2/types"
+import type { CredentialValue, ModelV2Info } from "@opencode-ai/sdk/v2/types"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { EventV2 } from "../../event"
 import { Credential } from "../../credential"
@@ -162,7 +162,10 @@ export const OpencodePlugin = define<HttpClient.HttpClient | EventV2.Service | S
               model.time.released = Number.isFinite(released) ? released : 0
             }
             if (config.cost !== undefined) {
-              model.cost = remoteCost(config.cost)
+              model.cost = remoteCost(
+                config.cost,
+                model.cost.filter((cost) => cost.tier?.type === "context"),
+              )
             }
             model.status = config.status ?? "active"
             model.enabled = config.status !== "deprecated"
@@ -224,7 +227,7 @@ function withoutCredentials(body: Readonly<Record<string, unknown>> | undefined)
   return Object.fromEntries(Object.entries(body ?? {}).filter(([key]) => key !== "apiKey" && key !== "headers"))
 }
 
-function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>) {
+function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>, tiers: ModelV2Info["cost"] = []) {
   const legacy = input.context_over_200k
   return [
     {
@@ -232,7 +235,8 @@ function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cos
       output: input.output,
       cache: { read: input.cache_read ?? 0, write: input.cache_write ?? 0 },
     },
-    ...(legacy
+    ...tiers,
+    ...(legacy && tiers.length === 0
       ? [
           {
             tier: { type: "context" as const, size: 200_000 },
