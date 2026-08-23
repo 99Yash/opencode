@@ -4,6 +4,7 @@ import { expect, test } from "bun:test"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
 import type { FormWithLocation } from "../../../src/context/data"
+import { DataProvider } from "../../../src/context/data"
 import { ClientProvider } from "../../../src/context/client"
 import { ThemeProvider } from "../../../src/context/theme"
 import { Keymap } from "../../../src/context/keymap"
@@ -12,7 +13,7 @@ import { ToastProvider } from "../../../src/ui/toast"
 import { emptyThemeSource, tmpdir } from "../../fixture/fixture"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
-import { createApi, createEventStream, createFetch } from "../../fixture/tui-client"
+import { createApi, createEventStream, createFetch, json } from "../../fixture/tui-client"
 
 async function mountForm(
   root: string,
@@ -20,11 +21,14 @@ async function mountForm(
   fields?: FormWithLocation["fields"],
   height = 20,
   clipboardText?: string,
+  replyStatus = 204,
+  cancelStatus = 204,
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
 
   const replies: unknown[] = []
+  const cancellations: unknown[] = []
   const copied: string[] = []
   const events = createEventStream()
   const transport = createFetch(
@@ -32,9 +36,22 @@ async function mountForm(
       url.pathname === "/api/session/ses_test/form/frm_test/reply"
         ? request.json().then((answer) => {
             replies.push(answer)
-            return new Response(null, { status: 204 })
+            if (replyStatus === 204) return new Response(null, { status: 204 })
+            return json(
+              { _tag: "FormNotFoundError", id: "frm_test", message: "Form not found: frm_test" },
+              { status: replyStatus },
+            )
           })
-        : undefined,
+        : url.pathname === "/api/session/ses_test/form/frm_test/cancel"
+          ? (() => {
+              cancellations.push(true)
+              if (cancelStatus === 204) return new Response(null, { status: 204 })
+              return json(
+                { _tag: "FormNotFoundError", id: "frm_test", message: "Form not found: frm_test" },
+                { status: cancelStatus },
+              )
+            })()
+          : undefined,
     events,
   )
   const config = createTuiResolvedConfig()
@@ -75,11 +92,13 @@ async function mountForm(
         <ConfigProvider config={config}>
           <Keymap.Provider>
             <ClientProvider api={createApi(transport.fetch)}>
-              <ThemeProvider mode="dark" source={emptyThemeSource}>
-                <ToastProvider>
-                  <FormPrompt form={form} />
-                </ToastProvider>
-              </ThemeProvider>
+              <DataProvider>
+                <ThemeProvider mode="dark" source={emptyThemeSource}>
+                  <ToastProvider>
+                    <FormPrompt form={form} />
+                  </ToastProvider>
+                </ThemeProvider>
+              </DataProvider>
             </ClientProvider>
           </Keymap.Provider>
         </ConfigProvider>
@@ -90,8 +109,53 @@ async function mountForm(
   const app = await testRender(() => <Harness />, { width, height, kittyKeyboard: true })
   app.renderer.start()
   await app.waitForFrame((frame) => frame.includes("Authorization required"))
-  return { app, copied, replies }
+  return { app, cancellations, copied, replies }
 }
+
+test("dismisses a stale form when replying reports it missing", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountForm(
+    tmp.path,
+    80,
+    [{ key: "target", type: "string", options: [{ value: "staging", label: "Staging" }] }],
+    20,
+    undefined,
+    404,
+  )
+  try {
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitFor(() => prompt.replies.length === 1)
+    await prompt.app.waitForFrame((frame) => !frame.includes("Authorization required"))
+
+    expect(prompt.app.captureCharFrame()).not.toContain("Authorization required")
+    expect(prompt.app.captureCharFrame()).not.toContain("Form not found")
+  } finally {
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("dismisses a stale form when cancelling reports it missing", async () => {
+  await using tmp = await tmpdir()
+  const prompt = await mountForm(
+    tmp.path,
+    80,
+    [{ key: "target", type: "string", options: [{ value: "staging", label: "Staging" }] }],
+    20,
+    undefined,
+    204,
+    404,
+  )
+  try {
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.waitFor(() => prompt.cancellations.length === 1)
+    await prompt.app.waitForFrame((frame) => !frame.includes("Authorization required"))
+
+    expect(prompt.app.captureCharFrame()).not.toContain("Authorization required")
+    expect(prompt.app.captureCharFrame()).not.toContain("Form not found")
+  } finally {
+    prompt.app.renderer.destroy()
+  }
+})
 
 test("requires explicit acknowledgement before submitting an external field", async () => {
   await using tmp = await tmpdir()

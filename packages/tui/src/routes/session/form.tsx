@@ -11,8 +11,8 @@ import {
 } from "@opentui/core"
 import open from "open"
 import { useTheme, useThemes } from "../../context/theme"
-import type { FormAnswer, FormField, FormValue } from "@opencode-ai/client"
-import type { FormWithLocation } from "../../context/data"
+import { isFormNotFoundError, type FormAnswer, type FormField, type FormValue } from "@opencode-ai/client"
+import { useData, type FormWithLocation } from "../../context/data"
 import { useClient } from "../../context/client"
 import { useClipboard } from "../../context/clipboard"
 import { SplitBorder } from "../../ui/border"
@@ -57,6 +57,7 @@ export function FormPrompt(props: {
   onCancel?: () => void | Promise<void>
 }) {
   const client = useClient()
+  const data = useData()
   const themes = useThemes()
   const theme = useTheme("elevated")
   const themeMode = themes.mode
@@ -70,6 +71,7 @@ export function FormPrompt(props: {
   const initial = formInitialValues(props.form.fields)
 
   const [tabHover, setTabHover] = createSignal<number | "confirm" | null>(null)
+  const [dismissed, setDismissed] = createSignal(false)
   const [reviewHeight, setReviewHeight] = createSignal(1)
   const [reviewScrollable, setReviewScrollable] = createSignal(false)
   const [store, setStore] = createStore({
@@ -85,6 +87,7 @@ export function FormPrompt(props: {
   let textarea: TextareaRenderable | undefined
   let review: ScrollBoxRenderable | undefined
   let measureReview: (() => void) | undefined
+  let releaseMode: (() => void) | undefined
 
   const message = createMemo(() => {
     const value = props.form.metadata?.["message"]
@@ -267,7 +270,13 @@ export function FormPrompt(props: {
               requestOptions(props.form),
             ),
       )
-      .catch((error: unknown) => setStore("error", errorMessage(error)))
+      .catch((error: unknown) => {
+        if (isFormNotFoundError(error)) {
+          dismissStale()
+          return
+        }
+        setStore("error", errorMessage(error))
+      })
   }
 
   function replySingle(field: FormAnswerField, value: FormValue) {
@@ -457,11 +466,30 @@ export function FormPrompt(props: {
   }
 
   function cancel() {
-    if (props.onCancel) {
-      void props.onCancel()
-      return
-    }
-    void client.api.form.cancel({ sessionID: props.form.sessionID, formID: props.form.id }, requestOptions(props.form))
+    void Promise.resolve()
+      .then(() =>
+        props.onCancel
+          ? props.onCancel()
+          : client.api.form.cancel(
+              { sessionID: props.form.sessionID, formID: props.form.id },
+              requestOptions(props.form),
+            ),
+      )
+      .catch((error: unknown) => {
+        if (isFormNotFoundError(error)) {
+          dismissStale()
+          return
+        }
+        setStore("error", errorMessage(error))
+      })
+  }
+
+  function dismissStale() {
+    releaseMode?.()
+    releaseMode = undefined
+    setDismissed(true)
+    data.session.form.invalidate(props.form.sessionID, props.form.location)
+    void data.session.form.sync(props.form.sessionID, props.form.location).catch(toast.error)
   }
 
   function openExternal() {
@@ -523,7 +551,10 @@ export function FormPrompt(props: {
     )
   }
 
-  onMount(() => onCleanup(keymap.mode.push(FORM_MODE)))
+  onMount(() => {
+    releaseMode = keymap.mode.push(FORM_MODE)
+    onCleanup(() => releaseMode?.())
+  })
 
   Keymap.createLayer(() => ({
     mode: FORM_MODE,
@@ -752,6 +783,7 @@ export function FormPrompt(props: {
 
   return (
     <box
+      visible={!dismissed()}
       backgroundColor={theme.background.default}
       border={["left"]}
       borderColor={theme.hue.interactive[themeMode() === "light" ? 800 : 200]}
