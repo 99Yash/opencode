@@ -26,7 +26,6 @@ export function SessionScreen(props: { session: SessionModel }) {
   const isDesktop = session.isDesktop
   const screen = createSessionScreenLayout(session, serverSDK.scope)
   const timeline = createSessionTimelineInteraction(session)
-  const messagesReady = timeline.ready
   const [store, setStore] = createStore({ deferRender: false })
 
   createComputed((prev) => {
@@ -58,9 +57,14 @@ export function SessionScreen(props: { session: SessionModel }) {
 
   const sessionPanelContent = () => (
     <>
-      {timeline.resource() ?? ""}
       <Show when={!isDesktop() && !!session.identity.params.id && !mobileTabsBottom()}>
         <SessionMobileTabs review={review} compact />
+      </Show>
+      {/* Surface query errors without suspending session metadata while messages load. */}
+      <Show when={timeline.resource.error}>
+        {(error) => {
+          throw error()
+        }}
       </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
@@ -68,34 +72,30 @@ export function SessionScreen(props: { session: SessionModel }) {
             <SessionMobileReview review={review} />
           </Match>
           <Match when={session.identity.params.id}>
-            <Show when={messagesReady() ? session.identity.params.id : undefined} keyed>
-              {(_id) => (
-                <MessageTimeline
-                  session={session}
-                  background={composer.region.state.background}
-                  actions={composer.actions.timeline}
-                  scroll={timeline.scroll}
-                  onResumeScroll={timeline.actions.resume}
-                  setScrollRef={timeline.view.setScrollRef}
-                  onScheduleScrollState={timeline.view.scheduleScrollState}
-                  onPin={timeline.view.pin}
-                  onUnpin={timeline.view.unpin}
-                  onUserScroll={timeline.view.markUserScroll}
-                  onHistoryScroll={timeline.view.onHistoryScroll}
-                  onSelectionInteraction={timeline.view.selectionInteraction}
-                  pinned={timeline.view.pinned()}
-                  centered={screen.centered()}
-                  setContentRef={timeline.view.setContentRef}
-                  diffs={review.details.diffs}
-                  onReview={review.open}
-                  workspaceMoveEligible={composer.workspaceMoveEligible()}
-                  onSummaryOpenChange={review.details.setOpen}
-                  anchor={timeline.view.anchor}
-                  setRevealMessage={timeline.view.setRevealMessage}
-                  setScrollToEnd={timeline.view.setScrollToEnd}
-                />
-              )}
-            </Show>
+            <MessageTimeline
+              session={session}
+              background={composer.region.state.background}
+              actions={composer.actions.timeline}
+              scroll={timeline.scroll}
+              onResumeScroll={timeline.actions.resume}
+              setScrollRef={timeline.view.setScrollRef}
+              onScheduleScrollState={timeline.view.scheduleScrollState}
+              onPin={timeline.view.pin}
+              onUnpin={timeline.view.unpin}
+              onUserScroll={timeline.view.markUserScroll}
+              onHistoryScroll={timeline.view.onHistoryScroll}
+              onSelectionInteraction={timeline.view.selectionInteraction}
+              pinned={timeline.view.pinned()}
+              centered={screen.centered()}
+              setContentRef={timeline.view.setContentRef}
+              diffs={review.details.diffs}
+              onReview={review.open}
+              workspaceMoveEligible={composer.workspaceMoveEligible()}
+              onSummaryOpenChange={review.details.setOpen}
+              anchor={timeline.view.anchor}
+              setRevealMessage={timeline.view.setRevealMessage}
+              setScrollToEnd={timeline.view.setScrollToEnd}
+            />
           </Match>
         </Switch>
       </div>
