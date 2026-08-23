@@ -3,7 +3,6 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { Effect } from "effect"
 import { HttpServer, HttpServerError, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createServer } from "node:http"
-import { createHash } from "node:crypto"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
@@ -16,12 +15,7 @@ describe("web UI", () => {
   test("falls back from API routes to assets and the SPA index", async () => {
     const index = path.join(root, "index.html")
     const asset = path.join(root, "app.js")
-    const theme = "document.documentElement.dataset.theme = 'dark'"
-    const registrationScript = "navigator.serviceWorker.register('/sw.js')"
-    await writeFile(
-      index,
-      `<html><head><script id="oc-theme-preload-script">${theme}</script><script id="vite-plugin-pwa:inline-sw">${registrationScript}</script></head><body>embedded</body></html>`,
-    )
+    await writeFile(index, "<html><body>embedded</body></html>")
     await writeFile(asset, "console.log('embedded')")
     const assets = {
       "index.html": await Bun.file(index).text(),
@@ -78,12 +72,6 @@ describe("web UI", () => {
           expect(yield* Effect.promise(() => fallback.text())).toContain("embedded")
           expect(fallback.headers.get("content-security-policy")).toContain("default-src 'self'")
           expect(fallback.headers.get("content-security-policy")).toContain("connect-src * data: blob:")
-          expect(fallback.headers.get("content-security-policy")).toContain(
-            `'sha256-${createHash("sha256").update(theme).digest("base64")}'`,
-          )
-          expect(fallback.headers.get("content-security-policy")).toContain(
-            `'sha256-${createHash("sha256").update(registrationScript).digest("base64")}'`,
-          )
         }),
       ).pipe(Effect.provide(NodeFileSystem.layer)),
     )

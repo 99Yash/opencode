@@ -50,15 +50,15 @@ function isRouteNotFound(error: unknown) {
   return error instanceof HttpServerError.HttpServerError && error.reason._tag === "RouteNotFound"
 }
 
-function csp(hashes: string[] = []) {
-  return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hashes.map((hash) => ` 'sha256-${hash}'`).join("")}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; media-src 'self' data:; connect-src * data: blob:`
+function csp(hash = "") {
+  return `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'${hash ? ` 'sha256-${hash}'` : ""}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; media-src 'self' data:; connect-src * data: blob:`
 }
 
 function cspForHtml(body: string) {
-  const scripts = body.matchAll(
-    /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(["'])(?:oc-theme-preload-script|vite-plugin-pwa:inline-sw)\1[^>]*>([\s\S]*?)<\/script>/gi,
+  const match = body.match(
+    /<script\b(?![^>]*\bsrc\s*=)[^>]*\bid=(["'])oc-theme-preload-script\1[^>]*>([\s\S]*?)<\/script>/i,
   )
-  return csp([...scripts].map((match) => createHash("sha256").update(match[2]).digest("base64")))
+  return csp(match ? createHash("sha256").update(match[2]).digest("base64") : "")
 }
 
 export * as WebUi from "./web-ui"
