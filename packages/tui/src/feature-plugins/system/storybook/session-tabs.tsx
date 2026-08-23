@@ -344,11 +344,6 @@ function SessionTabsStory(props: { context: Plugin.Context }) {
       flexDirection="column"
       backgroundColor={theme.background.default}
     >
-      <input
-        position="absolute"
-        width={0}
-        ref={(input) => queueMicrotask(() => !input.isDestroyed && input.focus())}
-      />
       <box flexGrow={1} flexDirection={orientation() === "vertical" ? "row" : "column"}>
         <SessionTabs controller={controller} orientation={orientation()} />
         <box flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={1} flexDirection="column">
