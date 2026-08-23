@@ -177,6 +177,10 @@ export const fffLayer = Layer.effect(
   }),
 )
 
+export function isPersistentEligible(location: Location.Interface) {
+  return !!location.vcs && !Protected.containsHome(location.project.directory)
+}
+
 export const layer = (options?: Options) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -184,7 +188,7 @@ export const layer = (options?: Options) =>
         return ripgrepLayer
       const location = yield* Location.Service
       // Non-VCS locations can contain many repositories, so avoid eagerly content-indexing the entire aggregate tree.
-      return location.vcs && !Protected.isHome(location.directory) ? fffLayer : ripgrepLayer
+      return isPersistentEligible(location) ? fffLayer : ripgrepLayer
     }),
   )
 

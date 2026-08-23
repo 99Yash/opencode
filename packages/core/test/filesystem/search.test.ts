@@ -15,6 +15,27 @@ import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { location } from "../fixture/location"
 
 describe("FileSystemSearch", () => {
+  test("disables persistent indexing when the worktree contains home", () => {
+    const home = AbsolutePath.make(os.homedir())
+    const directory = AbsolutePath.make(path.join(home, "broad-location"))
+    const vcs = { type: "git" as const, store: AbsolutePath.make(path.join(home, ".git")) }
+    expect(FileSystemSearch.isPersistentEligible(location({ directory }, { projectDirectory: home, vcs }))).toBe(false)
+    expect(
+      FileSystemSearch.isPersistentEligible(
+        location({ directory }, { projectDirectory: AbsolutePath.make(path.dirname(home)), vcs }),
+      ),
+    ).toBe(false)
+  })
+
+  test("enables persistent indexing for a nested worktree below home", () => {
+    const directory = AbsolutePath.make(path.join(os.homedir(), "project"))
+    expect(
+      FileSystemSearch.isPersistentEligible(
+        location({ directory }, { vcs: { type: "git", store: AbsolutePath.make(path.join(directory, ".git")) } }),
+      ),
+    ).toBe(true)
+  })
+
   test("honors wildcard directory rules from .gitignore", async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), "opencode-fff-ignore-"))
     try {
