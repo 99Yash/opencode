@@ -1476,7 +1476,7 @@ const layer = Layer.effect(
               if (model.id && model.id !== modelID) return modelID
               return existingModel?.name ?? modelID
             })
-            const legacy = model.cost?.context_over_200k
+            const legacy = existingModel?.cost.tiers?.length ? undefined : model.cost?.context_over_200k
             const tiers = legacy
               ? [
                   ...(existingModel?.cost.tiers?.filter(

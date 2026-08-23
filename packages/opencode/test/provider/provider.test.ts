@@ -582,7 +582,19 @@ it.instance(
   }),
   {
     config: {
-      provider: { requesty: { models: { "google/gemini-2.5-pro": {} } } },
+      provider: {
+        requesty: {
+          models: {
+            "google/gemini-2.5-pro": {
+              cost: {
+                input: 1.25,
+                output: 10,
+                context_over_200k: { input: 4, output: 16, cache_read: 0.4 },
+              },
+            },
+          },
+        },
+      },
     },
   },
 )
@@ -590,9 +602,8 @@ it.instance(
 it.instance(
   "legacy model config pricing is normalized into a context tier",
   Effect.gen(function* () {
-    yield* set("REQUESTY_API_KEY", "test-api-key")
     const providers = yield* list
-    expect(providers[ProviderV2.ID.make("requesty")].models["google/gemini-2.5-pro"].cost.tiers).toEqual([
+    expect(providers[ProviderV2.ID.make("legacy")].models.legacy.cost.tiers).toEqual([
       {
         input: 4,
         output: 16,
@@ -604,9 +615,11 @@ it.instance(
   {
     config: {
       provider: {
-        requesty: {
+        legacy: {
+          npm: "@ai-sdk/openai-compatible",
+          options: { apiKey: "test-api-key" },
           models: {
-            "google/gemini-2.5-pro": {
+            legacy: {
               cost: {
                 input: 1.25,
                 output: 10,
