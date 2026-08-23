@@ -1195,8 +1195,8 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
       write: c?.cache_write ?? 0,
     },
   }
-  if (c?.tiers) {
-    result.tiers = c.tiers.map((item) => ({
+  const tiers =
+    c?.tiers?.map((item) => ({
       input: item.input,
       output: item.output,
       cache: {
@@ -1204,8 +1204,19 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
         write: item.cache_write ?? 0,
       },
       tier: item.tier,
-    }))
-  }
+    })) ?? []
+  const legacy = c?.context_over_200k
+  if (legacy && tiers.length === 0)
+    tiers.push({
+      input: legacy.input,
+      output: legacy.output,
+      cache: {
+        read: legacy.cache_read ?? 0,
+        write: legacy.cache_write ?? 0,
+      },
+      tier: { type: "context", size: 200_000 },
+    })
+  if (tiers.length > 0) result.tiers = tiers
   return result
 }
 
@@ -1465,6 +1476,20 @@ const layer = Layer.effect(
               if (model.id && model.id !== modelID) return modelID
               return existingModel?.name ?? modelID
             })
+            const legacy = model.cost?.context_over_200k
+            const tiers = legacy
+              ? [
+                  ...(existingModel?.cost.tiers?.filter(
+                    (item) => item.tier.type !== "context" || item.tier.size !== 200_000,
+                  ) ?? []),
+                  {
+                    input: legacy.input,
+                    output: legacy.output,
+                    cache: { read: legacy.cache_read ?? 0, write: legacy.cache_write ?? 0 },
+                    tier: { type: "context" as const, size: 200_000 },
+                  },
+                ]
+              : existingModel?.cost.tiers
             const parsedModel: Model = {
               id: ModelV2.ID.make(modelID),
               api: {
@@ -1511,7 +1536,7 @@ const layer = Layer.effect(
                   read: model?.cost?.cache_read ?? existingModel?.cost?.cache.read ?? 0,
                   write: model?.cost?.cache_write ?? existingModel?.cost?.cache.write ?? 0,
                 },
-                tiers: existingModel?.cost.tiers,
+                tiers,
               },
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {

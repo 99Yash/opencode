@@ -193,12 +193,23 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
   const packageID = info.provider?.npm ?? packageName
   const lowerer = ConfigProviderOptionsV1.get(packageID)
   const request = info.options && lowerer.request(info.options)
+  const legacy = info.cost?.context_over_200k
   const costs = info.cost && [
     {
       input: info.cost.input,
       output: info.cost.output,
       cache: { read: info.cost.cache_read, write: info.cost.cache_write },
     },
+    ...(legacy
+      ? [
+          {
+            tier: { type: "context" as const, size: 200_000 },
+            input: legacy.input,
+            output: legacy.output,
+            cache: { read: legacy.cache_read, write: legacy.cache_write },
+          },
+        ]
+      : []),
   ]
   const capabilities =
     info.tool_call !== undefined || info.modalities?.input !== undefined || info.modalities?.output !== undefined

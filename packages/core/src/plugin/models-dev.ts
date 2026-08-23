@@ -19,9 +19,8 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
       write: input?.cache_write ?? 0,
     },
   }
-  return [
-    base,
-    ...(input?.tiers?.map((item) => ({
+  const tiers =
+    input?.tiers?.map((item) => ({
       tier: item.tier,
       input: item.input,
       output: item.output,
@@ -29,7 +28,24 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
         read: item.cache_read ?? 0,
         write: item.cache_write ?? 0,
       },
-    })) ?? []),
+    })) ?? []
+  const legacy = input?.context_over_200k
+  return [
+    base,
+    ...tiers,
+    ...(legacy && tiers.length === 0
+      ? [
+          {
+            tier: { type: "context" as const, size: 200_000 },
+            input: legacy.input,
+            output: legacy.output,
+            cache: {
+              read: legacy.cache_read ?? 0,
+              write: legacy.cache_write ?? 0,
+            },
+          },
+        ]
+      : []),
   ]
 }
 

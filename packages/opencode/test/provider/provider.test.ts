@@ -588,6 +588,39 @@ it.instance(
 )
 
 it.instance(
+  "legacy model config pricing is normalized into a context tier",
+  Effect.gen(function* () {
+    yield* set("REQUESTY_API_KEY", "test-api-key")
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("requesty")].models["google/gemini-2.5-pro"].cost.tiers).toEqual([
+      {
+        input: 4,
+        output: 16,
+        cache: { read: 0.4, write: 0 },
+        tier: { type: "context", size: 200_000 },
+      },
+    ])
+  }),
+  {
+    config: {
+      provider: {
+        requesty: {
+          models: {
+            "google/gemini-2.5-pro": {
+              cost: {
+                input: 1.25,
+                output: 10,
+                context_over_200k: { input: 4, output: 16, cache_read: 0.4 },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+)
+
+it.instance(
   "model config preserves explicitly empty models.dev variants",
   Effect.gen(function* () {
     yield* set("OPENAI_API_KEY", "test-api-key")
@@ -1430,6 +1463,11 @@ test("mode options and cost are derived from the base model", () => {
               tier: { type: "context", size: 272_000 },
             },
           ],
+          context_over_200k: {
+            input: 4,
+            output: 20,
+            cache_read: 0.4,
+          },
         },
         limit: {
           context: 1_050_000,
@@ -1479,6 +1517,41 @@ test("mode options and cost are derived from the base model", () => {
       output: 22.5,
       cache: { read: 0.5, write: 0 },
       tier: { type: "context", size: 272_000 },
+    },
+  ])
+})
+
+test("legacy models.dev pricing is normalized into a context tier", () => {
+  const provider = {
+    id: "legacy",
+    name: "Legacy",
+    env: [],
+    npm: "@ai-sdk/openai-compatible",
+    models: {
+      legacy: {
+        id: "legacy",
+        name: "Legacy",
+        release_date: "2026-01-01",
+        attachment: false,
+        reasoning: false,
+        temperature: true,
+        tool_call: true,
+        cost: {
+          input: 1,
+          output: 2,
+          context_over_200k: { input: 3, output: 4, cache_read: 0.3 },
+        },
+        limit: { context: 1_000_000, output: 32_000 },
+      },
+    },
+  } as unknown as ModelsDev.Provider
+
+  expect(Provider.fromModelsDevProvider(provider).models.legacy.cost.tiers).toEqual([
+    {
+      input: 3,
+      output: 4,
+      cache: { read: 0.3, write: 0 },
+      tier: { type: "context", size: 200_000 },
     },
   ])
 })

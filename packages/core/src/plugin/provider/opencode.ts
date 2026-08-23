@@ -225,12 +225,23 @@ function withoutCredentials(body: Readonly<Record<string, unknown>> | undefined)
 }
 
 function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>) {
+  const legacy = input.context_over_200k
   return [
     {
       input: input.input,
       output: input.output,
       cache: { read: input.cache_read ?? 0, write: input.cache_write ?? 0 },
     },
+    ...(legacy
+      ? [
+          {
+            tier: { type: "context" as const, size: 200_000 },
+            input: legacy.input,
+            output: legacy.output,
+            cache: { read: legacy.cache_read ?? 0, write: legacy.cache_write ?? 0 },
+          },
+        ]
+      : []),
   ]
 }
 

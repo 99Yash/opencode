@@ -20863,6 +20863,25 @@
                     },
                     "cache_write": {
                       "type": "number"
+                    },
+                    "context_over_200k": {
+                      "type": "object",
+                      "properties": {
+                        "input": {
+                          "type": "number"
+                        },
+                        "output": {
+                          "type": "number"
+                        },
+                        "cache_read": {
+                          "type": "number"
+                        },
+                        "cache_write": {
+                          "type": "number"
+                        }
+                      },
+                      "required": ["input", "output"],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["input", "output"],
