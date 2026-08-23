@@ -87,19 +87,24 @@ function ResolvedTargetSessionRoute() {
         </SessionRouteFrame>
       }
     >
-      <SessionRouteFrame padded passthrough={!!directory()}>
-        <SessionPanelFrame raised passthrough={!!directory()}>
-          <Show when={directory()}>
-            {(value) => (
+      <div class="relative size-full">
+        <div class="absolute inset-0" classList={{ invisible: !!directory() }}>
+          <SessionRouteFrame padded>
+            <SessionPanelFrame raised />
+          </SessionRouteFrame>
+        </div>
+        <Show when={directory()}>
+          {(value) => (
+            <div class="absolute inset-0">
               <LocationProvider directory={value()}>
                 <SessionUIProvider directory={value()} server={server.key}>
                   <TargetSessionPage />
                 </SessionUIProvider>
               </LocationProvider>
-            )}
-          </Show>
-        </SessionPanelFrame>
-      </SessionRouteFrame>
+            </div>
+          )}
+        </Show>
+      </div>
     </Show>
   )
 }
