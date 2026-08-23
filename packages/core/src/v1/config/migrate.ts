@@ -193,21 +193,23 @@ function migrateModel(info: typeof ConfigProviderV1.Model.Type, packageName?: st
   const packageID = info.provider?.npm ?? packageName
   const lowerer = ConfigProviderOptionsV1.get(packageID)
   const request = info.options && lowerer.request(info.options)
-  const legacy = info.cost?.context_over_200k
-  const costs = info.cost && {
-    input: info.cost.input,
-    output: info.cost.output,
-    cache: { read: info.cost.cache_read, write: info.cost.cache_write },
-    ...(legacy
-      ? {
-          context_over_200k: {
-            input: legacy.input,
-            output: legacy.output,
-            cache: { read: legacy.cache_read, write: legacy.cache_write },
+  const costs = info.cost && [
+    {
+      input: info.cost.input,
+      output: info.cost.output,
+      cache: { read: info.cost.cache_read, write: info.cost.cache_write },
+    },
+    ...(info.cost.context_over_200k
+      ? [
+          {
+            tier: { type: "context" as const, size: 200_000 },
+            input: info.cost.context_over_200k.input,
+            output: info.cost.context_over_200k.output,
+            cache: { read: info.cost.context_over_200k.cache_read, write: info.cost.context_over_200k.cache_write },
           },
-        }
-      : {}),
-  }
+        ]
+      : []),
+  ]
   const capabilities =
     info.tool_call !== undefined || info.modalities?.input !== undefined || info.modalities?.output !== undefined
       ? { tools: info.tool_call ?? false, input: info.modalities?.input ?? [], output: info.modalities?.output ?? [] }

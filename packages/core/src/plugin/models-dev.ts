@@ -19,8 +19,9 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
       write: input?.cache_write ?? 0,
     },
   }
-  const tiers =
-    input?.tiers?.map((item) => ({
+  return [
+    base,
+    ...(input?.tiers?.map((item) => ({
       tier: item.tier,
       input: item.input,
       output: item.output,
@@ -28,20 +29,19 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
         read: item.cache_read ?? 0,
         write: item.cache_write ?? 0,
       },
-    })) ?? []
-  const legacy = input?.context_over_200k
-  return [
-    base,
-    ...tiers,
-    ...(legacy && tiers.length === 0
+    })) ?? []),
+    ...(input?.context_over_200k
       ? [
           {
-            tier: { type: "context" as const, size: 200_000 },
-            input: legacy.input,
-            output: legacy.output,
+            tier: {
+              type: "context" as const,
+              size: 200_000,
+            },
+            input: input.context_over_200k.input,
+            output: input.context_over_200k.output,
             cache: {
-              read: legacy.cache_read ?? 0,
-              write: legacy.cache_write ?? 0,
+              read: input.context_over_200k.cache_read ?? 0,
+              write: input.context_over_200k.cache_write ?? 0,
             },
           },
         ]
@@ -51,10 +51,8 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
 
 function mergeCost(base: ModelV2Info["cost"], override: ModelsDev.Model["cost"] | undefined) {
   if (!override) return base
+  const next = cost(override)
   const [baseDefault, ...baseTiers] = base
-  const next = cost(
-    baseTiers.length > 0 && !override.tiers?.length ? { ...override, context_over_200k: undefined } : override,
-  )
   const [nextDefault, ...nextTiers] = next
   const tierKey = (item: ModelV2Info["cost"][number]) => `${item.tier?.type ?? "base"}:${item.tier?.size ?? 0}`
   const merge = (left: ModelV2Info["cost"][number], right: ModelV2Info["cost"][number]) => ({

@@ -67,12 +67,7 @@ describe("ModelsDevPlugin", () => {
                   experimental: {
                     modes: {
                       fast: {
-                        cost: {
-                          input: 5,
-                          output: 30,
-                          cache_read: 0.5,
-                          context_over_200k: { input: 100, output: 100 },
-                        },
+                        cost: { input: 5, output: 30, cache_read: 0.5 },
                         provider: {
                           headers: { "x-mode": "fast" },
                           body: { service_tier: "priority" },
@@ -80,22 +75,6 @@ describe("ModelsDevPlugin", () => {
                       },
                     },
                   },
-                },
-                legacy: {
-                  id: "legacy",
-                  name: "Legacy",
-                  family: "legacy",
-                  release_date: "2026-01-01",
-                  attachment: false,
-                  reasoning: false,
-                  temperature: true,
-                  tool_call: true,
-                  cost: {
-                    input: 1,
-                    output: 2,
-                    context_over_200k: { input: 3, output: 4, cache_read: 0.3 },
-                  },
-                  limit: { context: 1_000_000, output: 32_000 },
                 },
               },
             },
@@ -113,7 +92,6 @@ describe("ModelsDevPlugin", () => {
       const providerID = ProviderV2.ID.make("acme")
       const base = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4"))
       const fast = yield* catalog.model.get(providerID, ModelV2.ID.make("gpt-5.4-fast"))
-      const legacy = yield* catalog.model.get(providerID, ModelV2.ID.make("legacy"))
 
       expect(base?.variants).toEqual([])
       expect(base?.request.body).toEqual({})
@@ -136,14 +114,11 @@ describe("ModelsDevPlugin", () => {
           output: 18,
           cache: { read: 0.25, write: 0 },
         },
-      ])
-      expect(legacy?.cost).toEqual([
-        { input: 1, output: 2, cache: { read: 0, write: 0 } },
         {
           tier: { type: "context", size: 200_000 },
-          input: 3,
-          output: 4,
-          cache: { read: 0.3, write: 0 },
+          input: 5,
+          output: 22.5,
+          cache: { read: 0.5, write: 0 },
         },
       ])
     }),

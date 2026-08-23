@@ -22,11 +22,6 @@ class Cost extends Schema.Class<Cost>("ConfigV2.Model.Cost")({
   input: Schema.Finite,
   output: Schema.Finite,
   cache: Cache.pipe(Schema.optional),
-  context_over_200k: Schema.Struct({
-    input: Schema.Finite,
-    output: Schema.Finite,
-    cache: Cache.pipe(Schema.optional),
-  }).pipe(Schema.optional),
 }) {}
 
 class Limit extends Schema.Class<Limit>("ConfigV2.Model.Limit")({

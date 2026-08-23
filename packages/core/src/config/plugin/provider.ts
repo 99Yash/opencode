@@ -91,8 +91,7 @@ export const Plugin = define({
                   }
                 }
                 if (config.cost !== undefined) {
-                  const input = Array.isArray(config.cost) ? config.cost : [config.cost]
-                  const next = input.map((cost) => ({
+                  model.cost = (Array.isArray(config.cost) ? config.cost : [config.cost]).map((cost) => ({
                     tier: cost.tier && { ...cost.tier },
                     input: cost.input,
                     output: cost.output,
@@ -101,23 +100,6 @@ export const Plugin = define({
                       write: cost.cache?.write ?? 0,
                     },
                   }))
-                  const explicit = next.filter((cost) => cost.tier?.type === "context")
-                  const existing = model.cost.filter((cost) => cost.tier?.type === "context")
-                  const legacy = input.find((cost) => cost.tier === undefined)?.context_over_200k
-                  model.cost = [
-                    ...next.filter((cost) => cost.tier === undefined),
-                    ...(explicit.length > 0 ? explicit : existing),
-                    ...(legacy && explicit.length === 0 && existing.length === 0
-                      ? [
-                          {
-                            tier: { type: "context" as const, size: 200_000 },
-                            input: legacy.input,
-                            output: legacy.output,
-                            cache: { read: legacy.cache?.read ?? 0, write: legacy.cache?.write ?? 0 },
-                          },
-                        ]
-                      : []),
-                  ]
                 }
                 if (config.disabled !== undefined) model.enabled = !config.disabled
                 if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
