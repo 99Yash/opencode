@@ -661,7 +661,11 @@ const layer = Layer.effect(
             command: input.command,
             message: `Command not found: ${input.command}`,
           })
-        const evaluated = yield* commands.evaluate({ name: input.command, arguments: input.arguments })
+        const evaluated = yield* commands.evaluate({
+          name: input.command,
+          arguments: input.arguments,
+          sessionID: input.sessionID,
+        })
 
         // TODO(v2 commands): decide whether command-level subtask/background execution belongs in v2 commands.
         const agent = command.agent ?? input.agent

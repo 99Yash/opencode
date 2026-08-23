@@ -21,6 +21,16 @@ export type Evaluation = {
 
 export type Data = {
   commands: Map<string, Types.DeepMutable<Info>>
+  handlers: Map<string, Handler>
+}
+
+export type Handler = (input: {
+  readonly sessionID: string
+  readonly arguments: string
+}) => Effect.Effect<string, unknown>
+
+export type Definition = Omit<Info, "template"> & {
+  readonly execute: Handler
 }
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Command.NotFoundError", {
@@ -36,6 +46,7 @@ export class EvaluationError extends Schema.TaggedError<EvaluationError>()("Comm
 export type Draft = {
   list: () => readonly Info[]
   get: (name: string) => Info | undefined
+  add: (definition: Definition) => void
   update: (name: string, update: (command: Types.DeepMutable<Info>) => void) => void
   remove: (name: string) => void
 }
@@ -46,6 +57,7 @@ export interface Interface extends State.Transformable<Draft> {
   readonly evaluate: (input: {
     readonly name: string
     readonly arguments?: string
+    readonly sessionID?: string
   }) => Effect.Effect<Evaluation, NotFoundError | EvaluationError>
 }
 
@@ -62,10 +74,21 @@ const layer = () =>
       const shell = yield* ShellSelect.Service
       const state = State.create<Data, Draft>({
         name: "command",
-        initial: () => ({ commands: new Map() }),
+        initial: () => ({ commands: new Map(), handlers: new Map() }),
         draft: (draft) => ({
           list: () => Array.from(draft.commands.values()) as Info[],
           get: (name) => draft.commands.get(name),
+          add: (definition) => {
+            draft.commands.set(definition.name, {
+              name: definition.name,
+              template: "",
+              description: definition.description,
+              agent: definition.agent,
+              model: definition.model,
+              subtask: definition.subtask,
+            })
+            draft.handlers.set(definition.name, definition.execute)
+          },
           update: (name, update) => {
             const current = draft.commands.get(name) ?? ({ name, template: "" } as Types.DeepMutable<Info>)
             if (!draft.commands.has(name)) draft.commands.set(name, current)
@@ -74,6 +97,7 @@ const layer = () =>
           },
           remove: (name) => {
             draft.commands.delete(name)
+            draft.handlers.delete(name)
           },
         }),
         finalize: () => bus.publish(Command.Event.Updated, {}).pipe(Effect.asVoid),
@@ -104,6 +128,24 @@ const layer = () =>
         }),
         evaluate: Effect.fn("Command.evaluate")(function* (input) {
           const command = staticCommand(input.name)
+          const handler = state.get().handlers.get(input.name)
+          if (handler) {
+            if (input.sessionID === undefined)
+              return yield* new EvaluationError({
+                command: input.name,
+                message: `Command requires a session: ${input.name}`,
+              })
+            const text = yield* handler({ sessionID: input.sessionID, arguments: input.arguments ?? "" }).pipe(
+              Effect.mapError(
+                (error) =>
+                  new EvaluationError({
+                    command: input.name,
+                    message: error instanceof Error ? error.message : String(error),
+                  }),
+              ),
+            )
+            return { text }
+          }
           if (command)
             return yield* evaluateTemplate(input.name, command.template, input.arguments ?? "", {
               location,

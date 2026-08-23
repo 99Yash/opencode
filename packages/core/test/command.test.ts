@@ -74,4 +74,30 @@ describe("Command", () => {
       expect((yield* command.evaluate({ name: "review" })).text.replace(/\r?\n$/, "")).toEqual("Output: command-output")
     }),
   )
+
+  it.effect("executes registered command handlers", () =>
+    Effect.gen(function* () {
+      const command = yield* Command.Service
+      const calls: string[] = []
+      yield* command.transform((editor) => {
+        editor.add({
+          name: "deploy",
+          description: "Prepare a deployment",
+          execute: ({ sessionID, arguments: input }) =>
+            Effect.sync(() => {
+              calls.push(`${sessionID}:${input}`)
+              return `Deployment prepared for ${input}`
+            }),
+        })
+      })
+
+      expect(yield* command.get("deploy")).toEqual(
+        Command.Info.make({ name: "deploy", template: "", description: "Prepare a deployment" }),
+      )
+      expect(yield* command.evaluate({ name: "deploy", sessionID: "session-1", arguments: "staging" })).toEqual({
+        text: "Deployment prepared for staging",
+      })
+      expect(calls).toEqual(["session-1:staging"])
+    }),
+  )
 })

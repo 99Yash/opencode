@@ -2,9 +2,14 @@ import type { CommandApi } from "@opencode-ai/client/promise/api"
 import type { CommandInfo } from "@opencode-ai/client"
 import type { Transform } from "./registration.js"
 
+export interface CommandDefinition extends Omit<CommandInfo, "template"> {
+  readonly execute: (input: { readonly sessionID: string; readonly arguments: string }) => string | Promise<string>
+}
+
 export interface CommandDraft {
   list(): readonly CommandInfo[]
   get(name: string): CommandInfo | undefined
+  add(definition: CommandDefinition): void
   update(name: string, update: (command: CommandInfo) => void): void
   remove(name: string): void
 }
