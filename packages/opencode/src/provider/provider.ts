@@ -1035,13 +1035,6 @@ const ProviderCost = Schema.Struct({
   output: Schema.Finite,
   cache: ProviderCacheCost,
   tiers: optional(Schema.Array(ProviderCostTier)),
-  experimentalOver200K: optional(
-    Schema.Struct({
-      input: Schema.Finite,
-      output: Schema.Finite,
-      cache: ProviderCacheCost,
-    }),
-  ),
 })
 
 const ProviderLimit = Schema.Struct({
@@ -1212,16 +1205,6 @@ function cost(c: ModelsDev.Model["cost"]): Model["cost"] {
       },
       tier: item.tier,
     }))
-  }
-  if (c?.context_over_200k) {
-    result.experimentalOver200K = {
-      cache: {
-        read: c.context_over_200k.cache_read ?? 0,
-        write: c.context_over_200k.cache_write ?? 0,
-      },
-      input: c.context_over_200k.input,
-      output: c.context_over_200k.output,
-    }
   }
   return result
 }
@@ -1528,6 +1511,7 @@ const layer = Layer.effect(
                   read: model?.cost?.cache_read ?? existingModel?.cost?.cache.read ?? 0,
                   write: model?.cost?.cache_write ?? existingModel?.cost?.cache.write ?? 0,
                 },
+                tiers: existingModel?.cost.tiers,
               },
               options: mergeDeep(existingModel?.options ?? {}, model.options ?? {}),
               limit: {

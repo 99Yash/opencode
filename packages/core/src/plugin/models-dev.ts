@@ -30,22 +30,6 @@ function cost(input: ModelsDev.Model["cost"]): ModelV2Info["cost"] {
         write: item.cache_write ?? 0,
       },
     })) ?? []),
-    ...(input?.context_over_200k
-      ? [
-          {
-            tier: {
-              type: "context" as const,
-              size: 200_000,
-            },
-            input: input.context_over_200k.input,
-            output: input.context_over_200k.output,
-            cache: {
-              read: input.context_over_200k.cache_read ?? 0,
-              write: input.context_over_200k.cache_write ?? 0,
-            },
-          },
-        ]
-      : []),
   ]
 }
 

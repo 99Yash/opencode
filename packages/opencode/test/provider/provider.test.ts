@@ -567,6 +567,27 @@ it.instance(
 )
 
 it.instance(
+  "model config preserves catalog cost tiers",
+  Effect.gen(function* () {
+    yield* set("REQUESTY_API_KEY", "test-api-key")
+    const providers = yield* list
+    expect(providers[ProviderV2.ID.make("requesty")].models["google/gemini-2.5-pro"].cost.tiers).toEqual([
+      {
+        input: 2.5,
+        output: 15,
+        cache: { read: 0.25, write: 0 },
+        tier: { type: "context", size: 200_000 },
+      },
+    ])
+  }),
+  {
+    config: {
+      provider: { requesty: { models: { "google/gemini-2.5-pro": {} } } },
+    },
+  },
+)
+
+it.instance(
   "model config preserves explicitly empty models.dev variants",
   Effect.gen(function* () {
     yield* set("OPENAI_API_KEY", "test-api-key")
@@ -1401,11 +1422,14 @@ test("mode options and cost are derived from the base model", () => {
           input: 2.5,
           output: 15,
           cache_read: 0.25,
-          context_over_200k: {
-            input: 5,
-            output: 22.5,
-            cache_read: 0.5,
-          },
+          tiers: [
+            {
+              input: 5,
+              output: 22.5,
+              cache_read: 0.5,
+              tier: { type: "context", size: 272_000 },
+            },
+          ],
         },
         limit: {
           context: 1_050_000,
@@ -1449,11 +1473,14 @@ test("mode options and cost are derived from the base model", () => {
   const pro = Provider.fromModelsDevProvider(provider).models["gpt-5.6-sol-pro"]
   expect(pro.api.id).toEqual("gpt-5.6-sol")
   expect(pro.options).toEqual({ reasoningMode: "pro", serviceTier: "priority" })
-  expect(model.cost.experimentalOver200K).toEqual({
-    input: 5,
-    output: 22.5,
-    cache: { read: 0.5, write: 0 },
-  })
+  expect(model.cost.tiers).toEqual([
+    {
+      input: 5,
+      output: 22.5,
+      cache: { read: 0.5, write: 0 },
+      tier: { type: "context", size: 272_000 },
+    },
+  ])
 })
 
 test("models.dev normalization fills required response fields", () => {

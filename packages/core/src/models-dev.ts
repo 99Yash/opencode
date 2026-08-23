@@ -39,14 +39,6 @@ const Cost = Schema.Struct({
   cache_read: Schema.optional(Schema.Finite),
   cache_write: Schema.optional(Schema.Finite),
   tiers: Schema.optional(Schema.Array(CostTier)),
-  context_over_200k: Schema.optional(
-    Schema.Struct({
-      input: Schema.Finite,
-      output: Schema.Finite,
-      cache_read: Schema.optional(Schema.Finite),
-      cache_write: Schema.optional(Schema.Finite),
-    }),
-  ),
 })
 
 const ReasoningOption = Schema.Union([

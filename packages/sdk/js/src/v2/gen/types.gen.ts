@@ -1781,12 +1781,6 @@ export type ProviderConfig = {
         output: number
         cache_read?: number
         cache_write?: number
-        context_over_200k?: {
-          input: number
-          output: number
-          cache_read?: number
-          cache_write?: number
-        }
       }
       limit?: {
         context: number
@@ -2083,14 +2077,6 @@ export type Model = {
         size: number
       }
     }>
-    experimentalOver200K?: {
-      input: number
-      output: number
-      cache: {
-        read: number
-        write: number
-      }
-    }
   }
   limit: {
     context: number
