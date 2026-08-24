@@ -207,6 +207,8 @@ const layer = (options?: Options) =>
       })
       return Service.of({
         transform: state.transform,
+        invalidate: state.invalidate,
+        settle: state.settle,
         reload: state.reload,
         resolve: (input) => Effect.sync(() => resolve(input, state.get().shell, options, global.bin)),
       })

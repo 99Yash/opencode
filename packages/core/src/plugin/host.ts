@@ -99,6 +99,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
         if (ref && !isCurrentLocation(ref)) return runtime.location.agent.list(ref)
         return agents.list().pipe(Effect.map((data) => ({ location: locationInfo(), data })))
       },
+      invalidate: agents.invalidate,
       reload: agents.reload,
       transform: (callback) =>
         agents.transform((draft) => {
@@ -159,6 +160,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
         list: () => response(catalog.model.available()),
         default: () => response(catalog.model.default()),
       },
+      invalidate: catalog.invalidate,
       reload: catalog.reload,
       transform: (callback) =>
         catalog.transform((draft) => {
@@ -186,6 +188,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     command: {
       list: () => response(commands.list()),
+      invalidate: commands.invalidate,
       reload: commands.reload,
       transform: commands.transform,
     },
@@ -258,6 +261,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
             attemptID: Integration.AttemptID.make(input.attemptID),
           }),
       },
+      invalidate: integration.invalidate,
       reload: integration.reload,
       connection: {
         active: (id) => integration.connection.active(Integration.ID.make(id)),
@@ -308,6 +312,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
         if (ref && !isCurrentLocation(ref)) return runtime.location.mcp.disconnect(ref, input.server)
         return mcp.disconnect(input.server)
       },
+      invalidate: mcp.invalidate,
       reload: mcp.reload,
       transform: (callback) =>
         mcp.transform((draft) => {
@@ -349,6 +354,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     reference: {
       list: () => response(reference.list()),
+      invalidate: reference.invalidate,
       reload: reference.reload,
       transform: (callback) =>
         reference.transform((draft) => {
@@ -361,6 +367,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     skill: {
       list: () => response(skill.list()),
+      invalidate: skill.invalidate,
       reload: skill.reload,
       transform: (callback) =>
         skill.transform((draft) => {
@@ -404,6 +411,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
             providerID: input.providerID === undefined ? undefined : WebSearch.ID.make(input.providerID),
           }),
         ),
+      invalidate: websearch.invalidate,
       reload: websearch.reload,
       transform: (callback) =>
         websearch.transform((draft) => {
