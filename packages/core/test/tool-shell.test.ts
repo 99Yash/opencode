@@ -38,7 +38,7 @@ import { ShellTool } from "@opencode-ai/core/tool/plugin/shell"
 import { ToolOutput } from "@opencode-ai/core/tool-output"
 import { Tool } from "@opencode-ai/core/tool"
 import { tmpdir } from "./fixture/tmpdir"
-import { tempGlobalLayer } from "./fixture/global"
+import { globalLayer, tempGlobalLayer } from "./fixture/global"
 import { testEffect } from "./lib/effect"
 import { permissionLayer } from "./lib/permission"
 import { toolIdentity, executeTool, registerToolPlugin, toolDefinitions } from "./lib/tool"
@@ -786,17 +786,7 @@ describe("ShellTool", () => {
         Effect.gen(function* () {
           reset()
           const databasePath = path.join(tmp.path, "opencode.sqlite")
-          const globalLayer = Global.layerWith({
-            home: path.join(tmp.path, "home"),
-            data: path.join(tmp.path, "data"),
-            cache: path.join(tmp.path, "cache"),
-            config: path.join(tmp.path, "config"),
-            state: path.join(tmp.path, "state"),
-            tmp: path.join(tmp.path, "tmp"),
-            bin: path.join(tmp.path, "cache", "bin"),
-            log: path.join(tmp.path, "data", "log"),
-            repos: path.join(tmp.path, "data", "repos"),
-          })
+          const testGlobalLayer = globalLayer(tmp.path)
           const context = yield* Layer.buildWithScope(
             AppNodeBuilder.build(nodes, [
               [SessionExecution.node, executionNode],
@@ -804,7 +794,7 @@ describe("ShellTool", () => {
               [PluginSupervisor.node, shellPluginSupervisor],
               [Database.node, Database.configured({ path: databasePath })],
               [Bus.node, Bus.configured({ persist: true })],
-              [Global.node, globalLayer],
+              [Global.node, testGlobalLayer],
             ]),
             applicationScope,
           )
@@ -831,7 +821,7 @@ describe("ShellTool", () => {
           const pending = yield* Layer.build(
             AppNodeBuilder.build(Database.node, [
               [Database.node, Database.configured({ path: databasePath })],
-              [Global.node, globalLayer],
+              [Global.node, testGlobalLayer],
             ]),
           ).pipe(
             Effect.flatMap((verification) =>

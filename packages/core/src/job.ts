@@ -19,11 +19,16 @@ export type Info = {
   metadata?: Record<string, unknown>
 }
 
+export type SettledInfo = Info & {
+  status: Exclude<Status, "running">
+  completed_at: number
+}
+
 type Active = {
   info: Info
   done: Deferred.Deferred<Info>
   backgrounded: Deferred.Deferred<Info>
-  onBackgroundSettled?: (info: Info) => Effect.Effect<void>
+  onBackgroundSettled?: (info: SettledInfo) => Effect.Effect<void>
   backgroundNotification?: Deferred.Deferred<void>
   scope: Scope.Closeable
   token: object
@@ -39,6 +44,7 @@ type State = {
 }
 
 type Notification = {
+  jobID: string
   effect: Effect.Effect<void>
   done: Deferred.Deferred<void>
 }
@@ -76,7 +82,7 @@ export type StartInput = {
   title?: string
   metadata?: Record<string, unknown>
   run: Effect.Effect<string, unknown>
-  onBackgroundSettled?: (info: Info) => Effect.Effect<void>
+  onBackgroundSettled?: (info: SettledInfo) => Effect.Effect<void>
 }
 
 export type WaitInput = {
@@ -140,11 +146,17 @@ function decrementSession(input: Map<SessionSchema.ID, number>, sessionID: Sessi
   return next
 }
 
-function claimNotification(job: Active, info: Info) {
+function clearNotification(job: Active) {
+  if (!job.onBackgroundSettled && !job.backgroundNotification) return job
+  return { ...job, onBackgroundSettled: undefined, backgroundNotification: undefined }
+}
+
+function claimNotification(job: Active, info: SettledInfo) {
   if (!job.isBackgrounded || !job.onBackgroundSettled || !job.backgroundNotification) return { job }
   return {
-    job: { ...job, onBackgroundSettled: undefined, backgroundNotification: undefined },
+    job: clearNotification(job),
     notify: {
+      jobID: info.id,
       effect: job.onBackgroundSettled(info),
       done: job.backgroundNotification,
     },
@@ -168,12 +180,19 @@ export const make = Effect.gen(function* () {
 
   const notify = Effect.fnUntraced(function* (notification: Notification) {
     yield* notification.effect.pipe(
+      Effect.catchCause((cause) =>
+        Effect.logError("Failed to notify background Job settlement", { jobID: notification.jobID, cause }),
+      ),
       Effect.ensuring(
         Effect.sync(() => state.notifications.delete(notification.done)).pipe(
           Effect.andThen(Deferred.succeed(notification.done, undefined)),
         ),
       ),
     )
+  })
+
+  const launchNotification = Effect.fnUntraced(function* (notification: Notification) {
+    yield* notify(notification).pipe(Effect.forkIn(state.scope, { startImmediately: true }))
   })
 
   const settle = Effect.fnUntraced(function* (id: string, token: object, exit: Exit.Exit<string, unknown>) {
@@ -188,18 +207,19 @@ export const make = Effect.gen(function* () {
         : Cause.hasInterruptsOnly(exit.cause)
           ? "cancelled"
           : "error"
+      const info = {
+        ...job.info,
+        status,
+        completed_at,
+        ...(Exit.isSuccess(exit) ? { output: exit.value } : {}),
+        ...(Exit.isFailure(exit) ? { error: errorText(Cause.squash(exit.cause)) } : {}),
+        ...(job.info.metadata ? { metadata: { ...job.info.metadata } } : {}),
+      } satisfies SettledInfo
       const next = {
         ...job,
         blockingSessions: new Map<SessionSchema.ID, number>(),
-        info: {
-          ...job.info,
-          status,
-          completed_at,
-          ...(Exit.isSuccess(exit) ? { output: exit.value } : {}),
-          ...(Exit.isFailure(exit) ? { error: errorText(Cause.squash(exit.cause)) } : {}),
-        },
+        info,
       }
-      const info = snapshot(next)
       const notification = claimNotification(next, info)
       return [
         {
@@ -212,9 +232,12 @@ export const make = Effect.gen(function* () {
       ]
     })
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
-    if (result.notify) yield* notify(result.notify)
+    if (result.notify) yield* launchNotification(result.notify)
     if (result.scope) {
-      yield* Scope.close(result.scope, Exit.void).pipe(Effect.forkIn(state.scope, { startImmediately: true }))
+      yield* Scope.close(result.scope, Exit.void).pipe(
+        Effect.catchCause((cause) => Effect.logError("Failed to close settled Job scope", { id, cause })),
+        Effect.forkIn(state.scope, { startImmediately: true }),
+      )
     }
     return result.info
   })
@@ -246,9 +269,6 @@ export const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const id = input.id ?? Identifier.ascending("job")
         const started_at = yield* Clock.currentTimeMillis
-        const done = yield* Deferred.make<Info>()
-        const backgrounded = yield* Deferred.make<Info>()
-        const backgroundNotification = input.onBackgroundSettled ? yield* Deferred.make<void>() : undefined
         const result = yield* SynchronizedRef.modifyEffect(
           state.jobs,
           Effect.fnUntraced(function* (jobs) {
@@ -269,8 +289,9 @@ export const make = Effect.gen(function* () {
               ] as readonly [StartResult, Map<string, Active>]
             const existing = jobs.get(id)
             if (existing?.info.status === "running") {
-              if (existing.onBackgroundSettled || !input.onBackgroundSettled || !backgroundNotification)
+              if (existing.onBackgroundSettled || !input.onBackgroundSettled)
                 return [{ info: snapshot(existing) }, jobs] as readonly [StartResult, Map<string, Active>]
+              const backgroundNotification = yield* Deferred.make<void>()
               const adopted = {
                 ...existing,
                 onBackgroundSettled: input.onBackgroundSettled,
@@ -282,6 +303,9 @@ export const make = Effect.gen(function* () {
                 Map<string, Active>,
               ]
             }
+            const done = yield* Deferred.make<Info>()
+            const backgrounded = yield* Deferred.make<Info>()
+            const backgroundNotification = input.onBackgroundSettled ? yield* Deferred.make<void>() : undefined
             const scope = yield* Scope.fork(state.scope, "parallel")
             const token = {}
             const job = {
@@ -331,11 +355,7 @@ export const make = Effect.gen(function* () {
       if (!job || job.isBackgrounded) return jobs
       if (job.info.status !== "running") {
         if (!job.onBackgroundSettled) return jobs
-        return new Map(jobs).set(input.id, {
-          ...job,
-          onBackgroundSettled: undefined,
-          backgroundNotification: undefined,
-        })
+        return new Map(jobs).set(input.id, clearNotification(job))
       }
       return new Map(jobs).set(input.id, {
         ...job,
@@ -351,13 +371,7 @@ export const make = Effect.gen(function* () {
       if (job.info.status !== "running")
         return [
           { type: "finished", info: snapshot(job) },
-          job.onBackgroundSettled
-            ? new Map(jobs).set(input.id, {
-                ...job,
-                onBackgroundSettled: undefined,
-                backgroundNotification: undefined,
-              })
-            : jobs,
+          job.onBackgroundSettled ? new Map(jobs).set(input.id, clearNotification(job)) : jobs,
         ]
       if (job.isBackgrounded) return [{ type: "backgrounded", info: snapshot(job) }, jobs]
       return [
@@ -383,14 +397,25 @@ export const make = Effect.gen(function* () {
       (jobs): readonly [BackgroundResult, Map<string, Active>] => {
         const job = jobs.get(id)
         if (!job) return [{}, jobs]
+        if (state.shuttingDown) {
+          if (job.info.status === "running") return [{ info: snapshot(job), cancel: { id, token: job.token } }, jobs]
+          return [
+            { info: snapshot(job) },
+            job.onBackgroundSettled ? new Map(jobs).set(id, clearNotification(job)) : jobs,
+          ]
+        }
         if (job.info.status !== "running") {
           if (!job.onBackgroundSettled || !job.backgroundNotification) return [{}, jobs]
-          const next = { ...job, isBackgrounded: true }
+          const info = {
+            ...snapshot(job),
+            status: job.info.status,
+            completed_at: job.info.completed_at ?? job.info.started_at,
+          } satisfies SettledInfo
+          const next = { ...job, info, isBackgrounded: true }
           state.notifications.add(job.backgroundNotification)
-          const notification = claimNotification(next, snapshot(next))
-          return [{ info: snapshot(next), notify: notification.notify }, new Map(jobs).set(id, notification.job)]
+          const notification = claimNotification(next, info)
+          return [{ info, notify: notification.notify }, new Map(jobs).set(id, notification.job)]
         }
-        if (state.shuttingDown) return [{ info: snapshot(job), cancel: { id, token: job.token } }, jobs]
         if (job.isBackgrounded) return [{ info: snapshot(job) }, jobs]
         const next = {
           ...job,
@@ -402,7 +427,7 @@ export const make = Effect.gen(function* () {
       },
     )
     if (result.cancel) return yield* cancelGeneration(result.cancel.id, result.cancel.token)
-    if (result.notify) yield* notify(result.notify)
+    if (result.notify) yield* launchNotification(result.notify)
     if (result.info && result.backgrounded)
       yield* Deferred.succeed(result.backgrounded, result.info).pipe(Effect.ignore)
     return result.info
@@ -447,16 +472,17 @@ export const make = Effect.gen(function* () {
       if (!job) return [{}, jobs]
       if (token && job.token !== token) return [{}, jobs]
       if (job.info.status !== "running") return [{ info: snapshot(job) }, jobs]
+      const info = {
+        ...job.info,
+        status: "cancelled" as const,
+        completed_at,
+        ...(job.info.metadata ? { metadata: { ...job.info.metadata } } : {}),
+      } satisfies SettledInfo
       const next = {
         ...job,
         blockingSessions: new Map<SessionSchema.ID, number>(),
-        info: {
-          ...job.info,
-          status: "cancelled" as const,
-          completed_at,
-        },
+        info,
       }
-      const info = snapshot(next)
       const notification = claimNotification(next, info)
       return [
         {
@@ -465,12 +491,15 @@ export const make = Effect.gen(function* () {
           notify: notification.notify,
           scope: job.scope,
         },
-        new Map(jobs).set(id, notification.job),
+        new Map(jobs).set(id, notification.notify ? notification.job : clearNotification(notification.job)),
       ]
     })
-    if (result.scope) yield* Scope.close(result.scope, Exit.void)
+    if (result.scope)
+      yield* Scope.close(result.scope, Exit.void).pipe(
+        Effect.catchCause((cause) => Effect.logError("Failed to close cancelled Job scope", { id, cause })),
+      )
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
-    if (result.notify) yield* notify(result.notify)
+    if (result.notify) yield* launchNotification(result.notify)
     return result.info
   })
 

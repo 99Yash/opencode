@@ -150,7 +150,7 @@ describe("Job", () => {
       const jobs = yield* Job.Service
       const foregroundWork = yield* Deferred.make<void>()
       const interrupted = yield* Deferred.make<void>()
-      const callbackStarted = yield* Deferred.make<Job.Info>()
+      const callbackStarted = yield* Deferred.make<Job.SettledInfo>()
       const releaseCallback = yield* Deferred.make<void>()
       const background = yield* jobs.start({
         id: "job_background_shutdown",
@@ -213,6 +213,40 @@ describe("Job", () => {
 
       yield* Deferred.succeed(releaseCallback, undefined)
       yield* Fiber.join(shutdown)
+    }),
+  )
+
+  it.live("shutdown rejects late background notification registration", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const callback = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        id: "job_completed_before_background_shutdown",
+        type: "test",
+        run: Effect.succeed("done"),
+        onBackgroundSettled: () => Deferred.succeed(callback, undefined),
+      })
+      expect(yield* jobs.wait({ id: job.id })).toMatchObject({ info: { status: "completed" } })
+
+      yield* jobs.shutdown
+      expect(yield* jobs.background(job.id)).toMatchObject({ status: "completed" })
+      expect((yield* Deferred.poll(callback))._tag).toBe("None")
+    }),
+  )
+
+  it.live("shutdown completes when a background callback defects", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const job = yield* jobs.start({
+        id: "job_defective_shutdown_callback",
+        type: "test",
+        run: Effect.never,
+        onBackgroundSettled: () => Effect.die("callback defect"),
+      })
+      yield* jobs.background(job.id)
+
+      yield* jobs.shutdown.pipe(Effect.timeout("1 second"))
+      expect(yield* jobs.get(job.id)).toMatchObject({ status: "cancelled" })
     }),
   )
 

@@ -224,7 +224,6 @@ export const Plugin = {
                 metadata: {},
                 run,
                 onBackgroundSettled: (result) => {
-                  if (result.status === "running") return Effect.void
                   const text =
                     result.status === "completed"
                       ? (result.output ?? NO_TEXT)
@@ -241,8 +240,10 @@ export const Plugin = {
                   )
                 },
               })
-              if (info.status === "cancelled")
+              if (info.status === "cancelled") {
+                yield* runtime.session.interrupt(child.id)
                 return yield* new ToolFailure({ message: `Subagent cancelled (sessionID: ${child.id})` })
+              }
 
               if (background) {
                 const result = yield* runtime.job.background(info.id)

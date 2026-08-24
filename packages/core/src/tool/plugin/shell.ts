@@ -120,9 +120,8 @@ export const Plugin = {
         command: string
         settled: Deferred.Deferred<Output>
       },
-      info: Job.Info,
+      info: Job.SettledInfo,
     ) {
-      if (info.status === "running") return
       const output = info.status === "completed" ? yield* Deferred.await(input.settled) : undefined
       const text = output
         ? resultMessages(output).join("\n\n")
@@ -303,7 +302,10 @@ export const Plugin = {
                 run,
                 onBackgroundSettled: (result) => notifyWhenSettled(notification, result),
               })
-              if (job.status === "cancelled") return yield* Effect.fail(new Error("Command cancelled"))
+              if (job.status === "cancelled") {
+                yield* shell.remove(info.id).pipe(Effect.ignore)
+                return yield* Effect.fail(new Error("Command cancelled"))
+              }
 
               if (input.background === true) {
                 const background = yield* runtime.job.background(job.id)
