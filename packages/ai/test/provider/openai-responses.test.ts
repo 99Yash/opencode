@@ -2169,9 +2169,14 @@ describe("OpenAI Responses route", () => {
         {
           type: "reasoning-end",
           id: "rs_1:0",
-          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: null } },
         },
       ])
+      expect(response.events).toContainEqual({
+        type: "reasoning-metadata",
+        id: "rs_1:0",
+        providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+      })
       expect(response.message.content).toContainEqual({
         type: "reasoning",
         text: "thinking",
@@ -2223,6 +2228,194 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("ends reasoning before later tool and text output", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: null },
+              },
+              {
+                type: "response.output_item.added",
+                item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "lookup" },
+              },
+              {
+                type: "response.output_item.done",
+                item: {
+                  type: "function_call",
+                  id: "fc_1",
+                  call_id: "call_1",
+                  name: "lookup",
+                  arguments: '{"query":"Effect"}',
+                },
+              },
+              { type: "response.output_item.added", item: { type: "message", id: "msg_1" } },
+              { type: "response.output_text.delta", item_id: "msg_1", delta: "Found it" },
+              { type: "response.output_item.done", item: { type: "message", id: "msg_1" } },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      const reasoningEnd = response.events.findIndex((event) => event.type === "reasoning-end")
+      expect(reasoningEnd).toBeLessThan(response.events.findIndex((event) => event.type === "tool-input-start"))
+      expect(reasoningEnd).toBeLessThan(response.events.findIndex((event) => event.type === "text-start"))
+      expect(response.events.filter((event) => event.type === "reasoning-end")).toHaveLength(1)
+      expect(response.message.content[0]).toEqual({
+        type: "reasoning",
+        text: "thinking",
+        providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+      })
+    }),
+  )
+
+  it.effect("uses terminal reasoning instead of output_item.added encryption", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.added",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: "provisional-state" },
+              },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.message.content).toEqual([
+        {
+          type: "reasoning",
+          text: "thinking",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+        },
+      ])
+    }),
+  )
+
+  it.effect("backfills reasoning from an incomplete terminal response", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: null },
+              },
+              {
+                type: "response.incomplete",
+                response: {
+                  id: "resp_1",
+                  incomplete_details: { reason: "max_output_tokens" },
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.finishReason).toEqual({ normalized: "length", raw: "max_output_tokens" })
+      expect(response.message.content[0]).toMatchObject({
+        providerMetadata: { openai: { reasoningEncryptedContent: "terminal-state" } },
+      })
+    }),
+  )
+
+  it.effect("does not backfill reasoning from a mismatched terminal item", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: null },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_other", encrypted_content: "other-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.events.some((event) => event.type === "reasoning-metadata")).toBe(false)
+      expect(response.message.content[0]).toMatchObject({
+        providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: null } },
+      })
+    }),
+  )
+
+  it.effect("ignores a reasoning done item that mismatches its output index", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.added",
+                output_index: 0,
+                item: { type: "reasoning", id: "rs_1" },
+              },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.output_item.done",
+                output_index: 0,
+                item: { type: "reasoning", id: "rs_other", encrypted_content: "wrong-state" },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.message.content).toEqual([
+        {
+          type: "reasoning",
+          text: "thinking",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+        },
+      ])
+    }),
+  )
+
   it.effect("streams each reasoning summary part as a separate block", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(
@@ -2270,6 +2463,11 @@ describe("OpenAI Responses route", () => {
         {
           type: "reasoning-end",
           id: "rs_1:1",
+          providerMetadata: { openai: { itemId: "rs_1" } },
+        },
+        {
+          type: "reasoning-metadata",
+          id: "rs_1:1",
           providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "encrypted-state" } },
         },
         { type: "step-finish", index: 0, reason: { normalized: "stop", raw: undefined } },
@@ -2315,9 +2513,14 @@ describe("OpenAI Responses route", () => {
         {
           type: "reasoning-end",
           id: "rs_1:1",
-          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+          providerMetadata: { openai: { itemId: "rs_1" } },
         },
       ])
+      expect(response.events).toContainEqual({
+        type: "reasoning-metadata",
+        id: "rs_1:1",
+        providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+      })
     }),
   )
 

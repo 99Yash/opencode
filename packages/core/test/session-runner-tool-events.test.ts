@@ -203,6 +203,36 @@ test("reasoning state from start, empty delta, and end is merged", async () => {
   })
 })
 
+test("reasoning metadata updates completed reasoning state", async () => {
+  const { published, publisher } = capture("openai")
+  await Effect.runPromise(
+    Effect.forEach(
+      [
+        LLMEvent.reasoningStart({ id: "reasoning" }),
+        LLMEvent.reasoningEnd({
+          id: "reasoning",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: null } },
+        }),
+        LLMEvent.reasoningMetadata({
+          id: "reasoning",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+        }),
+      ],
+      publisher.publish,
+      { discard: true },
+    ),
+  )
+
+  expect(published.slice(-2).map((event) => event.type)).toEqual([
+    "session.reasoning.ended.1",
+    "session.reasoning.state.updated.1",
+  ])
+  expect(published.at(-1)?.data).toMatchObject({
+    ordinal: 0,
+    state: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" },
+  })
+})
+
 it.effect("batches text deltas and flushes pending text before the terminal event", () =>
   Effect.gen(function* () {
     const { published, publisher } = capture()
