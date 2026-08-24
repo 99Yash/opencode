@@ -372,12 +372,33 @@ const AnthropicStreamDelta = Schema.Struct({
   stop_sequence: optionalNull(Schema.String),
 })
 
+const AnthropicStreamBlockTypes = new Set([
+  "tool_use",
+  "server_tool_use",
+  "text",
+  "thinking",
+  "redacted_thinking",
+  "web_search_tool_result",
+  "code_execution_tool_result",
+  "web_fetch_tool_result",
+])
+const AnthropicStreamDeltaTypes = new Set(["text_delta", "thinking_delta", "signature_delta", "input_json_delta"])
+
+const AnthropicOpaqueStreamBlock = Schema.declare(
+  (input): input is Schema.Schema.Type<typeof AnthropicStreamBlock> =>
+    ProviderShared.isRecord(input) && typeof input.type === "string" && !AnthropicStreamBlockTypes.has(input.type),
+)
+const AnthropicOpaqueStreamDelta = Schema.declare(
+  (input): input is Schema.Schema.Type<typeof AnthropicStreamDelta> =>
+    ProviderShared.isRecord(input) && typeof input.type === "string" && !AnthropicStreamDeltaTypes.has(input.type),
+)
+
 const AnthropicEvent = Schema.Struct({
   type: Schema.String,
   index: Schema.optional(Schema.Number),
   message: Schema.optional(Schema.Struct({ usage: Schema.optional(AnthropicUsage) })),
-  content_block: Schema.optional(AnthropicStreamBlock),
-  delta: Schema.optional(AnthropicStreamDelta),
+  content_block: Schema.optional(Schema.Union([AnthropicStreamBlock, AnthropicOpaqueStreamBlock])),
+  delta: Schema.optional(Schema.Union([AnthropicStreamDelta, AnthropicOpaqueStreamDelta])),
   usage: Schema.optional(AnthropicUsage),
   // `type` and `message` are both required per Anthropic's spec, but
   // OpenAI-compatible proxies and gateway translations occasionally drop one
@@ -391,6 +412,7 @@ type AnthropicEvent = Schema.Schema.Type<typeof AnthropicEvent>
 
 interface ParserState {
   readonly tools: ToolStream.State<number>
+  readonly contentBlocks: Readonly<Record<number, true>>
   readonly reasoningSignatures: Readonly<Record<number, string>>
   readonly usage?: Usage
   readonly pendingFinish?: {
@@ -1101,6 +1123,10 @@ const onMessageStart = (state: ParserState, event: AnthropicEvent): StepResult =
 const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepResult => {
   const block = event.content_block
   if (!block) return [state, NO_EVENTS]
+  const index = event.index ?? 0
+  const nextState = AnthropicStreamBlockTypes.has(block.type)
+    ? { ...state, contentBlocks: { ...state.contentBlocks, [index]: true as const } }
+    : state
 
   if (block.type === "tool_use" || block.type === "server_tool_use") {
     if (event.index === undefined || !block.id) return [state, NO_EVENTS]
@@ -1108,7 +1134,7 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
     const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
     return [
       {
-        ...state,
+        ...nextState,
         lifecycle,
         tools: ToolStream.start(state.tools, event.index, {
           id: block.id,
@@ -1133,23 +1159,26 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
 
   if (block.type === "text" && block.text !== undefined) {
     const events: LLMEvent[] = []
-    const id = `text-${event.index ?? 0}`
+    const id = `text-${index}`
     const lifecycle = Lifecycle.textStart(state.lifecycle, events, id)
     return [
-      { ...state, lifecycle: block.text ? Lifecycle.textDelta(lifecycle, events, id, block.text) : lifecycle },
+      {
+        ...nextState,
+        lifecycle: block.text ? Lifecycle.textDelta(lifecycle, events, id, block.text) : lifecycle,
+      },
       events,
     ]
   }
 
   if (block.type === "thinking" && block.thinking !== undefined) {
     const events: LLMEvent[] = []
-    const id = `reasoning-${event.index ?? 0}`
+    const id = `reasoning-${index}`
     const providerMetadata =
       block.signature === undefined ? undefined : anthropicMetadata({ signature: block.signature })
     const lifecycle = Lifecycle.reasoningStart(state.lifecycle, events, id, providerMetadata)
     return [
       {
-        ...state,
+        ...nextState,
         lifecycle: block.thinking
           ? Lifecycle.reasoningDelta(lifecycle, events, id, block.thinking, providerMetadata)
           : lifecycle,
@@ -1169,11 +1198,11 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
     const events: LLMEvent[] = []
     return [
       {
-        ...state,
+        ...nextState,
         lifecycle: Lifecycle.reasoningStart(
           state.lifecycle,
           events,
-          `reasoning-${event.index ?? 0}`,
+          `reasoning-${index}`,
           anthropicMetadata({ redactedData: block.data }),
         ),
       },
@@ -1182,9 +1211,9 @@ const onContentBlockStart = (state: ParserState, event: AnthropicEvent): StepRes
   }
 
   const result = serverToolResultEvent(block)
-  if (!result) return [state, NO_EVENTS]
+  if (!result) return [nextState, NO_EVENTS]
   const events: LLMEvent[] = []
-  return [{ ...state, lifecycle: Lifecycle.stepStart(state.lifecycle, events) }, [...events, result]]
+  return [{ ...nextState, lifecycle: Lifecycle.stepStart(state.lifecycle, events) }, [...events, result]]
 }
 
 const onContentBlockDelta = Effect.fn("AnthropicMessages.onContentBlockDelta")(function* (
@@ -1194,19 +1223,23 @@ const onContentBlockDelta = Effect.fn("AnthropicMessages.onContentBlockDelta")(f
   const delta = event.delta
 
   if (delta?.type === "text_delta" && delta.text) {
+    const index = event.index ?? 0
+    if (!state.contentBlocks[index]) return [state, NO_EVENTS] satisfies StepResult
     const events: LLMEvent[] = []
     return [
-      { ...state, lifecycle: Lifecycle.textDelta(state.lifecycle, events, `text-${event.index ?? 0}`, delta.text) },
+      { ...state, lifecycle: Lifecycle.textDelta(state.lifecycle, events, `text-${index}`, delta.text) },
       events,
     ] satisfies StepResult
   }
 
   if (delta?.type === "thinking_delta" && delta.thinking) {
+    const index = event.index ?? 0
+    if (!state.contentBlocks[index]) return [state, NO_EVENTS] satisfies StepResult
     const events: LLMEvent[] = []
     return [
       {
         ...state,
-        lifecycle: Lifecycle.reasoningDelta(state.lifecycle, events, `reasoning-${event.index ?? 0}`, delta.thinking),
+        lifecycle: Lifecycle.reasoningDelta(state.lifecycle, events, `reasoning-${index}`, delta.thinking),
       },
       events,
     ] satisfies StepResult
@@ -1214,6 +1247,7 @@ const onContentBlockDelta = Effect.fn("AnthropicMessages.onContentBlockDelta")(f
 
   if (delta?.type === "signature_delta" && delta.signature) {
     const index = event.index ?? 0
+    if (!state.contentBlocks[index]) return [state, NO_EVENTS] satisfies StepResult
     return [
       {
         ...state,
@@ -1251,19 +1285,24 @@ const onContentBlockStop = Effect.fn("AnthropicMessages.onContentBlockStop")(fun
   const result = yield* ToolStream.finish(ADAPTER, state.tools, event.index)
   const events: LLMEvent[] = []
   const resultEvents = result.events ?? []
+  const accepted = state.contentBlocks[event.index]
   const signature = state.reasoningSignatures[event.index]
   const lifecycle = resultEvents.length
     ? Lifecycle.stepStart(state.lifecycle, events)
-    : Lifecycle.reasoningEnd(
-        Lifecycle.textEnd(state.lifecycle, events, `text-${event.index}`),
-        events,
-        `reasoning-${event.index}`,
-        signature === undefined ? undefined : anthropicMetadata({ signature }),
-      )
+    : accepted
+      ? Lifecycle.reasoningEnd(
+          Lifecycle.textEnd(state.lifecycle, events, `text-${event.index}`),
+          events,
+          `reasoning-${event.index}`,
+          signature === undefined ? undefined : anthropicMetadata({ signature }),
+        )
+      : state.lifecycle
   events.push(...resultEvents)
+  const contentBlocks = { ...state.contentBlocks }
+  delete contentBlocks[event.index]
   const reasoningSignatures = { ...state.reasoningSignatures }
   delete reasoningSignatures[event.index]
-  return [{ ...state, lifecycle, tools: result.tools, reasoningSignatures }, events] satisfies StepResult
+  return [{ ...state, contentBlocks, lifecycle, tools: result.tools, reasoningSignatures }, events] satisfies StepResult
 })
 
 const onMessageDelta = (state: ParserState, event: AnthropicEvent): StepResult => {
@@ -1361,6 +1400,7 @@ export const protocol = Protocol.make({
     event: Protocol.jsonEvent(AnthropicEvent),
     initial: () => ({
       tools: ToolStream.empty<number>(),
+      contentBlocks: {},
       reasoningSignatures: {},
       lifecycle: Lifecycle.initial(),
     }),

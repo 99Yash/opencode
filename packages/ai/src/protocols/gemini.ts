@@ -126,6 +126,21 @@ const GeminiContentPart = Schema.Union([
   GeminiFunctionResponsePart,
 ])
 
+const GeminiOpaqueResponsePart = Schema.declare(
+  (input): input is Schema.Schema.Type<typeof GeminiContentPart> =>
+    input !== null &&
+    (!ProviderShared.isRecord(input) ||
+      (!("text" in input) &&
+        !("functionCall" in input) &&
+        !("inlineData" in input) &&
+        !("functionResponse" in input))),
+)
+
+const GeminiResponseContent = Schema.Struct({
+  role: optionalNull(Schema.Literals(["user", "model"])),
+  parts: optionalNull(Schema.Array(Schema.Union([GeminiContentPart, GeminiOpaqueResponsePart]))),
+})
+
 const GeminiContent = Schema.Struct({
   role: optionalNull(Schema.Literals(["user", "model"])),
   parts: optionalNull(Schema.Array(GeminiContentPart)),
@@ -200,7 +215,7 @@ const GeminiUsage = Schema.Struct({
 type GeminiUsage = Schema.Schema.Type<typeof GeminiUsage>
 
 const GeminiCandidate = Schema.Struct({
-  content: optionalNull(GeminiContent),
+  content: optionalNull(GeminiResponseContent),
   finishReason: optionalNull(Schema.String),
 })
 
@@ -599,6 +614,7 @@ const step = (state: ParserState, event: GeminiEvent) => {
   const seenCallIds = new Set(nextState.seenCallIds)
 
   for (const part of candidate.content.parts ?? []) {
+    if (!ProviderShared.isRecord(part)) continue
     const signature = "thoughtSignature" in part && part.thoughtSignature ? part.thoughtSignature : undefined
     // Gemini attaches replay signatures to thought parts, visible text, or function calls;
     // each block kind must retain the signature attached to its own parts.
