@@ -5,6 +5,7 @@ import { Agent } from "@opencode-ai/schema/agent"
 import { SessionMessage } from "./message.js"
 import { SessionSchema } from "./schema.js"
 import { SessionError } from "@opencode-ai/schema/session-error"
+import { Skill } from "@opencode-ai/schema/skill"
 
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Session.NotFoundError", {
   sessionID: SessionSchema.ID,
@@ -52,3 +53,12 @@ export class UserInterruptedError extends Schema.TaggedError<UserInterruptedErro
     return "Session interrupted by user"
   }
 }
+
+export class AttachmentError extends Schema.TaggedError<AttachmentError>()("Session.AttachmentError", {
+  uri: Schema.String,
+  message: Schema.String,
+}) {}
+
+export class SkillNotFoundError extends Schema.TaggedError<SkillNotFoundError>()("Session.SkillNotFoundError", {
+  skill: Skill.ID,
+}) {}
