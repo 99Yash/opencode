@@ -405,7 +405,7 @@ const lowerReasoning = (part: ReasoningPart, providerMetadataKey: string): OpenR
   return {
     type: "reasoning",
     id,
-    summary: part.text.length > 0 ? [{ type: "summary_text", text: part.text }] : [],
+    summary: part.text.length > 0 ? [{ type: "summary_text", text: ProviderShared.sanitizeSurrogates(part.text) }] : [],
     encrypted_content: encryptedContent,
   }
 }
@@ -440,7 +440,7 @@ const lowerUserContent = Effect.fnUntraced(function* (
   request: LLMRequest,
   extension: Extension,
 ) {
-  if (part.type === "text") return { type: "input_text" as const, text: part.text }
+  if (part.type === "text") return { type: "input_text" as const, text: ProviderShared.sanitizeSurrogates(part.text) }
   if (part.type === "media") return yield* lowerMessageMedia(part, request, extension)
   return yield* ProviderShared.unsupportedContent(extension.name, "user", ["text", "media"])
 })
@@ -459,7 +459,7 @@ const lowerToolResultContentItem = Effect.fnUntraced(function* (
   request: LLMRequest,
   extension: Extension,
 ) {
-  if (item.type === "text") return { type: "input_text" as const, text: item.text }
+  if (item.type === "text") return { type: "input_text" as const, text: ProviderShared.sanitizeSurrogates(item.text) }
   return yield* lowerMedia(
     { type: "media", mediaType: item.mime, data: item.uri, filename: item.name },
     request,
@@ -473,7 +473,7 @@ const lowerHostedToolResultContentItem = Effect.fnUntraced(function* (
   request: LLMRequest,
   extension: Extension,
 ) {
-  if (item.type === "text") return { type: "input_text" as const, text: item.text }
+  if (item.type === "text") return { type: "input_text" as const, text: ProviderShared.sanitizeSurrogates(item.text) }
   return yield* lowerMessageMedia(
     { type: "media", mediaType: item.mime, data: item.uri, filename: item.name },
     request,
@@ -541,7 +541,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
             type: "message" as const,
             ...(group.id === undefined ? {} : { id: group.id }),
             role: "assistant" as const,
-            content: group.parts.map((part) => ({ type: "output_text" as const, text: part.text })),
+            content: group.parts.map((part) => ({ type: "output_text" as const, text: ProviderShared.sanitizeSurrogates(part.text) })),
             ...(group.phase === undefined ? {} : { phase: group.phase }),
           })),
         )

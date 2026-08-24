@@ -322,7 +322,11 @@ const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (
   const content: Array<Schema.Schema.Type<typeof OpenAIChatUserContent>> = []
   for (const part of message.content) {
     if (part.type === "text") {
-      content.push({ type: "text", text: part.text, cache_control: options.cacheControl?.(part.cache) })
+      content.push({
+        type: "text",
+        text: ProviderShared.sanitizeSurrogates(part.text),
+        cache_control: options.cacheControl?.(part.cache),
+      })
       continue
     }
     if (part.type === "media") {
@@ -363,7 +367,7 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
       continue
     }
   }
-  const text = reasoning.map((part) => part.text).join("")
+  const text = reasoning.map((part) => ProviderShared.sanitizeSurrogates(part.text)).join("")
   const details = reasoningDetails(reasoning, message.native?.openaiCompatible)
   const observedField = reasoning.map(reasoningField).find((value) => value !== undefined)
   const nativeReasoning = openAICompatibleReasoningContent(message.native?.openaiCompatible)
@@ -384,7 +388,12 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
   const cacheControl = options.cacheControl?.(cached && "cache" in cached ? cached.cache : undefined)
   const result = {
     role: "assistant" as const,
-    content: content.length > 0 ? content.map((part) => part.text).join("") : toolCalls.length > 0 ? null : "",
+    content:
+      content.length > 0
+        ? content.map((part) => ProviderShared.sanitizeSurrogates(part.text)).join("")
+        : toolCalls.length > 0
+          ? null
+          : "",
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     ...(details !== undefined ? { reasoning_details: details } : {}),
     ...(cacheControl !== undefined ? { cache_control: cacheControl } : {}),
@@ -412,7 +421,9 @@ const lowerToolMessages = Effect.fn("OpenAIChat.lowerToolMessages")(function* (
       continue
     }
     const content: ReadonlyArray<Tool.Content> = part.result.value
-    const text = content.filter((item) => item.type === "text").map((item) => item.text)
+    const text = content
+      .filter((item) => item.type === "text")
+      .map((item) => ProviderShared.sanitizeSurrogates(item.text))
     messages.push({
       role: "tool",
       tool_call_id: part.id,
@@ -449,7 +460,7 @@ const lowerMessages = Effect.fn("OpenAIChat.lowerMessages")(function* (request: 
               role: "system",
               content: request.system.map((part) => ({
                 type: "text",
-                text: part.text,
+                text: ProviderShared.sanitizeSurrogates(part.text),
                 cache_control: options.cacheControl?.(part.cache),
               })),
             },

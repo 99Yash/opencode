@@ -438,7 +438,8 @@ const lowerMedia = Effect.fn("AnthropicMessages.lowerMedia")(function* (part: Me
 // Tool results may carry structured text, images, and documents. Keep media as provider-native
 // content instead of JSON-stringifying base64 into a prompt string.
 const lowerToolResultContentItem = Effect.fnUntraced(function* (item: Tool.Content) {
-  if (item.type === "text") return { type: "text" as const, text: item.text } satisfies AnthropicTextBlock
+  if (item.type === "text")
+    return { type: "text" as const, text: ProviderShared.sanitizeSurrogates(item.text) } satisfies AnthropicTextBlock
   return yield* lowerMedia({ type: "media", mediaType: item.mime, data: item.uri, filename: item.name })
 })
 
@@ -503,7 +504,7 @@ const lowerNativeSystemUpdate = Effect.fn("AnthropicMessages.lowerNativeSystemUp
     role: "system" as const,
     content: content.map((part) => ({
       type: "text" as const,
-      text: part.text,
+      text: ProviderShared.sanitizeSurrogates(part.text),
       cache_control: cacheControl(breakpoints, part.cache),
     })),
   }
@@ -524,7 +525,11 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
         continue
       }
       const part = yield* ProviderShared.wrappedSystemUpdate("Anthropic Messages", message)
-      const block = { type: "text" as const, text: part.text, cache_control: cacheControl(breakpoints, part.cache) }
+      const block = {
+        type: "text" as const,
+        text: ProviderShared.sanitizeSurrogates(part.text),
+        cache_control: cacheControl(breakpoints, part.cache),
+      }
       const previous = messages.at(-1)
       if (previous?.role === "user")
         messages[messages.length - 1] = { role: "user", content: [...previous.content, block] }
@@ -536,7 +541,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       const content: AnthropicUserBlock[] = []
       for (const part of message.content) {
         if (part.type === "text") {
-          content.push({ type: "text", text: part.text, cache_control: cacheControl(breakpoints, part.cache) })
+          content.push({ type: "text", text: ProviderShared.sanitizeSurrogates(part.text), cache_control: cacheControl(breakpoints, part.cache) })
           continue
         }
         if (part.type === "media") {
@@ -553,7 +558,7 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
       const content: AnthropicAssistantBlock[] = []
       for (const part of message.content) {
         if (part.type === "text") {
-          content.push({ type: "text", text: part.text, cache_control: cacheControl(breakpoints, part.cache) })
+          content.push({ type: "text", text: ProviderShared.sanitizeSurrogates(part.text), cache_control: cacheControl(breakpoints, part.cache) })
           continue
         }
         if (part.type === "reasoning") {
@@ -566,7 +571,11 @@ const lowerMessages = Effect.fn("AnthropicMessages.lowerMessages")(function* (
             content.push({ type: "redacted_thinking", data: redactedData })
             continue
           }
-          content.push({ type: "thinking", thinking: part.text, signature })
+          content.push({
+            type: "thinking",
+            thinking: ProviderShared.sanitizeSurrogates(part.text),
+            signature,
+          })
           continue
         }
         if (part.type === "tool-call") {
@@ -659,7 +668,7 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
       ? undefined
       : request.system.map((part) => ({
           type: "text" as const,
-          text: part.text,
+          text: ProviderShared.sanitizeSurrogates(part.text),
           cache_control: cacheControl(breakpoints, part.cache),
         }))
   const messages = yield* lowerMessages(request, breakpoints)

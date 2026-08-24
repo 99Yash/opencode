@@ -35,6 +35,12 @@ export const clampPromptCacheKey = (key: string | undefined): string | undefined
   return chars.slice(0, OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH).join("")
 }
 
+// Removes unpaired surrogates that break JSON serialization. Valid paired
+// surrogates (emoji etc) are preserved. Used for every model-visible text
+// field before wire encoding.
+export const sanitizeSurrogates = (text: string): string =>
+  text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "")
+
 /**
  * Streaming tool-call accumulator. Adapters that build a tool call across
  * multiple `tool-input-delta` chunks store the partial JSON input string here
@@ -115,7 +121,8 @@ export const parseJson = (route: string, input: string, message: string) =>
  * (OpenAI Chat `system` content, OpenAI Responses `system` content, Gemini
  * `systemInstruction.parts[].text`).
  */
-export const joinText = (parts: ReadonlyArray<{ readonly text: string }>) => parts.map((part) => part.text).join("\n")
+export const joinText = (parts: ReadonlyArray<{ readonly text: string }>) =>
+  parts.map((part) => sanitizeSurrogates(part.text)).join("\n")
 
 const escapeSystemUpdateText = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -186,15 +193,15 @@ export const normalizeToolFile = (part: Tool.FileContent) =>
 export const trimBaseUrl = (value: string) => value.replace(/\/+$/, "")
 
 export const toolResultText = (part: ToolResultPart) => {
-  if (part.result.type === "text") return String(part.result.value)
+  if (part.result.type === "text") return sanitizeSurrogates(String(part.result.value))
   if (part.result.type === "error") {
     const value = part.result.value
     const prototype =
       typeof value === "object" && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value)
     const structured = Array.isArray(value) || prototype === Object.prototype || prototype === null
-    return structured && isJson(value) ? encodeJson(value) : String(value)
+    return sanitizeSurrogates(structured && isJson(value) ? encodeJson(value) : String(value))
   }
-  return encodeJson(part.result.value)
+  return sanitizeSurrogates(encodeJson(part.result.value))
 }
 
 export const errorText = (error: unknown) => {

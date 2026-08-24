@@ -293,7 +293,7 @@ const lowerToolResultContent = Effect.fn("BedrockConverse.lowerToolResultContent
   const content: Array<Schema.Schema.Type<typeof BedrockToolResultContentItem>> = []
   for (const item of part.result.value) {
     if (item.type === "text") {
-      content.push({ text: item.text })
+      content.push({ text: ProviderShared.sanitizeSurrogates(item.text) })
       continue
     }
     const media = yield* BedrockMedia.lower({
@@ -326,7 +326,7 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
   for (const message of request.messages) {
     if (message.role === "system") {
       const part = yield* ProviderShared.wrappedSystemUpdate("Bedrock Converse", message)
-      const content = textWithCache(breakpoints, part.text, part.cache)
+      const content = textWithCache(breakpoints, ProviderShared.sanitizeSurrogates(part.text), part.cache)
       const previous = messages.at(-1)
       if (previous?.role === "user")
         messages[messages.length - 1] = { role: "user", content: [...previous.content, ...content] }
@@ -340,7 +340,7 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
         if (!ProviderShared.supportsContent(part, ["text", "media"]))
           return yield* ProviderShared.unsupportedContent("Bedrock Converse", "user", ["text", "media"])
         if (part.type === "text") {
-          content.push(...textWithCache(breakpoints, part.text, part.cache))
+          content.push(...textWithCache(breakpoints, ProviderShared.sanitizeSurrogates(part.text), part.cache))
           continue
         }
         if (part.type === "media") {
@@ -365,7 +365,7 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
             "tool-call",
           ])
         if (part.type === "text") {
-          content.push(...textWithCache(breakpoints, part.text, part.cache))
+          content.push(...textWithCache(breakpoints, ProviderShared.sanitizeSurrogates(part.text), part.cache))
           continue
         }
         if (part.type === "reasoning") {
@@ -375,7 +375,7 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
             content.push({ reasoningContent: { redactedContent: redactedData } })
             continue
           }
-          content.push({ reasoningContent: { reasoningText: { text: part.text, signature } } })
+          content.push({ reasoningContent: { reasoningText: { text: ProviderShared.sanitizeSurrogates(part.text), signature } } })
           continue
         }
         if (part.type === "tool-call") {
@@ -409,7 +409,8 @@ const lowerMessages = Effect.fn("BedrockConverse.lowerMessages")(function* (
 const lowerSystem = (
   breakpoints: BedrockCache.Breakpoints,
   system: ReadonlyArray<LLMRequest["system"][number]>,
-): BedrockSystemBlock[] => system.flatMap((part) => textWithCache(breakpoints, part.text, part.cache))
+): BedrockSystemBlock[] =>
+  system.flatMap((part) => textWithCache(breakpoints, ProviderShared.sanitizeSurrogates(part.text), part.cache))
 
 const fromRequest = Effect.fn("BedrockConverse.fromRequest")(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined

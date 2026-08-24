@@ -273,7 +273,7 @@ const lowerToolConfig = (toolChoice: NonNullable<LLMRequest["toolChoice"]>) =>
   })
 
 const lowerUserPart = Effect.fn("Gemini.lowerUserPart")(function* (part: TextPart | MediaPart) {
-  if (part.type === "text") return { text: part.text }
+  if (part.type === "text") return { text: ProviderShared.sanitizeSurrogates(part.text) }
   const media = ProviderShared.normalizeMedia(part)
   return { inlineData: { mimeType: media.mime, data: media.base64 } }
 })
@@ -335,11 +335,11 @@ const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMR
         if (!ProviderShared.supportsContent(part, ["text", "reasoning", "tool-call"]))
           return yield* ProviderShared.unsupportedContent("Gemini", "assistant", ["text", "reasoning", "tool-call"])
         if (part.type === "text") {
-          parts.push({ text: part.text, thoughtSignature: thoughtSignature(part.providerMetadata) })
+          parts.push({ text: ProviderShared.sanitizeSurrogates(part.text), thoughtSignature: thoughtSignature(part.providerMetadata) })
           continue
         }
         if (part.type === "reasoning") {
-          parts.push({ text: part.text, thought: true, thoughtSignature: thoughtSignature(part.providerMetadata) })
+          parts.push({ text: ProviderShared.sanitizeSurrogates(part.text), thought: true, thoughtSignature: thoughtSignature(part.providerMetadata) })
           continue
         }
         if (part.type === "tool-call") {
@@ -379,7 +379,7 @@ const lowerMessages = Effect.fn("Gemini.lowerMessages")(function* (request: LLMR
         continue
       }
       const content: ReadonlyArray<Tool.Content> = part.result.value
-      const text = content.filter((item) => item.type === "text").map((item) => item.text)
+      const text = content.filter((item) => item.type === "text").map((item) => ProviderShared.sanitizeSurrogates(item.text))
       const media: GeminiInlineDataPart[] = []
       for (const item of content) {
         if (item.type === "text") continue
