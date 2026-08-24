@@ -20,7 +20,7 @@ export const create = (options: CreateOptions) => {
 }
 
 export const layer = (options: CreateOptions): Layer.Layer<OpenCode.Service, Config.ConfigError | Error> =>
-  layerWith(Layer.empty, options)
+  Layer.effect(OpenCode.Service, create(options))
 
 export const layerWith = <E, R>(
   registration: Layer.Layer<never, E, R>,

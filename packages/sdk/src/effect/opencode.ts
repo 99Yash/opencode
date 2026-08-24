@@ -64,7 +64,7 @@ export const create: (
 export class Service extends Context.Service<Service, Interface>()("@opencode-ai/sdk/OpenCode") {}
 
 export const layer = (options: CreateOptions = {}): Layer.Layer<Service, Config.ConfigError | Error> =>
-  layerWith(Layer.empty, options)
+  Layer.effect(Service, create(options))
 
 /** Builds a registration layer before starting suspended-session recovery. */
 export const layerWith = <E, R>(
