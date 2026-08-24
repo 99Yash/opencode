@@ -29,7 +29,10 @@ afterEach(() => mock.restore())
 describe("session target resolver", () => {
   test("adopts an explicit Session location and model", async () => {
     const client = OpenCode.make({ baseUrl: "https://opencode.test" })
-    const selected = session("ses_resume", "/session", "work_1", { providerID: "openai", id: "gpt-5" })
+    const selected = {
+      ...session("ses_resume", "/session", "work_1", { providerID: "openai", id: "gpt-5" }),
+      executing: false,
+    }
     spyOn(client.session, "get").mockResolvedValue(selected)
     spyOn(client.location, "get").mockResolvedValue(location("/session", "work_1"))
 
@@ -57,7 +60,7 @@ describe("session target resolver", () => {
 
   test("attaches the terminal environment to the resolved local Session", async () => {
     const client = OpenCode.make({ baseUrl: "https://opencode.test" })
-    const selected = session("ses_resume", "/session")
+    const selected = { ...session("ses_resume", "/session"), executing: false }
     spyOn(client.session, "get").mockResolvedValue(selected)
     spyOn(client.location, "get").mockResolvedValue(location("/session"))
     const environment = spyOn(client.session, "environment").mockResolvedValue()
