@@ -1,0 +1,32 @@
+{
+  "autoupdate": false,
+  "model": "test/test-model",
+  "providers": {
+    "test": {
+      "name": "Test",
+      "package": "aisdk:@ai-sdk/openai-compatible",
+      "settings": {
+        "apiKey": "test-key",
+        "baseURL": "http://127.0.0.1:18100/v1"
+      },
+      "models": {
+        "test-model": {
+          "name": "Test Model",
+          "capabilities": {
+            "tools": true,
+            "input": ["text"],
+            "output": ["text"]
+          },
+          "cost": {
+            "input": 0,
+            "output": 0
+          },
+          "limit": {
+            "context": 100000,
+            "output": 10000
+          }
+        }
+      }
+    }
+  }
+}
