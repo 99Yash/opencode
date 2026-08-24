@@ -469,7 +469,8 @@ it.live("starts recovery after Effect registration layers finish", () =>
         },
       )
 
-      yield* Layer.build(application)
+      // Reusing a memoized application layer must not launch another recovery sweep.
+      yield* Layer.build(Layer.merge(application, application))
       yield* Deferred.await(recovered).pipe(Effect.timeout("2 seconds"))
       expect(order).toEqual(["plugin", "recovery"])
     }),

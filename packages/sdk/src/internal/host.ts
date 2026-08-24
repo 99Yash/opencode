@@ -46,6 +46,11 @@ export const create = Effect.fn("EmbeddedHost.create")(function* (
     const services = yield* runtime.contextEffect
     const plugins = Context.get(services, SdkPlugins.Service)
     yield* Effect.forEach(initialPlugins, (plugin) => plugins.register(plugin), { discard: true })
+    const start = yield* Effect.cached(
+      Effect.sync(() => {
+        runtime.runFork(Context.get(services, SessionRestart.Service).resumeSuspendedSessions)
+      }),
+    )
     const handler = HttpEffect.toWebHandlerWith<never, HttpServerRequest.HttpServerRequest | Scope.Scope>(
       context(services),
     )(Context.get(services, HttpRouter.HttpRouter).asHttpEffect())
@@ -58,9 +63,7 @@ export const create = Effect.fn("EmbeddedHost.create")(function* (
       workspace: Context.get(services, Workspace.Service),
       // The sweep is a no-op when nothing is suspended. ManagedRuntime owns
       // the fiber so recovery never delays startup but still stops with the host.
-      start: Effect.sync(() => {
-        runtime.runFork(Context.get(services, SessionRestart.Service).resumeSuspendedSessions)
-      }),
+      start,
       close: transport.close,
     }
   }).pipe(Effect.onError(() => runtime.disposeEffect))
