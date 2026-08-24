@@ -342,12 +342,15 @@ export interface ParserState {
   readonly messageItems: ReadonlySet<string>
   readonly messagePhases: Readonly<Record<string, MessagePhase | null>>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
+  // Keeps malformed but recoverable reasoning streams coherent when item IDs are omitted.
+  readonly activeReasoningItemID: string | undefined
   readonly store: boolean | undefined
 }
 
 type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
 
 interface ReasoningStreamItem {
+  readonly providerItemID: string | undefined
   readonly encryptedContent: string | null | undefined
   // Keyed by the wire protocol's numeric `summary_index`. JS object keys coerce to
   // strings, but typing the map as `Record<number, ...>` documents intent
@@ -845,8 +848,19 @@ export const onReasoningDone = (state: ParserState, event: Event, itemID: string
   return onReasoningDelta(state, { ...event, delta: event.text }, itemID)
 }
 
-const reasoningMetadata = (state: ParserState, item: StreamItem & { id: string }) =>
-  providerMetadata(state, { itemId: item.id, reasoningEncryptedContent: item.encrypted_content ?? null })
+const reasoningMetadata = (state: ParserState, item: StreamItem) =>
+  providerMetadata(state, {
+    ...(item.id ? { itemId: item.id } : {}),
+    reasoningEncryptedContent: item.encrypted_content ?? null,
+  })
+
+const reasoningStreamMetadata = (state: ParserState, item: ReasoningStreamItem, includeEncrypted: boolean) => {
+  if (!item.providerItemID && !includeEncrypted) return undefined
+  return providerMetadata(state, {
+    ...(item.providerItemID ? { itemId: item.providerItemID } : {}),
+    ...(includeEncrypted ? { reasoningEncryptedContent: item.encryptedContent ?? null } : {}),
+  })
+}
 
 // Responses APIs stream reasoning items in a stable order:
 //   `output_item.added` (reasoning) →
@@ -873,15 +887,18 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
       NO_EVENTS,
     ]
   }
-  if (item && isReasoningItem(item)) {
+  if (item?.type === "reasoning") {
+    const id = item.id || `rs_${crypto.randomUUID().replaceAll("-", "")}`
     const events: LLMEvent[] = []
     return [
       {
         ...state,
-        lifecycle: Lifecycle.reasoningStart(state.lifecycle, events, `${item.id}:0`, reasoningMetadata(state, item)),
+        lifecycle: Lifecycle.reasoningStart(state.lifecycle, events, `${id}:0`, reasoningMetadata(state, item)),
+        activeReasoningItemID: id,
         reasoningItems: {
           ...state.reasoningItems,
-          [item.id]: {
+          [id]: {
+            providerItemID: item.id,
             encryptedContent: item.encrypted_content,
             summaryParts: { 0: "active" },
             deltaIndexes: new Set(),
@@ -928,7 +945,7 @@ const onReasoningSummaryPartAdded = (state: ParserState, event: Event): StepResu
           lifecycle,
           events,
           `${event.item_id}:${entry[0]}`,
-          providerMetadata(state, { itemId: event.item_id }),
+          reasoningStreamMetadata(state, item, false),
         ),
       state.lifecycle,
     )
@@ -939,7 +956,7 @@ const onReasoningSummaryPartAdded = (state: ParserState, event: Event): StepResu
         closed,
         events,
         `${event.item_id}:${event.summary_index}`,
-        providerMetadata(state, { itemId: event.item_id, reasoningEncryptedContent: item.encryptedContent ?? null }),
+        reasoningStreamMetadata(state, item, true),
       ),
       reasoningItems: {
         ...state.reasoningItems,
@@ -974,7 +991,7 @@ const onReasoningSummaryPartDone = (state: ParserState, event: Event): StepResul
               state.lifecycle,
               events,
               `${event.item_id}:${event.summary_index}`,
-              providerMetadata(state, { itemId: event.item_id }),
+              reasoningStreamMetadata(state, item, false),
             )
           : state.lifecycle,
       reasoningItems: {
@@ -1068,28 +1085,46 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     ] satisfies StepResult
   }
 
-  if (isReasoningItem(item)) {
+  if (item?.type === "reasoning") {
+    const activeID = state.activeReasoningItemID
+    const activeReasoningItem = activeID ? state.reasoningItems[activeID] : undefined
+    const id =
+      item.id && state.reasoningItems[item.id]
+        ? item.id
+        : activeID &&
+            activeReasoningItem &&
+            (!item.id || !activeReasoningItem.providerItemID || activeReasoningItem.providerItemID === item.id)
+          ? activeID
+          : (item.id ?? `rs_${crypto.randomUUID().replaceAll("-", "")}`)
     const events: LLMEvent[] = []
-    const metadata = reasoningMetadata(state, item)
-    const reasoningItem = state.reasoningItems[item.id]
+    const reasoningItem = state.reasoningItems[id]
+    const metadata = reasoningMetadata(state, {
+      ...item,
+      id: item.id || reasoningItem?.providerItemID,
+    })
+    const activeReasoningItemID = activeID === id ? undefined : activeID
     if (reasoningItem) {
       const lifecycle = Object.entries(reasoningItem.summaryParts)
         .filter((entry) => entry[1] === "active" || entry[1] === "can-conclude")
         .reduce(
-          (lifecycle, entry) => Lifecycle.reasoningEnd(lifecycle, events, `${item.id}:${entry[0]}`, metadata),
+          (lifecycle, entry) => Lifecycle.reasoningEnd(lifecycle, events, `${id}:${entry[0]}`, metadata),
           state.lifecycle,
         )
-      const { [item.id]: _removed, ...reasoningItems } = state.reasoningItems
-      return [{ ...state, lifecycle, reasoningItems }, events] satisfies StepResult
+      const { [id]: _removed, ...reasoningItems } = state.reasoningItems
+      return [{ ...state, lifecycle, reasoningItems, activeReasoningItemID }, events] satisfies StepResult
     }
-    if (!state.lifecycle.reasoning.has(item.id)) {
+    if (!state.lifecycle.reasoning.has(id)) {
       const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
-      events.push(LLMEvent.reasoningStart({ id: item.id, providerMetadata: metadata }))
-      events.push(LLMEvent.reasoningEnd({ id: item.id, providerMetadata: metadata }))
-      return [{ ...state, lifecycle }, events] satisfies StepResult
+      events.push(LLMEvent.reasoningStart({ id, providerMetadata: metadata }))
+      events.push(LLMEvent.reasoningEnd({ id, providerMetadata: metadata }))
+      return [{ ...state, lifecycle, activeReasoningItemID }, events] satisfies StepResult
     }
     return [
-      { ...state, lifecycle: Lifecycle.reasoningEnd(state.lifecycle, events, item.id, metadata) },
+      {
+        ...state,
+        activeReasoningItemID,
+        lifecycle: Lifecycle.reasoningEnd(state.lifecycle, events, id, metadata),
+      },
       events,
     ] satisfies StepResult
   }
@@ -1121,8 +1156,31 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
           })
         : undefined,
   })
-  return [{ ...state, lifecycle, hasFunctionCall, tools: pending.tools }, events] satisfies StepResult
+  return [
+    { ...state, lifecycle, hasFunctionCall, tools: pending.tools, activeReasoningItemID: undefined },
+    events,
+  ] satisfies StepResult
 })
+
+const normalizeReasoningEvent = (state: ParserState, event: Event) => {
+  if (event.item_id && state.reasoningItems[event.item_id]) return [state, event] as const
+  const id = state.activeReasoningItemID
+  const item = id ? state.reasoningItems[id] : undefined
+  if (!id || !item) return [state, event] as const
+  if (!event.item_id) return [state, { ...event, item_id: id }] as const
+  if (item.providerItemID)
+    return [state, item.providerItemID === event.item_id ? { ...event, item_id: id } : event] as const
+  return [
+    {
+      ...state,
+      reasoningItems: {
+        ...state.reasoningItems,
+        [id]: { ...item, providerItemID: event.item_id },
+      },
+    },
+    { ...event, item_id: id },
+  ] as const
+}
 
 // Build the prettiest summary available from whatever the provider supplied.
 // When both code and message are present, prefix the code so consumers see
@@ -1188,25 +1246,31 @@ export const step = (state: ParserState, event: Event) => {
     )
   }
   if (event.type === "response.reasoning.delta" || event.type === "response.reasoning_summary_text.delta") {
-    if (!event.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
-    return Effect.succeed(onReasoningDelta(state, event, event.item_id))
+    const [next, normalized] = normalizeReasoningEvent(state, event)
+    if (!normalized.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
+    return Effect.succeed(onReasoningDelta(next, normalized, normalized.item_id))
   }
   if (
     event.type === "response.reasoning.done" ||
     event.type === "response.reasoning_summary_text.done" ||
     event.type === "response.reasoning_text.done"
   ) {
-    if (!event.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
-    return Effect.succeed(onReasoningDone(state, event, event.item_id))
+    const [next, normalized] = normalizeReasoningEvent(state, event)
+    if (!normalized.item_id) return ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
+    return Effect.succeed(onReasoningDone(next, normalized, normalized.item_id))
   }
-  if (event.type === "response.reasoning_summary_part.added")
-    return event.item_id
-      ? Effect.succeed(onReasoningSummaryPartAdded(state, event))
+  if (event.type === "response.reasoning_summary_part.added") {
+    const [next, normalized] = normalizeReasoningEvent(state, event)
+    return normalized.item_id
+      ? Effect.succeed(onReasoningSummaryPartAdded(next, normalized))
       : ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
-  if (event.type === "response.reasoning_summary_part.done")
-    return event.item_id
-      ? Effect.succeed(onReasoningSummaryPartDone(state, event))
+  }
+  if (event.type === "response.reasoning_summary_part.done") {
+    const [next, normalized] = normalizeReasoningEvent(state, event)
+    return normalized.item_id
+      ? Effect.succeed(onReasoningSummaryPartDone(next, normalized))
       : ProviderShared.eventError(state.id, `${event.type} is missing item_id`)
+  }
   if (event.type === "response.output_item.added") {
     if (event.item?.type === "message" && !event.item.id)
       return ProviderShared.eventError(state.id, `${event.type} message is missing id`)
@@ -1248,6 +1312,7 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   messageItems: new Set<string>(),
   messagePhases: {},
   reasoningItems: {},
+  activeReasoningItemID: undefined,
   store: OpenResponsesOptions.resolve(request).store,
 })
 
