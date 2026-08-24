@@ -1,5 +1,4 @@
-import { Plugin } from "@opencode-ai/plugin/effect"
-import { Effect } from "effect"
+import { Effect, Plugin } from "@opencode-ai/plugin/effect"
 
 export default Plugin.define({
   id: "config-effect-plugin",

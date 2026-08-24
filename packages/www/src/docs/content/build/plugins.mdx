@@ -459,16 +459,16 @@ being resolved.
 ## Effect
 
 OpenCode provides a first-class Effect API for plugins through the
-`@opencode-ai/plugin/effect` entrypoint. Install `effect` alongside the
-plugin package and export an `effect` function instead of `setup`:
+`@opencode-ai/plugin/effect` entrypoint. It exports the compatible `Effect` and
+`Schema` modules alongside the plugin API. Use those exports instead of a separate
+`effect` installation so values crossing the plugin boundary share one runtime:
 
 ```sh
-bun add @opencode-ai/plugin@beta effect
+bun add @opencode-ai/plugin@beta
 ```
 
 ```ts title=".opencode/plugins/reviewer-effect.ts"
-import { Plugin } from "@opencode-ai/plugin/effect"
-import { Effect } from "effect"
+import { Effect, Plugin } from "@opencode-ai/plugin/effect"
 
 export default Plugin.define({
   id: "acme.reviewer-effect",
@@ -489,6 +489,6 @@ fibers, and registrations are released when the plugin reloads or unloads.
 OpenCode does not expose its private Core services to the plugin; use the
 capabilities on `ctx`.
 
-Typed tools can use `Schema` from `effect`. Effect and Promise plugins use the
+Typed tools can use `Schema` from `@opencode-ai/plugin/effect`. Effect and Promise plugins use the
 same `tools.add(name, tool, options?)` registration shape. Effect executors
 return an Effect and may fail with the typed tool failure channel.

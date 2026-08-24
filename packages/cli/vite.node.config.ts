@@ -127,14 +127,17 @@ export const Command = sdk.Command
 export const Connection = sdk.Connection
 export const Credential = sdk.Credential
 export const Integration = sdk.Integration
+export const Mcp = sdk.Mcp
 export const Model = sdk.Model
 export const Plugin = sdk.Plugin
 export const Provider = sdk.Provider
 export const Reference = sdk.Reference
-export const Skill = sdk.Skill`
+export const Skill = sdk.Skill
+export const WebSearch = sdk.WebSearch`
   const effectModule = promiseModule
     .replace("opencode.plugin.v2.promise", "opencode.plugin.v2.effect")
     .replace("Promise plugin", "Effect plugin")
+    .concat("\nexport const Effect = sdk.Effect\nexport const Schema = sdk.Schema")
   const promisePluginModule = `const sdk = globalThis[Symbol.for("opencode.plugin.v2.promise")]
 if (!sdk) throw new Error("OpenCode Promise plugin SDK is unavailable")
 export const define = sdk.Plugin.define`

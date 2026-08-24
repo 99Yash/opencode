@@ -2,6 +2,7 @@ export * as PluginSupervisor from "./supervisor.js"
 export { Service, type Interface } from "./supervisor-service.js"
 
 import type { Plugin as PluginDefinition } from "@opencode-ai/plugin/effect/plugin"
+import { instanceSafeContext } from "@opencode-ai/plugin/effect/tool-schema"
 import { Event } from "@opencode-ai/schema/config"
 import { Cause, Effect, Latch, Layer, Schema, Stream } from "effect"
 import path from "path"
@@ -126,7 +127,7 @@ const load = Effect.fn("PluginSupervisor.load")(function* (
     tui: plugin.tui,
     version: JSON.stringify(operation),
     source: pluginSource(operation.target),
-    effect: (host) => plugin.effect({ ...host, options: operation.options }),
+    effect: (host) => plugin.effect(instanceSafeContext({ ...host, options: operation.options })),
   } satisfies Plugin.Versioned
 })
 

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { Effect, Schema } from "effect"
 import { Agent } from "@opencode-ai/schema/agent"
 import { Command } from "@opencode-ai/schema/command"
 import { Connection } from "@opencode-ai/schema/connection"
@@ -30,7 +31,10 @@ test.each([
   expect(entrypoint.Reference).toBe(Reference)
   expect(entrypoint.Skill).toBe(Skill)
   expect(entrypoint.WebSearch).toBe(WebSearch)
-  expect(Object.keys(entrypoint).sort()).toEqual([
+})
+
+test("promise entrypoint exposes its public contract", () => {
+  expect(Object.keys(PromisePlugin).sort()).toEqual([
     "Agent",
     "Command",
     "Connection",
@@ -44,6 +48,32 @@ test.each([
     "Skill",
     "WebSearch",
   ])
+})
+
+test("effect entrypoint owns its Effect runtime", () => {
+  expect(Plugin.Effect).toBe(Effect)
+  expect(Plugin.Schema).toBe(Schema)
+  expect(Object.keys(Plugin).sort()).toEqual([
+    "Agent",
+    "Command",
+    "Connection",
+    "Credential",
+    "Effect",
+    "Integration",
+    "Mcp",
+    "Model",
+    "Plugin",
+    "Provider",
+    "Reference",
+    "Schema",
+    "Skill",
+    "WebSearch",
+  ])
+})
+
+test("effect plugin definition preserves identity", () => {
+  const definition = { id: "demo", effect: () => Effect.void }
+  expect(Plugin.Plugin.define(definition)).toBe(definition)
 })
 
 test("tui entrypoint exposes the plugin definition", () => {

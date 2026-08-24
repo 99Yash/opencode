@@ -43,6 +43,6 @@ export interface Plugin<R = Scope.Scope> {
   readonly effect: (context: Context) => Effect.Effect<void, never, R>
 }
 
-export function define<R = Scope.Scope>(plugin: Plugin<R>) {
+export function define<R = Scope.Scope>(plugin: Plugin<R>): Plugin<R> {
   return plugin
 }

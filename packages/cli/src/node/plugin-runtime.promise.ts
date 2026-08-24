@@ -4,11 +4,13 @@ import {
   Connection,
   Credential,
   Integration,
+  Mcp,
   Model,
   Plugin,
   Provider,
   Reference,
   Skill,
+  WebSearch,
 } from "@opencode-ai/plugin"
 
 const key = Symbol.for("opencode.plugin.v2.promise")
@@ -18,9 +20,11 @@ const key = Symbol.for("opencode.plugin.v2.promise")
   Connection,
   Credential,
   Integration,
+  Mcp,
   Model,
   Plugin,
   Provider,
   Reference,
   Skill,
+  WebSearch,
 }
