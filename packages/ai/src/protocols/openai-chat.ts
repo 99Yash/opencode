@@ -528,6 +528,40 @@ const hasToolHistory = (messages: ReadonlyArray<LLMRequest["messages"][number]>)
   return false
 }
 
+// Derive `max_tokens` vs `max_completion_tokens` from provider/baseURL when
+// explicit `compatibility.maxTokensField` is not set. Aligned with
+// models.dev provider naming: DeepSeek, Moonshot AI, Together AI, ZAI
+// (Zhipu + Coding Plan variants), Nvidia, Cerebras, Chutes, etc. still
+// require `max_tokens`.
+const detectMaxTokensField = (provider: string, baseURL: string | undefined): "max_tokens" | "max_completion_tokens" => {
+  const p = provider.toLowerCase()
+  const url = (baseURL ?? "").toLowerCase()
+  if (
+    p === "deepseek" ||
+    url.includes("deepseek.com") ||
+    p === "moonshotai" ||
+    url.includes("api.moonshot.ai") ||
+    p === "togetherai" ||
+    url.includes("api.together.") ||
+    p === "zai" ||
+    p === "zai-coding-plan" ||
+    p === "zhipuai" ||
+    p === "zhipuai-coding-plan" ||
+    url.includes("api.z.ai") ||
+    url.includes("open.bigmodel.cn") ||
+    p === "nvidia" ||
+    url.includes("integrate.api.nvidia.com") ||
+    p === "cerebras" ||
+    url.includes("cerebras.ai") ||
+    url.includes("llm.chutes.ai") ||
+    p === "chutes" ||
+    p === "cloudflare-ai-gateway" ||
+    url.includes("gateway.ai.cloudflare.com")
+  )
+    return "max_tokens"
+  return "max_completion_tokens"
+}
+
 const lowerOptions = (request: LLMRequest) => {
   const options = OpenAIOptions.resolve(request)
   const cacheKey = ProviderShared.clampPromptCacheKey(request.promptCacheKey)
@@ -551,7 +585,8 @@ export const fromRequest = Effect.fn("OpenAIChat.fromRequest")(function* (
     )
   const generation = request.generation
   const toolSchemaCompatibility = request.model.compatibility?.toolSchema
-  const maxTokensField = request.model.compatibility?.maxTokensField ?? "max_tokens"
+  const detectedMaxTokensField = detectMaxTokensField(String(request.model.provider), request.model.route.endpoint.baseURL)
+  const maxTokensField = request.model.compatibility?.maxTokensField ?? detectedMaxTokensField
   const hasHistory = hasToolHistory(request.messages)
   return {
     model: request.model.id,
