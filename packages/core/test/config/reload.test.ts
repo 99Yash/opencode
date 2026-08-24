@@ -10,20 +10,25 @@ import { ConfigCommandPlugin } from "@opencode-ai/core/config/plugin/command"
 import { ConfigProviderPlugin } from "@opencode-ai/core/config/plugin/provider"
 import { ConfigReferencePlugin } from "@opencode-ai/core/config/plugin/reference"
 import { ConfigSkillPlugin } from "@opencode-ai/core/config/plugin/skill"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Bus } from "@opencode-ai/core/bus"
 import { Integration } from "@opencode-ai/core/integration"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { Provider } from "@opencode-ai/core/provider"
 import { Reference } from "@opencode-ai/core/reference"
+import { ShellSelect } from "@opencode-ai/core/shell/select"
 import { Skill } from "@opencode-ai/core/skill"
 import { Global } from "@opencode-ai/util/global"
-import { Effect, Schema } from "effect"
+import { AppProcess } from "@opencode-ai/util/process"
+import { Effect, Layer, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "../plugin/fixture"
 
-const it = testEffect(PluginTestLayer)
+const it = testEffect(
+  Layer.mergeAll(PluginTestLayer, AppNodeBuilder.build(AppProcess.node), AppNodeBuilder.build(ShellSelect.node)),
+)
 const decode = Schema.decodeUnknownSync(Info)
 const document = path.join(import.meta.dir, "opencode.json")
 
