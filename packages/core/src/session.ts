@@ -609,7 +609,7 @@ const layer = Layer.effect(
               return yield* Image.Service
             }).pipe(Effect.provide(locations.get(session.location)))
             const skills = Skill.Service.pipe(Effect.provide(locations.get(session.location)))
-            const prompt = yield* resolvePrompt(
+            const resolved = yield* resolvePrompt(
               { text: input.text, files: input.files, agents: input.agents, skills: input.skills },
               image,
               skills,
@@ -617,7 +617,7 @@ const layer = Layer.effect(
             const messageID = input.id ?? SessionMessage.ID.create()
             const admittedInput = SessionInbox.Item.make({
               type: "user",
-              payload: { ...prompt, metadata: input.metadata },
+              payload: { ...resolved.prompt, skillActivations: resolved.skillActivations, metadata: input.metadata },
               delivery: input.delivery ?? "steer",
             })
             const admitted = yield* SessionInbox.admit(db, bus, {
@@ -746,7 +746,7 @@ const layer = Layer.effect(
       skill: Effect.fn("Session.skill")(function* (input) {
         const session = yield* result.get(input.sessionID)
         const skills = yield* Skill.Service.pipe(Effect.provide(locations.get(session.location)))
-        const skill = (yield* skills.list()).find((item) => item.id === input.skill)
+        const skill = Skill.find(yield* skills.list(), input.skill)
         if (!skill) return yield* new SkillNotFoundError({ skill: input.skill })
         yield* bus.publish(
           SessionEvent.Skill.Activated,
@@ -754,7 +754,7 @@ const layer = Layer.effect(
             sessionID: input.sessionID,
             id: skill.id,
             name: skill.name,
-            text: skill.content,
+            text: Skill.toModelOutput(skill, []),
           },
           { id: input.id ? Event.ID.make(input.id.replace(/^msg_/, "evt_")) : undefined },
         )
@@ -999,18 +999,35 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
     if (!requested?.length) return undefined
     const skillService = yield* skills
     const available = yield* skillService.list()
-    return yield* Effect.forEach(requested, (attachment) => {
-      const skill = available.find((item) => item.id === attachment.id)
-      if (!skill) return Effect.fail(new SkillNotFoundError({ skill: attachment.id }))
-      return Effect.succeed({
+    const loaded = yield* Effect.forEach(requested, (attachment) =>
+      Effect.gen(function* () {
+        const skill = Skill.find(available, attachment.id)
+        if (!skill) return yield* new SkillNotFoundError({ skill: attachment.id })
+        return { skill, attachment }
+      }),
+    )
+    return {
+      attachments: loaded.map((item) => ({
+        id: item.skill.id,
+        name: item.skill.name,
+        mention: item.attachment.mention,
+      })),
+      activations: Array.from(new Map(loaded.map((item) => [item.skill.id, item.skill])).values()).map((skill) => ({
         id: skill.id,
         name: skill.name,
         text: Skill.toModelOutput(skill, []),
-        mention: attachment.mention,
-      })
-    })
+      })),
+    }
   })
-  return Prompt.make({ text: input.text, agents: input.agents, files, skills: selected?.length ? selected : undefined })
+  return {
+    prompt: Prompt.fromUserMessage({
+      text: input.text,
+      agents: input.agents,
+      files,
+      skills: selected?.attachments,
+    }),
+    skillActivations: selected?.activations,
+  }
 })
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024

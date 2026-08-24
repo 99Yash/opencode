@@ -425,20 +425,37 @@ const publish = Effect.fn("SessionInbox.publish")(function* (
     (row) => {
       const entry = fromRow(row)
       if (entry.type === "compaction") return Effect.die(new LifecycleConflict({ id: entry.id }))
-      return bus
-        .publish(SessionEvent.InboxDelivered, {
-          sessionID,
-          inboxID: entry.id,
-        })
-        .pipe(
-          Effect.catchDefect((defect) =>
-            defect instanceof LifecycleConflict
-              ? promotedFromMessage(db, sessionID, entry.id, entry.delivery).pipe(
-                  Effect.flatMap((stored) => (stored !== undefined ? Effect.void : Effect.die(defect))),
-                )
-              : Effect.die(defect),
-          ),
-        )
+      const delivered = [SessionEvent.InboxDelivered, { sessionID, inboxID: entry.id }] as const
+      const activations = entry.type === "user" ? entry.payload.skillActivations : undefined
+      const published = activations?.length
+        ? bus
+            .publishAll([
+              [
+                SessionEvent.Skill.Activated,
+                { sessionID, id: activations[0].id, name: activations[0].name, text: activations[0].text },
+              ],
+              ...activations
+                .slice(1)
+                .map(
+                  (skill) =>
+                    [
+                      SessionEvent.Skill.Activated,
+                      { sessionID, id: skill.id, name: skill.name, text: skill.text },
+                    ] as const,
+                ),
+              delivered,
+            ])
+            .pipe(Effect.asVoid)
+        : bus.publish(...delivered).pipe(Effect.asVoid)
+      return published.pipe(
+        Effect.catchDefect((defect) =>
+          defect instanceof LifecycleConflict
+            ? promotedFromMessage(db, sessionID, entry.id, entry.delivery).pipe(
+                Effect.flatMap((stored) => (stored !== undefined ? Effect.void : Effect.die(defect))),
+              )
+            : Effect.die(defect),
+        ),
+      )
     },
     { discard: true },
   )

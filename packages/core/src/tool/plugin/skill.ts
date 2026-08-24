@@ -47,8 +47,7 @@ export const Plugin = {
           output: Output,
           execute: (input, context) =>
             Effect.gen(function* () {
-              const current = yield* skills.list()
-              const skill = current.find((skill) => skill.id === input.id)
+              const skill = Skill.find(yield* skills.list(), input.id)
               if (!skill) return yield* unableToLoad(input.id)
               return yield* Effect.gen(function* () {
                 yield* permission.assert({

@@ -59,7 +59,7 @@ describe("SkillInstructions", () => {
         [
           "Skills provide specialized instructions and workflows for specific tasks.",
           "Use the skill tool to load a skill when a task matches its description.",
-          "When the user references a skill with @skill-id, load that skill with the skill tool.",
+          "When the user references a skill with @skill-id, load that skill with the skill tool unless its <skill_content> was already provided immediately before the user message.",
           "<available_skills>",
           "  <skill>",
           "    <id>effect</id>",

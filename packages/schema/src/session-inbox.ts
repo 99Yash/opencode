@@ -7,13 +7,22 @@ import { Prompt } from "./prompt.js"
 import { DateTimeUtcFromMillis, optional, RelativePath } from "./schema.js"
 import { SessionID } from "./session-id.js"
 import { SessionMessage } from "./session-message.js"
+import { Skill } from "./skill.js"
 
 export const Delivery = Schema.Literals(["steer", "queue"]).annotate({ identifier: "Session.Inbox.Delivery" })
 export type Delivery = typeof Delivery.Type
 
+const SkillActivation = Schema.Struct({
+  id: Skill.ID,
+  name: Skill.Name,
+  text: Schema.String,
+})
+
 export interface UserPayload extends Schema.Schema.Type<typeof UserPayload> {}
 export const UserPayload = Schema.Struct({
   ...Prompt.fields,
+  /** Frozen at admission and emitted before the prompt when this inbox item is delivered. */
+  skillActivations: Schema.Array(SkillActivation).pipe(optional),
   metadata: Schema.Record(Schema.String, Schema.Unknown).pipe(optional),
 }).annotate({ identifier: "Session.Inbox.UserPayload" })
 

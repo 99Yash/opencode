@@ -52,6 +52,8 @@ export const toModelOutput = (skill: Info, files: ReadonlyArray<string>) => {
   ].join("\n")
 }
 
+export const find = (skills: ReadonlyArray<Info>, id: ID) => skills.find((skill) => skill.id === id)
+
 export type Data = {
   skills: Map<ID, Types.DeepMutable<Info>>
 }

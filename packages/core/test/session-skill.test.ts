@@ -23,17 +23,15 @@ const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const projects = Layer.mock(Project.Service, {
   resolve: (directory) => Effect.succeed({ id: Project.ID.global, directory, canonical: directory }),
 })
+const info = Skill.Info.make({
+  id: Skill.ID.make("effect"),
+  name: Skill.Name.make("Effect"),
+  description: "Effect guidance",
+  location: AbsolutePath.make(path.resolve("/skills/effect/SKILL.md")),
+  content: "Use Effect",
+})
 const skills = Layer.mock(Skill.Service, {
-  list: () =>
-    Effect.succeed([
-      Skill.Info.make({
-        id: Skill.ID.make("effect"),
-        name: Skill.Name.make("Effect"),
-        description: "Effect guidance",
-        location: AbsolutePath.make(path.resolve("/skills/effect/SKILL.md")),
-        content: "Use Effect",
-      }),
-    ]),
+  list: () => Effect.succeed([info]),
 })
 const locations = Layer.effect(
   LocationServiceMap.Service,
@@ -56,7 +54,7 @@ const it = testEffect(
 )
 
 describe("Session.skill", () => {
-  it.effect("resolves skill mentions on a normal prompt", () =>
+  it.effect("activates mentioned skills when the prompt is delivered", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const database = yield* Database.Service
@@ -71,9 +69,17 @@ describe("Session.skill", () => {
         skills: [{ id: Skill.ID.make("effect"), mention: { start: 6, end: 13, text: "@effect" } }],
         resume: false,
       })
+      expect(yield* sessions.messages({ sessionID: session.id })).toEqual([])
+
       yield* SessionInbox.promote(database.db, bus, session.id, "steer")
 
-      expect(yield* sessions.messages({ sessionID: session.id })).toContainEqual(
+      expect(yield* sessions.messages({ sessionID: session.id, order: "asc" })).toEqual([
+        expect.objectContaining({
+          type: "skill",
+          skill: "effect",
+          name: "Effect",
+          text: Skill.toModelOutput(info, []),
+        }),
         expect.objectContaining({
           id,
           type: "user",
@@ -82,12 +88,11 @@ describe("Session.skill", () => {
             {
               id: "effect",
               name: "Effect",
-              text: expect.stringContaining("Use Effect"),
               mention: { start: 6, end: 13, text: "@effect" },
             },
           ],
         }),
-      )
+      ])
     }),
   )
 
@@ -100,7 +105,13 @@ describe("Session.skill", () => {
       yield* sessions.skill({ id, sessionID: session.id, skill: Skill.ID.make("effect"), resume: false })
 
       expect(yield* sessions.messages({ sessionID: session.id })).toContainEqual(
-        expect.objectContaining({ id, type: "skill", skill: "effect", name: "Effect", text: "Use Effect" }),
+        expect.objectContaining({
+          id,
+          type: "skill",
+          skill: "effect",
+          name: "Effect",
+          text: Skill.toModelOutput(info, []),
+        }),
       )
     }),
   )
