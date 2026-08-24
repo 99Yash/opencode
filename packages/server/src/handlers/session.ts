@@ -175,7 +175,7 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
             .get(ctx.params.sessionID)
             .pipe(Effect.catchTag("Session.NotFoundError", missingSession))
           return {
-            data: Struct.assign(info, { executing: yield* session.executing(info.id) }),
+            data: Struct.assign(info, { executing: (yield* session.active).has(info.id) }),
           }
         }),
       )

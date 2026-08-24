@@ -270,7 +270,6 @@ export interface Interface {
   ) => Effect.Effect<SessionInbox.Compaction, NotFoundError | CompactionConflictError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly active: Effect.Effect<ReadonlySet<SessionSchema.ID>>
-  readonly executing: (sessionID: SessionSchema.ID) => Effect.Effect<boolean>
   readonly background: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID, options?: { readonly continue?: boolean }) => Effect.Effect<boolean>
@@ -841,7 +840,6 @@ const layer = Layer.effect(
         yield* execution.awaitIdle(sessionID)
       }),
       active: execution.active,
-      executing: execution.isActive,
       background: Effect.fn("Session.background")(function* (sessionID) {
         yield* result.get(sessionID)
         const backgrounded = yield* jobs.backgroundAll({ sessionID })
@@ -905,7 +903,7 @@ const layer = Layer.effect(
       revert: {
         stage: Effect.fn("Session.revert.stage")(function* (input) {
           const session = yield* result.get(input.sessionID)
-          if (yield* execution.isActive(input.sessionID))
+          if ((yield* execution.active).has(input.sessionID))
             return yield* new BusyError({ sessionID: input.sessionID })
           return yield* Effect.gen(function* () {
             const plugins = yield* PluginSupervisor.Service
@@ -918,7 +916,7 @@ const layer = Layer.effect(
         }),
         clear: Effect.fn("Session.revert.clear")(function* (sessionID) {
           const session = yield* result.get(sessionID)
-          if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
+          if ((yield* execution.active).has(sessionID)) return yield* new BusyError({ sessionID })
           const revert = yield* Effect.gen(function* () {
             const plugins = yield* PluginSupervisor.Service
             yield* plugins.flush
@@ -929,7 +927,7 @@ const layer = Layer.effect(
         }),
         commit: Effect.fn("Session.revert.commit")(function* (sessionID) {
           const session = yield* result.get(sessionID)
-          if (yield* execution.isActive(sessionID)) return yield* new BusyError({ sessionID })
+          if ((yield* execution.active).has(sessionID)) return yield* new BusyError({ sessionID })
           return yield* SessionRevert.commit(session).pipe(Effect.provideService(Bus.Service, bus))
         }),
       },

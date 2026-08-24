@@ -397,7 +397,7 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
       get: (input) =>
         Effect.gen(function* () {
           const info = yield* runtime.session.get(input.sessionID)
-          return Struct.assign(info, { executing: yield* runtime.session.executing(info.id) })
+          return Struct.assign(info, { executing: (yield* runtime.session.active).has(info.id) })
         }),
       switchAgent: runtime.session.switchAgent,
       switchModel: runtime.session.switchModel,
