@@ -343,7 +343,6 @@ export interface ParserState {
   readonly messageItems: ReadonlySet<string>
   readonly messagePhases: Readonly<Record<string, MessagePhase | null>>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
-  readonly store: boolean | undefined
 }
 
 type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
@@ -936,31 +935,21 @@ const onReasoningSummaryPartDone = (state: ParserState, event: Event): StepResul
   if (!event.item_id || event.summary_index === undefined) return [state, NO_EVENTS]
   const item = state.reasoningItems[event.item_id]
   if (!item) return [state, NO_EVENTS]
-  const events: LLMEvent[] = []
   return [
     {
       ...state,
-      lifecycle:
-        state.store !== false
-          ? Lifecycle.reasoningEnd(
-              state.lifecycle,
-              events,
-              `${event.item_id}:${event.summary_index}`,
-              providerMetadata(state, { itemId: event.item_id }),
-            )
-          : state.lifecycle,
       reasoningItems: {
         ...state.reasoningItems,
         [event.item_id]: {
           ...item,
           summaryParts: {
             ...item.summaryParts,
-            [event.summary_index]: state.store !== false ? "concluded" : "can-conclude",
+            [event.summary_index]: "can-conclude",
           },
         },
       },
     },
-    events,
+    NO_EVENTS,
   ]
 }
 
@@ -1045,8 +1034,8 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const metadata = reasoningMetadata(state, item)
     const reasoningItem = state.reasoningItems[item.id]
     if (reasoningItem) {
-      // Some providers only include stateless replay data on the terminal response.
-      if (state.store === false && typeof item.encrypted_content !== "string")
+      // Some providers only include encrypted replay data on the terminal response.
+      if (typeof item.encrypted_content !== "string")
         return [
           {
             ...state,
@@ -1066,7 +1055,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
       const { [item.id]: _removed, ...reasoningItems } = state.reasoningItems
       return [{ ...state, lifecycle, reasoningItems }, events] satisfies StepResult
     }
-    if (state.store === false && typeof item.encrypted_content !== "string") {
+    if (typeof item.encrypted_content !== "string") {
       const lifecycle = Lifecycle.reasoningStart(state.lifecycle, events, item.id, metadata)
       return [
         {
@@ -1256,7 +1245,6 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   messageItems: new Set<string>(),
   messagePhases: {},
   reasoningItems: {},
-  store: OpenResponsesOptions.resolve(request).store,
 })
 
 export const protocol = Protocol.make({

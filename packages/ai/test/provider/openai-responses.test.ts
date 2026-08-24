@@ -2278,7 +2278,7 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("closes reasoning summary parts when storage is not disabled", () =>
+  it.effect("backfills terminal reasoning when storage is enabled", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(LLMRequest.update(request, { providerOptions: { store: true } })).pipe(
         Effect.provide(
@@ -2298,7 +2298,13 @@ describe("OpenAI Responses route", () => {
                 type: "response.output_item.done",
                 item: { type: "reasoning", id: "rs_1", encrypted_content: null },
               },
-              { type: "response.completed", response: { id: "resp_1" } },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
             ),
           ),
         ),
@@ -2306,7 +2312,11 @@ describe("OpenAI Responses route", () => {
 
       expect(response.events.filter((event) => event.type === "reasoning-end")).toEqual([
         { type: "reasoning-end", id: "rs_1:0", providerMetadata: { openai: { itemId: "rs_1" } } },
-        { type: "reasoning-end", id: "rs_1:1", providerMetadata: { openai: { itemId: "rs_1" } } },
+        {
+          type: "reasoning-end",
+          id: "rs_1:1",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+        },
       ])
     }),
   )
