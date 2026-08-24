@@ -746,15 +746,16 @@ const layer = Layer.effect(
       skill: Effect.fn("Session.skill")(function* (input) {
         const session = yield* result.get(input.sessionID)
         const skills = yield* Skill.Service.pipe(Effect.provide(locations.get(session.location)))
-        const skill = yield* Skill.load(fs, yield* skills.list(), input.skill)
+        const skill = Skill.resolve(yield* skills.list(), input.skill)
         if (!skill) return yield* new SkillNotFoundError({ skill: input.skill })
+        const prepared = yield* Skill.prepare(fs, skill)
         yield* bus.publish(
           SessionEvent.Skill.Activated,
           {
             sessionID: input.sessionID,
-            id: skill.id,
-            name: skill.name,
-            text: skill.output,
+            id: prepared.id,
+            name: prepared.name,
+            text: prepared.output,
           },
           { id: input.id ? Event.ID.make(input.id.replace(/^msg_/, "evt_")) : undefined },
         )
@@ -1001,9 +1002,9 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
     const available = yield* skillService.list()
     const loaded = yield* Effect.forEach(requested, (attachment) =>
       Effect.gen(function* () {
-        const skill = yield* Skill.load(fs, available, attachment.id)
+        const skill = Skill.resolve(available, attachment.id)
         if (!skill) return yield* new SkillNotFoundError({ skill: attachment.id })
-        return { skill, attachment }
+        return { skill: yield* Skill.prepare(fs, skill), attachment }
       }),
     )
     return {

@@ -45,18 +45,20 @@ export const Plugin = {
           output: Output,
           execute: (input, context) =>
             Effect.gen(function* () {
-              const loaded = yield* Skill.load(fs, yield* skills.list(), input.id, (skill) =>
-                permission.assert({
+              const skill = Skill.resolve(yield* skills.list(), input.id)
+              if (!skill) return yield* unableToLoad(input.id)
+              yield* permission
+                .assert({
                   action: name,
                   resources: [skill.id],
                   save: [skill.id],
                   sessionID: context.sessionID,
                   agent: context.agent,
                   source: { type: "tool", messageID: context.messageID, id: context.id },
-                }),
-              ).pipe(Effect.mapError((error) => unableToLoad(input.id, error)))
-              if (!loaded) return yield* unableToLoad(input.id)
-              return { name: loaded.name, directory: loaded.directory, output: loaded.output }
+                })
+                .pipe(Effect.mapError((error) => unableToLoad(input.id, error)))
+              const prepared = yield* Skill.prepare(fs, skill)
+              return { name: prepared.name, directory: prepared.directory, output: prepared.output }
             }).pipe(
               Effect.map((output) => ({
                 output,
