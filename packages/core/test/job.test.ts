@@ -145,6 +145,77 @@ describe("Job", () => {
     }),
   )
 
+  it.live("shutdown cancels only background jobs and awaits their terminal callbacks", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const foregroundWork = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
+      const callbackStarted = yield* Deferred.make<Job.Info>()
+      const releaseCallback = yield* Deferred.make<void>()
+      const background = yield* jobs.start({
+        id: "job_background_shutdown",
+        type: "test",
+        run: Effect.never.pipe(Effect.ensuring(Deferred.succeed(interrupted, undefined))),
+        onBackgroundSettled: (info) =>
+          Deferred.await(interrupted).pipe(
+            Effect.andThen(Deferred.succeed(callbackStarted, info)),
+            Effect.andThen(Deferred.await(releaseCallback)),
+          ),
+      })
+      const foreground = yield* jobs.start({
+        id: "job_foreground_shutdown",
+        type: "test",
+        run: Deferred.await(foregroundWork).pipe(Effect.as("foreground")),
+      })
+      yield* jobs.background(background.id)
+
+      const shutdown = yield* jobs.shutdown.pipe(Effect.forkIn(yield* Scope.Scope, { startImmediately: true }))
+      expect(yield* Deferred.await(callbackStarted)).toMatchObject({
+        id: background.id,
+        status: "cancelled",
+      })
+      expect(shutdown.pollUnsafe()).toBeUndefined()
+      expect(yield* jobs.get(foreground.id)).toMatchObject({ status: "running" })
+
+      yield* Deferred.succeed(releaseCallback, undefined)
+      yield* Fiber.join(shutdown)
+      expect(yield* jobs.get(background.id)).toMatchObject({ status: "cancelled" })
+      expect(yield* jobs.get(foreground.id)).toMatchObject({ status: "running" })
+      expect(yield* jobs.background(foreground.id)).toMatchObject({ status: "cancelled" })
+      expect(yield* jobs.start({ id: "job_started_during_shutdown", type: "test", run: Effect.never })).toMatchObject({
+        status: "cancelled",
+      })
+      expect(yield* jobs.get("job_started_during_shutdown")).toBeUndefined()
+    }),
+  )
+
+  it.live("shutdown awaits a background callback already running after completion", () =>
+    Effect.gen(function* () {
+      const jobs = yield* Job.Service
+      const work = yield* Deferred.make<void>()
+      const callbackStarted = yield* Deferred.make<void>()
+      const releaseCallback = yield* Deferred.make<void>()
+      const job = yield* jobs.start({
+        id: "job_completed_before_shutdown",
+        type: "test",
+        run: Deferred.await(work).pipe(Effect.as("done")),
+        onBackgroundSettled: () =>
+          Deferred.succeed(callbackStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseCallback))),
+      })
+      yield* jobs.background(job.id)
+      yield* Deferred.succeed(work, undefined)
+      yield* Deferred.await(callbackStarted)
+      expect(yield* jobs.get(job.id)).toMatchObject({ status: "completed" })
+
+      const shutdown = yield* jobs.shutdown.pipe(Effect.forkIn(yield* Scope.Scope, { startImmediately: true }))
+      yield* Effect.yieldNow
+      expect(shutdown.pollUnsafe()).toBeUndefined()
+
+      yield* Deferred.succeed(releaseCallback, undefined)
+      yield* Fiber.join(shutdown)
+    }),
+  )
+
   it.live("interrupts live work without promising settlement after the owning process-local scope closes", () =>
     Effect.gen(function* () {
       const scope = yield* Scope.make()

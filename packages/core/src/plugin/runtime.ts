@@ -156,9 +156,13 @@ export const providerLayerWithCell = (cell: Cell) =>
       }
       cell.runtime = runtime
       yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          if (cell.runtime === runtime) cell.runtime = undefined
-        }),
+        jobs.shutdown.pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              if (cell.runtime === runtime) cell.runtime = undefined
+            }),
+          ),
+        ),
       )
     }),
   )

@@ -3,7 +3,7 @@ import { realpathSync } from "node:fs"
 import os from "os"
 import path from "path"
 import { describe, expect } from "bun:test"
-import { Deferred, Duration, Effect, Fiber, Layer, Scope, Stream } from "effect"
+import { Context, Deferred, Duration, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
 import { Money } from "@opencode-ai/schema/money"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
@@ -26,6 +26,7 @@ import { Job } from "@opencode-ai/core/job"
 import { Session } from "@opencode-ai/core/session"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { Permission } from "@opencode-ai/core/permission"
@@ -159,6 +160,7 @@ const replacements = [
 ] satisfies LayerNode.Replacements
 const productionIt = testEffect(AppNodeBuilder.build(nodes, replacements))
 const it = testEffect(AppNodeBuilder.build(nodes, [...replacements, [PluginSupervisor.node, shellPluginSupervisor]]))
+const lifecycleIt = testEffect(Layer.empty)
 
 const call = (input: typeof ShellTool.Input.Type, id = "call-shell") => ({
   sessionID,
@@ -774,6 +776,93 @@ describe("ShellTool", () => {
         )
       },
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined)),
+    ),
+  )
+
+  lifecycleIt.live("notifies the session when application shutdown cancels a background command", () =>
+    Effect.acquireUseRelease(
+      Effect.all([Effect.promise(() => tmpdir()), Scope.make()]),
+      ([tmp, applicationScope]) =>
+        Effect.gen(function* () {
+          reset()
+          const databasePath = path.join(tmp.path, "opencode.sqlite")
+          const globalLayer = Global.layerWith({
+            home: path.join(tmp.path, "home"),
+            data: path.join(tmp.path, "data"),
+            cache: path.join(tmp.path, "cache"),
+            config: path.join(tmp.path, "config"),
+            state: path.join(tmp.path, "state"),
+            tmp: path.join(tmp.path, "tmp"),
+            bin: path.join(tmp.path, "cache", "bin"),
+            log: path.join(tmp.path, "data", "log"),
+            repos: path.join(tmp.path, "data", "repos"),
+          })
+          const context = yield* Layer.buildWithScope(
+            AppNodeBuilder.build(nodes, [
+              [SessionExecution.node, executionNode],
+              [Permission.node, permission],
+              [PluginSupervisor.node, shellPluginSupervisor],
+              [Database.node, Database.configured({ path: databasePath })],
+              [Bus.node, Bus.configured({ persist: true })],
+              [Global.node, globalLayer],
+            ]),
+            applicationScope,
+          )
+          const sessions = Context.get(context, Session.Service)
+          const location = Location.Ref.make({ directory: AbsolutePath.make(tmp.path) })
+          yield* sessions.create({
+            id: sessionID,
+            title: "shell shutdown test",
+            location,
+            model: sessionModel,
+          })
+          const locations = Context.get(context, LocationServiceMap.Service)
+          const settled = yield* Effect.gen(function* () {
+            yield* (yield* PluginSupervisor.Service).flush
+            return yield* executeTool(
+              yield* Tool.Service,
+              call({ command: idleCommand, background: true }, "call-shutdown-background"),
+            )
+          }).pipe(Effect.provide(locations.get(location)))
+
+          expect(settled.metadata).toMatchObject({ status: "running" })
+          yield* Scope.close(applicationScope, Exit.void)
+
+          const pending = yield* Layer.build(
+            AppNodeBuilder.build(Database.node, [
+              [Database.node, Database.configured({ path: databasePath })],
+              [Global.node, globalLayer],
+            ]),
+          ).pipe(
+            Effect.flatMap((verification) =>
+              SessionInbox.list(Context.get(verification, Database.Service).db, sessionID),
+            ),
+            Effect.scoped,
+          )
+          const cancellation = pending.find(
+            (item) =>
+              item.type === "synthetic" &&
+              item.payload.metadata?.source === "shell" &&
+              item.payload.metadata.jobID === "call-shutdown-background",
+          )
+          expect(cancellation).toMatchObject({
+            type: "synthetic",
+            payload: {
+              text: expect.stringContaining("Command cancelled"),
+              description: idleCommand,
+              metadata: {
+                source: "shell",
+                jobID: "call-shutdown-background",
+                shellID: settled.metadata?.shellID,
+                state: "cancelled",
+              },
+            },
+          })
+        }),
+      ([tmp, applicationScope]) =>
+        Scope.close(applicationScope, Exit.void).pipe(
+          Effect.andThen(Effect.promise(() => tmp[Symbol.asyncDispose]().then(() => undefined))),
+        ),
     ),
   )
 

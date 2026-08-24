@@ -2,7 +2,7 @@ export * as SubagentTool from "./subagent.js"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import { Effect, Schema, Scope } from "effect"
+import { Effect, Schema } from "effect"
 import { Agent } from "../../agent.js"
 import { Config } from "../../config.js"
 import { PluginRuntime } from "../../plugin/runtime.js"
@@ -57,11 +57,6 @@ export const Plugin = {
     const agents = yield* Agent.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
-    const scope = yield* Scope.Scope
-    // One completion observer per job generation. Keyed by child plus start time so a fresh
-    // continuation job is observable even while a settled generation's observer is finalizing.
-    const notifications = new Set<string>()
-
     // Concatenate the child's final completed assistant text. Distinguishes "completed with no
     // text" (generic string) from "failed" (the run effect fails, surfaced as a job error).
     const latestAssistantText = Effect.fn("SubagentTool.latestAssistantText")(function* (sessionID: SessionSchema.ID) {
@@ -86,44 +81,15 @@ export const Plugin = {
       state: "completed" | "error" | "cancelled",
       text: string,
     ) {
-      yield* runtime.session.synthetic({
-        sessionID: parentID,
-        text: `<subagent sessionID="${childID}" state="${state}" description="${description}">\n${text}\n</subagent>`,
-        description,
-        metadata: { source: "subagent", childID, agent, state },
-      })
-    })
-
-    const notifyWhenDone = Effect.fn("SubagentTool.notifyWhenDone")(function* (
-      parentID: SessionSchema.ID,
-      childID: SessionSchema.ID,
-      agent: string,
-      description: string,
-      startedAt: number,
-    ) {
-      const key = `${childID}:${startedAt}`
-      if (notifications.has(key)) return
-      notifications.add(key)
-      yield* runtime.job.wait({ id: childID }).pipe(
-        Effect.flatMap((result) => {
-          if (result.info?.status === "completed")
-            return injectCompletion(parentID, childID, agent, description, "completed", result.info.output ?? NO_TEXT)
-          if (result.info?.status === "error")
-            return injectCompletion(
-              parentID,
-              childID,
-              agent,
-              description,
-              "error",
-              result.info.error ?? "Subagent failed",
-            )
-          if (result.info?.status === "cancelled")
-            return injectCompletion(parentID, childID, agent, description, "cancelled", "Subagent cancelled")
-          return Effect.void
-        }),
-        Effect.ensuring(Effect.sync(() => notifications.delete(key))),
-        Effect.forkIn(scope, { startImmediately: true }),
-      )
+      yield* runtime.session
+        .synthetic({
+          sessionID: parentID,
+          text: `<subagent sessionID="${childID}" state="${state}" description="${description}">\n${text}\n</subagent>`,
+          description,
+          metadata: { source: "subagent", childID, agent, state },
+          ...(state === "cancelled" ? { resume: false } : {}),
+        })
+        .pipe(Effect.ignore)
     })
 
     yield* ctx.tool
@@ -257,11 +223,31 @@ export const Plugin = {
                 title: input.description,
                 metadata: {},
                 run,
+                onBackgroundSettled: (result) => {
+                  if (result.status === "running") return Effect.void
+                  const text =
+                    result.status === "completed"
+                      ? (result.output ?? NO_TEXT)
+                      : result.status === "error"
+                        ? (result.error ?? "Subagent failed")
+                        : "Subagent cancelled"
+                  return injectCompletion(
+                    context.sessionID,
+                    child.id,
+                    agent.name,
+                    input.description,
+                    result.status,
+                    text,
+                  )
+                },
               })
+              if (info.status === "cancelled")
+                return yield* new ToolFailure({ message: `Subagent cancelled (sessionID: ${child.id})` })
 
               if (background) {
-                yield* runtime.job.background(info.id)
-                yield* notifyWhenDone(context.sessionID, child.id, agent.name, input.description, info.started_at)
+                const result = yield* runtime.job.background(info.id)
+                if (result?.status === "cancelled")
+                  return yield* new ToolFailure({ message: `Subagent cancelled (sessionID: ${child.id})` })
                 return backgroundResult(child.id)
               }
 
@@ -273,13 +259,6 @@ export const Plugin = {
                 ),
               )
               if (result?.type === "backgrounded") {
-                yield* notifyWhenDone(
-                  context.sessionID,
-                  child.id,
-                  agent.name,
-                  input.description,
-                  result.info.started_at,
-                )
                 return backgroundResult(child.id)
               }
               // Failure surfaces keep the sessionID visible so the model can continue the child.

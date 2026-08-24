@@ -3,9 +3,10 @@ export * as ShellTool from "./shell.js"
 import path from "path"
 import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import { Deferred, Effect, Schema, Scope } from "effect"
+import { Deferred, Effect, Schema } from "effect"
 import { Config } from "../../config.js"
 import { Environment } from "../../environment/index.js"
+import { Job } from "../../job.js"
 import { LocationMutation } from "../../location-mutation.js"
 import { Permission } from "../../permission.js"
 import { PluginRuntime } from "../../plugin/runtime.js"
@@ -105,62 +106,50 @@ export const Plugin = {
   id: "opencode.tool.shell",
   effect: Effect.fn("ShellTool.Plugin")(function* (ctx: PluginContext) {
     const runtime = yield* PluginRuntime.Service
-    const scope = yield* Scope.Scope
     const environment = yield* Environment.Service
     const mutation = yield* LocationMutation.Service
     const shell = yield* Shell.Service
     const permission = yield* Permission.Service
     const config = yield* Config.Service
 
-    const notifyWhenDone = Effect.fn("ShellTool.notifyWhenDone")(function* (
-      sessionID: SessionSchema.ID,
-      id: string,
-      shellID: string,
-      command: string,
-      settled: Deferred.Deferred<Output>,
+    const notifyWhenSettled = Effect.fn("ShellTool.notifyWhenSettled")(function* (
+      input: {
+        sessionID: SessionSchema.ID
+        id: string
+        shellID: string
+        command: string
+        settled: Deferred.Deferred<Output>
+      },
+      info: Job.Info,
     ) {
-      yield* runtime.job.wait({ id: id }).pipe(
-        Effect.flatMap((result) =>
-          Effect.gen(function* () {
-            const info = result.info
-            if (!info) return
-            const state =
-              info.status === "completed"
-                ? "completed"
-                : info.status === "error"
-                  ? "error"
-                  : info.status === "cancelled"
-                    ? "cancelled"
-                    : undefined
-            if (state === undefined) return
-            const output = state === "completed" ? yield* Deferred.await(settled) : undefined
-            const text = output
-              ? resultMessages(output).join("\n\n")
-              : state === "error"
-                ? (info.error ?? "Command failed")
-                : "Command cancelled"
-            yield* runtime.session.synthetic({
-              sessionID,
-              text: `<shell id="${id}" state="${state}" command="${command}">\n${text}\n</shell>`,
-              description: command,
-              metadata: {
-                source: "shell",
-                jobID: id,
-                shellID,
-                state,
-                ...(output
-                  ? {
-                      truncated: output.truncated,
-                      ...(output.exit !== undefined ? { exit: output.exit } : {}),
-                      ...(output.timeout !== undefined ? { timeout: output.timeout } : {}),
-                    }
-                  : {}),
-              },
-            })
-          }),
-        ),
-        Effect.forkIn(scope, { startImmediately: true }),
-      )
+      if (info.status === "running") return
+      const output = info.status === "completed" ? yield* Deferred.await(input.settled) : undefined
+      const text = output
+        ? resultMessages(output).join("\n\n")
+        : info.status === "error"
+          ? (info.error ?? "Command failed")
+          : "Command cancelled"
+      yield* runtime.session
+        .synthetic({
+          sessionID: input.sessionID,
+          text: `<shell id="${input.id}" state="${info.status}" command="${input.command}">\n${text}\n</shell>`,
+          description: input.command,
+          metadata: {
+            source: "shell",
+            jobID: input.id,
+            shellID: input.shellID,
+            state: info.status,
+            ...(output
+              ? {
+                  truncated: output.truncated,
+                  ...(output.exit !== undefined ? { exit: output.exit } : {}),
+                  ...(output.timeout !== undefined ? { timeout: output.timeout } : {}),
+                }
+              : {}),
+          },
+          ...(info.status === "cancelled" ? { resume: false } : {}),
+        })
+        .pipe(Effect.ignore)
     })
 
     yield* ctx.tool
@@ -294,6 +283,13 @@ export const Plugin = {
               })
 
               const settled = yield* Deferred.make<Output>()
+              const notification = {
+                sessionID: context.sessionID,
+                id: context.id,
+                shellID: info.id,
+                command: info.command,
+                settled,
+              }
               const run = settleShell().pipe(
                 Effect.tap((output) => Deferred.succeed(settled, output)),
                 Effect.map((output) => output.output),
@@ -305,11 +301,13 @@ export const Plugin = {
                 title: info.command,
                 metadata: { sessionID: context.sessionID, shellID: info.id },
                 run,
+                onBackgroundSettled: (result) => notifyWhenSettled(notification, result),
               })
+              if (job.status === "cancelled") return yield* Effect.fail(new Error("Command cancelled"))
 
               if (input.background === true) {
-                yield* runtime.job.background(job.id)
-                yield* notifyWhenDone(context.sessionID, context.id, info.id, info.command, settled)
+                const background = yield* runtime.job.background(job.id)
+                if (background?.status === "cancelled") return yield* Effect.fail(new Error("Command cancelled"))
                 return backgroundResult(info.id)
               }
 
@@ -318,7 +316,6 @@ export const Plugin = {
                 .pipe(Effect.onInterrupt(() => runtime.job.cancel(job.id).pipe(Effect.ignore)))
               if (result?.type === "backgrounded") {
                 yield* shell.timeout(info.id, 0)
-                yield* notifyWhenDone(context.sessionID, context.id, info.id, info.command, settled)
                 return backgroundResult(info.id)
               }
               if (result?.info.status === "error")
