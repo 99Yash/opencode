@@ -6,6 +6,7 @@ import { OpenAIChat } from "@opencode-ai/ai/protocols"
 import { TestLLM } from "@opencode-ai/ai/testing"
 import { llmClient } from "@opencode-ai/core/effect/app-node-platform"
 import { makeMemoryDriver } from "@opencode-ai/core/environment/index"
+import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { WorkspaceDriver } from "@opencode-ai/core/workspace/driver"
 import { Deferred, Effect, Fiber, Latch, Layer, Option, Ref, Schema, Stream } from "effect"
@@ -440,6 +441,76 @@ it.live("embedded client is available as a Layer service", () =>
       expect(created.id).toBe(id)
     }).pipe(Effect.provide(fixture.sdk.OpenCode.layer()))
   }),
+)
+
+it.live("starts recovery after Effect registration layers finish", () =>
+  withEmbedded("opencode-embedded-start-", (fixture) =>
+    Effect.gen(function* () {
+      const order: string[] = []
+      const recovered = yield* Deferred.make<void>()
+      const restart = Layer.mock(SessionRestart.Service, {
+        resumeSuspendedSessions: Effect.sync(() => {
+          order.push("recovery")
+        }).pipe(Effect.andThen(Deferred.succeed(recovered, undefined))),
+      })
+      const registration = Layer.effectDiscard(
+        Effect.gen(function* () {
+          const opencode = yield* fixture.sdk.OpenCode.Service
+          yield* Effect.sleep("50 millis")
+          yield* opencode.plugin({ id: "startup", effect: () => Effect.void })
+          order.push("plugin")
+        }),
+      )
+      const application = registration.pipe(
+        Layer.provideMerge(fixture.sdk.OpenCode.layerDeferred({}, { overrides: [[SessionRestart.node, restart]] })),
+        fixture.sdk.OpenCode.start,
+      )
+
+      yield* Layer.build(application)
+      yield* Deferred.await(recovered).pipe(Effect.timeout("2 seconds"))
+      expect(order).toEqual(["plugin", "recovery"])
+    }),
+  ),
+)
+
+it.live("disposes the Effect host when a registration layer fails", () =>
+  withEmbedded("opencode-embedded-start-failure-", (fixture) =>
+    Effect.gen(function* () {
+      let disposed = false
+      let recovered = false
+      const restart = Layer.effect(
+        SessionRestart.Service,
+        Effect.acquireRelease(
+          Effect.succeed(
+            SessionRestart.Service.of({
+              resumeSuspendedSessions: Effect.sync(() => {
+                recovered = true
+              }),
+            }),
+          ),
+          () =>
+            Effect.sync(() => {
+              disposed = true
+            }),
+        ),
+      )
+      const registration = Layer.effectDiscard(
+        Effect.gen(function* () {
+          yield* fixture.sdk.OpenCode.Service
+          yield* Effect.fail(new Error("registration failed"))
+        }),
+      )
+      const application = registration.pipe(
+        Layer.provideMerge(fixture.sdk.OpenCode.layerDeferred({}, { overrides: [[SessionRestart.node, restart]] })),
+        fixture.sdk.OpenCode.start,
+      )
+
+      const exit = yield* Layer.build(application).pipe(Effect.scoped, Effect.exit)
+      expect(exit._tag).toBe("Failure")
+      expect(disposed).toBe(true)
+      expect(recovered).toBe(false)
+    }),
+  ),
 )
 
 it.live("configures workspace providers through the SDK facade", () =>

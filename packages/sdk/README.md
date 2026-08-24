@@ -69,4 +69,21 @@ const opencode = yield * OpenCode.create()
 const session = yield * opencode.sessions.get({ sessionID })
 ```
 
-The Effect Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`.
+`OpenCode.create()` starts recovery automatically. When composing an application from Layers, apply `OpenCode.start` to the complete application Layer so registration Layers finish before suspended Sessions resume:
+
+```ts
+import { OpenCode } from "@opencode-ai/sdk/effect"
+import { Effect, Layer } from "effect"
+import myPlugin from "./my-plugin"
+
+const PluginLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const opencode = yield* OpenCode.Service
+    yield* opencode.plugin(myPlugin)
+  }),
+)
+
+const ApplicationLive = PluginLive.pipe(Layer.provideMerge(OpenCode.layerDeferred()), OpenCode.start)
+```
+
+Use `OpenCode.layer()` when there are no registration layers; it starts recovery automatically. The Effect Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`, with matching `layerDeferred` and `start` exports.

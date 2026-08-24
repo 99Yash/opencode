@@ -141,8 +141,30 @@ const session = await Effect.runPromise(program)
 
 Effect applications can contribute plugins from ordinary registration layers.
 The registration layer may depend on `OpenCode.Service` and any other services
-needed to construct the plugin; `OpenCode.layer()` remains unaware of those
-features.
+needed to construct the plugin; the host layer remains unaware of those features:
 
-Use `OpenCode.layer()` for dependency injection. The Effect-native Workerd
-entrypoint is `@opencode-ai/sdk/workerd/effect`.
+```ts
+import { OpenCode } from "@opencode-ai/sdk/effect"
+import { Effect, Layer } from "effect"
+import myPlugin from "./my-plugin"
+
+const PluginLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const opencode = yield* OpenCode.Service
+    yield* opencode.plugin(myPlugin)
+  }),
+)
+
+const ApplicationLive = PluginLive.pipe(Layer.provideMerge(OpenCode.layerDeferred()), OpenCode.start)
+```
+
+`OpenCode.start` runs after the complete application layer has built. This
+ensures every registration layer succeeds before suspended Sessions resume; if
+registration fails, the host is released without starting recovery. Direct
+`OpenCode.create()` and `OpenCode.layer()` calls start recovery automatically;
+use `layerDeferred` only when registration layers establish the startup
+boundary.
+
+The Effect-native Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`; it
+exports matching `Service`, `layerDeferred`, and `start` values for the same
+composition pattern.

@@ -25,10 +25,12 @@ export type Interface = Omit<OpenCodeClient, "plugin" | "workspace"> & {
   readonly plugin: EmbeddedHost.Interface["plugins"]["register"] & OpenCodeClient["plugin"]
 }
 
-export const create: (
+const starts = new WeakMap<Interface, Effect.Effect<void>>()
+
+const make: (
   options?: CreateOptions,
   embed?: EmbedOptions,
-) => Effect.Effect<Interface, Config.ConfigError | Error, Scope.Scope> = Effect.fn("OpenCode.create")(function* (
+) => Effect.Effect<Interface, Config.ConfigError | Error, Scope.Scope> = Effect.fn("OpenCode.make")(function* (
   options: CreateOptions = {},
   embed: EmbedOptions = {},
 ) {
@@ -39,7 +41,7 @@ export const create: (
     ),
   )
 
-  return {
+  const opencode: Interface = {
     ...client,
     sessions: client.session,
     events: client.event,
@@ -50,9 +52,39 @@ export const create: (
     },
     plugin: Object.assign(host.plugins.register, client.plugin),
   }
+  starts.set(opencode, host.start)
+  return opencode
+})
+
+export const create: (
+  options?: CreateOptions,
+  embed?: EmbedOptions,
+) => Effect.Effect<Interface, Config.ConfigError | Error, Scope.Scope> = Effect.fn("OpenCode.create")(function* (
+  options: CreateOptions = {},
+  embed: EmbedOptions = {},
+) {
+  const opencode = yield* make(options, embed)
+  yield* recovery(opencode)
+  return opencode
 })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode-ai/sdk/OpenCode") {}
 
-export const layer = (options: CreateOptions = {}): Layer.Layer<Service, Config.ConfigError | Error> =>
-  Layer.effect(Service, create(options))
+export const layer = (
+  options: CreateOptions = {},
+  embed: EmbedOptions = {},
+): Layer.Layer<Service, Config.ConfigError | Error> => Layer.effect(Service, create(options, embed))
+
+/** Builds a host whose recovery is deferred until `OpenCode.start`. */
+export const layerDeferred = (
+  options: CreateOptions = {},
+  embed: EmbedOptions = {},
+): Layer.Layer<Service, Config.ConfigError | Error> => Layer.effect(Service, make(options, embed))
+
+/** Starts suspended-session recovery after the complete application layer has built. */
+export const start = <A, E, R>(self: Layer.Layer<Service | A, E, R>): Layer.Layer<Service | A, E, R> =>
+  self.pipe(Layer.tap((services: Context.Context<Service>) => recovery(Context.get(services, Service))))
+
+function recovery(opencode: Interface) {
+  return starts.get(opencode) ?? Effect.die(new Error("OpenCode.start requires OpenCode.layerDeferred"))
+}
