@@ -297,6 +297,7 @@ export const Event = Schema.StructWithRest(
           incomplete_details: optionalNull(Schema.Struct({ reason: Schema.optional(Schema.String) })),
           usage: optionalNull(OpenResponsesUsage),
           error: optionalNull(OpenResponsesErrorPayload),
+          output: Schema.optional(Schema.Array(StreamItem)),
         }),
         [Schema.Record(Schema.String, Schema.Unknown)],
       ),
@@ -349,6 +350,7 @@ type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
 
 interface ReasoningStreamItem {
   readonly encryptedContent: string | null | undefined
+  readonly blockIDs?: ReadonlyArray<string>
   // Keyed by the wire protocol's numeric `summary_index`. JS object keys coerce to
   // strings, but typing the map as `Record<number, ...>` documents intent
   // and matches the wire field.
@@ -1043,6 +1045,18 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const metadata = reasoningMetadata(state, item)
     const reasoningItem = state.reasoningItems[item.id]
     if (reasoningItem) {
+      // Some providers only include stateless replay data on the terminal response.
+      if (state.store === false && typeof item.encrypted_content !== "string")
+        return [
+          {
+            ...state,
+            reasoningItems: {
+              ...state.reasoningItems,
+              [item.id]: { ...reasoningItem, encryptedContent: item.encrypted_content },
+            },
+          },
+          NO_EVENTS,
+        ] satisfies StepResult
       const lifecycle = Object.entries(reasoningItem.summaryParts)
         .filter((entry) => entry[1] === "active" || entry[1] === "can-conclude")
         .reduce(
@@ -1051,6 +1065,20 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
         )
       const { [item.id]: _removed, ...reasoningItems } = state.reasoningItems
       return [{ ...state, lifecycle, reasoningItems }, events] satisfies StepResult
+    }
+    if (state.store === false && typeof item.encrypted_content !== "string") {
+      const lifecycle = Lifecycle.reasoningStart(state.lifecycle, events, item.id, metadata)
+      return [
+        {
+          ...state,
+          lifecycle,
+          reasoningItems: {
+            ...state.reasoningItems,
+            [item.id]: { encryptedContent: item.encrypted_content, blockIDs: [item.id], summaryParts: {} },
+          },
+        },
+        events,
+      ] satisfies StepResult
     }
     if (!state.lifecycle.reasoning.has(item.id)) {
       const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
@@ -1077,7 +1105,22 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
   const hasFunctionCall =
     pending.events.some((event) => LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputError(event)) ||
     state.hasFunctionCall
-  const lifecycle = Lifecycle.finish(state.lifecycle, events, {
+  const terminalReasoning = new Map(
+    (event.response?.output ?? []).filter(isReasoningItem).map((item) => [item.id, item]),
+  )
+  const reasoningLifecycle = Object.entries(state.reasoningItems).reduce((lifecycle, [id, item]) => {
+    const terminal = terminalReasoning.get(id)
+    const encryptedContent =
+      typeof item.encryptedContent === "string" ? item.encryptedContent : terminal?.encrypted_content
+    const metadata = providerMetadata(state, { itemId: id, reasoningEncryptedContent: encryptedContent ?? null })
+    const blockIDs =
+      item.blockIDs ??
+      Object.entries(item.summaryParts)
+        .filter((entry) => entry[1] === "active" || entry[1] === "can-conclude")
+        .map((entry) => `${id}:${entry[0]}`)
+    return blockIDs.reduce((current, blockID) => Lifecycle.reasoningEnd(current, events, blockID, metadata), lifecycle)
+  }, state.lifecycle)
+  const lifecycle = Lifecycle.finish(reasoningLifecycle, events, {
     reason: {
       normalized: mapFinishReason(event, hasFunctionCall),
       raw: event.response?.incomplete_details?.reason,
@@ -1091,7 +1134,10 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
           })
         : undefined,
   })
-  return [{ ...state, lifecycle, hasFunctionCall, tools: pending.tools }, events] satisfies StepResult
+  return [
+    { ...state, lifecycle, hasFunctionCall, tools: pending.tools, reasoningItems: {} },
+    events,
+  ] satisfies StepResult
 })
 
 // Build the prettiest summary available from whatever the provider supplied.

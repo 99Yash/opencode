@@ -2141,6 +2141,88 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
+  it.effect("backfills encrypted reasoning from the terminal response", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+              { type: "response.reasoning_summary_text.delta", item_id: "rs_1", delta: "thinking" },
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_1", encrypted_content: null },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_1", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.events.filter((event) => event.type === "reasoning-end")).toEqual([
+        {
+          type: "reasoning-end",
+          id: "rs_1:0",
+          providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+        },
+      ])
+      expect(response.message.content).toContainEqual({
+        type: "reasoning",
+        text: "thinking",
+        providerMetadata: { openai: { itemId: "rs_1", reasoningEncryptedContent: "terminal-state" } },
+      })
+
+      const prepared = yield* compileRequest(LLM.request({ model, messages: [response.message] }))
+      expect(prepared.body.input).toEqual([
+        {
+          type: "reasoning",
+          id: "rs_1",
+          summary: [{ type: "summary_text", text: "thinking" }],
+          encrypted_content: "terminal-state",
+        },
+      ])
+    }),
+  )
+
+  it.effect("backfills done-only reasoning from the terminal response", () =>
+    Effect.gen(function* () {
+      const response = yield* LLMClient.generate(request).pipe(
+        Effect.provide(
+          fixedResponse(
+            sseEvents(
+              {
+                type: "response.output_item.done",
+                item: { type: "reasoning", id: "rs_done", encrypted_content: null },
+              },
+              {
+                type: "response.completed",
+                response: {
+                  id: "resp_1",
+                  output: [{ type: "reasoning", id: "rs_done", encrypted_content: "terminal-state" }],
+                },
+              },
+            ),
+          ),
+        ),
+      )
+
+      expect(response.message.content).toEqual([
+        {
+          type: "reasoning",
+          text: "",
+          providerMetadata: { openai: { itemId: "rs_done", reasoningEncryptedContent: "terminal-state" } },
+        },
+      ])
+      expect(response.events.filter((event) => event.type === "reasoning-end")).toHaveLength(1)
+    }),
+  )
+
   it.effect("streams each reasoning summary part as a separate block", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(
