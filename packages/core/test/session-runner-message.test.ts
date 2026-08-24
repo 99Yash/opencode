@@ -231,6 +231,36 @@ Recent work
     })
   })
 
+  test("injects resolved skill content for selected skill attachments", () => {
+    const messages = toLLMMessages(
+      [
+        SessionMessage.User.make({
+          id: id("user-skill"),
+          type: "user",
+          text: "@bro",
+          skills: [
+            SkillAttachment.make({
+              id: Skill.ID.make("bro"),
+              name: Skill.Name.make("Bro"),
+              text: "Explain this intuitively.",
+              mention: { start: 0, end: 4, text: "@bro" },
+            }),
+          ],
+          time: { created },
+        }),
+      ],
+      model,
+    )
+
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      content: [
+        { type: "text", text: "Explain this intuitively." },
+        { type: "text", text: "@bro" },
+      ],
+    })
+  })
+
   test("decodes inline text attachment content", () => {
     const messages = toLLMMessages(
       [

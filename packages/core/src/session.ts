@@ -1005,6 +1005,7 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
       return Effect.succeed({
         id: skill.id,
         name: skill.name,
+        text: Skill.toModelOutput(skill, []),
         mention: attachment.mention,
       })
     })

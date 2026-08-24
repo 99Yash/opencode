@@ -56,7 +56,7 @@ const it = testEffect(
 )
 
 describe("Session.skill", () => {
-  it.effect("keeps skill mentions as references on a normal prompt", () =>
+  it.effect("resolves skill mentions on a normal prompt", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
       const database = yield* Database.Service
@@ -82,6 +82,7 @@ describe("Session.skill", () => {
             {
               id: "effect",
               name: "Effect",
+              text: expect.stringContaining("Use Effect"),
               mention: { start: 6, end: 13, text: "@effect" },
             },
           ],
