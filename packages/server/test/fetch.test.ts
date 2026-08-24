@@ -1,9 +1,11 @@
 import { expect } from "bun:test"
 import { createServer, type Server } from "node:http"
 import { makeMemoryDriver } from "@opencode-ai/core/environment/index"
+import { Session } from "@opencode-ai/core/session"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { Workspace } from "@opencode-ai/core/workspace"
 import { WorkspaceDriver } from "@opencode-ai/core/workspace/driver"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { it } from "../../core/test/lib/effect"
 import { ServerFetch } from "../src/fetch"
 
@@ -250,6 +252,52 @@ it.live("serves the session view operation and missing-session error", () =>
       ),
     )
     expect(missing.status).toBe(404)
+  }).pipe(Effect.scoped),
+)
+
+it.live("reports per-session runtime execution status", () =>
+  Effect.gen(function* () {
+    const executing = Session.ID.make("ses_executing")
+    const idle = Session.ID.make("ses_idle")
+    const handler = yield* ServerFetch.make(options, {
+      overrides: [
+        [
+          SessionExecution.node,
+          Layer.succeed(
+            SessionExecution.Service,
+            SessionExecution.Service.of({
+              active: Effect.succeed(new Set([executing])),
+              resume: () => Effect.void,
+              wake: () => Effect.void,
+              interrupt: () => Effect.succeed(false),
+              awaitIdle: () => Effect.void,
+            }),
+          ),
+        ],
+      ],
+    })
+
+    yield* Effect.forEach([executing, idle], (id) =>
+      Effect.promise(() =>
+        handler(
+          new Request("http://opencode.local/api/session", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ id }),
+          }),
+        ),
+      ),
+    )
+    const responses = yield* Effect.forEach([executing, idle], (id) =>
+      Effect.promise(() =>
+        handler(new Request(`http://opencode.local/api/session/${id}`)).then((response) => response.json()),
+      ),
+    )
+
+    expect(responses).toMatchObject([
+      { data: { id: executing, executing: true } },
+      { data: { id: idle, executing: false } },
+    ])
   }).pipe(Effect.scoped),
 )
 

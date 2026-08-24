@@ -5,7 +5,7 @@ import type { IntegrationMethodRegistration } from "@opencode-ai/plugin/effect/i
 import { EventManifest } from "@opencode-ai/schema/event-manifest"
 import { Mcp } from "@opencode-ai/schema/mcp"
 import { App } from "../app.js"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Schema, Stream, Struct } from "effect"
 import { Agent } from "../agent.js"
 import { AISDK } from "../aisdk.js"
 import { Catalog } from "../catalog.js"
@@ -394,7 +394,11 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
           location:
             input?.location ?? Location.Ref.make({ directory: location.directory, workspaceID: location.workspaceID }),
         }),
-      get: (input) => runtime.session.get(input.sessionID),
+      get: (input) =>
+        Effect.gen(function* () {
+          const info = yield* runtime.session.get(input.sessionID)
+          return Struct.assign(info, { executing: (yield* runtime.session.active).has(info.id) })
+        }),
       switchAgent: runtime.session.switchAgent,
       switchModel: runtime.session.switchModel,
       prompt: runtime.session.prompt,

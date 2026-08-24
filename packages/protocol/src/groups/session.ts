@@ -106,6 +106,13 @@ const SessionActive = Schema.Struct({
   type: Schema.Literal("running"),
 }).annotate({ identifier: "SessionActive" })
 
+const SessionGetInfo = Schema.Struct({
+  ...Session.Info.fields,
+  executing: Schema.Boolean.annotate({
+    description: "Whether this OpenCode process is currently executing the session.",
+  }),
+}).annotate({ identifier: "SessionGetInfo" })
+
 const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
   Schema.decodeTo(Schema.Boolean, {
     decode: SchemaGetter.transform((value) => value === "true"),
@@ -229,13 +236,13 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     .add(
       HttpApiEndpoint.get("session.get", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
-        success: Schema.Struct({ data: Session.Info }),
+        success: Schema.Struct({ data: SessionGetInfo }),
         error: SessionNotFoundError,
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "v2.session.get",
           summary: "Get session",
-          description: "Retrieve a session by ID.",
+          description: "Retrieve a session by ID with its process-local runtime execution status.",
         }),
       ),
     )

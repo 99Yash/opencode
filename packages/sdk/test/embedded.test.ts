@@ -301,6 +301,7 @@ it.live(
         expect(created.id).toBe(id)
         expect(selected.model?.id).toBe(model.id)
         expect(selected.model?.providerID).toBe(model.providerID)
+        expect(selected.executing).toBe(false)
         expect(page.data.some((session) => session.id === id)).toBe(true)
         expect(active).toEqual({})
         expect(admitted.sessionID).toBe(id)

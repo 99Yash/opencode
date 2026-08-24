@@ -2,7 +2,7 @@ import { Session } from "@opencode-ai/core/session"
 import { SessionStats } from "@opencode-ai/core/session/stats"
 import { SessionTransfer } from "@opencode-ai/core/session/transfer"
 import { InstructionEntry } from "@opencode-ai/core/session/instruction-entry"
-import { DateTime, Effect, Stream } from "effect"
+import { DateTime, Effect, Stream, Struct } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { SessionsCursor } from "@opencode-ai/protocol/groups/session"
@@ -171,10 +171,11 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.get",
         Effect.fn(function* (ctx) {
+          const info = yield* session
+            .get(ctx.params.sessionID)
+            .pipe(Effect.catchTag("Session.NotFoundError", missingSession))
           return {
-            data: yield* session
-              .get(ctx.params.sessionID)
-              .pipe(Effect.catchTag("Session.NotFoundError", missingSession)),
+            data: Struct.assign(info, { executing: (yield* session.active).has(info.id) }),
           }
         }),
       )

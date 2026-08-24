@@ -1545,6 +1545,24 @@ export type SessionInfo = {
   revert?: SessionRevert
 }
 
+export type SessionGetInfo = {
+  id: string
+  parentID?: string
+  fork?: { sessionID: string; boundary: SessionForkBoundary }
+  projectID: string
+  agent?: string
+  model?: ModelRef
+  cost: MoneyUSD
+  tokens: TokenUsageInfo
+  outcome?: "succeeded" | "failed" | "interrupted"
+  time: { created: number; updated: number; idle?: number; viewed?: number; archived?: number }
+  title?: string
+  location: LocationRef
+  subpath?: string
+  revert?: SessionRevert
+  executing: boolean
+}
+
 export type SessionRevertStaged = {
   id: string
   created: number
@@ -3399,7 +3417,7 @@ export type SessionActiveOutput = { data: { [x: string]: SessionActive } }["data
 
 export type SessionGetInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 
-export type SessionGetOutput = { data: SessionInfo }["data"]
+export type SessionGetOutput = { data: SessionGetInfo }["data"]
 
 export type SessionRemoveInput = { readonly sessionID: { readonly sessionID: string }["sessionID"] }
 

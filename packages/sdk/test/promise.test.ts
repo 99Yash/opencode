@@ -43,6 +43,7 @@ test("Promise host uses the embedded router and releases plugins", async () => {
     const events = Array.fromAsync(opencode.sessions.log({ sessionID: session.id }))
 
     expect(selected.id).toBe(session.id)
+    expect(selected.executing).toBe(false)
     expect(page.data.some((item) => item.id === session.id)).toBe(true)
     expect((await events).some((event) => event.type === "session.created")).toBe(true)
     expect(setup).toBe(true)
