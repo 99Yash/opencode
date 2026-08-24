@@ -55,6 +55,7 @@ import { fileURLToPath } from "url"
 import { SessionEnvironment } from "./session/environment.js"
 import { SessionHistory } from "./session/history.js"
 import { InstructionEntry } from "./session/instruction-entry.js"
+import { Environment } from "./environment/index.js"
 
 // get project -> project.locations
 //
@@ -597,10 +598,17 @@ const layer = Layer.effect(
               return yield* Image.Service
             }).pipe(Effect.provide(locations.get(session.location)))
             const skills = Skill.Service.pipe(Effect.provide(locations.get(session.location)))
+            const workspace = session.location.workspaceID
+              ? {
+                  root: session.location.directory,
+                  environment: Environment.Service.pipe(Effect.provide(locations.get(session.location))),
+                }
+              : undefined
             const prompt = yield* resolvePrompt(
               { text: input.text, files: input.files, agents: input.agents, skills: input.skills },
               image,
               skills,
+              workspace,
             ).pipe(Effect.provideService(FSUtil.Service, fs))
             const messageID = input.id ?? SessionMessage.ID.create()
             const admittedInput = SessionInbox.Item.make({
@@ -961,10 +969,13 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
   input: PromptInput.Prompt,
   image: Effect.Effect<Image.Interface>,
   skills: Effect.Effect<Skill.Interface>,
+  workspace: WorkspaceAttachmentSource | undefined,
 ) {
   const fs = yield* FSUtil.Service
   const files = input.files
-    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file, image), { concurrency: 8 })
+    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file, image, workspace), {
+        concurrency: 8,
+      })
     : undefined
   const requested = input.skills
   const selected = yield* Effect.gen(function* () {
@@ -985,11 +996,16 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
 })
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+type WorkspaceAttachmentSource = {
+  readonly root: string
+  readonly environment: Effect.Effect<Environment.Interface>
+}
 
 const materializeAttachment = Effect.fn("Session.materializeAttachment")(function* (
   fs: FSUtil.Interface,
   input: PromptInput.FileAttachment,
   image: Effect.Effect<Image.Interface>,
+  workspace: WorkspaceAttachmentSource | undefined,
 ) {
   const resolved = input.uri.startsWith("data:")
     ? {
@@ -1000,7 +1016,9 @@ const materializeAttachment = Effect.fn("Session.materializeAttachment")(functio
         name: undefined,
         mime: undefined,
       }
-    : yield* readFileAttachment(fs, input.uri)
+    : input.uri.startsWith("workspace:")
+      ? yield* readWorkspaceAttachment(workspace, input.uri)
+      : yield* readFileAttachment(fs, input.uri)
   if (resolved.bytes.byteLength > MAX_ATTACHMENT_BYTES)
     return yield* new AttachmentError({
       uri: input.uri,
@@ -1095,6 +1113,54 @@ const readFileAttachment = Effect.fn("Session.readFileAttachment")(function* (fs
     .readFile(target)
     .pipe(Effect.mapError(() => new AttachmentError({ uri, message: `Unable to read attachment: ${uri}` })))
   return { bytes, source: { type: "uri" as const, uri }, start, end, name: path.basename(target), mime: undefined }
+})
+
+const readWorkspaceAttachment = Effect.fn("Session.readWorkspaceAttachment")(function* (
+  workspace: WorkspaceAttachmentSource | undefined,
+  uri: string,
+) {
+  if (!workspace)
+    return yield* new AttachmentError({
+      uri,
+      message: `Workspace attachment requires a workspace-bound session: ${uri}`,
+    })
+  const url = yield* Effect.try({
+    try: () => new URL(uri),
+    catch: () => new AttachmentError({ uri, message: `Invalid workspace attachment URI: ${uri}` }),
+  })
+  const relative = yield* Effect.try({
+    try: () => decodeURIComponent(url.pathname),
+    catch: () => new AttachmentError({ uri, message: `Invalid workspace attachment URI: ${uri}` }),
+  })
+  if (url.protocol !== "workspace:" || url.host || !relative || path.isAbsolute(relative))
+    return yield* new AttachmentError({ uri, message: `Invalid workspace attachment URI: ${uri}` })
+  const service = yield* workspace.environment
+  const target = path.resolve(workspace.root, relative)
+  const within = path.relative(workspace.root, target)
+  if (within === ".." || within.startsWith(`..${path.sep}`) || path.isAbsolute(within))
+    return yield* new AttachmentError({ uri, message: `Workspace attachment escapes the workspace root: ${uri}` })
+  const result = yield* service.files.read(target).pipe(
+    Effect.mapError(
+      (error) =>
+        new AttachmentError({
+          uri,
+          message:
+            error._tag === "Environment.NotFound"
+              ? `Workspace attachment not found: ${uri}`
+              : error._tag === "Environment.WrongKind"
+                ? `Workspace attachment is not a file: ${uri}`
+                : `Unable to read workspace attachment: ${uri}`,
+        }),
+    ),
+  )
+  return {
+    bytes: result.bytes,
+    source: { type: "uri" as const, uri },
+    start: positiveInt(url.searchParams.get("start")),
+    end: positiveInt(url.searchParams.get("end")),
+    name: path.basename(target),
+    mime: undefined,
+  }
 })
 
 function decodeDataURL(uri: string) {

@@ -1825,7 +1825,7 @@
             }
           }
         },
-        "description": "Durably admit one session input and schedule agent-loop execution unless resume is false.",
+        "description": "Durably admit one session input and schedule agent-loop execution unless resume is false. File attachments accept data:, file:, and workspace:relative/path URIs; workspace: URIs require a workspace-bound session and are resolved through that workspace when admitted.",
         "summary": "Send message",
         "requestBody": {
           "content": {
@@ -14936,7 +14936,8 @@
         "type": "object",
         "properties": {
           "uri": {
-            "type": "string"
+            "type": "string",
+            "description": "Attachment URI. data: URLs embed bytes inline; file: URLs are read from the server's local filesystem; workspace:relative/path URLs are read relative to the session directory through its bound workspace and require a workspace-bound session. Bytes are snapshotted when the prompt is admitted."
           },
           "name": {
             "type": "string"

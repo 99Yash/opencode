@@ -350,7 +350,8 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
           OpenApi.annotations({
             identifier: "v2.session.prompt",
             summary: "Send message",
-            description: "Durably admit one session input and schedule agent-loop execution unless resume is false.",
+            description:
+              "Durably admit one session input and schedule agent-loop execution unless resume is false. File attachments accept data:, file:, and workspace:relative/path URIs; workspace: URIs require a workspace-bound session and are resolved through that workspace when admitted.",
           }),
         ),
     )

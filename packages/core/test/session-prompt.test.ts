@@ -29,6 +29,9 @@ import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Image } from "@opencode-ai/core/image"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { Snapshot } from "@opencode-ai/core/snapshot"
+import { Environment } from "@opencode-ai/core/environment/index"
+import { Workspace } from "@opencode-ai/core/workspace"
+import { toLLMMessages } from "@opencode-ai/core/session/runner/to-llm-message"
 import { testEffect } from "./lib/effect"
 
 const executionCalls: Session.ID[] = []
@@ -36,6 +39,8 @@ const interruptCalls: Session.ID[] = []
 const interruptContinuations: Array<boolean | undefined> = []
 const wakeCalls: Session.ID[] = []
 const activeSessions = new Set<Session.ID>()
+const workspaceDriver = Environment.makeMemoryDriver()
+const workspaceFiles = Environment.makeFiles(workspaceDriver)
 const execution = Layer.succeed(
   SessionExecution.Service,
   SessionExecution.Service.of({
@@ -82,6 +87,10 @@ const locations = Layer.effect(
               PluginSupervisor.Service,
               PluginSupervisor.Service.of({ flush: Effect.sync(() => (ready = true)) }),
             ),
+            Layer.succeed(
+              Environment.Service,
+              Environment.Service.of({ files: workspaceFiles, spawner: workspaceDriver.spawner }),
+            ),
           )
         }),
       ) as unknown as Layer.Layer<LocationServices>,
@@ -122,6 +131,17 @@ const setup = Effect.gen(function* () {
     .run()
     .pipe(Effect.orDie)
 })
+const setupWorkspace = (workspaceID: Workspace.ID) =>
+  Effect.gen(function* () {
+    yield* setup
+    const { db } = yield* Database.Service
+    yield* db
+      .update(SessionTable)
+      .set({ workspace_id: workspaceID })
+      .where(eq(SessionTable.id, sessionID))
+      .run()
+      .pipe(Effect.orDie)
+  })
 
 const admitted = (id: SessionMessage.ID) => Database.Service.use(({ db }) => SessionInbox.find(db, id))
 const admittedCount = Database.Service.use(({ db }) =>
@@ -428,6 +448,86 @@ describe("Session.prompt", () => {
       ])
       const stored = yield* admitted(message.id)
       expect(stored?.type === "user" ? stored.payload.files : undefined).toEqual(message.payload.files)
+    }),
+  )
+
+  it.effect("materializes workspace image content through the session environment", () =>
+    Effect.gen(function* () {
+      const workspaceID = Workspace.ID.ascending("wrk_prompt")
+      yield* setupWorkspace(workspaceID)
+      const session = yield* Session.Service
+      const bytes = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64",
+      )
+      yield* workspaceFiles.write("/project/uploads/image.png", bytes)
+
+      const message = yield* session.prompt({
+        sessionID,
+        text: "Inspect this image",
+        files: [{ uri: "workspace:uploads/image.png" }],
+        resume: false,
+      })
+
+      expect(message.payload.files).toEqual([
+        {
+          data: bytes.toString("base64"),
+          mime: "image/png",
+          source: { type: "uri", uri: "workspace:uploads/image.png" },
+          name: "image.png",
+        },
+      ])
+      const messages = toLLMMessages(
+        [
+          SessionMessage.User.make({
+            id: message.id,
+            type: "user",
+            ...message.payload,
+            time: { created: DateTime.makeUnsafe(0) },
+          }),
+        ],
+        Model.Ref.make({ id: Model.ID.make("model"), providerID: Provider.ID.make("provider") }),
+      )
+      expect(messages[0]?.content).toEqual([
+        { type: "text", text: "Inspect this image" },
+        { type: "media", mediaType: "image/png", data: bytes.toString("base64"), filename: "image.png" },
+      ])
+    }),
+  )
+
+  it.effect("rejects missing workspace attachments with a typed error", () =>
+    Effect.gen(function* () {
+      yield* setupWorkspace(Workspace.ID.ascending("wrk_prompt"))
+      const session = yield* Session.Service
+      const uri = "workspace:uploads/missing.png"
+
+      const error = yield* session
+        .prompt({ sessionID, text: "Inspect this", files: [{ uri }], resume: false })
+        .pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "Session.AttachmentError",
+        uri,
+        message: `Workspace attachment not found: ${uri}`,
+      })
+    }),
+  )
+
+  it.effect("rejects workspace attachments for sessions without a workspace binding", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const uri = "workspace:uploads/image.png"
+
+      const error = yield* session
+        .prompt({ sessionID, text: "Inspect this", files: [{ uri }], resume: false })
+        .pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "Session.AttachmentError",
+        uri,
+        message: `Workspace attachment requires a workspace-bound session: ${uri}`,
+      })
     }),
   )
 

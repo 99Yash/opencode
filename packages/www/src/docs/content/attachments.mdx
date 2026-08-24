@@ -32,20 +32,26 @@ Attachment controls and client-side limits depend on the interface. For programm
 [API reference](/api).
 
 V2 prompt and command inputs represent each attachment with a `uri` and
-optional `name` and `description`. Use an absolute `file:` URL for a file or
-directory available to the server, or an inline `data:` URL. For a text `file:`
-URL, optional positive `start` and `end` query parameters select one-based
-lines:
+optional `name` and `description`. Use an inline `data:` URL, an absolute
+`file:` URL for a file or directory available to the server process, or a
+`workspace:relative/path` URL for a file in the session's workspace directory.
+`workspace:` URLs require a workspace-bound session and are read through that
+workspace rather than the server's local filesystem. For text `file:` and
+`workspace:` URLs, optional positive `start` and `end` query parameters select
+one-based lines:
 
 ```text
 file:///home/me/project/src/server.ts?start=20&end=60
+workspace:src/server.ts?start=20&end=60
 ```
 
 HTTP and HTTPS attachment URLs are not supported. OpenCode materializes each
 attachment before admitting the prompt and rejects invalid URLs, unreadable
-paths, non-files other than directories, and attachments over 20 MiB decoded.
-The server infers the media type from the bytes. A supplied filename or data
-URL media type does not make an unsupported binary format model-visible.
+paths, `workspace:` paths outside the session directory, non-files other than
+local `file:` directories, and attachments over 20 MiB decoded. This admission
+snapshot keeps later retries and history independent of changes to the source
+file. The server infers the media type from the bytes. A supplied filename or
+data URL media type does not make an unsupported binary format model-visible.
 
 ## Configure image processing
 

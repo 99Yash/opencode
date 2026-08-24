@@ -7,7 +7,10 @@ import { Skill } from "./skill.js"
 
 export interface FileAttachment extends Schema.Schema.Type<typeof FileAttachment> {}
 export const FileAttachment = Schema.Struct({
-  uri: Schema.String,
+  uri: Schema.String.annotate({
+    description:
+      "Attachment URI. data: URLs embed bytes inline; file: URLs are read from the server's local filesystem; workspace:relative/path URLs are read relative to the session directory through its bound workspace and require a workspace-bound session. Bytes are snapshotted when the prompt is admitted.",
+  }),
   name: Schema.String.pipe(optional),
   description: Schema.String.pipe(optional),
   mention: PromptMention.pipe(optional),
