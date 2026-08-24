@@ -862,6 +862,18 @@ const reasoningStreamMetadata = (state: ParserState, item: ReasoningStreamItem, 
   })
 }
 
+const syntheticReasoningItemID = () => `rs_${crypto.randomUUID().replaceAll("-", "")}`
+
+const resolveReasoningItemID = (state: ParserState, item: StreamItem) => {
+  if (item.id && state.reasoningItems[item.id]) return item.id
+  const activeID = state.activeReasoningItemID
+  if (!activeID) return item.id ?? syntheticReasoningItemID()
+  const activeItem = state.reasoningItems[activeID]
+  if (!activeItem) return item.id ?? syntheticReasoningItemID()
+  if (!item.id || !activeItem.providerItemID || activeItem.providerItemID === item.id) return activeID
+  return item.id
+}
+
 // Responses APIs stream reasoning items in a stable order:
 //   `output_item.added` (reasoning) →
 //     `reasoning_summary_part.added` (index=0) →
@@ -888,7 +900,7 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
     ]
   }
   if (item?.type === "reasoning") {
-    const id = item.id || `rs_${crypto.randomUUID().replaceAll("-", "")}`
+    const id = item.id || syntheticReasoningItemID()
     const events: LLMEvent[] = []
     return [
       {
@@ -1086,23 +1098,14 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   }
 
   if (item?.type === "reasoning") {
-    const activeID = state.activeReasoningItemID
-    const activeReasoningItem = activeID ? state.reasoningItems[activeID] : undefined
-    const id =
-      item.id && state.reasoningItems[item.id]
-        ? item.id
-        : activeID &&
-            activeReasoningItem &&
-            (!item.id || !activeReasoningItem.providerItemID || activeReasoningItem.providerItemID === item.id)
-          ? activeID
-          : (item.id ?? `rs_${crypto.randomUUID().replaceAll("-", "")}`)
+    const id = resolveReasoningItemID(state, item)
     const events: LLMEvent[] = []
     const reasoningItem = state.reasoningItems[id]
     const metadata = reasoningMetadata(state, {
       ...item,
       id: item.id || reasoningItem?.providerItemID,
     })
-    const activeReasoningItemID = activeID === id ? undefined : activeID
+    const activeReasoningItemID = state.activeReasoningItemID === id ? undefined : state.activeReasoningItemID
     if (reasoningItem) {
       const lifecycle = Object.entries(reasoningItem.summaryParts)
         .filter((entry) => entry[1] === "active" || entry[1] === "can-conclude")
