@@ -2,79 +2,59 @@ export * as PromptMaterializer from "./prompt-materializer.js"
 
 import { PromptInput } from "@opencode-ai/schema/prompt-input"
 import { Base64, FileAttachment, Prompt } from "@opencode-ai/schema/prompt"
-import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { FSUtil } from "@opencode-ai/util/fs-util"
-import { Context, Effect, Layer } from "effect"
+import { Effect, Layer } from "effect"
 import path from "path"
 import { fileURLToPath } from "url"
 import { Environment } from "../environment/index.js"
 import { Image } from "../image.js"
-import { LocationServiceMap } from "../location-service-map.js"
 import { Location } from "../location.js"
 import { Mime } from "../mime.js"
 import { PluginSupervisor } from "../plugin/supervisor-service.js"
 import { Skill } from "../skill.js"
 import { AttachmentError, SkillNotFoundError } from "./error.js"
 
-export interface Interface {
-  readonly materialize: (
-    location: Location.Ref,
-    input: PromptInput.Prompt,
-  ) => Effect.Effect<Prompt, AttachmentError | SkillNotFoundError>
-}
+type LocationServices =
+  | Environment.Service
+  | Image.Service
+  | Location.Service
+  | PluginSupervisor.Service
+  | Skill.Service
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Session/PromptMaterializer") {}
-
-const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const fs = yield* FSUtil.Service
-    const locations = yield* LocationServiceMap.Service
-    return Service.of({
-      materialize: Effect.fn("PromptMaterializer.materialize")(function* (location, input) {
-        const services = locations.get(location)
-        const image = Effect.gen(function* () {
-          const plugins = yield* PluginSupervisor.Service
-          yield* plugins.flush
-          return yield* Image.Service
-        }).pipe(Effect.provide(services))
-        const environment = Environment.Service.pipe(Effect.provide(services))
-        const files = input.files
-          ? yield* Effect.forEach(
-              input.files,
-              (file) => materializeAttachment(fs, location, environment, file, image),
-              { concurrency: 8 },
-            )
-          : undefined
-        const selected = yield* Effect.gen(function* () {
-          if (!input.skills?.length) return undefined
-          const skills = yield* Skill.Service.pipe(Effect.provide(services))
-          const available = yield* skills.list()
-          return yield* Effect.forEach(input.skills, (attachment) => {
-            const skill = available.find((item) => item.id === attachment.id)
-            if (!skill) return Effect.fail(new SkillNotFoundError({ skill: attachment.id }))
-            return Effect.succeed({ id: skill.id, name: skill.name, mention: attachment.mention })
-          })
+export const materialize = Effect.fn("PromptMaterializer.materialize")(function* (
+  input: PromptInput.Prompt,
+  services: Layer.Layer<LocationServices>,
+) {
+  const fs = yield* FSUtil.Service
+  const files = input.files
+    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file, services), { concurrency: 8 })
+    : undefined
+  const requested = input.skills
+  const selected = requested?.length
+    ? yield* Effect.gen(function* () {
+        const skills = yield* Skill.Service
+        const available = yield* skills.list()
+        return yield* Effect.forEach(requested, (attachment) => {
+          const skill = available.find((item) => item.id === attachment.id)
+          if (!skill) return Effect.fail(new SkillNotFoundError({ skill: attachment.id }))
+          return Effect.succeed({ id: skill.id, name: skill.name, mention: attachment.mention })
         })
-        return Prompt.fromUserMessage({
-          text: input.text,
-          agents: input.agents,
-          files,
-          skills: selected?.length ? selected : undefined,
-        })
-      }),
-    })
-  }),
-)
+      }).pipe(Effect.provide(services))
+    : undefined
+  return Prompt.fromUserMessage({
+    text: input.text,
+    agents: input.agents,
+    files,
+    skills: selected?.length ? selected : undefined,
+  })
+})
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
 const materializeAttachment = Effect.fn("PromptMaterializer.materializeAttachment")(function* (
   fs: FSUtil.Interface,
-  location: Location.Ref,
-  environment: Effect.Effect<Environment.Interface>,
   input: PromptInput.FileAttachment,
-  image: Effect.Effect<Image.Interface>,
+  services: Layer.Layer<LocationServices>,
 ) {
   const resolved = input.uri.startsWith("data:")
     ? {
@@ -86,7 +66,7 @@ const materializeAttachment = Effect.fn("PromptMaterializer.materializeAttachmen
         mime: undefined,
       }
     : input.uri.startsWith("workspace:")
-      ? yield* readWorkspaceAttachment(location, environment, input.uri)
+      ? yield* readWorkspaceAttachment(input.uri).pipe(Effect.provide(services))
       : yield* readFileAttachment(fs, input.uri)
   if (resolved.bytes.byteLength > MAX_ATTACHMENT_BYTES)
     return yield* new AttachmentError({
@@ -105,7 +85,7 @@ const materializeAttachment = Effect.fn("PromptMaterializer.materializeAttachmen
             .join("\n"),
         )
       : resolved.bytes
-  const normalized = yield* normalizeImageAttachment(input, Buffer.from(content).toString("base64"), mime, image)
+  const normalized = yield* normalizeImageAttachment(input, Buffer.from(content).toString("base64"), mime, services)
   return FileAttachment.create({
     data: normalized.data,
     mime: normalized.mime,
@@ -120,13 +100,17 @@ const normalizeImageAttachment = Effect.fn("PromptMaterializer.normalizeImageAtt
   input: PromptInput.FileAttachment,
   data: string,
   mime: string,
-  image: Effect.Effect<Image.Interface>,
+  services: Layer.Layer<LocationServices>,
 ) {
   if (!mime.startsWith("image/")) return { data: Base64.make(data), mime }
-  const service = yield* image
+  const image = yield* Effect.gen(function* () {
+    const plugins = yield* PluginSupervisor.Service
+    yield* plugins.flush
+    return yield* Image.Service
+  }).pipe(Effect.provide(services))
   const label = input.name ?? (input.uri.startsWith("data:") ? "inline attachment" : input.uri)
   const content = { uri: label, content: data, encoding: "base64" as const, mime }
-  const normalized = yield* service.normalize(label, content).pipe(
+  const normalized = yield* image.normalize(label, content).pipe(
     Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(content)),
     Effect.mapError((error) => new AttachmentError({ uri: label, message: error.message })),
   )
@@ -187,11 +171,8 @@ const readFileAttachment = Effect.fn("PromptMaterializer.readFileAttachment")(fu
   return { bytes, source: { type: "uri" as const, uri }, start, end, name: path.basename(target), mime: undefined }
 })
 
-const readWorkspaceAttachment = Effect.fn("PromptMaterializer.readWorkspaceAttachment")(function* (
-  location: Location.Ref,
-  environment: Effect.Effect<Environment.Interface>,
-  uri: string,
-) {
+const readWorkspaceAttachment = Effect.fn("PromptMaterializer.readWorkspaceAttachment")(function* (uri: string) {
+  const location = yield* Location.Service
   if (!location.workspaceID)
     return yield* new AttachmentError({
       uri,
@@ -210,8 +191,8 @@ const readWorkspaceAttachment = Effect.fn("PromptMaterializer.readWorkspaceAttac
   const target = path.resolve(location.directory, relative)
   if (!FSUtil.contains(location.directory, target))
     return yield* new AttachmentError({ uri, message: `Workspace attachment escapes the workspace root: ${uri}` })
-  const service = yield* environment
-  const result = yield* service.files.read(target, { offset: 0, length: MAX_ATTACHMENT_BYTES + 1 }).pipe(
+  const environment = yield* Environment.Service
+  const result = yield* environment.files.read(target, { offset: 0, length: MAX_ATTACHMENT_BYTES + 1 }).pipe(
     Effect.mapError(
       (error) =>
         new AttachmentError({
@@ -253,13 +234,7 @@ function decodeDataURL(uri: string) {
 }
 
 function positiveInt(value: string | null) {
-  if (value === null) return
+  if (value === null) return undefined
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
-
-export const node = makeGlobalNode({
-  service: Service,
-  layer,
-  deps: [FSUtil.node, LocationServiceMap.node],
-})

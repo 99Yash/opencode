@@ -25,6 +25,7 @@ import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { Location } from "@opencode-ai/core/location"
 import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Image } from "@opencode-ai/core/image"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
@@ -64,7 +65,7 @@ const execution = Layer.succeed(
 const locations = Layer.effect(
   LocationServiceMap.Service,
   LayerMap.make(
-    () =>
+    (ref) =>
       // These operations resolve Location services lazily and must wait for plugin-projected state.
       // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
       Layer.unwrap(
@@ -80,8 +81,7 @@ const locations = Layer.effect(
             Layer.mock(Snapshot.Service, {
               capture: () =>
                 ready ? Effect.undefined : Effect.die(new Error("Snapshot used before plugins were ready")),
-              restore: () =>
-                ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready")),
+              restore: () => (ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready"))),
             }),
             Layer.succeed(
               PluginSupervisor.Service,
@@ -90,6 +90,14 @@ const locations = Layer.effect(
             Layer.succeed(
               Environment.Service,
               Environment.Service.of({ files: workspaceFiles, spawner: workspaceDriver.spawner }),
+            ),
+            Layer.succeed(
+              Location.Service,
+              Location.Service.of({
+                directory: ref.directory,
+                workspaceID: ref.workspaceID,
+                project: { id: Project.ID.global, directory: ref.directory, canonical: ref.directory },
+              }),
             ),
           )
         }),

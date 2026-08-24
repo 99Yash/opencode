@@ -304,7 +304,6 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
     const fs = yield* FSUtil.Service
-    const promptMaterializer = yield* PromptMaterializer.Service
     const jobs = yield* Job.Service
     const environments = yield* SessionEnvironment.Service
     const scope = yield* Scope.Scope
@@ -586,7 +585,9 @@ const layer = Layer.effect(
             // A staged revert must be committed before admitting new input so the prompt
             // continues from the reverted boundary rather than stale post-boundary history.
             if (session.revert) yield* SessionRevert.commit(session).pipe(Effect.provideService(Bus.Service, bus))
-            const prompt = yield* promptMaterializer.materialize(session.location, input)
+            const prompt = yield* PromptMaterializer.materialize(input, locations.get(session.location)).pipe(
+              Effect.provideService(FSUtil.Service, fs),
+            )
             const messageID = input.id ?? SessionMessage.ID.create()
             const admittedInput = SessionInbox.Item.make({
               type: "user",
@@ -963,7 +964,6 @@ export const node = makeGlobalNode({
     SessionExecution.node,
     SessionStore.node,
     LocationServiceMap.node,
-    PromptMaterializer.node,
     SessionProjector.node,
     FSUtil.node,
     Global.node,
