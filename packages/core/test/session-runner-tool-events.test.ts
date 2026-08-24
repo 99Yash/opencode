@@ -233,6 +233,23 @@ test("reasoning metadata updates completed reasoning state", async () => {
   })
 })
 
+test("reasoning metadata ignores unrelated provider state", async () => {
+  const { published, publisher } = capture("openai")
+  await Effect.runPromise(
+    Effect.forEach(
+      [
+        LLMEvent.reasoningStart({ id: "reasoning" }),
+        LLMEvent.reasoningEnd({ id: "reasoning" }),
+        LLMEvent.reasoningMetadata({ id: "reasoning", providerMetadata: { anthropic: { signature: "ignored" } } }),
+      ],
+      publisher.publish,
+      { discard: true },
+    ),
+  )
+
+  expect(published.some((event) => event.type === "session.reasoning.state.updated.1")).toBe(false)
+})
+
 it.effect("batches text deltas and flushes pending text before the terminal event", () =>
   Effect.gen(function* () {
     const { published, publisher } = capture()

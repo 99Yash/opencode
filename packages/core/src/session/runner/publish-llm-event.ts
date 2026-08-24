@@ -419,11 +419,13 @@ export const createLLMEventPublisher = (bus: Pick<Bus.Interface, "publish">, inp
       case "reasoning-metadata": {
         const ordinal = completedReasoning.get(event.id)
         if (ordinal === undefined) return yield* Effect.die(new Error(`Reasoning metadata before end: ${event.id}`))
+        const state = providerState(event.providerMetadata)
+        if (state === undefined) return
         yield* bus.publish(SessionEvent.Reasoning.StateUpdated, {
           sessionID: input.sessionID,
           assistantMessageID: yield* currentAssistantMessageID(),
           ordinal,
-          state: providerState(event.providerMetadata) ?? {},
+          state,
         })
         return
       }
