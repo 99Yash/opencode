@@ -69,7 +69,7 @@ const opencode = yield * OpenCode.create()
 const session = yield * opencode.sessions.get({ sessionID })
 ```
 
-`OpenCode.create()` starts recovery automatically. When composing an application from Layers, apply `OpenCode.start` to the complete application Layer so registration Layers finish before suspended Sessions resume:
+`OpenCode.create()` and `OpenCode.layer()` start recovery automatically. Use `OpenCode.layerWith()` when plugins come from registration Layers so recovery starts only after those Layers succeed:
 
 ```ts
 import { OpenCode } from "@opencode-ai/sdk/effect"
@@ -83,7 +83,7 @@ const PluginLive = Layer.effectDiscard(
   }),
 )
 
-const ApplicationLive = PluginLive.pipe(Layer.provideMerge(OpenCode.layerDeferred()), OpenCode.start)
+const OpenCodeLive = OpenCode.layerWith(PluginLive)
 ```
 
-Use `OpenCode.layer()` when there are no registration layers; it starts recovery automatically. The Effect Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`, with matching `layerDeferred` and `start` exports.
+The Effect Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`, with a matching `layerWith` export.

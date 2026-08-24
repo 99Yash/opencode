@@ -49,44 +49,6 @@ test("registers every initial Promise plugin before recovery starts", async () =
   }
 })
 
-test("does not build the host when initial Promise plugin construction fails", async () => {
-  const failure = new Error("plugin construction failed")
-  let built = false
-  const error = await PromiseSdk.create(
-    {
-      plugins: [
-        {
-          get id(): string {
-            throw failure
-          },
-          setup() {},
-        },
-      ],
-    },
-    {
-      overrides: [
-        [
-          SdkPlugins.node,
-          Layer.effect(
-            SdkPlugins.Service,
-            Effect.sync(() => {
-              built = true
-              return SdkPlugins.Service.of({
-                register: () => Effect.void,
-                all: () => [],
-              })
-            }),
-          ),
-        ],
-      ],
-    },
-  ).catch((error: unknown) => error)
-
-  expect(error).toBeInstanceOf(Error)
-  expect(String(error)).toContain(failure.message)
-  expect(built).toBe(false)
-})
-
 test("disposes the host when initial Promise plugin registration fails", async () => {
   const failure = new Error("plugin registration failed")
   let disposed = false

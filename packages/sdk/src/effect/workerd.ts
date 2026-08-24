@@ -19,17 +19,16 @@ export const create = (options: CreateOptions) => {
   return OpenCode.create(host.options, host.embed)
 }
 
-export const layer = (options: CreateOptions): Layer.Layer<OpenCode.Service, Config.ConfigError | Error> => {
-  const host = make(options)
-  return OpenCode.layer(host.options, host.embed)
-}
+export const layer = (options: CreateOptions): Layer.Layer<OpenCode.Service, Config.ConfigError | Error> =>
+  layerWith(Layer.empty, options)
 
-export const layerDeferred = (options: CreateOptions): Layer.Layer<OpenCode.Service, Config.ConfigError | Error> => {
+export const layerWith = <E, R>(
+  registration: Layer.Layer<never, E, R>,
+  options: CreateOptions,
+): Layer.Layer<OpenCode.Service, Config.ConfigError | Error | E, Exclude<R, OpenCode.Service>> => {
   const host = make(options)
-  return OpenCode.layerDeferred(host.options, host.embed)
+  return OpenCode.layerWith(registration, host.options, host.embed)
 }
-
-export const start = OpenCode.start
 
 export type Interface = OpenCode.Interface
 export type Requirements = Scope.Scope

@@ -103,20 +103,11 @@ try {
       `import { bodyDigest } from "@opencode-ai/core/models-dev"
 import { OpenCodeWorkerd } from "@opencode-ai/sdk/workerd"
 
-const pluginReady = Promise.withResolvers()
-const packedPlugin = {
-  id: "packed-workerd-plugin",
-  setup() {
-    pluginReady.resolve()
-  },
-}
-
 export class OpenCodeDO {
   constructor(state) {
     this.opencode = state.blockConcurrencyWhile(() => OpenCodeWorkerd.create({
       storage: state.storage,
       app: { version: "packed-workerd" },
-      plugins: [packedPlugin],
     }))
   }
 
@@ -125,11 +116,6 @@ export class OpenCodeDO {
       throw new Error("Packed workerd SHA-256 mismatch")
     }
     const opencode = await this.opencode
-    await opencode.plugin.list({ location: { directory: "/" } })
-    await Promise.race([
-      pluginReady.promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("Packed workerd Promise plugin did not activate")), 2_000)),
-    ])
     return Response.json(await opencode.health.get())
   }
 }

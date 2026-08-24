@@ -461,9 +461,12 @@ it.live("starts recovery after Effect registration layers finish", () =>
           order.push("plugin")
         }),
       )
-      const application = registration.pipe(
-        Layer.provideMerge(fixture.sdk.OpenCode.layerDeferred({}, { overrides: [[SessionRestart.node, restart]] })),
-        fixture.sdk.OpenCode.start,
+      const application = fixture.sdk.OpenCode.layerWith(
+        registration,
+        {},
+        {
+          overrides: [[SessionRestart.node, restart]],
+        },
       )
 
       yield* Layer.build(application)
@@ -500,9 +503,12 @@ it.live("disposes the Effect host when a registration layer fails", () =>
           yield* Effect.fail(new Error("registration failed"))
         }),
       )
-      const application = registration.pipe(
-        Layer.provideMerge(fixture.sdk.OpenCode.layerDeferred({}, { overrides: [[SessionRestart.node, restart]] })),
-        fixture.sdk.OpenCode.start,
+      const application = fixture.sdk.OpenCode.layerWith(
+        registration,
+        {},
+        {
+          overrides: [[SessionRestart.node, restart]],
+        },
       )
 
       const exit = yield* Layer.build(application).pipe(Effect.scoped, Effect.exit)

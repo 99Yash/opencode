@@ -155,16 +155,14 @@ const PluginLive = Layer.effectDiscard(
   }),
 )
 
-const ApplicationLive = PluginLive.pipe(Layer.provideMerge(OpenCode.layerDeferred()), OpenCode.start)
+const OpenCodeLive = OpenCode.layerWith(PluginLive)
 ```
 
-`OpenCode.start` runs after the complete application layer has built. This
-ensures every registration layer succeeds before suspended Sessions resume; if
-registration fails, the host is released without starting recovery. Direct
-`OpenCode.create()` and `OpenCode.layer()` calls start recovery automatically;
-use `layerDeferred` only when registration layers establish the startup
-boundary.
+`OpenCode.layerWith` supplies `OpenCode.Service` to the registration layer and
+starts recovery only after that layer succeeds. If registration fails, the host
+is released without starting recovery. Direct `OpenCode.create()` and
+`OpenCode.layer()` calls start recovery automatically.
 
 The Effect-native Workerd entrypoint is `@opencode-ai/sdk/workerd/effect`; it
-exports matching `Service`, `layerDeferred`, and `start` values for the same
-composition pattern.
+exports matching `Service` and `layerWith` values for the same composition
+pattern.

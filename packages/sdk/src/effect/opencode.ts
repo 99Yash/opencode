@@ -25,15 +25,7 @@ export type Interface = Omit<OpenCodeClient, "plugin" | "workspace"> & {
   readonly plugin: EmbeddedHost.Interface["plugins"]["register"] & OpenCodeClient["plugin"]
 }
 
-const starts = new WeakMap<Interface, Effect.Effect<void>>()
-
-const make: (
-  options?: CreateOptions,
-  embed?: EmbedOptions,
-) => Effect.Effect<Interface, Config.ConfigError | Error, Scope.Scope> = Effect.fn("OpenCode.make")(function* (
-  options: CreateOptions = {},
-  embed: EmbedOptions = {},
-) {
+const make = Effect.fn("OpenCode.make")(function* (options: CreateOptions = {}, embed: EmbedOptions = {}) {
   const host = yield* Effect.acquireRelease(EmbeddedHost.create(options, embed), (host) => Effect.promise(host.close))
   const client = yield* OpenCode.make({ baseUrl: "http://opencode.local" }).pipe(
     Effect.provide(
@@ -41,19 +33,20 @@ const make: (
     ),
   )
 
-  const opencode: Interface = {
-    ...client,
-    sessions: client.session,
-    events: client.event,
-    workspace: {
-      create: ({ provider }: { readonly provider: string }) => host.workspace.create(provider),
-      provision: ({ workspaceID }: { readonly workspaceID: Workspace.ID }) => host.workspace.provision(workspaceID),
-      destroy: ({ workspaceID }: { readonly workspaceID: Workspace.ID }) => host.workspace.destroy(workspaceID),
+  return {
+    opencode: {
+      ...client,
+      sessions: client.session,
+      events: client.event,
+      workspace: {
+        create: ({ provider }: { readonly provider: string }) => host.workspace.create(provider),
+        provision: ({ workspaceID }: { readonly workspaceID: Workspace.ID }) => host.workspace.provision(workspaceID),
+        destroy: ({ workspaceID }: { readonly workspaceID: Workspace.ID }) => host.workspace.destroy(workspaceID),
+      },
+      plugin: Object.assign(host.plugins.register, client.plugin),
     },
-    plugin: Object.assign(host.plugins.register, client.plugin),
+    start: host.start,
   }
-  starts.set(opencode, host.start)
-  return opencode
 })
 
 export const create: (
@@ -63,28 +56,29 @@ export const create: (
   options: CreateOptions = {},
   embed: EmbedOptions = {},
 ) {
-  const opencode = yield* make(options, embed)
-  yield* recovery(opencode)
-  return opencode
+  const host = yield* make(options, embed)
+  yield* host.start
+  return host.opencode
 })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode-ai/sdk/OpenCode") {}
 
-export const layer = (
+export const layer = (options: CreateOptions = {}): Layer.Layer<Service, Config.ConfigError | Error> =>
+  layerWith(Layer.empty, options)
+
+/** Builds a registration layer before starting suspended-session recovery. */
+export const layerWith = <E, R>(
+  registration: Layer.Layer<never, E, R>,
   options: CreateOptions = {},
   embed: EmbedOptions = {},
-): Layer.Layer<Service, Config.ConfigError | Error> => Layer.effect(Service, create(options, embed))
-
-/** Builds a host whose recovery is deferred until `OpenCode.start`. */
-export const layerDeferred = (
-  options: CreateOptions = {},
-  embed: EmbedOptions = {},
-): Layer.Layer<Service, Config.ConfigError | Error> => Layer.effect(Service, make(options, embed))
-
-/** Starts suspended-session recovery after the complete application layer has built. */
-export const start = <A, E, R>(self: Layer.Layer<Service | A, E, R>): Layer.Layer<Service | A, E, R> =>
-  self.pipe(Layer.tap((services: Context.Context<Service>) => recovery(Context.get(services, Service))))
-
-function recovery(opencode: Interface) {
-  return starts.get(opencode) ?? Effect.die(new Error("OpenCode.start requires OpenCode.layerDeferred"))
-}
+): Layer.Layer<Service, Config.ConfigError | Error | E, Exclude<R, Service>> =>
+  Layer.unwrap(
+    make(options, embed).pipe(
+      Effect.map((host) =>
+        registration.pipe(
+          Layer.provideMerge(Layer.succeed(Service, host.opencode)),
+          Layer.tap(() => host.start),
+        ),
+      ),
+    ),
+  )
