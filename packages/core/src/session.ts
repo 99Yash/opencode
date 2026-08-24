@@ -1134,12 +1134,11 @@ const readWorkspaceAttachment = Effect.fn("Session.readWorkspaceAttachment")(fun
   })
   if (url.protocol !== "workspace:" || url.host || !relative || path.isAbsolute(relative))
     return yield* new AttachmentError({ uri, message: `Invalid workspace attachment URI: ${uri}` })
-  const service = yield* workspace.environment
   const target = path.resolve(workspace.root, relative)
-  const within = path.relative(workspace.root, target)
-  if (within === ".." || within.startsWith(`..${path.sep}`) || path.isAbsolute(within))
+  if (!FSUtil.contains(workspace.root, target))
     return yield* new AttachmentError({ uri, message: `Workspace attachment escapes the workspace root: ${uri}` })
-  const result = yield* service.files.read(target).pipe(
+  const service = yield* workspace.environment
+  const result = yield* service.files.read(target, { offset: 0, length: MAX_ATTACHMENT_BYTES + 1 }).pipe(
     Effect.mapError(
       (error) =>
         new AttachmentError({
