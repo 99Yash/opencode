@@ -1,6 +1,7 @@
 export * as Skill from "./skill.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
+import { FSUtil } from "@opencode-ai/util/fs-util"
 import path from "path"
 import { Context, Effect, Layer, Types } from "effect"
 import { Skill } from "@opencode-ai/schema/skill"
@@ -52,7 +53,31 @@ export const toModelOutput = (skill: Info, files: ReadonlyArray<string>) => {
   ].join("\n")
 }
 
-export const find = (skills: ReadonlyArray<Info>, id: ID) => skills.find((skill) => skill.id === id)
+const FILE_LIMIT = 10
+
+export const load = Effect.fn("Skill.load")(function* (fs: FSUtil.Interface, skills: ReadonlyArray<Info>, id: ID) {
+  const skill = skills.find((skill) => skill.id === id)
+  if (!skill) return
+  const directory = path.dirname(skill.location)
+  const files =
+    path.basename(skill.location) === "SKILL.md"
+      ? yield* fs
+          .scan("**/*", { cwd: directory, absolute: true, include: "file", dot: true })
+          .pipe(Effect.orElseSucceed(() => [] as string[]))
+      : []
+  return {
+    id: skill.id,
+    name: skill.name,
+    directory,
+    output: toModelOutput(
+      skill,
+      files
+        .filter((file) => path.basename(file) !== "SKILL.md")
+        .toSorted()
+        .slice(0, FILE_LIMIT),
+    ),
+  }
+})
 
 export type Data = {
   skills: Map<ID, Types.DeepMutable<Info>>

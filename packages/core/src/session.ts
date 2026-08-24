@@ -746,7 +746,7 @@ const layer = Layer.effect(
       skill: Effect.fn("Session.skill")(function* (input) {
         const session = yield* result.get(input.sessionID)
         const skills = yield* Skill.Service.pipe(Effect.provide(locations.get(session.location)))
-        const skill = Skill.find(yield* skills.list(), input.skill)
+        const skill = yield* Skill.load(fs, yield* skills.list(), input.skill)
         if (!skill) return yield* new SkillNotFoundError({ skill: input.skill })
         yield* bus.publish(
           SessionEvent.Skill.Activated,
@@ -754,7 +754,7 @@ const layer = Layer.effect(
             sessionID: input.sessionID,
             id: skill.id,
             name: skill.name,
-            text: Skill.toModelOutput(skill, []),
+            text: skill.output,
           },
           { id: input.id ? Event.ID.make(input.id.replace(/^msg_/, "evt_")) : undefined },
         )
@@ -1001,7 +1001,7 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
     const available = yield* skillService.list()
     const loaded = yield* Effect.forEach(requested, (attachment) =>
       Effect.gen(function* () {
-        const skill = Skill.find(available, attachment.id)
+        const skill = yield* Skill.load(fs, available, attachment.id)
         if (!skill) return yield* new SkillNotFoundError({ skill: attachment.id })
         return { skill, attachment }
       }),
@@ -1015,7 +1015,7 @@ const resolvePrompt = Effect.fn("Session.resolvePrompt")(function* (
       activations: Array.from(new Map(loaded.map((item) => [item.skill.id, item.skill])).values()).map((skill) => ({
         id: skill.id,
         name: skill.name,
-        text: Skill.toModelOutput(skill, []),
+        text: skill.output,
       })),
     }
   })

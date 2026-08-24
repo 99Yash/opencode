@@ -1,7 +1,6 @@
 export * as SkillTool from "./skill.js"
 
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
-import path from "path"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
 import { FSUtil } from "@opencode-ai/util/fs-util"
@@ -9,7 +8,6 @@ import { Skill } from "../../skill.js"
 import { Permission } from "../../permission.js"
 
 export const name = "skill"
-const FILE_LIMIT = 10
 
 export const Input = Schema.Struct({
   id: Skill.ID.annotate({ description: "The ID of an available skill or a skill explicitly referenced by the user" }),
@@ -47,29 +45,21 @@ export const Plugin = {
           output: Output,
           execute: (input, context) =>
             Effect.gen(function* () {
-              const skill = Skill.find(yield* skills.list(), input.id)
-              if (!skill) return yield* unableToLoad(input.id)
+              const loaded = yield* Skill.load(fs, yield* skills.list(), input.id)
+              if (!loaded) return yield* unableToLoad(input.id)
               return yield* Effect.gen(function* () {
                 yield* permission.assert({
                   action: name,
-                  resources: [skill.id],
-                  save: [skill.id],
+                  resources: [loaded.id],
+                  save: [loaded.id],
                   sessionID: context.sessionID,
                   agent: context.agent,
                   source: { type: "tool", messageID: context.messageID, id: context.id },
                 })
-                const directory = path.dirname(skill.location)
-                const files =
-                  path.basename(skill.location) === "SKILL.md"
-                    ? (yield* fs.scan("**/*", { cwd: directory, absolute: true, include: "file", dot: true }))
-                        .filter((file) => path.basename(file) !== "SKILL.md")
-                        .toSorted()
-                        .slice(0, FILE_LIMIT)
-                    : []
                 return {
-                  name: skill.name,
-                  directory,
-                  output: Skill.toModelOutput(skill, files),
+                  name: loaded.name,
+                  directory: loaded.directory,
+                  output: loaded.output,
                 }
               }).pipe(Effect.mapError((error) => unableToLoad(input.id, error)))
             }).pipe(
