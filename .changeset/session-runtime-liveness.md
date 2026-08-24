@@ -1,7 +1,9 @@
 ---
 "@opencode-ai/protocol": minor
 "@opencode-ai/client": minor
+"@opencode-ai/core": minor
 "@opencode-ai/plugin": minor
+"@opencode-ai/schema": minor
 "@opencode-ai/sdk": minor
 ---
 

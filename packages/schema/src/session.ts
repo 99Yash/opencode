@@ -52,6 +52,15 @@ export const Info = Schema.Struct({
   revert: Revert.pipe(optional),
 }).annotate({ identifier: "Session.Info" })
 
+/** Session projection enriched with process-local runtime liveness. */
+export interface GetInfo extends Schema.Schema.Type<typeof GetInfo> {}
+export const GetInfo = Schema.Struct({
+  ...Info.fields,
+  executing: Schema.Boolean.annotate({
+    description: "Whether this OpenCode process is currently executing the session.",
+  }),
+}).annotate({ identifier: "Session.GetInfo" })
+
 export const ListAnchor = Schema.Struct({
   id: ID,
   time: Schema.Finite,

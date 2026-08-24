@@ -203,34 +203,7 @@ export type SessionActiveOutput = { readonly [x: Session.ID]: { readonly type: "
 export type SessionActiveOperation<E = never> = () => Effect.Effect<SessionActiveOutput, E>
 
 export type SessionGetInput = { readonly sessionID: Session.ID }
-export type SessionGetOutput = {
-  readonly id: Session.ID
-  readonly parentID?: Session.ID | undefined
-  readonly fork?: { readonly sessionID: Session.ID; readonly boundary: Session.ForkBoundary } | undefined
-  readonly projectID: Project.ID
-  readonly agent?: Agent.ID | undefined
-  readonly model?: Model.Ref | undefined
-  readonly cost: number & Brand.Brand<"Money.USD">
-  readonly tokens: {
-    readonly input: number
-    readonly output: number
-    readonly reasoning: number
-    readonly cache: { readonly read: number; readonly write: number }
-  }
-  readonly outcome?: "succeeded" | "failed" | "interrupted" | undefined
-  readonly time: {
-    readonly created: DateTime.Utc
-    readonly updated: DateTime.Utc
-    readonly idle?: DateTime.Utc | undefined
-    readonly viewed?: DateTime.Utc | undefined
-    readonly archived?: DateTime.Utc | undefined
-  }
-  readonly title?: string | undefined
-  readonly location: Location.Ref
-  readonly subpath?: RelativePath | undefined
-  readonly revert?: Session.Revert | undefined
-  readonly executing: boolean
-}
+export type SessionGetOutput = Session.GetInfo
 export type SessionGetOperation<E = never> = (input: SessionGetInput) => Effect.Effect<SessionGetOutput, E>
 
 export type SessionRemoveInput = { readonly sessionID: Session.ID }

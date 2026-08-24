@@ -267,6 +267,7 @@ it.live("reports per-session runtime execution status", () =>
             SessionExecution.Service,
             SessionExecution.Service.of({
               active: Effect.succeed(new Set([executing])),
+              isActive: (sessionID) => Effect.succeed(sessionID === executing),
               resume: () => Effect.void,
               wake: () => Effect.void,
               interrupt: () => Effect.succeed(false),

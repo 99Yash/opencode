@@ -82,9 +82,11 @@ describe("SessionRunCoordinator", () => {
         })
 
         expect(Array.from(yield* coordinator.active)).toEqual([])
+        expect(yield* coordinator.isActive("first")).toBe(false)
         const first = yield* coordinator.run("first").pipe(Effect.forkChild)
         yield* Deferred.await(firstStarted)
         expect(Array.from(yield* coordinator.active)).toEqual(["first"])
+        expect(yield* coordinator.isActive("first")).toBe(true)
 
         const second = yield* coordinator.run("second").pipe(Effect.forkChild)
         yield* Deferred.await(secondStarted)
@@ -93,6 +95,7 @@ describe("SessionRunCoordinator", () => {
         yield* Deferred.succeed(firstGate, undefined)
         yield* Fiber.join(first)
         expect(Array.from(yield* coordinator.active)).toEqual(["second"])
+        expect(yield* coordinator.isActive("first")).toBe(false)
         yield* Deferred.succeed(secondGate, undefined)
         yield* Fiber.join(second)
         expect(Array.from(yield* coordinator.active)).toEqual([])

@@ -106,13 +106,6 @@ const SessionActive = Schema.Struct({
   type: Schema.Literal("running"),
 }).annotate({ identifier: "SessionActive" })
 
-const SessionGetInfo = Schema.Struct({
-  ...Session.Info.fields,
-  executing: Schema.Boolean.annotate({
-    description: "Whether this OpenCode process is currently executing the session.",
-  }),
-}).annotate({ identifier: "SessionGetInfo" })
-
 const BooleanFromString = Schema.Literals(["true", "false"]).pipe(
   Schema.decodeTo(Schema.Boolean, {
     decode: SchemaGetter.transform((value) => value === "true"),
@@ -236,7 +229,7 @@ export const makeSessionGroup = <I extends HttpApiMiddleware.AnyId, S>(sessionLo
     .add(
       HttpApiEndpoint.get("session.get", "/api/session/:sessionID", {
         params: { sessionID: Session.ID },
-        success: Schema.Struct({ data: SessionGetInfo }),
+        success: Schema.Struct({ data: Session.GetInfo }),
         error: SessionNotFoundError,
       }).annotateMerge(
         OpenApi.annotations({
