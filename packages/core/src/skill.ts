@@ -55,9 +55,15 @@ export const toModelOutput = (skill: Info, files: ReadonlyArray<string>) => {
 
 const FILE_LIMIT = 10
 
-export const load = Effect.fn("Skill.load")(function* (fs: FSUtil.Interface, skills: ReadonlyArray<Info>, id: ID) {
+export const load = Effect.fn("Skill.load")(function* <E = never, R = never>(
+  fs: FSUtil.Interface,
+  skills: ReadonlyArray<Info>,
+  id: ID,
+  authorize?: (skill: Info) => Effect.Effect<void, E, R>,
+) {
   const skill = skills.find((skill) => skill.id === id)
   if (!skill) return
+  if (authorize) yield* authorize(skill)
   const directory = path.dirname(skill.location)
   const files =
     path.basename(skill.location) === "SKILL.md"
