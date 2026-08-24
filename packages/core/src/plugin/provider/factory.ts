@@ -1,4 +1,4 @@
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import type { AISDKHooks } from "@opencode-ai/plugin/effect/aisdk"
 import { Effect } from "effect"
 

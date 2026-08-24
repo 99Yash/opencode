@@ -6,9 +6,10 @@ import type { Agent } from "@opencode-ai/schema/agent"
 import type { Session } from "@opencode-ai/schema/session"
 import type { SessionMessage } from "@opencode-ai/schema/session-message"
 import type { JsonSchema } from "effect"
-import type { Hooks, Transform } from "./registration.js"
+import type { Hooks, InvocationContext, Transform } from "./registration.js"
 
 export interface ToolContext extends Omit<Tool.Context, "progress"> {
+  readonly signal: AbortSignal
   readonly progress: (update: Tool.Metadata) => Promise<void>
 }
 
@@ -28,7 +29,7 @@ interface ToolDraft {
   ): void
 }
 
-interface ToolHooks {
+export interface ToolHooks {
   readonly "execute.before": {
     readonly tool: string
     readonly inputSchema: JsonSchema.JsonSchema
@@ -56,6 +57,8 @@ interface ToolHooks {
       }
   )
 }
+
+export type BeforeHook = (input: ToolHooks["execute.before"], context: InvocationContext) => Promise<void> | void
 
 export interface ToolDomain {
   readonly transform: Transform<ToolDraft>

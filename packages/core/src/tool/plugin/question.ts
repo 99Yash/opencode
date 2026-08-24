@@ -1,6 +1,6 @@
 export * as QuestionTool from "./question.js"
 
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
 import { Form } from "../../form.js"

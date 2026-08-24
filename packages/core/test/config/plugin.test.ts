@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { pathToFileURL } from "url"
 import { describe, expect } from "bun:test"
-import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
+import { Plugin as EffectPlugin } from "@opencode-ai/core/plugin/definition"
 import { Agent } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { ConfigPluginSource } from "@opencode-ai/core/config/plugin/source"
@@ -146,6 +146,7 @@ describe("PluginSupervisor config", () => {
           "-*",
           path.join(import.meta.dir, "../plugin/fixtures/missing-plugin.ts"),
           path.join(import.meta.dir, "../plugin/fixtures/invalid-plugin.ts"),
+          path.join(import.meta.dir, "../plugin/fixtures/raw-effect-plugin.ts"),
           {
             package: path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts"),
             options: { description: "Loaded after invalid plugins" },
@@ -162,12 +163,14 @@ describe("PluginSupervisor config", () => {
         expect(output).toEqual([
           path.join(import.meta.dir, "../plugin/fixtures/missing-plugin.ts"),
           path.join(import.meta.dir, "../plugin/fixtures/invalid-plugin.ts"),
+          path.join(import.meta.dir, "../plugin/fixtures/raw-effect-plugin.ts"),
         ])
         expect(
           (yield* plugins.list()).filter((plugin) => plugin.status === "failed").map((plugin) => plugin.source),
         ).toEqual([
           { type: "local", path: path.join(import.meta.dir, "../plugin/fixtures/missing-plugin.ts") },
           { type: "local", path: path.join(import.meta.dir, "../plugin/fixtures/invalid-plugin.ts") },
+          { type: "local", path: path.join(import.meta.dir, "../plugin/fixtures/raw-effect-plugin.ts") },
         ])
       }),
     ).pipe(Effect.provide(Logger.layer([logger])))

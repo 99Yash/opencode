@@ -23,11 +23,21 @@ export default Plugin.define({
 })
 ```
 
+`Plugin.define` compiles the definition to OpenCode's Promise plugin contract.
+The adapter runs every Effect, schema conversion, callback, and finalizer with
+the plugin's installed `effect` peer; OpenCode never executes a plugin-created
+Effect with the host runtime.
+
 Plugin setup registers hooks imperatively through each domain's `hook` method.
 
 Configuration supplied for the plugin is available as `ctx.options`.
 
 Registrations are owned by the plugin scope. Closing the scope removes them automatically; a registration may also be removed early through `dispose`.
+
+Tool schemas are converted to detached Standard Schema capabilities before
+registration. Inputs decode from model JSON into the executor type, while
+outputs encode from the executor type back to JSON. The host does not inspect
+or transfer Effect schema ASTs.
 
 ## Transform Hooks
 

@@ -1,6 +1,6 @@
 export * as AgentPlugin from "./agent.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 import { Agent } from "../agent.js"
 import { Permission } from "../permission.js"

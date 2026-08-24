@@ -2,7 +2,7 @@ export * as ShellTool from "./shell.js"
 
 import path from "path"
 import { ToolFailure } from "@opencode-ai/ai"
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { Deferred, Effect, Schema, Scope } from "effect"
 import { Config } from "../../config.js"
 import { Environment } from "../../environment/index.js"

@@ -8,7 +8,7 @@ import { App } from "../../app.js"
 import { Agent } from "../../agent.js"
 import { Integration } from "../../integration.js"
 import { Model } from "../../model.js"
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Provider } from "../../provider.js"
 import type { PluginInternal } from "../internal.js"
 

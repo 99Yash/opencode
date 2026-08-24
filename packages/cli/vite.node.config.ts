@@ -132,20 +132,10 @@ export const Plugin = sdk.Plugin
 export const Provider = sdk.Provider
 export const Reference = sdk.Reference
 export const Skill = sdk.Skill`
-  const effectModule = promiseModule
-    .replace("opencode.plugin.v2.promise", "opencode.plugin.v2.effect")
-    .replace("Promise plugin", "Effect plugin")
   const promisePluginModule = `const sdk = globalThis[Symbol.for("opencode.plugin.v2.promise")]
 if (!sdk) throw new Error("OpenCode Promise plugin SDK is unavailable")
 export const define = sdk.Plugin.define`
-  const effectPluginModule = promisePluginModule
-    .replace("opencode.plugin.v2.promise", "opencode.plugin.v2.effect")
-    .replace("Promise plugin", "Effect plugin")
   const promiseToolModule = `export {}`
-  const effectToolModule = `const sdk = globalThis[Symbol.for("opencode.plugin.v2.effect")]
-if (!sdk) throw new Error("OpenCode Effect plugin SDK is unavailable")
-export const Error = sdk.Tool.Error
-`
   return `#!/usr/bin/env -S node ${nodeExecArgv.join(" ")}
 import __cjs_mod__ from "node:module"
 import { chmodSync as __ocChmod, existsSync as __ocExists, lstatSync as __ocLstat, mkdirSync as __ocMkdir, renameSync as __ocRename, rmSync as __ocRm, writeFileSync as __ocWrite } from "node:fs"
@@ -160,17 +150,11 @@ const __ocPluginModules = ${JSON.stringify({
     "@opencode-ai/plugin": "opencode:plugin-v2",
     "@opencode-ai/plugin/promise/plugin": "opencode:plugin-promise-plugin",
     "@opencode-ai/plugin/promise/tool": "opencode:plugin-promise-tool",
-    "@opencode-ai/plugin/effect": "opencode:plugin-v2-effect",
-    "@opencode-ai/plugin/effect/plugin": "opencode:plugin-v2-effect-plugin",
-    "@opencode-ai/plugin/effect/tool": "opencode:plugin-v2-effect-tool",
   })}
 const __ocPluginSources = ${JSON.stringify({
     "opencode:plugin-v2": promiseModule,
     "opencode:plugin-promise-plugin": promisePluginModule,
     "opencode:plugin-promise-tool": promiseToolModule,
-    "opencode:plugin-v2-effect": effectModule,
-    "opencode:plugin-v2-effect-plugin": effectPluginModule,
-    "opencode:plugin-v2-effect-tool": effectToolModule,
   })}
 __cjs_mod__.registerHooks({
   resolve(__ocSpecifier, __ocContext, __ocNextResolve) {

@@ -6,7 +6,7 @@
  */
 export * as EditTool from "./edit.js"
 
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { ToolFailure } from "@opencode-ai/ai"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { Bom } from "@opencode-ai/util/bom"

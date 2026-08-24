@@ -17,6 +17,7 @@ import type { ToolDomain } from "./tool.js"
 import type { WebSearchDomain } from "./websearch.js"
 
 export interface Context {
+  readonly signal: AbortSignal
   readonly app: App
   readonly options: PluginOptions
   readonly agent: AgentDomain

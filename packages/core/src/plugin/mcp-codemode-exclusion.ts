@@ -1,6 +1,6 @@
 export * as MCPCodeModeExclusionPlugin from "./mcp-codemode-exclusion.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 
 // These servers provide Code Mode, so expose them directly instead of nesting them inside OpenCode Code Mode.

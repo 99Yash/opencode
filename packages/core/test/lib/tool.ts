@@ -4,7 +4,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { toSessionError } from "@opencode-ai/core/session/to-session-error"
 import type { SessionError } from "@opencode-ai/schema/session-error"
 import { Tool } from "@opencode-ai/core/tool"
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { Effect, type Scope } from "effect"
 import { host } from "../plugin/host"
 

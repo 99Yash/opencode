@@ -1,6 +1,6 @@
 export * as CommandPlugin from "./command.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 import { Location } from "../location.js"
 import PROMPT_INITIALIZE from "./command/initialize.txt"

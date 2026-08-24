@@ -1,4 +1,4 @@
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Integration } from "@opencode-ai/schema/integration"
 import { Effect, Stream } from "effect"
 import { Bus } from "../bus.js"

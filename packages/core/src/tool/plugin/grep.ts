@@ -1,6 +1,6 @@
 export * as GrepTool from "./grep.js"
 
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Effect, Schema } from "effect"
 import path from "path"

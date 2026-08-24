@@ -2,7 +2,7 @@
 
 export * as SkillPlugin from "./skill.js"
 
-import { define, type Context } from "@opencode-ai/plugin/effect/plugin"
+import { define, type Context } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 import { AbsolutePath } from "../schema.js"
 import { Skill } from "../skill.js"

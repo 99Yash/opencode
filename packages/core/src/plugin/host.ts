@@ -1,6 +1,6 @@
 export * as PluginHost from "./host.js"
 
-import { Plugin } from "@opencode-ai/plugin/effect"
+import { Plugin } from "@opencode-ai/core/plugin/definition"
 import type { IntegrationMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { EventManifest } from "@opencode-ai/schema/event-manifest"
 import { Mcp } from "@opencode-ai/schema/mcp"

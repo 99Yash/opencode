@@ -1,7 +1,7 @@
 import os from "os"
 import { App } from "../../app.js"
 import { Effect, Option, Schema } from "effect"
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Form } from "@opencode-ai/schema/form"
 import { Provider } from "../../provider.js"
 import { iife } from "../../util/iife.js"

@@ -1,4 +1,4 @@
-export * as Plugin from "./plugin.js"
+export * as Plugin from "./adapter.js"
 export type { StorageEntry, StorageScanOptions, StorageScanResult } from "../storage.js"
 
 export { Agent } from "@opencode-ai/schema/agent"

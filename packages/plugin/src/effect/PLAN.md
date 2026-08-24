@@ -2,7 +2,9 @@
 
 ## Status
 
-This document describes the agreed target design for the V2 plugin system. It is an implementation plan, not documentation for the current API.
+This is a historical implementation plan. It was superseded by the
+Promise/Standard Schema host boundary documented in `../README.md` and
+`README.md`; do not treat the direction or API names below as current design.
 
 ## Goals
 

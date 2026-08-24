@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test"
 import { ToolFailure } from "@opencode-ai/ai"
 import { Context, Effect, Exit, Fiber, Schema, Stream } from "effect"
-import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
+import { Plugin as EffectPlugin } from "@opencode-ai/core/plugin/definition"
 import { Config as ConfigSchema } from "@opencode-ai/schema/config"
 import { Agent } from "@opencode-ai/core/agent"
 import { Bus } from "@opencode-ai/core/bus"

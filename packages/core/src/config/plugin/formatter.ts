@@ -1,6 +1,6 @@
 export * as ConfigFormatterPlugin from "./formatter.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Global } from "@opencode-ai/util/global"
 import { Npm } from "@opencode-ai/util/npm"

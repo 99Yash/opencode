@@ -18,7 +18,7 @@ import {
   Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
-import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
+import { Plugin as EffectPlugin } from "@opencode-ai/core/plugin/definition"
 import { Agent } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"

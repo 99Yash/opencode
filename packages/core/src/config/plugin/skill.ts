@@ -1,6 +1,6 @@
 export * as ConfigSkillPlugin from "./skill.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import type { Entry } from "@opencode-ai/schema/config"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Global } from "@opencode-ai/util/global"

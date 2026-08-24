@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Message, SystemPart } from "@opencode-ai/ai"
-import { DateTime, Effect, Schema } from "effect"
+import { DateTime, Effect, Fiber, Schema } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Model } from "@opencode-ai/core/model"
@@ -25,6 +25,7 @@ import { PluginTestLayer } from "./fixture"
 import { host as testHost } from "./host"
 
 const it = testEffect(PluginTestLayer)
+const EffectPlugin = await import("@opencode-ai/plugin/effect")
 
 describe("fromPromise", () => {
   it.effect("adapts plugin storage methods", () =>
@@ -469,11 +470,11 @@ describe("fromPromise", () => {
       const events: string[] = []
       const promisePlugin = define({
         id: "promise-cleanup",
-        setup: async () => {
+        setup: async (context) => {
           events.push("setup")
           return async () => {
             await Promise.resolve()
-            events.push("cleanup")
+            events.push(context.signal.aborted ? "cleanup-aborted" : "cleanup-active")
           }
         },
       })
@@ -485,7 +486,7 @@ describe("fromPromise", () => {
         }),
       )
 
-      expect(events).toEqual(["setup", "cleanup"])
+      expect(events).toEqual(["setup", "cleanup-aborted"])
     }),
   )
 
@@ -531,6 +532,77 @@ describe("fromPromise", () => {
         content: [{ type: "text", text: "Hello, world!" }],
       })
       expect(progress).toEqual([{ phase: "greeting" }])
+    }),
+  )
+
+  it.effect("runs Effect-authored tool codecs through the Promise boundary", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const registry = yield* Tool.Service
+      const host = yield* PluginHost.make(plugins)
+      const interrupted: string[] = []
+      const effectPlugin = EffectPlugin.Plugin.define({
+        id: "effect-tool",
+        effect: (context) =>
+          context.tool.transform((tools) =>
+            tools.add({
+              name: "increment",
+              options: { codemode: false },
+              description: "Increment",
+              input: Schema.FiniteFromString,
+              output: Schema.FiniteFromString,
+              execute: (input) => {
+                if (input === 42) {
+                  return Effect.fail(
+                    new Tool.Error({ message: "cannot increment 42", metadata: { reason: "reserved" } }),
+                  )
+                }
+                if (input === 43) {
+                  return Effect.sync(() => interrupted.push("started")).pipe(
+                    Effect.andThen(Effect.never),
+                    Effect.ensuring(Effect.sync(() => interrupted.push("finalized"))),
+                  )
+                }
+                return Effect.succeed({ output: input + 1 })
+              },
+            }),
+          ),
+      })
+
+      yield* PluginPromise.fromPromise(effectPlugin).effect(host)
+
+      expect(
+        yield* (yield* registry.snapshot()).execute({
+          sessionID: Session.ID.make("ses_effect_tool"),
+          agent: Agent.ID.make("build"),
+          messageID: SessionMessage.ID.make("msg_effect_tool"),
+          progress: () => Effect.void,
+          call: { type: "tool-call", id: "call_effect_tool", name: "increment", input: "41" },
+        }),
+      ).toMatchObject({ output: "42" })
+      expect(
+        yield* Effect.flip(
+          (yield* registry.snapshot()).execute({
+            sessionID: Session.ID.make("ses_effect_tool"),
+            agent: Agent.ID.make("build"),
+            messageID: SessionMessage.ID.make("msg_effect_tool_error"),
+            progress: () => Effect.void,
+            call: { type: "tool-call", id: "call_effect_tool_error", name: "increment", input: "42" },
+          }),
+        ),
+      ).toMatchObject({ _tag: "Tool.Error", message: "cannot increment 42", metadata: { reason: "reserved" } })
+      const execution = yield* (yield* registry.snapshot())
+        .execute({
+          sessionID: Session.ID.make("ses_effect_tool"),
+          agent: Agent.ID.make("build"),
+          messageID: SessionMessage.ID.make("msg_effect_tool_interrupt"),
+          progress: () => Effect.void,
+          call: { type: "tool-call", id: "call_effect_tool_interrupt", name: "increment", input: "43" },
+        })
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      while (interrupted.length === 0) yield* Effect.yieldNow
+      yield* Fiber.interrupt(execution)
+      expect(interrupted).toEqual(["started", "finalized"])
     }),
   )
 

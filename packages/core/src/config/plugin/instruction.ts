@@ -1,6 +1,6 @@
 export * as ConfigInstructionPlugin from "./instruction.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Global } from "@opencode-ai/util/global"
 import { dirname, join } from "path"

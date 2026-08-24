@@ -1,9 +1,10 @@
 import { Tool } from "@opencode-ai/schema/tool"
-import { Effect, Schema, SchemaAST, Scope, Stream } from "effect"
-import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
-import { define } from "../effect/plugin.js"
+import { Effect, Option, Schema, Scope, Stream } from "effect"
+import { HttpApiEndpoint } from "effect/unstable/httpapi"
+import type { Plugin as EffectPlugin } from "../effect/plugin.js"
+import { endpointSchemas } from "../effect/endpoint-schema.js"
 import type { Context, Plugin } from "./plugin.js"
-import type { Info } from "./tool.js"
+import type { BeforeHook, Info } from "./tool.js"
 
 type HostRegistration = { readonly dispose: Effect.Effect<void> }
 type Registration = { readonly dispose: () => Promise<void> }
@@ -20,52 +21,27 @@ const compiledEndpoints = new WeakMap<object, CompiledEndpoint>()
 function compileEndpoint(endpoint: HttpApiEndpoint.Top) {
   const cached = compiledEndpoints.get(endpoint)
   if (cached) return cached
-  const payloadSchemas = Array.from(endpoint.payload.values()).flatMap(({ schemas }) => schemas)
-  const successSchemas = Array.from(endpoint.success)
-  if (payloadSchemas.length > 1 || successSchemas.length > 1) {
-    throw new Error(`Unsupported API schema cardinality: ${endpoint.identifier}`)
-  }
-  const inputs = [
-    endpoint.params,
-    endpoint.query === undefined ? undefined : Schema.toType(endpoint.query),
-    endpoint.headers,
-    ...payloadSchemas,
-  ].filter((schema): schema is Schema.Top => schema !== undefined) as Array<RuntimeSchema>
-  const success = (successSchemas[0] ?? HttpApiSchema.NoContent) as RuntimeSchema
-  const noContent = HttpApiSchema.isNoContent(success.ast)
-  const type = Schema.toType(success).ast
-  const data = SchemaAST.isObjects(success.ast)
-    ? success.ast.propertySignatures.find((property) => property.name === "data")
-    : undefined
-  const output =
-    !noContent &&
-    SchemaAST.isObjects(type) &&
-    type.indexSignatures.length === 0 &&
-    type.propertySignatures.length === 1 &&
-    type.propertySignatures[0]?.name === "data" &&
-    data !== undefined
-      ? (Schema.make<Schema.Top>(data.type) as RuntimeSchema)
-      : success
+  const schemas = endpointSchemas(endpoint)
   const compiled = {
-    decode: inputs.map((schema) => Schema.decodeUnknownEffect(schema)),
-    encode: Schema.encodeUnknownEffect(output),
-    noContent,
+    decode: schemas.inputs.map((schema) => Schema.decodeUnknownEffect(schema)),
+    encode: Schema.encodeUnknownEffect(schemas.output),
+    noContent: schemas.noContent,
   } satisfies CompiledEndpoint
   compiledEndpoints.set(endpoint, compiled)
   return compiled
 }
 
 /**
- * Adapts a Promise plugin into an Effect plugin so the existing Effect-only
- * loader (`Plugin` / `PluginSupervisor`) can run it unchanged.
+ * Adapts the runtime-neutral Promise contract into Core's internal Effect
+ * plugin representation.
  *
  * Hook registrations created during the async `setup` attach to the plugin's
  * scope, so unloading the plugin disposes them. The captured fiber context
  * preserves boot-time batching, so Promise-plugin transforms still coalesce
  * into one reload per domain.
  */
-export function fromPromise(plugin: Plugin) {
-  return define({
+export function fromPromise(plugin: Plugin): EffectPlugin {
+  return {
     id: plugin.id,
     tui: plugin.tui,
     effect: (host) =>
@@ -100,13 +76,15 @@ export function fromPromise(plugin: Plugin) {
           method: (input: never) => Effect.Effect<unknown, unknown>,
         ) => {
           const compiled = compileEndpoint(endpoint)
-          return ((input?: unknown) =>
+          return ((input?: unknown, requestOptions?: { readonly signal?: AbortSignal }) =>
             Effect.gen(function* () {
               const decoded = yield* Effect.forEach(compiled.decode, (decode) => decode(input ?? {}))
               const result = yield* method(Object.assign({}, ...decoded) as never)
               if (compiled.noContent) return undefined
               return yield* compiled.encode(result)
-            }).pipe(Effect.runPromiseWith(context))) as PromiseMethod
+            }).pipe((effect) =>
+              Effect.runPromiseWith(context)(effect, { signal: requestOptions?.signal }),
+            )) as PromiseMethod
         }
 
         const transform =
@@ -120,7 +98,7 @@ export function fromPromise(plugin: Plugin) {
               }),
             )
 
-        const context2: Context = {
+        const context2: Omit<Context, "signal"> = {
           app: host.app,
           options: host.options,
           agent: {
@@ -132,7 +110,11 @@ export function fromPromise(plugin: Plugin) {
           aisdk: {
             hook: (name, callback, options) =>
               register(
-                host.aisdk.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))), options),
+                host.aisdk.hook(
+                  name,
+                  (event) => attempt((signal) => Promise.resolve(callback(event, { signal }))).pipe(Effect.orDie),
+                  options,
+                ),
               ),
           },
           catalog: {
@@ -280,8 +262,21 @@ export function fromPromise(plugin: Plugin) {
                   }),
                 ),
               ),
-            hook: (name, callback) =>
-              register(host.tool.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))))),
+            hook: (name, callback) => {
+              if (name === "execute.before") {
+                const before = callback as BeforeHook
+                return register(
+                  host.tool.hook("execute.before", (event) =>
+                    attemptTool((signal) => Promise.resolve(before(event, { signal }))),
+                  ),
+                )
+              }
+              return register(
+                host.tool.hook(name, (event) =>
+                  attempt((signal) => Promise.resolve(callback(event, { signal }))).pipe(Effect.orDie),
+                ),
+              )
+            },
           },
           websearch: {
             providers: adaptApiMethod(WebSearchEndpoints["websearch.providers"], host.websearch.providers),
@@ -305,7 +300,11 @@ export function fromPromise(plugin: Plugin) {
           session: {
             hook: (name, callback, options) =>
               register(
-                host.session.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))), options),
+                host.session.hook(
+                  name,
+                  (event) => attempt((signal) => Promise.resolve(callback(event, { signal }))).pipe(Effect.orDie),
+                  options,
+                ),
               ),
             create: adaptApiMethod(SessionEndpoints["session.create"], host.session.create),
             get: adaptApiMethod(SessionEndpoints["session.get"], host.session.get),
@@ -321,27 +320,45 @@ export function fromPromise(plugin: Plugin) {
           },
           shell: {
             hook: (name, callback) =>
-              register(host.shell.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))))),
+              register(
+                host.shell.hook(name, (event) =>
+                  attempt((signal) => Promise.resolve(callback(event, { signal }))).pipe(Effect.orDie),
+                ),
+              ),
           },
         }
 
-        const cleanup = yield* Effect.promise(() => Promise.resolve(plugin.setup(context2)))
-        if (!cleanup) return
-        yield* Effect.addFinalizer(() => Effect.promise(() => Promise.resolve(cleanup())))
+        const controller = new AbortController()
+        const cleanup = yield* attempt((signal) => {
+          signal.addEventListener("abort", () => controller.abort(), { once: true })
+          return Promise.resolve(plugin.setup({ ...context2, signal: controller.signal }))
+        }).pipe(Effect.orDie)
+        if (cleanup) yield* Effect.addFinalizer(() => Effect.promise(() => Promise.resolve(cleanup())))
+        yield* Effect.addFinalizer(() => Effect.sync(() => controller.abort()))
       }),
-  })
+  }
 }
 
 function attempt<A>(evaluate: (signal: AbortSignal) => PromiseLike<A>) {
   return Effect.tryPromise({ try: evaluate, catch: (cause) => cause })
 }
 
-type RuntimeSchema = Schema.Codec<unknown, unknown>
+function attemptTool<A>(evaluate: (signal: AbortSignal) => PromiseLike<A>) {
+  return Effect.tryPromise({
+    try: evaluate,
+    catch: (cause) =>
+      Option.getOrElse(
+        Schema.decodeUnknownOption(Tool.Error)(cause),
+        () => new Tool.Error({ message: cause instanceof Error ? cause.message : String(cause), error: cause }),
+      ),
+  })
+}
 
 const executePromiseTool = (tool: Info, input: any, context: Tool.Context) =>
-  Effect.promise(() =>
+  attemptTool((signal) =>
     tool.execute(input, {
       ...context,
+      signal,
       progress: (update) => Effect.runPromise(context.progress(update)),
     }),
   )

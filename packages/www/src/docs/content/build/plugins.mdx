@@ -171,11 +171,9 @@ when the plugin is disabled, reloaded, or shut down:
 
 ```ts
 setup: async (ctx) => {
-  const controller = new AbortController()
-  const task = synchronize(ctx, controller.signal)
+  const task = synchronize(ctx, ctx.signal)
 
   return async () => {
-    controller.abort()
     await task
   }
 }
@@ -183,7 +181,9 @@ setup: async (ctx) => {
 
 Hook registrations are released automatically with the same plugin scope. Use
 the returned cleanup for resources the plugin owns, such as timers, watchers,
-connections, and background tasks.
+connections, and background tasks. `ctx.signal` is aborted before cleanup runs.
+Runtime hooks receive an invocation signal as their second callback argument,
+and tool executors receive it on their context.
 
 ### Context
 
@@ -489,6 +489,14 @@ fibers, and registrations are released when the plugin reloads or unloads.
 OpenCode does not expose its private Core services to the plugin; use the
 capabilities on `ctx`.
 
+`Plugin.define` compiles this authoring API to the same Promise contract used by
+other plugins. Effects, callbacks, scopes, and schema conversion stay inside the
+plugin's installed Effect runtime; OpenCode receives Promise capabilities and
+detached Standard Schema implementations. This means the plugin and OpenCode do
+not need to share one physical `effect` package instance.
+
 Typed tools can use `Schema` from `effect`. Effect and Promise plugins use the
 same `tools.add(name, tool, options?)` registration shape. Effect executors
-return an Effect and may fail with the typed tool failure channel.
+return an Effect and may fail with the typed tool failure channel. Input schemas
+decode model JSON before execution; output schemas encode executor values after
+execution.

@@ -1,6 +1,6 @@
 export * as SdkPlugins from "./sdk.js"
 
-import type { Plugin } from "@opencode-ai/plugin/effect/plugin"
+import type { Plugin } from "@opencode-ai/core/plugin/definition"
 import { Context, Effect, Layer } from "effect"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { Bus } from "../bus.js"

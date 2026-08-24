@@ -25,13 +25,13 @@
     "@opencode-ai/protocol": "workspace:*",
     "@opencode-ai/schema": "workspace:*",
     "@standard-schema/spec": "catalog:",
-    "effect": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {
     "@opencode-ai/theme": "workspace:*",
     "@opentui/core": ">=0.5.8",
     "@opentui/solid": ">=0.5.8",
+    "effect": "catalog:",
     "solid-js": ">=1.9.0"
   },
   "peerDependenciesMeta": {
@@ -42,6 +42,9 @@
       "optional": true
     },
     "@opentui/solid": {
+      "optional": true
+    },
+    "effect": {
       "optional": true
     },
     "solid-js": {
@@ -55,6 +58,7 @@
     "@tsconfig/bun": "catalog:",
     "@tsconfig/node22": "catalog:",
     "@types/node": "catalog:",
+    "effect": "catalog:",
     "solid-js": "catalog:",
     "typescript": "catalog:",
     "@typescript/native-preview": "catalog:"

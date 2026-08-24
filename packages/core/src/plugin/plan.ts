@@ -1,7 +1,7 @@
 export * as PlanPlugin from "./plan.js"
 
 import { Message, ToolFailure } from "@opencode-ai/ai"
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Global } from "@opencode-ai/util/global"
 import { Effect, Stream } from "effect"
 import path from "path"

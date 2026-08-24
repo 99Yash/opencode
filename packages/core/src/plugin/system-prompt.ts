@@ -1,6 +1,6 @@
 export * as SystemPromptPlugin from "./system-prompt.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 
 import PROMPT_ANTHROPIC from "./system-prompt/anthropic.txt"

@@ -1,7 +1,7 @@
 export * as SubagentTool from "./subagent.js"
 
 import { ToolFailure } from "@opencode-ai/ai"
-import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
+import type { Context as PluginContext } from "@opencode-ai/core/plugin/definition"
 import { Effect, Schema, Scope } from "effect"
 import { Agent } from "../../agent.js"
 import { Config } from "../../config.js"

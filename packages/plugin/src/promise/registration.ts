@@ -7,14 +7,18 @@ export interface ModelHookOptions {
   readonly providerID?: string
 }
 
+export interface InvocationContext {
+  readonly signal: AbortSignal
+}
+
 export type Hooks<Spec> = <Name extends keyof Spec>(
   name: Name,
-  callback: (input: Spec[Name]) => Promise<void> | void,
+  callback: (input: Spec[Name], context: InvocationContext) => Promise<void> | void,
 ) => Promise<Registration>
 
 export type ModelHooks<Spec> = <Name extends keyof Spec>(
   name: Name,
-  callback: (input: Spec[Name]) => Promise<void> | void,
+  callback: (input: Spec[Name], context: InvocationContext) => Promise<void> | void,
   options?: ModelHookOptions,
 ) => Promise<Registration>
 

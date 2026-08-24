@@ -1,6 +1,6 @@
 export * as PluginInternal from "./internal.js"
 
-import type { Plugin } from "@opencode-ai/plugin/effect/plugin"
+import type { Plugin } from "@opencode-ai/core/plugin/definition"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
 import { AppProcess } from "@opencode-ai/util/process"

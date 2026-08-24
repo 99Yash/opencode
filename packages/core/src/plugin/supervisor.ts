@@ -1,9 +1,8 @@
 export * as PluginSupervisor from "./supervisor.js"
 export { Service, type Interface } from "./supervisor-service.js"
 
-import type { Plugin as PluginDefinition } from "@opencode-ai/plugin/effect/plugin"
 import { Event } from "@opencode-ai/schema/config"
-import { Cause, Effect, Latch, Layer, Schema, Stream } from "effect"
+import { Cause, Effect, Latch, Layer, Predicate, Schema, Stream } from "effect"
 import path from "path"
 import { pathToFileURL } from "url"
 import { ConfigPluginSource } from "../config/plugin/source.js"
@@ -18,22 +17,13 @@ import { importModule } from "@opencode-ai/util/runtime-import"
 import { Service } from "./supervisor-service.js"
 
 const PluginModule = Schema.Struct({
-  default: Schema.Union([
-    Schema.Struct({
-      id: Schema.String,
-      tui: Schema.optional(Schema.Boolean),
-      effect: Schema.declare<PluginDefinition["effect"]>(
-        (input): input is PluginDefinition["effect"] => typeof input === "function",
-      ),
-    }),
-    Schema.Struct({
-      id: Schema.String,
-      tui: Schema.optional(Schema.Boolean),
-      setup: Schema.declare<Parameters<typeof PluginPromise.fromPromise>[0]["setup"]>(
-        (input): input is Parameters<typeof PluginPromise.fromPromise>[0]["setup"] => typeof input === "function",
-      ),
-    }),
-  ]),
+  default: Schema.Struct({
+    id: Schema.String,
+    tui: Schema.optional(Schema.Boolean),
+    setup: Schema.declare<Parameters<typeof PluginPromise.fromPromise>[0]["setup"]>(
+      (input): input is Parameters<typeof PluginPromise.fromPromise>[0]["setup"] => typeof input === "function",
+    ),
+  }),
 })
 
 const resolve = Effect.fn("PluginSupervisor.resolve")(function* (
@@ -119,8 +109,18 @@ const load = Effect.fn("PluginSupervisor.load")(function* (
         : `${entrypoint}?mtime=${operation.mtime}`
   yield* Effect.log({ msg: "loading plugin", id: operation.target, entrypoint: source })
   const mod = yield* Effect.promise(() => importModule(source))
+  if (
+    Predicate.isObject(mod) &&
+    Predicate.isObject(mod.default) &&
+    "effect" in mod.default &&
+    !("setup" in mod.default)
+  ) {
+    return yield* Effect.fail(
+      new Error("Effect plugins must be exported through Plugin.define from @opencode-ai/plugin/effect"),
+    )
+  }
   const value = (yield* Schema.decodeUnknownEffect(PluginModule)(mod)).default
-  const plugin = "effect" in value ? value : PluginPromise.fromPromise(value)
+  const plugin = PluginPromise.fromPromise(value)
   return {
     id: plugin.id,
     tui: plugin.tui,

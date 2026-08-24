@@ -10,8 +10,10 @@ import { Provider } from "@opencode-ai/schema/provider"
 import { Reference } from "@opencode-ai/schema/reference"
 import { Skill } from "@opencode-ai/schema/skill"
 import { WebSearch } from "@opencode-ai/schema/websearch"
+import { Effect } from "effect"
 
 const Plugin = await import("../src/effect/index")
+const EffectPlugin = await import("../src/effect/plugin")
 const PromisePlugin = await import("../src/promise/index")
 const TuiPlugin = await import("../src/tui/index")
 
@@ -44,6 +46,15 @@ test.each([
     "Skill",
     "WebSearch",
   ])
+})
+
+test("effect definitions compile to the Promise plugin ABI", () => {
+  const plugin = Plugin.Plugin.define({ id: "effect", effect: () => Effect.void })
+  const subpath = EffectPlugin.define({ id: "effect-subpath", effect: () => Effect.void })
+  expect(plugin).toHaveProperty("setup")
+  expect(plugin).not.toHaveProperty("effect")
+  expect(subpath).toHaveProperty("setup")
+  expect(subpath).not.toHaveProperty("effect")
 })
 
 test("tui entrypoint exposes the plugin definition", () => {

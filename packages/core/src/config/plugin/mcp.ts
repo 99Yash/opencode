@@ -1,6 +1,6 @@
 export * as ConfigMCPPlugin from "./mcp.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Document, type Entry } from "@opencode-ai/schema/config"
 import { Mcp } from "@opencode-ai/schema/mcp"
 import { Effect, Stream } from "effect"

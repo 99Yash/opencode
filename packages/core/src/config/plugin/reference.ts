@@ -1,6 +1,6 @@
 export * as ConfigReferencePlugin from "./reference.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Document } from "@opencode-ai/schema/config"
 import { ConfigReference } from "@opencode-ai/schema/config/reference"
 import path from "path"

@@ -1,11 +1,15 @@
 # OpenCode V2 Promise Plugin API
 
-The Promise plugin API at `@opencode-ai/plugin` is the async/await equivalent of `@opencode-ai/plugin/effect`. It grants plugins the same two in-process capabilities:
+The Promise plugin API at `@opencode-ai/plugin` is OpenCode's runtime-neutral
+plugin contract. The Effect entrypoint compiles its authoring API to this same
+contract before the plugin reaches OpenCode. It grants plugins two in-process
+capabilities:
 
 - `hook` installs behavior at an OpenCode extension point.
 - `reload` reruns every transform hook for a stateful domain.
 
-The only difference from the Effect API is the async boundary: hook callbacks, hook registration, `reload`, and `Registration.dispose` use Promises instead of Effects.
+Hook callbacks, hook registration, `reload`, and `Registration.dispose` use
+Promises. No Effect runtime values are part of this boundary.
 
 ## Defining A Plugin
 
@@ -56,6 +60,11 @@ await ctx.agent.transform((agent) => {
   })
 })
 ```
+
+`ctx.signal` is aborted when setup is interrupted or the plugin unloads. Runtime
+hook callbacks receive the invocation signal as their second argument, and tool
+executors receive it on their context, so asynchronous work can stop with the
+host operation.
 
 Available transform hooks are namespaced by domain:
 

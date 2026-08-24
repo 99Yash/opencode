@@ -1,6 +1,6 @@
 export * as ConfigSnapshotPlugin from "./snapshot.js"
 
-import { define } from "@opencode-ai/plugin/effect/plugin"
+import { define } from "@opencode-ai/core/plugin/definition"
 import { Effect } from "effect"
 import { Config } from "../../config.js"
 import { Snapshot } from "../../snapshot.js"
