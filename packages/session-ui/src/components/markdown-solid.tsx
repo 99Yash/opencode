@@ -3,7 +3,14 @@ import { createStore, reconcile } from "solid-js/store"
 import { Dynamic, render } from "solid-js/web"
 
 type MarkdownNode =
-  | { key: string; type: "element"; tag: string; attributes: Record<string, string>; children: MarkdownNode[] }
+  | {
+      key: string
+      type: "element"
+      tag: string
+      attributes: Record<string, string>
+      children: MarkdownNode[]
+      animate?: true
+    }
   | { key: string; type: "text"; text: string }
   | { key: string; type: "word"; text: string; animate?: true }
 
@@ -38,8 +45,12 @@ function MarkdownDomNode(props: { node: MarkdownNode; animate: () => boolean }) 
       </span>
     )
   }
+  let ref: HTMLElement | undefined
+  onMount(() => {
+    if (props.animate() && node.animate) ref?.setAttribute("data-markdown-enter", "")
+  })
   return (
-    <Dynamic component={node.tag} {...node.attributes}>
+    <Dynamic component={node.tag} ref={ref} {...node.attributes}>
       <For each={node.children}>{(node) => <MarkdownDomNode node={node} animate={props.animate} />}</For>
     </Dynamic>
   )
@@ -68,6 +79,9 @@ function parseNode(node: Node, key: string, words: boolean, animate: boolean): M
       tag: node.tagName.toLowerCase(),
       attributes: Object.fromEntries(Array.from(node.attributes).map((attribute) => [attribute.name, attribute.value])),
       children: Array.from(node.childNodes).flatMap((child, index) => parseNode(child, `${key}.${index}`, words, animate)),
+      ...(words && animate && node.tagName === "CODE" && node.parentElement?.tagName !== "PRE"
+        ? { animate: true as const }
+        : {}),
     },
   ]
 }
