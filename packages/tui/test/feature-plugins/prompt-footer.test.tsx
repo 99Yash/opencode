@@ -8,6 +8,7 @@ import { PromptFooter } from "../../src/feature-plugins/prompt/footer"
 test("prompt footer separates simultaneous subagent, shell, and usage status", async () => {
   const color = RGBA.fromInts(200, 200, 200)
   const subdued = RGBA.fromInts(100, 100, 100)
+  const warning = RGBA.fromInts(220, 180, 90)
   const dispatched: string[] = []
   const context = {
     location: { directory: "/workspace" },
@@ -15,6 +16,7 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
       text: {
         default: color,
         subdued,
+        feedback: { warning: { default: warning } },
       },
     },
     keymap: {
@@ -29,6 +31,10 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
         get: () => ({ id: "session", location: { directory: "/workspace" } }),
         cost: () => 1,
         message: { list: () => [] },
+        permission: { list: (id: string) => (id === "child" ? [{ id: "permission-child" }] : []) },
+        form: {
+          list: (id: string) => (id === "child" ? [{ id: "question-child", metadata: { kind: "question" } }] : []),
+        },
       },
       shell: {
         list: () => [{ metadata: { sessionID: "session" } }],
@@ -45,7 +51,7 @@ test("prompt footer separates simultaneous subagent, shell, and usage status", a
 
   try {
     await app.renderOnce()
-    expect(app.captureCharFrame()).toContain("ctrl+j 1 subagent · 1 shell · $1.00")
+    expect(app.captureCharFrame()).toContain("ctrl+j 1 subagent · 1 approval · 1 question · 1 shell · $1.00")
     expect(app.captureCharFrame()).toContain("ctrl+p commands")
 
     await app.mockMouse.moveTo(2, 0)

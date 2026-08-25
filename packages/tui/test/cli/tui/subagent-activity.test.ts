@@ -1,4 +1,3 @@
-/** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import type {
   FormInfo,
@@ -7,16 +6,7 @@ import type {
   SessionMessageAssistant,
   SessionMessageAssistantTool,
 } from "@opencode-ai/client"
-import { testRender } from "@opentui/solid"
-import { ConfigProvider } from "../../../src/config"
-import { ThemeProvider } from "../../../src/context/theme"
-import {
-  collectSubagentActivity,
-  subagentActive,
-  SubagentActivityDock,
-  type SubagentActivity,
-} from "../../../src/routes/session/subagent-activity"
-import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
+import { collectSubagentActivity, subagentActive } from "../../../src/routes/session/subagent-activity"
 
 const now = 1_000_000
 
@@ -167,66 +157,4 @@ test("shows provider retries as actionable subagent activity", () => {
   ])
   expect(subagentActive("retry")).toBeTrue()
   expect(subagentActive("completed")).toBeFalse()
-})
-
-test("renders actionable subagents before completed work", async () => {
-  const entries: SubagentActivity[] = [
-    {
-      sessionID: "completed",
-      agent: "Explore",
-      title: "Map auth flow",
-      prefix: "",
-      status: "completed",
-      activity: "Completed",
-      tools: 5,
-      started: now,
-      ended: now + 4000,
-      background: false,
-      cost: 0,
-    },
-    {
-      sessionID: "blocked",
-      agent: "General",
-      title: "Review migration",
-      prefix: "",
-      status: "permission",
-      activity: "Approval: shell git diff",
-      tools: 2,
-      started: now,
-      background: true,
-      cost: 0,
-    },
-  ]
-  const selected: Array<string | undefined> = []
-  const app = await testRender(
-    () => (
-      <ConfigProvider config={createTuiResolvedConfig()}>
-        <ThemeProvider mode="dark" source={{ discover: async () => ({}) }}>
-          <SubagentActivityDock
-            entries={entries}
-            width={100}
-            shortcut="down"
-            onOpen={(sessionID) => selected.push(sessionID)}
-          />
-        </ThemeProvider>
-      </ConfigProvider>
-    ),
-    { width: 100, height: 8 },
-  )
-
-  try {
-    app.renderer.start()
-    await app.waitForFrame((frame) => frame.includes("Subagents"))
-    const frame = app.captureCharFrame()
-    expect(frame).toContain("1 needs input")
-    expect(frame).toContain("Review migration")
-    expect(frame).toContain("background")
-    expect(frame).toContain("Approval: shell git diff")
-    expect(frame.indexOf("Review migration")).toBeLessThan(frame.indexOf("Map auth flow"))
-
-    await app.mockMouse.click(8, 3)
-    expect(selected).toEqual(["blocked"])
-  } finally {
-    app.renderer.destroy()
-  }
 })
