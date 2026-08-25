@@ -46,7 +46,7 @@ export interface Resolved {
 
 // Keep this filesystem-only; permission checks use it and should not execute VCS commands.
 export const root = Effect.fn("Project.root")(function* (fs: FSUtil.Interface, input: AbsolutePath) {
-  return yield* fs.up({ targets: [".git", ".hg"], start: input, mode: "first" }).pipe(
+  return yield* fs.up({ targets: [".git", ".hg", ".jj"], start: input, mode: "first" }).pipe(
     Effect.map((matches) => (matches[0] ? AbsolutePath.make(path.dirname(matches[0])) : undefined)),
     Effect.orElseSucceed(() => undefined),
   )
@@ -105,7 +105,7 @@ const layer = Layer.effect(
         directories.push({
           projectID: project.id,
           directory: project.directory,
-          strategy: project.vcs.type === "git" ? "git" : undefined,
+          strategy: project.vcs.type === "git" && project.vcs.workspace !== "jj" ? "git" : undefined,
         })
       // A missing directory row means this directory's resolution is a new durable
       // fact (copy.ts registers copy directories directly; those never strand
@@ -264,24 +264,71 @@ const layer = Layer.effect(
       }
     })
 
+    const jjDiscover = Effect.fnUntraced(function* (input: AbsolutePath) {
+      const metadata = yield* fs.up({ targets: [".jj"], start: input, mode: "first" }).pipe(
+        Effect.map((matches) => matches[0]),
+        Effect.orElseSucceed(() => undefined),
+      )
+      if (!metadata) return undefined
+      const directory = yield* fs.realPath(path.dirname(metadata)).pipe(
+        Effect.map((value) => AbsolutePath.make(value)),
+        Effect.orElseSucceed(() => AbsolutePath.make(path.dirname(metadata))),
+      )
+      const reference = path.join(metadata, "repo")
+      const pointer = yield* fs.readFileString(reference).pipe(Effect.orElseSucceed(() => undefined))
+      const target = pointer === undefined ? reference : path.resolve(metadata, pointer.trim())
+      const store = yield* fs.realPath(target).pipe(
+        Effect.map((value) => AbsolutePath.make(value)),
+        Effect.orElseSucceed(() => AbsolutePath.make(target)),
+      )
+      return { directory, store, canonical: AbsolutePath.make(path.dirname(path.dirname(store))) }
+    })
+
     const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
-      const repo = yield* git.repo.discover(input)
-      if (repo) {
-        const previous = yield* cached(repo.commonDirectory)
-        const id = (yield* remote(repo)) ?? previous ?? (yield* rootCommit(repo))
-        const canonical =
-          repo.gitDirectory === repo.commonDirectory
-            ? repo.worktree
-            : yield* git.worktree.list(repo).pipe(
-                Effect.map((items) => items.find((item) => item.kind === "main")?.directory ?? repo.worktree),
-                Effect.orElseSucceed(() => repo.worktree),
+      const [repo, discovered] = yield* Effect.all([git.repo.discover(input), jjDiscover(input)], { concurrency: 2 })
+      const jj =
+        discovered &&
+        repo &&
+        repo.worktree !== discovered.directory &&
+        FSUtil.contains(discovered.directory, repo.worktree)
+          ? undefined
+          : discovered
+      const backing = jj && (!repo || repo.worktree !== jj.directory) ? yield* git.repo.discover(jj.canonical) : repo
+      const selected =
+        jj && backing?.worktree !== jj.canonical && backing?.worktree !== jj.directory ? undefined : backing
+      if (selected) {
+        const previous = yield* cached(selected.commonDirectory)
+        const id = (yield* remote(selected)) ?? previous ?? (yield* rootCommit(selected))
+        const workspace = jj && jj.directory !== selected.worktree
+        const canonical = workspace
+          ? selected.worktree
+          : selected.gitDirectory === selected.commonDirectory
+            ? selected.worktree
+            : yield* git.worktree.list(selected).pipe(
+                Effect.map((items) => items.find((item) => item.kind === "main")?.directory ?? selected.worktree),
+                Effect.orElseSucceed(() => selected.worktree),
               )
         return yield* persist({
           previous,
           id: id ?? ID.global,
-          directory: repo.worktree,
+          directory: workspace ? jj.directory : selected.worktree,
           canonical,
-          vcs: { type: "git" as const, store: repo.commonDirectory },
+          vcs: {
+            type: "git" as const,
+            store: selected.commonDirectory,
+            ...(workspace ? { workspace: "jj" as const } : {}),
+          },
+        })
+      }
+
+      if (jj) {
+        const previous = yield* cached(jj.store)
+        return yield* persist({
+          previous,
+          id: previous ?? ID.make(Hash.fast(`jj-repository:${jj.store}`)),
+          directory: jj.directory,
+          canonical: jj.canonical,
+          vcs: { type: "jj" as const, store: jj.store },
         })
       }
 
