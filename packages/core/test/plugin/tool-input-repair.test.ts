@@ -368,7 +368,7 @@ describe("tool input repair plugin", () => {
     }),
   )
 
-  it.effect("selects union branches using numeric ranges and string patterns", () =>
+  it.effect("repairs numeric unions while preserving explicitly accepted strings", () =>
     Effect.gen(function* () {
       const event = yield* run(
         { minimum: "2", maximum: "8", exclusiveMinimum: "3", exclusiveMaximum: "7", pattern: "42" },
@@ -401,7 +401,7 @@ describe("tool input repair plugin", () => {
         }),
       )
 
-      expect(event.input).toEqual({ minimum: 2, maximum: 8, exclusiveMinimum: 3, exclusiveMaximum: 7, pattern: 42 })
+      expect(event.input).toEqual({ minimum: 2, maximum: 8, exclusiveMinimum: 3, exclusiveMaximum: 7, pattern: "42" })
     }),
   )
 
