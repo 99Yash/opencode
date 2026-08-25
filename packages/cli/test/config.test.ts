@@ -4,6 +4,7 @@ import { Global } from "@opencode-ai/util/global"
 import { Effect, FileSystem, Option } from "effect"
 import { expect, test } from "bun:test"
 import { parse } from "jsonc-parser"
+import { lstat, symlink } from "node:fs/promises"
 import path from "path"
 import { Config } from "../src/config"
 
@@ -474,6 +475,107 @@ test("updates a config draft while preserving JSONC comments", async () => {
       mini: { thinking: "hide", shell_output: "hide", turn_summary: "hide", splash: "hide", mono: true },
     })
     expect(await Bun.file(path.join(directory, "cli.json")).text()).toContain("// Keep this comment")
+  } finally {
+    await Bun.$`rm -rf ${directory}`
+  }
+})
+
+test.each(["relative", "absolute"])("updates a %s symlinked cli config without replacing it", async (kind) => {
+  const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
+  const file = path.join(directory, "cli.json")
+  const target = path.join(directory, "dotfiles", "cli.json")
+  await Bun.write(target, '{\n  // Keep this comment\n  "animations": true\n}\n')
+  await symlink(kind === "relative" ? path.relative(directory, target) : target, file)
+
+  try {
+    const config = await run(
+      directory,
+      Effect.gen(function* () {
+        const service = yield* Config.Service
+        return yield* service.update((draft) => {
+          draft.mouse = false
+        })
+      }),
+    )
+
+    expect(config).toEqual({ animations: true, mouse: false })
+    expect((await lstat(file)).isSymbolicLink()).toBe(true)
+    expect(parse(await Bun.file(target).text())).toEqual({ animations: true, mouse: false })
+    expect(await Bun.file(target).text()).toContain("// Keep this comment")
+    expect(await Array.fromAsync(new Bun.Glob("*.tmp").scan(path.dirname(target)))).toEqual([])
+  } finally {
+    await Bun.$`rm -rf ${directory}`
+  }
+})
+
+test.each(["relative", "absolute"])("migrates a %s symlinked cli config without replacing it", async (kind) => {
+  const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
+  const file = path.join(directory, "cli.json")
+  const target = path.join(directory, "dotfiles", "cli.json")
+  await Bun.write(target, '{\n  // Keep this comment\n  "keybinds": {"session_delete": "ctrl+d"}\n}\n')
+  await symlink(kind === "relative" ? path.relative(directory, target) : target, file)
+
+  try {
+    const config = await run(
+      directory,
+      Effect.gen(function* () {
+        const service = yield* Config.Service
+        return yield* service.get()
+      }),
+    )
+
+    expect(config.keybinds).toEqual({ "session.delete": "ctrl+d" })
+    expect((await lstat(file)).isSymbolicLink()).toBe(true)
+    expect(parse(await Bun.file(target).text()).keybinds).toEqual({ "session.delete": "ctrl+d" })
+    expect(await Bun.file(target).text()).toContain("// Keep this comment")
+    expect(await Array.fromAsync(new Bun.Glob("*.tmp").scan(path.dirname(target)))).toEqual([])
+  } finally {
+    await Bun.$`rm -rf ${directory}`
+  }
+})
+
+test("fails to update a broken cli config symlink without replacing it", async () => {
+  const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
+  const file = path.join(directory, "cli.json")
+  await symlink("missing.json", file)
+
+  try {
+    await expect(
+      run(
+        directory,
+        Effect.gen(function* () {
+          const service = yield* Config.Service
+          return yield* service.update((draft) => {
+            draft.mouse = false
+          })
+        }),
+      ),
+    ).rejects.toThrow("Failed to update CLI config")
+    expect((await lstat(file)).isSymbolicLink()).toBe(true)
+    expect(await Bun.file(path.join(directory, "missing.json")).exists()).toBe(false)
+  } finally {
+    await Bun.$`rm -rf ${directory}`
+  }
+})
+
+test("fails to migrate through a broken cli config symlink without replacing it", async () => {
+  const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
+  const file = path.join(directory, "cli.json")
+  await Bun.write(path.join(directory, "tui.json"), JSON.stringify({ theme: "legacy" }))
+  await symlink("missing.json", file)
+
+  try {
+    const config = await run(
+      directory,
+      Effect.gen(function* () {
+        const service = yield* Config.Service
+        return yield* service.get()
+      }),
+    )
+
+    expect(config.theme).toEqual({ name: "legacy" })
+    expect((await lstat(file)).isSymbolicLink()).toBe(true)
+    expect(await Bun.file(path.join(directory, "missing.json")).exists()).toBe(false)
   } finally {
     await Bun.$`rm -rf ${directory}`
   }
