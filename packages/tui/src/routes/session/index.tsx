@@ -100,6 +100,7 @@ import {
 import { switchLabel } from "../../util/model"
 import { findMessageBoundary, messageNavigationSlack } from "./message-navigation"
 import { stringWidth } from "../../util/string-width"
+import { sessionDescendants } from "../../util/session"
 import { useArgs } from "../../context/args"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
 import { useSessionTabs } from "../../context/session-tabs"
@@ -190,24 +191,18 @@ export function Session(props: { verticalTabsWidth: number }) {
     setEpilogue(sessionEpilogue({ title, sessionID: session()?.id }))
   })
   onCleanup(() => setEpilogue())
-  const descendantSessionIDs = createMemo(() => {
-    if (session()?.parentID) return []
-    return data.session.family(route.sessionID).filter((id) => id !== route.sessionID)
-  })
-  const permissions = createMemo(() => {
-    if (session()?.parentID) return []
-    return [route.sessionID, ...descendantSessionIDs()].flatMap(
-      (sessionID) => data.session.permission.list(sessionID) ?? [],
-    )
-  })
+  const descendantSessionIDs = createMemo(() =>
+    session() ? sessionDescendants(data.session.list(), route.sessionID).map((item) => item.id) : [],
+  )
+  const permissions = createMemo(() =>
+    [route.sessionID, ...descendantSessionIDs()].flatMap((sessionID) => data.session.permission.list(sessionID) ?? []),
+  )
   const promptedPermissions = createMemo(() => (local.permission.mode === "auto" ? [] : permissions()))
-  const forms = createMemo(() => {
-    const global = data.session.form.list("global", location()) ?? []
-    if (session()?.parentID) return global
-    return [route.sessionID, ...descendantSessionIDs()]
+  const forms = createMemo(() =>
+    [route.sessionID, ...descendantSessionIDs()]
       .flatMap((sessionID) => data.session.form.list(sessionID) ?? [])
-      .concat(global)
-  })
+      .concat(data.session.form.list("global", location()) ?? []),
+  )
   const pendingUsers = createMemo(() =>
     data.session.pending.list(route.sessionID).flatMap((item) => (item.type === "user" ? [item] : [])),
   )
@@ -220,6 +215,7 @@ export function Session(props: { verticalTabsWidth: number }) {
     tab: undefined as string | undefined,
   })
   const disabled = createMemo(() => promptedPermissions().length > 0 || forms().length > 0)
+  const composerVisible = createMemo(() => !disabled() && (composer.open || !!session()?.parentID))
 
   const lastAssistant = createMemo(() => {
     return messages().findLast((x) => x.type === "assistant")
@@ -308,7 +304,11 @@ export function Session(props: { verticalTabsWidth: number }) {
     on([descendantSessionIDs, () => client.connection.status()], ([sessionIDs, status]) => {
       if (status !== "connected") return
       void Promise.allSettled(
-        sessionIDs.flatMap((sessionID) => [data.session.permission.sync(sessionID), data.session.form.sync(sessionID)]),
+        sessionIDs.flatMap((sessionID) => [
+          data.session.sync(sessionID, { children: true }),
+          data.session.permission.sync(sessionID),
+          data.session.form.sync(sessionID),
+        ]),
       )
     }),
   )
@@ -1287,12 +1287,12 @@ export function Session(props: { verticalTabsWidth: number }) {
               <Slot path="session.composer.top" input={{ sessionID: route.sessionID }} />
               <Composer
                 sessionID={route.sessionID}
-                open={composer.open || (!!session()?.parentID && forms().length === 0)}
+                open={composerVisible()}
                 defaultTab={composer.tab ?? (session()?.parentID ? "subagents" : undefined)}
                 onClose={() => setComposer("open", false)}
               />
               <Switch>
-                <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
+                <Match when={composerVisible()}>{null}</Match>
                 <Match when={promptedPermissions().length > 0}>
                   <Show when={promptedPermissions()[0]?.id} keyed>
                     {(_) => {

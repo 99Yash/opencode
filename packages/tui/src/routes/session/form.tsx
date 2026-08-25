@@ -19,6 +19,7 @@ import { useToast } from "../../ui/toast"
 import { Keymap } from "../../context/keymap"
 import { useConfig } from "../../config"
 import { errorMessage } from "../../util/error"
+import { subagentLabel } from "../../util/session"
 import {
   formCustom,
   formDisplayValue,
@@ -51,6 +52,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   const config = useConfig().data
   const clipboard = useClipboard()
   const toast = useToast()
+  const owner = createMemo(() => {
+    const session = data.session.get(props.form.sessionID)
+    return session?.parentID ? session : undefined
+  })
   const configuredFields = props.form.fields.filter(isFormAnswerField)
   const initial = formInitialValues(props.form.fields)
 
@@ -740,6 +745,13 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <box paddingLeft={1}>
           <text fg={theme.text.subdued}>{props.form.title}</text>
+          <Show when={owner()}>
+            {(current) => (
+              <text fg={theme.text.subdued} wrapMode="none" truncate>
+                {subagentLabel(current())}
+              </text>
+            )}
+          </Show>
         </box>
         <Show when={message()}>
           <box paddingLeft={1}>
