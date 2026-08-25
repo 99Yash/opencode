@@ -42,6 +42,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@opencode-ai/sdk#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "@opencode-ai/function#test": {
       "outputs": []
     },
