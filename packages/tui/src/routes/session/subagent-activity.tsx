@@ -273,6 +273,11 @@ export function SubagentActivityDock(props: {
             <text fg={theme.text.default} flexGrow={1} minWidth={0} wrapMode="none" truncate>
               {entry.title}
             </text>
+            <Show when={entry.background}>
+              <text fg={theme.text.subdued} flexShrink={0} wrapMode="none">
+                {props.width >= 90 ? "background" : "bg"}
+              </text>
+            </Show>
             <Show when={props.width >= 72}>
               <text
                 fg={color(entry)}

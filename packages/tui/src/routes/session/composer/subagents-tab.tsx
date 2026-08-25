@@ -255,6 +255,7 @@ export function SubagentsTab(props: { sessionID: string }) {
                     </text>
                   </box>
                   <text fg={color()} maxWidth={38} flexShrink={1} wrapMode="none" truncate>
+                    {entry.background ? "bg · " : ""}
                     {entry.status === "running" && entry.activity !== "Starting"
                       ? entry.activity
                       : subagentStatusLabel(entry.status)}

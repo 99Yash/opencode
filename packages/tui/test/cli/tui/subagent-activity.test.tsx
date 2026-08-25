@@ -220,6 +220,7 @@ test("renders actionable subagents before completed work", async () => {
     const frame = app.captureCharFrame()
     expect(frame).toContain("1 needs input")
     expect(frame).toContain("Review migration")
+    expect(frame).toContain("background")
     expect(frame).toContain("Approval: shell git diff")
     expect(frame.indexOf("Review migration")).toBeLessThan(frame.indexOf("Map auth flow"))
 

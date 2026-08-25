@@ -236,7 +236,6 @@ export function Session(props: { verticalTabsWidth: number }) {
   const activeSubagents = createMemo(() => subagents().filter((item) => subagentActive(item.status)))
   const visibleSubagentIDs = createMemo(() =>
     activeSubagents()
-      .slice(0, 8)
       .map((item) => item.sessionID)
       .join("\n"),
   )
@@ -354,7 +353,11 @@ export function Session(props: { verticalTabsWidth: number }) {
   createEffect(
     on([visibleSubagentIDs, () => client.connection.status()], ([sessionIDs, status]) => {
       if (status !== "connected" || !sessionIDs) return
-      void Promise.allSettled(sessionIDs.split("\n").map((sessionID) => data.session.message.sync(sessionID)))
+      void (async () => {
+        const pending = sessionIDs.split("\n")
+        while (pending.length > 0)
+          await Promise.allSettled(pending.splice(0, 8).map((sessionID) => data.session.message.sync(sessionID)))
+      })()
     }),
   )
 
