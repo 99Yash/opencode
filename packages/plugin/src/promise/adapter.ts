@@ -131,7 +131,6 @@ export function fromPromise(plugin: Plugin) {
             get: adaptApiMethod(AgentEndpoints["agent.get"], host.agent.get),
             list: adaptApiMethod(AgentEndpoints["agent.list"], host.agent.list),
             transform: transform(host.agent),
-            invalidate: () => run(host.agent.invalidate()),
             reload: () => run(host.agent.reload()),
           },
           aisdk: {
@@ -150,7 +149,6 @@ export function fromPromise(plugin: Plugin) {
               default: adaptApiMethod(ModelEndpoints["model.default"], host.catalog.model.default),
             },
             transform: transform(host.catalog),
-            invalidate: () => run(host.catalog.invalidate()),
             reload: () => run(host.catalog.reload()),
           },
           command: {
@@ -168,7 +166,6 @@ export function fromPromise(plugin: Plugin) {
                   }),
                 ),
               ),
-            invalidate: () => run(host.command.invalidate()),
             reload: () => run(host.command.reload()),
           },
           event: {
@@ -255,7 +252,6 @@ export function fromPromise(plugin: Plugin) {
                   }),
                 ),
               ),
-            invalidate: () => run(host.integration.invalidate()),
             reload: () => run(host.integration.reload()),
             connection: {
               active: (id) => Effect.runPromiseWith(context)(host.integration.connection.active(id)),
@@ -269,7 +265,6 @@ export function fromPromise(plugin: Plugin) {
             connect: adaptApiMethod(McpEndpoints["mcp.connect"], host.mcp.connect),
             disconnect: adaptApiMethod(McpEndpoints["mcp.disconnect"], host.mcp.disconnect),
             transform: transform(host.mcp),
-            invalidate: () => run(host.mcp.invalidate()),
             reload: () => run(host.mcp.reload()),
           },
           permission: {
@@ -285,13 +280,11 @@ export function fromPromise(plugin: Plugin) {
           reference: {
             list: adaptApiMethod(ReferenceEndpoints["reference.list"], host.reference.list),
             transform: transform(host.reference),
-            invalidate: () => run(host.reference.invalidate()),
             reload: () => run(host.reference.reload()),
           },
           skill: {
             list: adaptApiMethod(SkillEndpoints["skill.list"], host.skill.list),
             transform: transform(host.skill),
-            invalidate: () => run(host.skill.invalidate()),
             reload: () => run(host.skill.reload()),
           },
           storage: {
@@ -343,7 +336,6 @@ export function fromPromise(plugin: Plugin) {
           websearch: {
             providers: adaptApiMethod(WebSearchEndpoints["websearch.providers"], host.websearch.providers),
             query: adaptApiMethod(WebSearchEndpoints["websearch.query"], host.websearch.query),
-            invalidate: () => run(host.websearch.invalidate()),
             reload: () => run(host.websearch.reload()),
             transform: (callback) =>
               register(
