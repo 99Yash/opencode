@@ -1,21 +1,25 @@
 import { createMemo, For, Show, createEffect, onMount, onCleanup } from "solid-js"
 import { createStore } from "solid-js/store"
 import { TextAttributes, ScrollBoxRenderable } from "@opentui/core"
+import type { SessionInfo } from "@opencode-ai/client"
 import { useRoute, useRouteData } from "../../../context/route"
 import { useData } from "../../../context/data"
 import { useClient } from "../../../context/client"
 import { useTheme } from "../../../context/theme"
+import { Locale } from "../../../util/locale"
 import { Keymap } from "../../../context/keymap"
-import { Spinner } from "../../../component/spinner"
-import {
-  collectSubagentActivity,
-  subagentActive,
-  subagentStatusLabel,
-  type SubagentActivity,
-} from "../subagent-activity"
 import { useComposerTab } from "./index"
+import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
+import { sessionFamily } from "../../../util/session"
 
-type SubagentEntry = SubagentActivity & { current: boolean }
+interface SubagentEntry {
+  sessionID: string
+  agent: string
+  title: string
+  status: string
+  current: boolean
+  prefix: string
+}
 
 export function SubagentsTab(props: { sessionID: string }) {
   const route = useRouteData("session")
@@ -33,16 +37,26 @@ export function SubagentsTab(props: { sessionID: string }) {
     const current = session()
     if (!current) return []
 
-    return collectSubagentActivity({
-      sessionID: current.id,
-      sessions: data.session.list(),
-      messages: (sessionID) => data.session.message.list(sessionID),
-      status: (sessionID) => data.session.status(sessionID),
-      permissions: (sessionID) => data.session.permission.list(sessionID),
-      forms: (sessionID) => data.session.form.list(sessionID),
-    })
-      .map((entry) => ({ ...entry, current: entry.sessionID === route.sessionID }))
-      .filter((entry) => (store.active ? subagentActive(entry.status) : !subagentActive(entry.status)))
+    const result = sessionFamily<SessionInfo>(data.session.list(), current.id).map(
+      ({ session, prefix }): SubagentEntry => {
+        const title = withTimestampedFallback(session)
+        const agentMatch = title.match(/@(\w+) subagent/)
+        return {
+          sessionID: session.id,
+          agent: session.agent
+            ? Locale.titlecase(session.agent)
+            : agentMatch
+              ? Locale.titlecase(agentMatch[1])
+              : "Subagent",
+          title: agentMatch ? title.replace(agentMatch[0], "").trim() || title : title,
+          status: data.session.status(session.id),
+          current: session.id === route.sessionID,
+          prefix,
+        }
+      },
+    )
+
+    return result.filter((entry) => (store.active ? entry.status === "running" : entry.status !== "running"))
   })
 
   let selectedSessionID = ""
@@ -103,7 +117,7 @@ export function SubagentsTab(props: { sessionID: string }) {
       hints: () => {
         const entry = selectedEntry()
         return [
-          ...(entry && data.session.status(entry.sessionID) === "running"
+          ...(entry?.status === "running"
             ? [{ label: "interrupt", shortcut: shortcuts.get("composer.subagent.interrupt") ?? "" }]
             : []),
           {
@@ -172,7 +186,7 @@ export function SubagentsTab(props: { sessionID: string }) {
         group: "Composer",
         run() {
           const entry = selectedEntry()
-          if (!entry || data.session.status(entry.sessionID) !== "running") return
+          if (!entry || entry.status !== "running") return
           void client.api.session.interrupt({ sessionID: entry.sessionID })
         },
       },
@@ -189,19 +203,15 @@ export function SubagentsTab(props: { sessionID: string }) {
           <For each={entries()}>
             {(entry, index) => {
               const active = createMemo(() => index() === store.selected)
-              const color = createMemo(() => {
-                if (active()) return theme.text.action.primary.focused
-                if (entry.status === "permission" || entry.status === "question" || entry.status === "retry")
-                  return theme.text.feedback.warning.default
-                if (entry.status === "error") return theme.text.feedback.error.default
-                return theme.text.subdued
+              const status = createMemo(() => {
+                if (entry.status === "running") return "Running"
+                return ""
               })
               return (
                 <box
                   flexDirection="row"
                   paddingLeft={1}
                   paddingRight={1}
-                  gap={1}
                   backgroundColor={
                     active()
                       ? theme.background.action.primary.focused
@@ -215,28 +225,6 @@ export function SubagentsTab(props: { sessionID: string }) {
                     navigate({ type: "session", sessionID: entry.sessionID })
                   }}
                 >
-                  <box width={2} flexShrink={0}>
-                    <Show
-                      when={entry.status === "running" || entry.status === "starting"}
-                      fallback={
-                        <text fg={color()}>
-                          {entry.status === "permission"
-                            ? "△"
-                            : entry.status === "question"
-                              ? "?"
-                              : entry.status === "retry"
-                                ? "↻"
-                                : entry.status === "error"
-                                  ? "!"
-                                  : entry.status === "completed"
-                                    ? "✓"
-                                    : "○"}
-                        </text>
-                      }
-                    >
-                      <Spinner color={color()} />
-                    </Show>
-                  </box>
                   <box flexGrow={1} minWidth={0} flexDirection="row">
                     <text
                       fg={
@@ -248,18 +236,16 @@ export function SubagentsTab(props: { sessionID: string }) {
                       }
                       attributes={active() ? TextAttributes.BOLD : undefined}
                       wrapMode="none"
-                      truncate
                     >
                       {entry.prefix}
                       {entry.agent}: {entry.title}
                     </text>
                   </box>
-                  <text fg={color()} maxWidth={38} flexShrink={1} wrapMode="none" truncate>
-                    {entry.background ? "bg · " : ""}
-                    {entry.status === "running" && entry.activity !== "Starting"
-                      ? entry.activity
-                      : subagentStatusLabel(entry.status)}
-                  </text>
+                  <Show when={status()}>
+                    <text fg={active() ? theme.text.action.primary.focused : theme.text.subdued} wrapMode="none">
+                      {status()}
+                    </text>
+                  </Show>
                 </box>
               )
             }}

@@ -256,22 +256,6 @@ describe("internal notifications TUI plugin", () => {
     ])
   })
 
-  test("notifies when a subagent fails", async () => {
-    const harness = await setup()
-
-    harness.emit(executionStarted("event-1", "subagent"))
-    harness.emit(executionFailed("event-2", "subagent"))
-
-    expect(harness.notifications).toEqual([
-      {
-        title: "Subagent session",
-        message: "boom",
-        notification: { when: "blurred" },
-        sound: { name: "error", when: "always" },
-      },
-    ])
-  })
-
   test("notifies session errors once and suppresses the following idle done notification", async () => {
     const harness = await setup()
 

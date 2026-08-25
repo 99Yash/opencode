@@ -216,11 +216,6 @@ export function Session(props: { verticalTabsWidth: number }) {
       return promptedPermissions().findIndex((item) => item.id === current.request.id) + 1
     return promptedPermissions().length + forms().findIndex((item) => item.id === current.request.id) + 1
   })
-  const visibleSubagentIDs = createMemo(() =>
-    descendantSessionIDs()
-      .filter((sessionID) => data.session.status(sessionID) === "running")
-      .join("\n"),
-  )
   const pendingUsers = createMemo(() =>
     data.session.pending.list(route.sessionID).flatMap((item) => (item.type === "user" ? [item] : [])),
   )
@@ -328,17 +323,6 @@ export function Session(props: { verticalTabsWidth: number }) {
           data.session.form.sync(sessionID),
         ]),
       )
-    }),
-  )
-
-  createEffect(
-    on([visibleSubagentIDs, () => client.connection.status()], ([sessionIDs, status]) => {
-      if (status !== "connected" || !sessionIDs) return
-      void (async () => {
-        const pending = sessionIDs.split("\n")
-        while (pending.length > 0)
-          await Promise.allSettled(pending.splice(0, 8).map((sessionID) => data.session.message.sync(sessionID)))
-      })()
     }),
   )
 

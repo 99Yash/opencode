@@ -10,7 +10,7 @@ function notify(
 ) {
   const session = sessionID ? context.data.session.get(sessionID) : undefined
   const isSubagent = session?.parentID !== undefined
-  const actionable = sound === "permission" || sound === "question" || sound === "error"
+  const actionable = sound === "permission" || sound === "question"
   void context.attention.notify({
     title: title ?? session?.title,
     message,

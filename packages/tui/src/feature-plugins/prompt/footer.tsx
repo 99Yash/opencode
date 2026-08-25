@@ -18,19 +18,6 @@ export function PromptFooter(props: { context: Plugin.Context; sessionID?: strin
       .filter((id) => id !== props.sessionID && props.context.data.session.status(id) === "running").length
     return count ? `${count} subagent${count === 1 ? "" : "s"}` : undefined
   })
-  const attention = createMemo(() => {
-    if (!props.sessionID) return []
-    const sessions = props.context.data.session.family(props.sessionID).filter((id) => id !== props.sessionID)
-    const permissions = sessions.flatMap((id) => props.context.data.session.permission.list(id) ?? []).length
-    const forms = sessions.flatMap((id) => props.context.data.session.form.list(id) ?? [])
-    const questions = forms.filter((form) => form.metadata?.kind === "question").length
-    const input = forms.length - questions
-    return [
-      permissions ? `${permissions} approval${permissions === 1 ? "" : "s"}` : undefined,
-      questions ? `${questions} question${questions === 1 ? "" : "s"}` : undefined,
-      input ? `${input} input${input === 1 ? "" : "s"}` : undefined,
-    ].filter((item): item is string => Boolean(item))
-  })
   const shells = createMemo(() => {
     if (!props.sessionID) return 0
     const count = props.context.data.shell
@@ -77,12 +64,6 @@ export function PromptFooter(props: { context: Plugin.Context; sessionID?: strin
                       {(value) => <span style={{ fg: props.context.theme.text.default }}>{value()} </span>}
                     </Show>
                     <Show when={subagents()}>{(value) => <>{value()}</>}</Show>
-                    <Show when={attention().length > 0}>
-                      <span style={{ fg: props.context.theme.text.feedback.warning.default }}>
-                        {" · "}
-                        {attention().join(" · ")}
-                      </span>
-                    </Show>
                     <Show when={subagents() && shells()}> · </Show>
                     <Show when={shells()}>{(value) => <>{value()}</>}</Show>
                   </text>
