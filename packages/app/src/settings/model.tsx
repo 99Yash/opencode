@@ -386,12 +386,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
 
 export function migrateSettings(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value
-  const general = "general" in value ? value.general : undefined
-  if (general && typeof general === "object" && !Array.isArray(general) && "followUpBehavior" in general) return value
+  const settings = value as Partial<Settings>
+  if (settings.general?.followUpBehavior) return value
   return {
-    ...value,
+    ...settings,
     general: {
-      ...(general && typeof general === "object" && !Array.isArray(general) ? general : {}),
+      ...settings.general,
       followUpBehavior: "steer",
     },
   }
