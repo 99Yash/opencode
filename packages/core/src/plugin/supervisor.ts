@@ -16,6 +16,7 @@ import { PluginInternal } from "./internal.js"
 import { SdkPlugins } from "./sdk.js"
 import { importModule } from "@opencode-ai/util/runtime-import"
 import { Service } from "./supervisor-service.js"
+import "#plugin-imports"
 
 const PluginModule = Schema.Struct({
   default: Schema.Union([

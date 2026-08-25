@@ -95,6 +95,50 @@ describe("PluginSupervisor config", () => {
     ),
   )
 
+  it.live("loads plugins without local runtime packages", () =>
+    withLocation(
+      { plugins: ["-*", "./promise.ts", "./effect.ts"] },
+      Effect.gen(function* () {
+        yield* ready()
+        const plugins = yield* Plugin.Service
+        expect((yield* plugins.list()).map((plugin) => String(plugin.id))).toEqual([
+          "host-plugin-package",
+          "host-effect-packages",
+        ])
+      }),
+      false,
+      (directory) =>
+        Promise.all([
+          fs.writeFile(
+            path.join(directory, "promise.ts"),
+            `import { Plugin } from "@opencode-ai/plugin"
+import { fromPromise } from "@opencode-ai/plugin/promise/adapter"
+
+export default Plugin.define({
+  id: "host-plugin-package",
+  setup() {
+    if (typeof fromPromise !== "function") throw new Error("missing Promise adapter")
+  },
+})
+`,
+          ),
+          fs.writeFile(
+            path.join(directory, "effect.ts"),
+            `import { Plugin } from "@opencode-ai/plugin/effect/index"
+import { Effect } from "effect"
+
+export default Plugin.define({
+  id: "host-effect-packages",
+  effect() {
+    return Effect.void
+  },
+})
+`,
+          ),
+        ]).then(() => undefined),
+    ),
+  )
+
   it.live("disables configured plugins by exported ID", () => {
     const plugin = path.join(import.meta.dir, "../plugin/fixtures/config-promise-plugin.ts")
     return withLocation(

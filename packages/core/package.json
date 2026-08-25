@@ -29,6 +29,10 @@
     "./*": "./src/*.ts"
   },
   "imports": {
+    "#plugin-imports": {
+      "bun": "./src/plugin/imports.bun.ts",
+      "default": "./src/plugin/imports.noop.ts"
+    },
     "#sqlite": {
       "workerd": "./src/database/sqlite.workerd.ts",
       "bun": "./src/database/sqlite.bun.ts",
