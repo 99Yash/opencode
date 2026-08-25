@@ -18,11 +18,13 @@ import {
   Stream,
 } from "effect"
 import { TestClock } from "effect/testing"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { LayerNodePlatform } from "@opencode-ai/util/effect/app-node-platform"
 import { Global } from "@opencode-ai/util/global"
 import { LocationServiceMap, type LocationServices } from "@opencode-ai/core/location-services"
 import { LocationActivity } from "@opencode-ai/core/location-activity"
@@ -51,6 +53,40 @@ import { Tool } from "../src/tool"
 const it = testEffect(
   AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, LocationServiceMap.node]), [
     [Global.node, tempGlobalLayer],
+  ]),
+)
+const consoleRequests: Array<{ url: string; authorization: string | undefined }> = []
+const itWithConsole = testEffect(
+  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, LocationServiceMap.node]), [
+    [Global.node, tempGlobalLayer],
+    [
+      LayerNodePlatform.httpClient,
+      Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            consoleRequests.push({ url: request.url, authorization: request.headers.authorization })
+            if (request.url !== "https://opencode.ai/console/api/config") {
+              return HttpClientResponse.fromWeb(request, new Response("Not found", { status: 404 }))
+            }
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                config: {
+                  provider: {
+                    "console-openai-test": {
+                      name: "Console OpenAI",
+                      npm: "@ai-sdk/openai-compatible",
+                      models: { "solstice-alpha": { name: "Solstice Alpha" } },
+                    },
+                  },
+                },
+              }),
+            )
+          }),
+        ),
+      ),
+    ],
   ]),
 )
 const itWithSdk = testEffect(
@@ -154,6 +190,54 @@ describe("LocationServiceMap", () => {
           expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([workspaceRef])
         }),
       ),
+    ),
+  )
+
+  itWithConsole.live("discovers Console models during clean supervisor boot with only an environment service key", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.OPENCODE_API_KEY
+        process.env.OPENCODE_API_KEY = "supervisor-service-account-secret"
+        consoleRequests.length = 0
+        return previous
+      }),
+      () =>
+        Effect.acquireRelease(
+          Effect.promise(() => tmpdir()),
+          (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+        ).pipe(
+          Effect.flatMap((dir) =>
+            Effect.gen(function* () {
+              const locations = yield* LocationServiceMap.Service
+              const bus = yield* Bus.Service
+              const context = yield* locations.contextEffect(
+                Location.Ref.make({ directory: AbsolutePath.make(dir.path) }),
+              )
+              const catalog = yield* Catalog.Service.pipe(Effect.provide(context))
+              const discovered = yield* bus.subscribe(Catalog.Event.Updated).pipe(
+                Stream.mapEffect(() =>
+                  catalog.model.get(Provider.ID.make("console-openai-test"), Model.ID.make("solstice-alpha")),
+                ),
+                Stream.filter((model): model is Model.Info => model !== undefined),
+                Stream.runHead,
+                Effect.forkScoped({ startImmediately: true }),
+              )
+              yield* PluginSupervisor.Service.use((supervisor) => supervisor.flush).pipe(Effect.provide(context))
+              expect(consoleRequests).toContainEqual({
+                url: "https://opencode.ai/console/api/config",
+                authorization: "Bearer supervisor-service-account-secret",
+              })
+              expect((yield* Fiber.join(discovered).pipe(Effect.timeout("3 seconds"))).valueOrUndefined?.name).toBe(
+                "Solstice Alpha",
+              )
+            }),
+          ),
+        ),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.OPENCODE_API_KEY
+          else process.env.OPENCODE_API_KEY = previous
+        }),
     ),
   )
 

@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
 import { Effect } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Bus } from "@opencode-ai/core/bus"
@@ -90,6 +91,70 @@ describe("OpencodePlugin", () => {
         { type: "key", label: "API key (service account)" },
       ])
     }),
+  )
+
+  it.live("discovers Console models when a later plugin materializes service-account authentication", () =>
+    withEnv({ OPENCODE_API_KEY: "service-account-secret" }, () =>
+      Effect.gen(function* () {
+        const plugins = yield* Plugin.Service
+        const bus = yield* Bus.Service
+        const integrations = yield* Integration.Service
+        const catalog = yield* Catalog.Service
+        const requests: Array<{ url: string; authorization: string | undefined }> = []
+        const http = HttpClient.make((request) =>
+          Effect.sync(() => {
+            requests.push({ url: request.url, authorization: request.headers.authorization })
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                config: {
+                  provider: {
+                    "console-openai-test": {
+                      name: "Console OpenAI",
+                      npm: "@ai-sdk/openai-compatible",
+                      models: { "solstice-alpha": { name: "Solstice Alpha" } },
+                    },
+                  },
+                },
+              }),
+            )
+          }),
+        )
+
+        yield* plugins.activate([
+          {
+            id: OpencodePlugin.id,
+            version: "1",
+            effect: (host) =>
+              OpencodePlugin.effect(host).pipe(
+                Effect.provideService(Bus.Service, bus),
+                Effect.provideService(HttpClient.HttpClient, http),
+              ),
+          },
+          {
+            id: "later-sdk-integration",
+            version: "1",
+            effect: (host) =>
+              host.integration.transform((draft) =>
+                draft.method.update({
+                  integrationID: "opencode",
+                  method: { type: "env", names: ["OPENCODE_API_KEY"] },
+                }),
+              ),
+          },
+        ])
+
+        const model = yield* eventually(
+          catalog.model.get(Provider.ID.make("console-openai-test"), Model.ID.make("solstice-alpha")),
+          (current) => current !== undefined,
+        )
+        expect(model?.name).toBe("Solstice Alpha")
+        expect(requests).toEqual([
+          { url: "https://opencode.ai/console/api/config", authorization: "Bearer service-account-secret" },
+        ])
+        expect((yield* integrations.connection.active(Integration.ID.make("opencode")))?.type).toBe("env")
+      }),
+    ),
   )
 
   it.live("uses a canonical custom server throughout device authorization", () =>

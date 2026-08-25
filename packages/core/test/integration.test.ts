@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Cause, Clock, Duration, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
+import { Cause, Clock, Duration, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { Credential } from "@opencode-ai/core/credential"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -60,6 +60,186 @@ describe("Integration", () => {
       yield* Scope.close(scope, Exit.void)
       expect(yield* integrations.get(openai)).toBeUndefined()
     }),
+  )
+
+  it.effect("publishes effective environment connection changes after state commits", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.OPENCODE_INTEGRATION_CONNECTION_TEST
+        process.env.OPENCODE_INTEGRATION_CONNECTION_TEST = "secret"
+        return previous
+      }),
+      () =>
+        Effect.gen(function* () {
+          const integrations = yield* Integration.Service
+          const bus = yield* Bus.Service
+          const integrationID = Integration.ID.make("environment-test")
+          const observed: Array<{ id: Integration.ID; active: string | undefined }> = []
+          const unsubscribe = yield* bus.listen((event) =>
+            Effect.gen(function* () {
+              if (event.type !== Integration.Event.ConnectionUpdated.type) return
+              const id = Schema.decodeUnknownSync(Integration.Event.ConnectionUpdated)(event).data.integrationID
+              const active = yield* integrations.connection.active(id)
+              observed.push({ id, active: active?.type === "env" ? active.name : active?.id })
+            }),
+          )
+          const scope = yield* Scope.fork(yield* Scope.Scope)
+
+          yield* integrations
+            .transform((draft) =>
+              draft.method.update({
+                integrationID,
+                method: { type: "env", names: ["OPENCODE_INTEGRATION_CONNECTION_TEST"] },
+              }),
+            )
+            .pipe(Scope.provide(scope))
+          expect(observed).toEqual([{ id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" }])
+
+          yield* integrations.transform((draft) =>
+            draft.update(integrationID, (integration) => (integration.name = "Renamed")),
+          )
+          expect(observed).toHaveLength(1)
+
+          const removal = yield* Scope.fork(yield* Scope.Scope)
+          yield* integrations.transform((draft) => draft.remove(integrationID)).pipe(Scope.provide(removal))
+          expect(observed).toEqual([
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
+            { id: integrationID, active: undefined },
+          ])
+          yield* Scope.close(removal, Exit.void)
+          yield* Scope.close(scope, Exit.void)
+          expect(observed).toEqual([
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
+            { id: integrationID, active: undefined },
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
+            { id: integrationID, active: undefined },
+          ])
+          yield* unsubscribe
+        }),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.OPENCODE_INTEGRATION_CONNECTION_TEST
+          else process.env.OPENCODE_INTEGRATION_CONNECTION_TEST = previous
+        }),
+    ),
+  )
+
+  it.effect("announces reordered environment connections only when the active variable changes", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = {
+          first: process.env.OPENCODE_INTEGRATION_FIRST_TEST,
+          second: process.env.OPENCODE_INTEGRATION_SECOND_TEST,
+        }
+        process.env.OPENCODE_INTEGRATION_FIRST_TEST = "first"
+        process.env.OPENCODE_INTEGRATION_SECOND_TEST = "second"
+        return previous
+      }),
+      () =>
+        Effect.gen(function* () {
+          const integrations = yield* Integration.Service
+          const bus = yield* Bus.Service
+          const integrationID = Integration.ID.make("ordered-test")
+          const observed: string[] = []
+          const unsubscribe = yield* bus.listen((event) =>
+            Effect.gen(function* () {
+              if (event.type !== Integration.Event.ConnectionUpdated.type) return
+              const active = yield* integrations.connection.active(integrationID)
+              if (active?.type === "env") observed.push(active.name)
+            }),
+          )
+          const first = yield* Scope.fork(yield* Scope.Scope)
+          const second = yield* Scope.fork(yield* Scope.Scope)
+
+          yield* integrations
+            .transform((draft) =>
+              draft.method.update({
+                integrationID,
+                method: {
+                  type: "env",
+                  names: ["OPENCODE_INTEGRATION_FIRST_TEST", "OPENCODE_INTEGRATION_SECOND_TEST"],
+                },
+              }),
+            )
+            .pipe(Scope.provide(first))
+          yield* integrations
+            .transform((draft) =>
+              draft.method.update({
+                integrationID,
+                method: {
+                  type: "env",
+                  names: ["OPENCODE_INTEGRATION_SECOND_TEST", "OPENCODE_INTEGRATION_FIRST_TEST"],
+                },
+              }),
+            )
+            .pipe(Scope.provide(second))
+          yield* Scope.close(second, Exit.void)
+
+          expect(observed).toEqual([
+            "OPENCODE_INTEGRATION_FIRST_TEST",
+            "OPENCODE_INTEGRATION_SECOND_TEST",
+            "OPENCODE_INTEGRATION_FIRST_TEST",
+          ])
+          yield* unsubscribe
+        }),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous.first === undefined) delete process.env.OPENCODE_INTEGRATION_FIRST_TEST
+          else process.env.OPENCODE_INTEGRATION_FIRST_TEST = previous.first
+          if (previous.second === undefined) delete process.env.OPENCODE_INTEGRATION_SECOND_TEST
+          else process.env.OPENCODE_INTEGRATION_SECOND_TEST = previous.second
+        }),
+    ),
+  )
+
+  it.effect("does not announce environment changes while a stored credential remains active", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const previous = process.env.OPENCODE_INTEGRATION_PRIORITY_TEST
+        process.env.OPENCODE_INTEGRATION_PRIORITY_TEST = "environment-secret"
+        return previous
+      }),
+      () =>
+        Effect.gen(function* () {
+          const integrations = yield* Integration.Service
+          const credentials = yield* Credential.Service
+          const bus = yield* Bus.Service
+          const integrationID = Integration.ID.make("priority-test")
+          yield* credentials.create({
+            integrationID,
+            value: Credential.Key.make({ type: "key", key: "stored-secret" }),
+          })
+          const observed: Integration.ID[] = []
+          const unsubscribe = yield* bus.listen((event) =>
+            Effect.sync(() => {
+              if (event.type === Integration.Event.ConnectionUpdated.type) {
+                observed.push(Schema.decodeUnknownSync(Integration.Event.ConnectionUpdated)(event).data.integrationID)
+              }
+            }),
+          )
+          const scope = yield* Scope.fork(yield* Scope.Scope)
+
+          yield* integrations
+            .transform((draft) =>
+              draft.method.update({
+                integrationID,
+                method: { type: "env", names: ["OPENCODE_INTEGRATION_PRIORITY_TEST"] },
+              }),
+            )
+            .pipe(Scope.provide(scope))
+          expect(observed).toEqual([])
+          expect((yield* integrations.connection.active(integrationID))?.type).toBe("credential")
+
+          yield* Scope.close(scope, Exit.void)
+          expect(observed).toEqual([])
+          yield* unsubscribe
+        }),
+      (previous) =>
+        Effect.sync(() => {
+          if (previous === undefined) delete process.env.OPENCODE_INTEGRATION_PRIORITY_TEST
+          else process.env.OPENCODE_INTEGRATION_PRIORITY_TEST = previous
+        }),
+    ),
   )
 
   it.effect("reveals the previous registration when an override closes", () =>

@@ -264,6 +264,7 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const attempts = SynchronizedRef.makeUnsafe(new Map<AttemptID, AttemptEntry>())
     const commandAttempts = SynchronizedRef.makeUnsafe(new Map<AttemptID, CommandAttemptEntry>())
+    const environmentConnections = new Map<ID, string>()
     const state = State.create<Data, Draft>({
       name: "integration",
       initial: () => ({ integrations: new Map<ID, Entry>() }),
@@ -326,7 +327,34 @@ const layer = Layer.effect(
           },
         },
       }),
-      finalize: () => bus.publish(Integration.Event.Updated, {}).pipe(Effect.asVoid),
+      finalize: (draft) =>
+        Effect.gen(function* () {
+          const current = new Map(
+            draft.list().flatMap((integration) => {
+              const name = draft.method
+                .list(integration.id)
+                .filter((method) => method.type === "env")
+                .flatMap((method) => method.names)
+                .find((name) => process.env[name])
+              return name ? [[integration.id, name] as const] : []
+            }),
+          )
+          const changed = Array.from(new Set([...environmentConnections.keys(), ...current.keys()])).filter(
+            (id) => environmentConnections.get(id) !== current.get(id),
+          )
+          environmentConnections.clear()
+          current.forEach((name, id) => environmentConnections.set(id, name))
+          yield* Effect.forEach(
+            changed,
+            (integrationID) =>
+              Effect.gen(function* () {
+                if ((yield* credentials.list(integrationID)).length > 0) return
+                yield* bus.publish(Integration.Event.ConnectionUpdated, { integrationID })
+              }),
+            { discard: true },
+          )
+          yield* bus.publish(Integration.Event.Updated, {}).pipe(Effect.asVoid)
+        }),
     })
 
     const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
