@@ -314,7 +314,94 @@ describe("tool input repair plugin", () => {
         }),
       )
 
+      expect(event.input).toEqual({ ...input, parent: 3 })
+      expect(input.parent).toBe("3")
+    }),
+  )
+
+  it.effect("preserves values accepted by unconstrained union branches and structural literals", () =>
+    Effect.gen(function* () {
+      const constant = { nested: [1, { enabled: true }] }
+      const enumerated = ["first", { count: 2 }]
+      const input = {
+        emptyAny: "2",
+        trueAny: "3",
+        emptyOne: "4",
+        trueOne: "5",
+        constant,
+        enumerated,
+      }
+      const event = yield* run(
+        input,
+        object({
+          emptyAny: { anyOf: [{ type: "number" }, {}] },
+          trueAny: { anyOf: [{ type: "number" }, true] },
+          emptyOne: { oneOf: [{ type: "number" }, {}] },
+          trueOne: { oneOf: [{ type: "number" }, true] },
+          constant: { anyOf: [{ const: { nested: [1, { enabled: true }] } }, { type: "string" }] },
+          enumerated: { oneOf: [{ enum: [["first", { count: 2 }]] }, { type: "string" }] },
+        }),
+      )
+
       expect(event.input).toBe(input)
+      expect((event.input as typeof input).constant).toBe(constant)
+      expect((event.input as typeof input).enumerated).toBe(enumerated)
+    }),
+  )
+
+  it.effect("intersects parent types and jointly applies anyOf and oneOf alternatives", () =>
+    Effect.gen(function* () {
+      const event = yield* run(
+        { any: "2", one: "3", both: "4", nullable: null },
+        object({
+          any: { type: "number", anyOf: [{ type: "string" }, { type: "number" }] },
+          one: { type: "integer", oneOf: [{ type: "string" }, { type: "integer" }] },
+          both: {
+            anyOf: [{ type: "string" }, { type: "integer" }],
+            oneOf: [{ type: "integer" }, { type: "boolean" }],
+          },
+          nullable: { type: "number", nullable: true, anyOf: [{ type: "number" }, { type: "null" }] },
+        }),
+      )
+
+      expect(event.input).toEqual({ any: 2, one: 3, both: 4, nullable: null })
+    }),
+  )
+
+  it.effect("selects union branches using numeric ranges and string patterns", () =>
+    Effect.gen(function* () {
+      const event = yield* run(
+        { minimum: "2", maximum: "8", exclusiveMinimum: "3", exclusiveMaximum: "7", pattern: "42" },
+        object({
+          minimum: {
+            anyOf: [
+              { type: "number", minimum: 5 },
+              { type: "integer", maximum: 3 },
+            ],
+          },
+          maximum: {
+            oneOf: [
+              { type: "number", maximum: 5 },
+              { type: "integer", minimum: 7 },
+            ],
+          },
+          exclusiveMinimum: {
+            anyOf: [
+              { type: "number", exclusiveMinimum: 3 },
+              { type: "integer", maximum: 3 },
+            ],
+          },
+          exclusiveMaximum: {
+            oneOf: [
+              { type: "number", exclusiveMaximum: 7 },
+              { type: "integer", minimum: 7 },
+            ],
+          },
+          pattern: { anyOf: [{ type: "string", pattern: "^[a-z]+$" }, { type: "integer" }] },
+        }),
+      )
+
+      expect(event.input).toEqual({ minimum: 2, maximum: 8, exclusiveMinimum: 3, exclusiveMaximum: 7, pattern: 42 })
     }),
   )
 
@@ -500,6 +587,309 @@ describe("tool input repair plugin", () => {
       )
 
       expect(event.input).toBe(input)
+    }),
+  )
+
+  it.effect("repairs matching pattern properties and removes unmatched closed-object keys", () =>
+    Effect.gen(function* () {
+      const input = { count_first: "2", flag_ready: "false", extra: true }
+      const event = yield* run(input, {
+        type: "object",
+        patternProperties: { "^count_": { type: "integer" }, "^flag_": { type: "boolean" } },
+        additionalProperties: false,
+      })
+
+      expect(event.input).toEqual({ count_first: 2, flag_ready: false })
+      expect(input).toEqual({ count_first: "2", flag_ready: "false", extra: true })
+    }),
+  )
+
+  it.effect("preserves values claimed by overlapping pattern schemas", () =>
+    Effect.gen(function* () {
+      const input = { value: "2" }
+      const event = yield* run(input, {
+        type: "object",
+        patternProperties: { "^val": { type: "integer" }, ue$: { type: "number" } },
+        additionalProperties: false,
+      })
+
+      expect(event.input).toBe(input)
+    }),
+  )
+
+  it.effect("recursively repairs arrays and tuples selected from nullable unions", () =>
+    Effect.gen(function* () {
+      const input = { array: '[{"count":"2"}]', tuple: '["3","false"]', nullable: null }
+      const event = yield* run(
+        input,
+        object({
+          array: { anyOf: [{ type: "array", items: object({ count: { type: "integer" } }) }, { type: "null" }] },
+          tuple: {
+            oneOf: [{ type: "array", prefixItems: [{ type: "integer" }, { type: "boolean" }] }, { type: "null" }],
+          },
+          nullable: { anyOf: [{ type: "array", items: { type: "integer" } }, { type: "null" }] },
+        }),
+      )
+
+      expect(event.input).toEqual({ array: [{ count: 2 }], tuple: [3, false], nullable: null })
+      expect(input.array).toBe('[{"count":"2"}]')
+    }),
+  )
+
+  it.effect("selects object alternatives using multi-value enum discriminators and closed ownership", () =>
+    Effect.gen(function* () {
+      const event = yield* run(
+        { tagged: { kind: "total", value: "2" }, closed: { count: "3", extra: true } },
+        object({
+          tagged: {
+            anyOf: [
+              object({ kind: { enum: ["count", "total"] }, value: { type: "integer" } }, ["kind", "value"]),
+              object({ kind: { enum: ["flag", "switch"] }, value: { type: "boolean" } }, ["kind", "value"]),
+            ],
+          },
+          closed: {
+            oneOf: [
+              { ...object({ enabled: { type: "boolean" } }), additionalProperties: false },
+              { ...object({ count: { type: "integer" } }), additionalProperties: false },
+            ],
+          },
+        }),
+      )
+
+      expect(event.input).toEqual({ tagged: { kind: "total", value: 2 }, closed: { count: 3 } })
+    }),
+  )
+
+  it.effect("resolves local definitions across nested objects, tuples, and additional properties", () =>
+    Effect.gen(function* () {
+      const input = {
+        modern: "2",
+        legacy: "false",
+        nested: { count: "3" },
+        tuple: ["4", "true"],
+        dictionary: { first: "5" },
+        escaped: "6",
+      }
+      const event = yield* run(input, {
+        ...object({
+          modern: { $ref: "#/$defs/integer" },
+          legacy: { $ref: "#/definitions/boolean" },
+          nested: { $ref: "#/$defs/nested" },
+          tuple: {
+            type: "array",
+            prefixItems: [{ $ref: "#/$defs/integer" }, { $ref: "#/definitions/boolean" }],
+          },
+          dictionary: { type: "object", additionalProperties: { $ref: "#/$defs/integer" } },
+          escaped: { $ref: "#/$defs/slash~1and~0tilde" },
+        }),
+        $defs: {
+          integer: { type: "integer" },
+          nested: object({ count: { $ref: "#/$defs/integer" } }),
+          "slash/and~tilde": { type: "integer" },
+        },
+        definitions: { boolean: { type: "boolean" } },
+      })
+
+      expect(event.input).toEqual({
+        modern: 2,
+        legacy: false,
+        nested: { count: 3 },
+        tuple: [4, true],
+        dictionary: { first: 5 },
+        escaped: 6,
+      })
+      expect(input.nested.count).toBe("3")
+      expect(input.tuple).toEqual(["4", "true"])
+      expect(input.dictionary.first).toBe("5")
+    }),
+  )
+
+  it.effect("bounds recursive references and preserves unresolved or external references", () =>
+    Effect.gen(function* () {
+      const input = {
+        recursive: { value: "2", next: { value: "3" } },
+        cyclic: "4",
+        unresolved: "5",
+        external: "6",
+      }
+      const event = yield* run(input, {
+        ...object({
+          recursive: { $ref: "#/$defs/node" },
+          cyclic: { $ref: "#/$defs/cyclic" },
+          unresolved: { $ref: "#/$defs/missing" },
+          external: { $ref: "other-schema.json#/$defs/integer" },
+        }),
+        $defs: {
+          node: object({ value: { type: "integer" }, next: { $ref: "#/$defs/node" } }),
+          cyclic: { $ref: "#/$defs/cyclic" },
+        },
+      })
+
+      expect(event.input).toEqual({
+        recursive: { value: 2, next: { value: 3 } },
+        cyclic: "4",
+        unresolved: "5",
+        external: "6",
+      })
+      expect(input.recursive).toEqual({ value: "2", next: { value: "3" } })
+    }),
+  )
+
+  it.effect("repairs typeless and composed root schemas when their shape is unambiguous", () =>
+    Effect.gen(function* () {
+      expect((yield* run({ count: "2" }, { properties: { count: { type: "integer" } } })).input).toEqual({ count: 2 })
+      expect((yield* run({ count: "3" }, { allOf: [object({ count: { type: "integer" } })] })).input).toEqual({
+        count: 3,
+      })
+      expect(
+        (yield* run(
+          { kind: "count", value: "4" },
+          {
+            anyOf: [
+              object({ kind: { const: "count" }, value: { type: "integer" } }, ["kind", "value"]),
+              object({ kind: { const: "flag" }, value: { type: "boolean" } }, ["kind", "value"]),
+            ],
+          },
+        )).input,
+      ).toEqual({ kind: "count", value: 4 })
+      expect(
+        (yield* run(
+          { enabled: "false" },
+          {
+            oneOf: [
+              object({ enabled: { type: "boolean" } }, ["enabled"]),
+              object({ count: { type: "integer" } }, ["count"]),
+            ],
+          },
+        )).input,
+      ).toEqual({ enabled: false })
+      expect(
+        (yield* run({ count: "5" }, { $ref: "#/$defs/root", $defs: { root: object({ count: { type: "integer" } }) } }))
+          .input,
+      ).toEqual({ count: 5 })
+    }),
+  )
+
+  it.effect("removes extras from closed objects even without declared properties", () =>
+    Effect.gen(function* () {
+      const input = { typed: { extra: true }, typeless: { extra: true } }
+      const event = yield* run(
+        input,
+        object({
+          typed: { type: "object", additionalProperties: false },
+          typeless: { additionalProperties: false },
+        }),
+      )
+
+      expect(event.input).toEqual({ typed: {}, typeless: {} })
+      expect(input).toEqual({ typed: { extra: true }, typeless: { extra: true } })
+    }),
+  )
+
+  it.effect("parses unconstrained arrays without wrapping scalars that lack item evidence", () =>
+    Effect.gen(function* () {
+      const event = yield* run(
+        { omitted: '[1,"two"]', allowed: '[2,"three"]', omittedScalar: "4", allowedScalar: "5" },
+        object({
+          omitted: { type: "array" },
+          allowed: { type: "array", items: true },
+          omittedScalar: { type: "array" },
+          allowedScalar: { type: "array", items: true },
+        }),
+      )
+
+      expect(event.input).toEqual({
+        omitted: [1, "two"],
+        allowed: [2, "three"],
+        omittedScalar: "4",
+        allowedScalar: "5",
+      })
+    }),
+  )
+
+  it.effect("repairs draft tuple rest values using additionalItems schemas", () =>
+    Effect.gen(function* () {
+      const input = { tuple: ["2", "false", "3", "4"] }
+      const event = yield* run(
+        input,
+        object({
+          tuple: {
+            type: "array",
+            items: [{ type: "integer" }, { type: "boolean" }],
+            additionalItems: { type: "number" },
+          },
+        }),
+      )
+
+      expect(event.input).toEqual({ tuple: [2, false, 3, 4] })
+      expect(input.tuple).toEqual(["2", "false", "3", "4"])
+    }),
+  )
+
+  it.effect("removes optional nulls from nonnullable unions while preserving nullable alternatives", () =>
+    Effect.gen(function* () {
+      const event = yield* run(
+        { any: null, one: null, allowedAny: null, allowedOne: null, nullable: null, constrained: null },
+        object({
+          any: { anyOf: [{ type: "string" }, { type: "integer" }] },
+          one: { oneOf: [{ type: "string" }, { type: "boolean" }] },
+          allowedAny: { anyOf: [{ type: "string" }, { type: "null" }] },
+          allowedOne: { oneOf: [{ type: "boolean" }, { type: "null" }] },
+          nullable: { type: "string", nullable: true },
+          constrained: { nullable: true, anyOf: [{ type: "string" }, { type: "integer" }] },
+        }),
+      )
+
+      expect(event.input).toEqual({ allowedAny: null, allowedOne: null, nullable: null })
+    }),
+  )
+
+  it.effect("does not treat inherited prototype names as required object properties", () =>
+    Effect.gen(function* () {
+      const input = { value: "2" }
+      const event = yield* run(input, {
+        oneOf: [
+          object({ constructor: { type: "string" }, value: { type: "boolean" } }, ["constructor"]),
+          object({ toString: { type: "string" }, value: { type: "boolean" } }, ["toString"]),
+          object({ value: { type: "integer" } }, ["value"]),
+        ],
+      })
+
+      expect(event.input).toEqual({ value: 2 })
+      expect(input.value).toBe("2")
+    }),
+  )
+
+  it.effect("repairs alternatives nested in allOf without resolving ambiguous oneOf branches", () =>
+    Effect.gen(function* () {
+      const ambiguous = { value: "4" }
+      const event = yield* run(
+        { tagged: { kind: "count", value: "2" }, required: { enabled: "false" }, ambiguous },
+        object({
+          tagged: {
+            anyOf: [
+              { allOf: [object({ kind: { const: "count" }, value: { type: "integer" } }, ["kind", "value"])] },
+              { allOf: [object({ kind: { const: "flag" }, value: { type: "boolean" } }, ["kind", "value"])] },
+            ],
+          },
+          required: {
+            oneOf: [
+              { allOf: [object({ enabled: { type: "boolean" } }, ["enabled"])] },
+              { allOf: [object({ count: { type: "integer" } }, ["count"])] },
+            ],
+          },
+          ambiguous: {
+            oneOf: [
+              { allOf: [object({ value: { type: "integer" } }, ["value"])] },
+              { allOf: [object({ value: { type: "number" } }, ["value"])] },
+            ],
+          },
+        }),
+      )
+
+      expect(event.input).toEqual({ tagged: { kind: "count", value: 2 }, required: { enabled: false }, ambiguous })
+      expect((event.input as { ambiguous: typeof ambiguous }).ambiguous).toBe(ambiguous)
+      expect(ambiguous.value).toBe("4")
     }),
   )
 
