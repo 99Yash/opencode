@@ -132,6 +132,22 @@ describe("tool input repair plugin", () => {
     }),
   )
 
+  it.effect("preserves properties that may belong to composed object schemas", () =>
+    Effect.gen(function* () {
+      const input = { name: "example", extra: true }
+
+      for (const keyword of ["allOf", "anyOf", "oneOf"]) {
+        const event = yield* run(input, {
+          type: "object",
+          [keyword]: [object({ name: { type: "string" } })],
+          additionalProperties: false,
+        })
+
+        expect(event.input).toBe(input)
+      }
+    }),
+  )
+
   it.effect("removes only optional nonnullable nulls and non-object empty placeholders", () =>
     Effect.gen(function* () {
       const input = {
@@ -139,6 +155,9 @@ describe("tool input repair plugin", () => {
         required: null,
         nullable: null,
         union: null,
+        constant: null,
+        permissive: null,
+        referenced: null,
         placeholder: {},
         array: {},
         requiredPlaceholder: {},
@@ -153,6 +172,9 @@ describe("tool input repair plugin", () => {
             required: { type: "string" },
             nullable: { type: "string", nullable: true },
             union: { anyOf: [{ type: "integer" }, { type: "null" }] },
+            constant: { anyOf: [{ type: "integer" }, { const: null }] },
+            permissive: { anyOf: [{ type: "integer" }, true] },
+            referenced: { anyOf: [{ type: "integer" }, { $ref: "#/$defs/nullable" }] },
             placeholder: { type: "integer" },
             array: { type: "array", items: { type: "string" } },
             requiredPlaceholder: { type: "boolean" },
@@ -167,6 +189,9 @@ describe("tool input repair plugin", () => {
         required: null,
         nullable: null,
         union: null,
+        constant: null,
+        permissive: null,
+        referenced: null,
         requiredPlaceholder: {},
         object: {},
         unknown: null,
@@ -328,7 +353,14 @@ describe("tool input repair plugin", () => {
 
   it.effect("repairs typed dictionaries and straightforward local references", () =>
     Effect.gen(function* () {
-      const input = { modern: "2", legacy: "false", nested: { count: "3" }, dictionary: { first: "4" }, missing: "5" }
+      const input = {
+        modern: "2",
+        legacy: "false",
+        nested: { count: "3" },
+        dictionary: { first: "4" },
+        missing: "5",
+        pointer: "6",
+      }
       const event = yield* run(input, {
         ...object({
           modern: { $ref: "#/$defs/integer" },
@@ -336,6 +368,7 @@ describe("tool input repair plugin", () => {
           nested: { $ref: "#/$defs/nested" },
           dictionary: { type: "object", additionalProperties: { $ref: "#/$defs/integer" } },
           missing: { $ref: "#/$defs/missing" },
+          pointer: { $ref: "#/$defs/nested/properties/count" },
         }),
         $defs: {
           integer: { type: "integer" },
@@ -350,6 +383,7 @@ describe("tool input repair plugin", () => {
         nested: { count: 3 },
         dictionary: { first: 4 },
         missing: "5",
+        pointer: "6",
       })
       expect(input.nested.count).toBe("3")
       expect(input.dictionary.first).toBe("4")

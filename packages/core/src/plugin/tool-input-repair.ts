@@ -32,9 +32,9 @@ function repair(value: unknown, schema: JsonSchema.JsonSchema, root: JsonSchema.
   if (depth > maxDepth) return value
 
   if (typeof schema.$ref === "string") {
-    const definitions = schema.$ref.startsWith("#/$defs/")
+    const definitions = /^#\/\$defs\/[^/]+$/.test(schema.$ref)
       ? root.$defs
-      : schema.$ref.startsWith("#/definitions/")
+      : /^#\/definitions\/[^/]+$/.test(schema.$ref)
         ? root.definitions
         : undefined
     if (!Predicate.isObject(definitions)) return value
@@ -88,13 +88,14 @@ function repairObject(
   const properties = Predicate.isObject(schema.properties) ? schema.properties : {}
   const required = Array.isArray(schema.required) ? schema.required : []
   const patterned = Predicate.isObject(schema.patternProperties)
+  const composed = Array.isArray(schema.allOf) || Array.isArray(schema.anyOf) || Array.isArray(schema.oneOf)
 
   return Object.keys(parsed).reduce<Record<string, unknown>>((result, key) => {
     const current = result[key]
     const declared = Object.hasOwn(properties, key)
     const property = declared ? properties[key] : !patterned ? schema.additionalProperties : undefined
 
-    if (!declared && schema.additionalProperties === false && !patterned) {
+    if (!declared && schema.additionalProperties === false && !patterned && !composed) {
       const next = { ...result }
       delete next[key]
       return next
@@ -111,7 +112,12 @@ function repairObject(
         property.nullable === true ||
         property.type === "null" ||
         (Array.isArray(property.type) && property.type.includes("null")) ||
-        branches.some((branch) => Predicate.isObject(branch) && branch.type === "null")
+        branches.some(
+          (branch) =>
+            branch === true ||
+            (Predicate.isObject(branch) &&
+              (branch.type === "null" || branch.const === null || typeof branch.$ref === "string")),
+        )
       const placeholder =
         Predicate.isObject(current) &&
         Object.keys(current).length === 0 &&
