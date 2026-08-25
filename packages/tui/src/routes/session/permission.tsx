@@ -110,7 +110,11 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
   )
 }
 
-export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
+export function PermissionPrompt(props: {
+  request: PermissionRequest
+  directory?: string
+  pending?: { current: number; total: number }
+}) {
   const data = useData()
   const toast = useToast()
   const [store, setStore] = createStore({
@@ -227,6 +231,12 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               <box flexDirection="row" gap={1} flexShrink={0}>
                 <text fg={theme.text.feedback.warning.default}>{"△"}</text>
                 <text fg={theme.text.default}>Permission required</text>
+                <Show when={props.pending && props.pending.total > 1}>
+                  <box flexGrow={1} />
+                  <text fg={theme.text.subdued} wrapMode="none">
+                    {props.pending?.current} of {props.pending?.total}
+                  </text>
+                </Show>
               </box>
               <Show when={owner()}>
                 {(current) => (

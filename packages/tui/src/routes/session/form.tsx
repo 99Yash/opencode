@@ -41,7 +41,7 @@ function truncate(label: string, max: number) {
   return label.length > max ? label.slice(0, max - 1).trimEnd() + "…" : label
 }
 
-export function FormPrompt(props: { form: FormWithLocation }) {
+export function FormPrompt(props: { form: FormWithLocation; pending?: { current: number; total: number } }) {
   const data = useData()
   const themes = useThemes()
   const theme = useTheme("elevated")
@@ -744,7 +744,15 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     >
       <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <box paddingLeft={1}>
-          <text fg={theme.text.subdued}>{props.form.title}</text>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme.text.subdued}>{props.form.title}</text>
+            <Show when={props.pending && props.pending.total > 1}>
+              <box flexGrow={1} />
+              <text fg={theme.text.subdued} wrapMode="none">
+                {props.pending?.current} of {props.pending?.total}
+              </text>
+            </Show>
+          </box>
           <Show when={owner()}>
             {(current) => (
               <text fg={theme.text.subdued} wrapMode="none" truncate>
