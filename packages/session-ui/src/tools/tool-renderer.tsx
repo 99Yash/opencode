@@ -13,6 +13,7 @@ import {
   type JSX,
 } from "solid-js"
 import stripAnsi from "strip-ansi"
+import { createTwoFilesPatch } from "diff"
 import { Dynamic } from "solid-js/web"
 import { type SessionSummary, useData } from "../context"
 import { useFileComponent } from "@opencode-ai/ui/context/file"
@@ -573,8 +574,23 @@ export function CurrentFileToolGroup(props: {
   const files = createMemo((previous: { key: string; value: unknown }[]) => {
     const next = props.tools.flatMap((tool) => {
       const files = currentToolMetadata(tool).files
-      if (!Array.isArray(files)) return []
-      return files.map((value, index) => ({ key: `${tool.id}:${index}`, value }))
+      if (Array.isArray(files) && files.length > 0)
+        return files.map((value, index) => ({ key: `${tool.id}:${index}`, value }))
+      if (tool.name !== "write") return []
+      const input = currentToolInput(tool)
+      if (typeof input.path !== "string" || typeof input.content !== "string" || !input.content) return []
+      return [
+        {
+          key: `${tool.id}:0`,
+          value: {
+            file: input.path,
+            patch: createTwoFilesPatch(input.path, input.path, "", input.content),
+            additions: input.content.split("\n").length - Number(input.content.endsWith("\n")),
+            deletions: 0,
+            status: "modified",
+          },
+        },
+      ]
     })
     const updates = new Map(next.map((entry) => [entry.key, entry.value]))
     const existing = new Set(previous.map((entry) => entry.key))
