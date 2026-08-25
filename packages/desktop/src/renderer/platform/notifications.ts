@@ -2,6 +2,8 @@ import type { Platform } from "@opencode-ai/app/desktop"
 import type { ElectronAPI } from "../api-types"
 
 export function createDesktopNotify(api: ElectronAPI): Platform["notify"] {
+  const notifications = new Set<Notification>()
+
   return async (title, description, onClick) => {
     const focused = await api.getWindowFocused().catch(() => document.hasFocus())
     if (focused) return
@@ -10,10 +12,15 @@ export function createDesktopNotify(api: ElectronAPI): Platform["notify"] {
       body: description ?? "",
       icon: "https://opencode.ai/favicon-96x96-v3.png",
     })
+    notifications.add(notification)
+    const clear = () => notifications.delete(notification)
+    notification.onclose = clear
+    notification.onerror = clear
     notification.onclick = () => {
       void api.showWindow()
       void api.setWindowFocus()
       onClick?.()
+      clear()
       notification.close()
     }
   }
