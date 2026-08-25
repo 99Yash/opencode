@@ -109,6 +109,12 @@ import type { SessionInbox } from "@opencode-ai/schema/session-inbox"
 import { generateThinkingSyntax } from "./thinking-syntax"
 import { createDelayedPresence } from "../../util/delayed-presence"
 import { SessionLocationMissing } from "./location-missing"
+import {
+  collectSubagentActivity,
+  subagentActive,
+  SubagentActivityDock,
+  type SubagentActivity,
+} from "./subagent-activity"
 import { isRecord } from "../../util/record"
 import { createHistoryPrepend } from "./history"
 
@@ -138,6 +144,7 @@ const context = createContext<{
   groupExploration: () => boolean
   diffWrapMode: () => "word" | "none"
   models: () => ModelInfo[]
+  subagents: () => SubagentActivity[]
   config: ReturnType<typeof useConfig>["data"]
   mutatePending: (action: PendingAction, inboxID: string) => Promise<boolean>
   pendingDelivery: (inboxID: string) => SessionInbox.Delivery | undefined
@@ -203,6 +210,24 @@ export function Session(props: { verticalTabsWidth: number }) {
       .flatMap((sessionID) => data.session.form.list(sessionID) ?? [])
       .concat(data.session.form.list("global", location()) ?? []),
   )
+  const subagents = createMemo(() =>
+    collectSubagentActivity({
+      sessionID: route.sessionID,
+      sessions: data.session.list(),
+      messages: (sessionID) => data.session.message.list(sessionID),
+      status: (sessionID) => data.session.status(sessionID),
+      permissions: (sessionID) => data.session.permission.list(sessionID),
+      forms: (sessionID) => data.session.form.list(sessionID),
+    }),
+  )
+  const activeSubagents = createMemo(() => subagents().filter((item) => subagentActive(item.status)))
+  const visibleSubagentIDs = createMemo(() =>
+    activeSubagents()
+      .slice(0, 8)
+      .map((item) => item.sessionID)
+      .join("\n"),
+  )
+  const subagentShortcut = Keymap.useShortcut("session.child.first")
   const pendingUsers = createMemo(() =>
     data.session.pending.list(route.sessionID).flatMap((item) => (item.type === "user" ? [item] : [])),
   )
@@ -310,6 +335,13 @@ export function Session(props: { verticalTabsWidth: number }) {
           data.session.form.sync(sessionID),
         ]),
       )
+    }),
+  )
+
+  createEffect(
+    on([visibleSubagentIDs, () => client.connection.status()], ([sessionIDs, status]) => {
+      if (status !== "connected" || !sessionIDs) return
+      void Promise.allSettled(sessionIDs.split("\n").map((sessionID) => data.session.message.sync(sessionID)))
     }),
   )
 
@@ -1201,6 +1233,7 @@ export function Session(props: { verticalTabsWidth: number }) {
         groupExploration,
         diffWrapMode,
         models,
+        subagents,
         config,
         mutatePending,
         pendingDelivery: (inboxID) => pendingDeliveries().get(inboxID),
@@ -1281,6 +1314,27 @@ export function Session(props: { verticalTabsWidth: number }) {
               </Show>
             </box>
             <box flexShrink={0}>
+              <Show
+                when={
+                  !session()?.parentID &&
+                  !composerVisible() &&
+                  (activeSubagents().length > 0 || subagents().some((item) => item.status === "error"))
+                }
+              >
+                <SubagentActivityDock
+                  entries={subagents()}
+                  width={contentWidth()}
+                  shortcut={subagentShortcut()}
+                  agentColor={(agent) => local.agent.color(agent)}
+                  onOpen={(sessionID) => {
+                    if (sessionID) {
+                      navigate({ type: "session", sessionID })
+                      return
+                    }
+                    setComposer({ open: true, tab: "subagents" })
+                  }}
+                />
+              </Show>
               <Show when={!composer.open && !disabled() && queuedPrompts().length > 0}>
                 <QueuedPromptDock prompts={queuedPrompts()} onOpen={openQueuedPrompts} />
               </Show>
@@ -3246,35 +3300,64 @@ function WebSearch(props: ToolProps) {
 function Subagent(props: ToolProps) {
   const { navigate } = useRoute()
   const data = useData()
+  const theme = useTheme()
+  const ctx = use()
   const sessionID = createMemo(() => stringValue(props.metadata.sessionID) ?? stringValue(props.metadata.sessionId))
   const description = createMemo(() => stringValue(props.input.description))
   const continuation = createMemo(() => Boolean(stringValue(props.input.sessionID)))
+  const activity = createMemo(() => ctx.subagents().find((item) => item.sessionID === sessionID()))
   const isRunning = createMemo(() => {
     const id = sessionID()
     return props.part.state.status === "running" || Boolean(id && data.session.status(id) === "running")
   })
 
   return (
-    <InlineTool
-      icon={continuation() ? "↳" : isRunning() ? "│" : props.part.state.status === "completed" ? "✓" : "│"}
-      spinner={!continuation() && isRunning()}
-      complete={description()}
-      pending="Delegating..."
-      part={props.part}
-      onClick={() => {
-        const id = sessionID()
-        if (id) navigate({ type: "session", sessionID: id })
-      }}
-      status={
-        isBackgroundSubagent(props.metadata, props.part.state.status) ? (
-          <StatusBadge>Background</StatusBadge>
-        ) : undefined
-      }
-    >
-      {continuation()
-        ? `Continue subagent — ${description() ?? "Subagent"}`
-        : `${Locale.titlecase(stringValue(props.input.agent) ?? stringValue(props.input.subagent_type) ?? "General")} Subagent — ${description() ?? "Subagent"}`}
-    </InlineTool>
+    <>
+      <InlineTool
+        icon={continuation() ? "↳" : isRunning() ? "│" : props.part.state.status === "completed" ? "✓" : "│"}
+        spinner={!continuation() && isRunning()}
+        complete={description()}
+        pending="Delegating..."
+        part={props.part}
+        onClick={() => {
+          const id = sessionID()
+          if (id) navigate({ type: "session", sessionID: id })
+        }}
+        status={
+          isBackgroundSubagent(props.metadata, props.part.state.status) ? (
+            <StatusBadge>Background</StatusBadge>
+          ) : undefined
+        }
+      >
+        {continuation()
+          ? `Continue subagent — ${description() ?? "Subagent"}`
+          : `${Locale.titlecase(stringValue(props.input.agent) ?? stringValue(props.input.subagent_type) ?? "General")} Subagent — ${description() ?? "Subagent"}`}
+      </InlineTool>
+      <Show when={!continuation() && activity()}>
+        {(current) => (
+          <Show when={current().activity !== "Starting" || current().tools > 0}>
+            <box paddingLeft={3 + INLINE_TOOL_ICON_WIDTH}>
+              <text
+                fg={
+                  current().status === "permission" || current().status === "question" || current().status === "retry"
+                    ? theme.text.feedback.warning.default
+                    : current().status === "error"
+                      ? theme.text.feedback.error.default
+                      : theme.text.subdued
+                }
+                wrapMode="none"
+                truncate
+              >
+                ↳ {current().activity}
+                <Show when={current().tools > 0}>
+                  {` · ${current().tools} ${current().tools === 1 ? "tool" : "tools"}`}
+                </Show>
+              </text>
+            </box>
+          </Show>
+        )}
+      </Show>
+    </>
   )
 }
 
