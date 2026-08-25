@@ -54,7 +54,12 @@ test("marks streamed inline code for animation", () => {
           type: "element",
           tag: "code",
           attributes: {},
-          children: [{ key: "0.0.0:0", type: "word", text: "file.ts:29-43", animate: true }],
+          children: Array.from("file.ts:29-43", (text, index) => ({
+            key: `0.0.0:${index}`,
+            type: "word",
+            text,
+            animate: true,
+          })),
           animate: true,
         },
       ],
