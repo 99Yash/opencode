@@ -110,6 +110,7 @@ import { createDelayedPresence } from "../../util/delayed-presence"
 import { SessionLocationMissing } from "./location-missing"
 import { isRecord } from "../../util/record"
 import { createHistoryPrepend } from "./history"
+import { useTerminalWorkspace } from "../../context/terminal-workspace"
 
 addDefaultParsers(parsers.parsers)
 
@@ -280,6 +281,7 @@ export function Session(props: { verticalTabsWidth: number }) {
   const [navigationSlack, setNavigationSlack] = createSignal(0)
   const [synced, setSynced] = createSignal(false)
   const sessionTabs = useSessionTabs()
+  const panes = useTerminalWorkspace()
   const [awayFromBottom, setAwayFromBottom] = createSignal(false)
   const [latestHovered, setLatestHovered] = createSignal(false)
   let ensureAllRowsPending: (() => void)[] | undefined
@@ -894,6 +896,16 @@ export function Session(props: { verticalTabsWidth: number }) {
           setSidebarOpen(!isVisible)
         })
         dialog.clear()
+      },
+    },
+    {
+      title: "New terminal",
+      id: "session.terminal",
+      group: "Session",
+      slash: { name: "terminal" },
+      run: async () => {
+        dialog.clear()
+        await panes.newTerminal(route.sessionID).catch(toast.error)
       },
     },
     {
