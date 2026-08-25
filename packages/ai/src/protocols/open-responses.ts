@@ -287,6 +287,7 @@ export const Event = Schema.StructWithRest(
     delta: Schema.optional(Schema.String),
     text: Schema.optional(Schema.String),
     item_id: Schema.optional(Schema.String),
+    output_index: Schema.optional(Schema.Number),
     summary_index: Schema.optional(Schema.Number),
     item: Schema.optional(StreamItem),
     response: Schema.optional(
@@ -342,8 +343,6 @@ export interface ParserState {
   readonly messageItems: ReadonlySet<string>
   readonly messagePhases: Readonly<Record<string, MessagePhase | null>>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
-  // Keeps malformed but recoverable reasoning streams coherent when item IDs are omitted.
-  readonly activeReasoningItemID: string | undefined
   readonly store: boolean | undefined
 }
 
@@ -351,6 +350,7 @@ type ReasoningSummaryStatus = "active" | "can-conclude" | "concluded"
 
 interface ReasoningStreamItem {
   readonly providerItemID: string | undefined
+  readonly outputIndex: number | undefined
   readonly encryptedContent: string | null | undefined
   // Keyed by the wire protocol's numeric `summary_index`. JS object keys coerce to
   // strings, but typing the map as `Record<number, ...>` documents intent
@@ -862,16 +862,17 @@ const reasoningStreamMetadata = (state: ParserState, item: ReasoningStreamItem, 
   })
 }
 
-const syntheticReasoningItemID = () => `rs_${crypto.randomUUID().replaceAll("-", "")}`
-
-const resolveReasoningItemID = (state: ParserState, item: StreamItem) => {
-  if (item.id && state.reasoningItems[item.id]) return item.id
-  const activeID = state.activeReasoningItemID
-  if (!activeID) return item.id ?? syntheticReasoningItemID()
-  const activeItem = state.reasoningItems[activeID]
-  if (!activeItem) return item.id ?? syntheticReasoningItemID()
-  if (!item.id || !activeItem.providerItemID || activeItem.providerItemID === item.id) return activeID
-  return item.id
+const findReasoningItem = (state: ParserState, event: Event, itemID: string | undefined) => {
+  if (itemID && state.reasoningItems[itemID]) return [itemID, state.reasoningItems[itemID]] as const
+  const items = Object.entries(state.reasoningItems)
+  if (itemID) {
+    const known = items.find((entry) => entry[1].providerItemID === itemID)
+    if (known) return known
+  }
+  if (event.output_index === undefined) return undefined
+  const indexed = items.find((entry) => entry[1].outputIndex === event.output_index)
+  if (indexed?.[1].providerItemID && itemID && indexed[1].providerItemID !== itemID) return undefined
+  return indexed
 }
 
 // Responses APIs stream reasoning items in a stable order:
@@ -900,17 +901,17 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
     ]
   }
   if (item?.type === "reasoning") {
-    const id = item.id || syntheticReasoningItemID()
+    const id = item.id || `reasoning:${event.output_index}`
     const events: LLMEvent[] = []
     return [
       {
         ...state,
         lifecycle: Lifecycle.reasoningStart(state.lifecycle, events, `${id}:0`, reasoningMetadata(state, item)),
-        activeReasoningItemID: id,
         reasoningItems: {
           ...state.reasoningItems,
           [id]: {
             providerItemID: item.id,
+            outputIndex: event.output_index,
             encryptedContent: item.encrypted_content,
             summaryParts: { 0: "active" },
             deltaIndexes: new Set(),
@@ -1098,14 +1099,13 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   }
 
   if (item?.type === "reasoning") {
-    const id = resolveReasoningItemID(state, item)
+    const id = findReasoningItem(state, event, item.id)?.[0] ?? item.id ?? `reasoning:${event.output_index}`
     const events: LLMEvent[] = []
     const reasoningItem = state.reasoningItems[id]
     const metadata = reasoningMetadata(state, {
       ...item,
       id: item.id || reasoningItem?.providerItemID,
     })
-    const activeReasoningItemID = state.activeReasoningItemID === id ? undefined : state.activeReasoningItemID
     if (reasoningItem) {
       const lifecycle = Object.entries(reasoningItem.summaryParts)
         .filter((entry) => entry[1] === "active" || entry[1] === "can-conclude")
@@ -1114,18 +1114,17 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
           state.lifecycle,
         )
       const { [id]: _removed, ...reasoningItems } = state.reasoningItems
-      return [{ ...state, lifecycle, reasoningItems, activeReasoningItemID }, events] satisfies StepResult
+      return [{ ...state, lifecycle, reasoningItems }, events] satisfies StepResult
     }
     if (!state.lifecycle.reasoning.has(id)) {
       const lifecycle = Lifecycle.stepStart(state.lifecycle, events)
       events.push(LLMEvent.reasoningStart({ id, providerMetadata: metadata }))
       events.push(LLMEvent.reasoningEnd({ id, providerMetadata: metadata }))
-      return [{ ...state, lifecycle, activeReasoningItemID }, events] satisfies StepResult
+      return [{ ...state, lifecycle }, events] satisfies StepResult
     }
     return [
       {
         ...state,
-        activeReasoningItemID,
         lifecycle: Lifecycle.reasoningEnd(state.lifecycle, events, id, metadata),
       },
       events,
@@ -1159,20 +1158,15 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
           })
         : undefined,
   })
-  return [
-    { ...state, lifecycle, hasFunctionCall, tools: pending.tools, activeReasoningItemID: undefined },
-    events,
-  ] satisfies StepResult
+  return [{ ...state, lifecycle, hasFunctionCall, tools: pending.tools }, events] satisfies StepResult
 })
 
 const normalizeReasoningEvent = (state: ParserState, event: Event) => {
-  if (event.item_id && state.reasoningItems[event.item_id]) return [state, event] as const
-  const id = state.activeReasoningItemID
-  const item = id ? state.reasoningItems[id] : undefined
-  if (!id || !item) return [state, event] as const
-  if (!event.item_id) return [state, { ...event, item_id: id }] as const
-  if (item.providerItemID)
-    return [state, item.providerItemID === event.item_id ? { ...event, item_id: id } : event] as const
+  const entry = findReasoningItem(state, event, event.item_id)
+  if (!entry) return [state, event] as const
+  const id = entry[0]
+  const item = entry[1]
+  if (!event.item_id || item.providerItemID) return [state, { ...event, item_id: id }] as const
   return [
     {
       ...state,
@@ -1277,6 +1271,8 @@ export const step = (state: ParserState, event: Event) => {
   if (event.type === "response.output_item.added") {
     if (event.item?.type === "message" && !event.item.id)
       return ProviderShared.eventError(state.id, `${event.type} message is missing id`)
+    if (event.item?.type === "reasoning" && !event.item.id && event.output_index === undefined)
+      return ProviderShared.eventError(state.id, `${event.type} reasoning is missing id and output_index`)
     return Effect.succeed(onOutputItemAdded(state, event))
   }
   if (event.type === "response.function_call_arguments.delta")
@@ -1286,6 +1282,8 @@ export const step = (state: ParserState, event: Event) => {
   if (event.type === "response.output_item.done") {
     if (event.item?.type === "message" && !event.item.id)
       return ProviderShared.eventError(state.id, `${event.type} message is missing id`)
+    if (event.item?.type === "reasoning" && !event.item.id && event.output_index === undefined)
+      return ProviderShared.eventError(state.id, `${event.type} reasoning is missing id and output_index`)
     return onOutputItemDone(state, event)
   }
   if (event.type === "response.completed" || event.type === "response.incomplete") return onResponseFinish(state, event)
@@ -1315,7 +1313,6 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   messageItems: new Set<string>(),
   messagePhases: {},
   reasoningItems: {},
-  activeReasoningItemID: undefined,
   store: OpenResponsesOptions.resolve(request).store,
 })
 

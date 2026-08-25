@@ -2133,16 +2133,17 @@ describe("OpenAI Responses route", () => {
     }),
   )
 
-  it.effect("reuses a synthetic ID when reasoning events omit item IDs", () =>
+  it.effect("tracks reasoning by output index when events omit item IDs", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(
         Effect.provide(
           fixedResponse(
             sseEvents(
-              { type: "response.output_item.added", item: { type: "reasoning" } },
-              { type: "response.reasoning_summary_text.delta", delta: "thinking" },
+              { type: "response.output_item.added", output_index: 0, item: { type: "reasoning" } },
+              { type: "response.reasoning_summary_text.delta", output_index: 0, delta: "thinking" },
               {
                 type: "response.output_item.done",
+                output_index: 0,
                 item: {
                   type: "reasoning",
                   encrypted_content: "encrypted-state",
@@ -2159,7 +2160,7 @@ describe("OpenAI Responses route", () => {
       const delta = response.events.find(LLMEvent.is.reasoningDelta)
       const end = response.events.find(LLMEvent.is.reasoningEnd)
 
-      expect(start?.id).toMatch(/^rs_[a-f0-9]{32}:0$/)
+      expect(start?.id).toBe("reasoning:0:0")
       expect(delta?.id).toBe(start?.id)
       expect(end?.id).toBe(start?.id)
       expect(response.message.content).toEqual([
@@ -2184,8 +2185,8 @@ describe("OpenAI Responses route", () => {
         Effect.provide(
           fixedResponse(
             sseEvents(
-              { type: "response.output_item.added", item: { type: "reasoning" } },
-              { type: "response.reasoning_summary_part.added", item_id: "rs_real", summary_index: 0 },
+              { type: "response.output_item.added", output_index: 0, item: { type: "reasoning" } },
+              { type: "response.reasoning_summary_part.added", output_index: 0, item_id: "rs_real", summary_index: 0 },
               {
                 type: "response.reasoning_summary_text.delta",
                 item_id: "rs_real",
@@ -2195,6 +2196,7 @@ describe("OpenAI Responses route", () => {
               { type: "response.reasoning_summary_part.done", item_id: "rs_real", summary_index: 0 },
               {
                 type: "response.output_item.done",
+                output_index: 0,
                 item: {
                   type: "reasoning",
                   encrypted_content: "encrypted-state",
@@ -2208,7 +2210,7 @@ describe("OpenAI Responses route", () => {
       )
 
       const start = response.events.find(LLMEvent.is.reasoningStart)
-      expect(start?.id).toMatch(/^rs_[a-f0-9]{32}:0$/)
+      expect(start?.id).toBe("reasoning:0:0")
       expect(response.reasoning).toBe("thinking")
       expect(response.message.content).toEqual([
         {
