@@ -199,8 +199,9 @@ test("reflows held tabs when the pointer leaves the strip", async () => {
     await app.mockMouse.click(22, 0)
     await app.waitForFrame((frame) => items().length === 3 && Array.from(frame.split("\n")[0] ?? "")[22] === "✕")
 
-    await app.mockMouse.moveTo(0, 1)
-    await app.mockMouse.moveTo(20, 0)
+    await app.mockMouse.moveTo(0, 2, { delayMs: 10 })
+    await app.waitForFrame((frame) => Array.from(frame.split("\n")[0] ?? "")[22] !== "✕")
+    await app.mockMouse.moveTo(20, 0, { delayMs: 10 })
     await app.waitForFrame((frame) => Array.from(frame.split("\n")[0] ?? "")[20] === "✕", { maxPasses: 100 })
     expect(Array.from(app.captureCharFrame().split("\n")[0] ?? "")[22]).not.toBe("✕")
   } finally {
