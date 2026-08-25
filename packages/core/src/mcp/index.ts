@@ -706,13 +706,13 @@ export const layer = (options?: Options) =>
         finalize: reconcile,
       })
 
-      // Suspend so each await sees current entries; a bare Map iterator is exhausted after one run.
-      const whenAllReady = Effect.suspend(() =>
-        Effect.forEach(Array.from(entries.values()), (entry) => entry.startup.await, {
+      const whenAllReady = Effect.gen(function* () {
+        yield* state.read()
+        yield* Effect.forEach(Array.from(entries.values()), (entry) => entry.startup.await, {
           concurrency: "unbounded",
           discard: true,
-        }),
-      )
+        })
+      })
       return Service.of({
         transform: state.transform,
         reload: state.reload,
@@ -754,7 +754,6 @@ export const layer = (options?: Options) =>
           yield* state.reload()
         }),
         tools: Effect.fn("MCP.tools")(function* () {
-          yield* state.read()
           yield* whenAllReady
           return Array.from(entries.values())
             .flatMap((entry) => entry.tools ?? [])
@@ -786,7 +785,6 @@ export const layer = (options?: Options) =>
           })
         }),
         instructions: Effect.fn("MCP.instructions")(function* () {
-          yield* state.read()
           yield* whenAllReady
           return Array.from(entries)
             .flatMap(([server, entry]) => {
@@ -820,7 +818,6 @@ export const layer = (options?: Options) =>
           })
         }),
         resourceCatalog: Effect.fn("MCP.resourceCatalog")(function* () {
-          yield* state.read()
           yield* whenAllReady
           const catalogs = yield* Effect.forEach(
             Array.from(entries),
