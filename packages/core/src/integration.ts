@@ -264,7 +264,24 @@ const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const attempts = SynchronizedRef.makeUnsafe(new Map<AttemptID, AttemptEntry>())
     const commandAttempts = SynchronizedRef.makeUnsafe(new Map<AttemptID, CommandAttemptEntry>())
-    const environmentConnections = new Map<ID, string>()
+    const environmentConnections = new Map<ID, { name: string; value: string }>()
+    const resolveConnections = (
+      entry: { readonly methods: readonly Method[] } | undefined,
+      saved: readonly Credential.Info[],
+    ) => {
+      const credentials = saved
+        .map((credential) => ({
+          type: "credential" as const,
+          id: credential.id,
+          label: credential.label,
+        }))
+        .toReversed()
+      const env = (entry?.methods ?? [])
+        .filter((method) => method.type === "env")
+        .flatMap((method) => method.names.filter((name) => process.env[name]))
+        .map((name) => ({ type: "env" as const, name }))
+      return [...credentials, ...env]
+    }
     const state = State.create<Data, Draft>({
       name: "integration",
       initial: () => ({ integrations: new Map<ID, Entry>() }),
@@ -331,19 +348,19 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const current = new Map(
             draft.list().flatMap((integration) => {
-              const name = draft.method
-                .list(integration.id)
-                .filter((method) => method.type === "env")
-                .flatMap((method) => method.names)
-                .find((name) => process.env[name])
-              return name ? [[integration.id, name] as const] : []
+              const connection = resolveConnections({ methods: draft.method.list(integration.id) }, [])[0]
+              return connection?.type === "env"
+                ? [[integration.id, { name: connection.name, value: process.env[connection.name] ?? "" }] as const]
+                : []
             }),
           )
-          const changed = Array.from(new Set([...environmentConnections.keys(), ...current.keys()])).filter(
-            (id) => environmentConnections.get(id) !== current.get(id),
-          )
+          const changed = Array.from(new Set([...environmentConnections.keys(), ...current.keys()])).filter((id) => {
+            const previous = environmentConnections.get(id)
+            const next = current.get(id)
+            return previous?.name !== next?.name || previous?.value !== next?.value
+          })
           environmentConnections.clear()
-          current.forEach((name, id) => environmentConnections.set(id, name))
+          current.forEach((connection, id) => environmentConnections.set(id, connection))
           yield* Effect.forEach(
             changed,
             (integrationID) =>
@@ -356,21 +373,6 @@ const layer = Layer.effect(
           yield* bus.publish(Integration.Event.Updated, {}).pipe(Effect.asVoid)
         }),
     })
-
-    const resolveConnections = (entry: Entry | undefined, saved: readonly Credential.Info[]) => {
-      const credentials = saved
-        .map((credential) => ({
-          type: "credential" as const,
-          id: credential.id,
-          label: credential.label,
-        }))
-        .toReversed()
-      const env = (entry?.methods ?? [])
-        .filter((method) => method.type === "env")
-        .flatMap((method) => method.names.filter((name) => process.env[name]))
-        .map((name) => ({ type: "env" as const, name }))
-      return [...credentials, ...env]
-    }
 
     const project = (entry: Entry, connections: IntegrationConnection.Info[]): Info =>
       Info.make({

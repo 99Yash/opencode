@@ -100,15 +100,26 @@ describe("Integration", () => {
           )
           expect(observed).toHaveLength(1)
 
+          process.env.OPENCODE_INTEGRATION_CONNECTION_TEST = "rotated-secret"
+          yield* integrations.transform((draft) =>
+            draft.update(integrationID, (integration) => (integration.name = "Rotated")),
+          )
+          expect(observed).toEqual([
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
+          ])
+
           const removal = yield* Scope.fork(yield* Scope.Scope)
           yield* integrations.transform((draft) => draft.remove(integrationID)).pipe(Scope.provide(removal))
           expect(observed).toEqual([
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
             { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
             { id: integrationID, active: undefined },
           ])
           yield* Scope.close(removal, Exit.void)
           yield* Scope.close(scope, Exit.void)
           expect(observed).toEqual([
+            { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
             { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
             { id: integrationID, active: undefined },
             { id: integrationID, active: "OPENCODE_INTEGRATION_CONNECTION_TEST" },
@@ -229,6 +240,12 @@ describe("Integration", () => {
             .pipe(Scope.provide(scope))
           expect(observed).toEqual([])
           expect((yield* integrations.connection.active(integrationID))?.type).toBe("credential")
+
+          process.env.OPENCODE_INTEGRATION_PRIORITY_TEST = "rotated-environment-secret"
+          yield* integrations.transform((draft) =>
+            draft.update(integrationID, (integration) => (integration.name = "Rotated")),
+          )
+          expect(observed).toEqual([])
 
           yield* Scope.close(scope, Exit.void)
           expect(observed).toEqual([])
