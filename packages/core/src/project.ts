@@ -14,6 +14,7 @@ import { AppProcess } from "@opencode-ai/util/process"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { Hash } from "@opencode-ai/util/hash"
 import { ProjectSchema } from "./project/schema.js"
+import { ProjectJj } from "./project/jj.js"
 import { ProjectTable, upsertProject } from "./project/sql.js"
 import { WorktreeTable } from "./worktree/sql.js"
 
@@ -264,38 +265,10 @@ const layer = Layer.effect(
       }
     })
 
-    const jjDiscover = Effect.fnUntraced(function* (input: AbsolutePath) {
-      const metadata = yield* fs.up({ targets: [".jj"], start: input, mode: "first" }).pipe(
-        Effect.map((matches) => matches[0]),
-        Effect.orElseSucceed(() => undefined),
-      )
-      if (!metadata) return undefined
-      const directory = yield* fs.realPath(path.dirname(metadata)).pipe(
-        Effect.map((value) => AbsolutePath.make(value)),
-        Effect.orElseSucceed(() => AbsolutePath.make(path.dirname(metadata))),
-      )
-      const reference = path.join(metadata, "repo")
-      const pointer = yield* fs.readFileString(reference).pipe(Effect.orElseSucceed(() => undefined))
-      const target = pointer === undefined ? reference : path.resolve(metadata, pointer.trim())
-      const store = yield* fs.realPath(target).pipe(
-        Effect.map((value) => AbsolutePath.make(value)),
-        Effect.orElseSucceed(() => AbsolutePath.make(target)),
-      )
-      return { directory, store, canonical: AbsolutePath.make(path.dirname(path.dirname(store))) }
-    })
-
     const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
-      const [repo, discovered] = yield* Effect.all([git.repo.discover(input), jjDiscover(input)], { concurrency: 2 })
-      const jj =
-        discovered &&
-        repo &&
-        repo.worktree !== discovered.directory &&
-        FSUtil.contains(discovered.directory, repo.worktree)
-          ? undefined
-          : discovered
-      const backing = jj && (!repo || repo.worktree !== jj.directory) ? yield* git.repo.discover(jj.canonical) : repo
-      const selected =
-        jj && backing?.worktree !== jj.canonical && backing?.worktree !== jj.directory ? undefined : backing
+      const repositories = yield* ProjectJj.repositories(fs, git, input)
+      const selected = repositories.git
+      const jj = repositories.jj
       if (selected) {
         const previous = yield* cached(selected.commonDirectory)
         const id = (yield* remote(selected)) ?? previous ?? (yield* rootCommit(selected))

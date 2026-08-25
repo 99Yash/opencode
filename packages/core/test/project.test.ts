@@ -357,6 +357,28 @@ describe("Project.resolve", () => {
     }),
   )
 
+  it.live("ignores incomplete Jujutsu metadata", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => fs.mkdir(path.join(tmp.path, ".jj")))
+      const project = yield* Project.Service
+
+      expect((yield* project.resolve(abs(tmp.path))).vcs).toBeUndefined()
+
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, ".jj", "repo"), "   \n"))
+      expect((yield* project.resolve(abs(tmp.path))).vcs).toBeUndefined()
+
+      yield* Effect.promise(() => fs.writeFile(path.join(tmp.path, ".jj", "repo"), "../missing"))
+      expect((yield* project.resolve(abs(tmp.path))).vcs).toBeUndefined()
+
+      yield* Effect.promise(() => initRepo(tmp.path, { commit: true }))
+      expect((yield* project.resolve(abs(tmp.path))).vcs?.type).toBe("git")
+    }),
+  )
+
   itJj.live("preserves Git project identity in colocated Jujutsu repositories", () =>
     Effect.gen(function* () {
       const tmp = yield* Effect.acquireRelease(

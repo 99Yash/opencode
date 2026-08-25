@@ -109,6 +109,41 @@ describeJj("Vcs jujutsu", () => {
     ),
   )
 
+  it.live("preserves patches and counts for filenames with tabs and newlines", () =>
+    withJj((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(directory, "line\nname.txt"), "first\nsecond\n")
+          await fs.writeFile(path.join(directory, "tab\tname.txt"), "third\n")
+        })
+        const vcs = yield* Vcs.Service
+        expect(yield* vcs.status()).toEqual([
+          { file: "line\nname.txt", additions: 2, deletions: 0, status: "added" },
+          { file: "tab\tname.txt", additions: 1, deletions: 0, status: "added" },
+        ])
+        const diff = yield* vcs.diff("working")
+        expect(diff[0].patch).toContain("+first")
+        expect(diff[1].patch).toContain("+third")
+      }),
+    ),
+  )
+
+  it.live("preserves rename destinations and their patches", () =>
+    withJj((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(directory, "before.txt"), "one\ntwo\n")
+          await jj(directory, "commit", "-m", "initial")
+          await fs.rename(path.join(directory, "before.txt"), path.join(directory, "after.txt"))
+        })
+        const vcs = yield* Vcs.Service
+        const diff = yield* vcs.diff("working")
+        expect(diff).toMatchObject([{ file: "after.txt", status: "modified", additions: 0, deletions: 0 }])
+        expect(diff[0].patch).toContain("rename to after.txt")
+      }),
+    ),
+  )
+
   it.live("prefers Jujutsu over Git in colocated repositories", () =>
     withJj(
       (directory) =>
@@ -142,6 +177,25 @@ describeJj("Vcs jujutsu", () => {
         expect(yield* vcs.branches()).toEqual(["feature-one", "feature-two", "main"])
         expect(yield* vcs.branches({ search: "FEATURE", limit: 1 })).toEqual(["feature-one"])
         expect(yield* vcs.branches({ search: "*" })).toEqual([])
+      }),
+    ),
+  )
+
+  it.live("uses the configured trunk bookmark instead of an unrelated main bookmark", () =>
+    withJj((directory) =>
+      Effect.gen(function* () {
+        yield* Effect.promise(async () => {
+          await fs.writeFile(path.join(directory, "file.txt"), "initial\n")
+          await jj(directory, "commit", "-m", "initial")
+          await jj(directory, "bookmark", "create", "main", "-r", "@-")
+          await fs.writeFile(path.join(directory, "file.txt"), "initial\nnext\n")
+          await jj(directory, "commit", "-m", "develop")
+          await jj(directory, "bookmark", "create", "develop", "-r", "@-")
+          await jj(directory, "config", "set", "--repo", 'revset-aliases."trunk()"', "develop")
+        })
+        const vcs = yield* Vcs.Service
+        yield* vcs.reload()
+        expect((yield* vcs.info()).branch.default).toBe("develop")
       }),
     ),
   )

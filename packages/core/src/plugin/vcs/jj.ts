@@ -1,6 +1,5 @@
 export * as VcsJjPlugin from "./jj.js"
 
-import path from "path"
 import { Effect } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { define } from "@opencode-ai/plugin/effect/plugin"
@@ -9,8 +8,9 @@ import { BranchList, FileStatus, Info, Mode } from "@opencode-ai/schema/vcs"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { AppProcess } from "@opencode-ai/util/process"
 import { Location } from "../../location.js"
+import { ProjectJj } from "../../project/jj.js"
 import type { Adapter, BranchOptions, DiffOptions } from "../../vcs.js"
-import { chunksByFile, countPatch, emptyPatch, MAX_TOTAL_PATCH_BYTES, PATCH_CONTEXT_LINES } from "../../vcs/patch.js"
+import { countPatch, emptyPatch, MAX_TOTAL_PATCH_BYTES, PATCH_CONTEXT_LINES, splitGitPatch } from "../../vcs/patch.js"
 
 export const Plugin = define({
   id: "opencode.vcs.jj",
@@ -19,15 +19,8 @@ export const Plugin = define({
     if (location.vcs?.type !== "jj" && location.vcs?.type !== "git") return
 
     const fs = yield* FSUtil.Service
-    const metadata = yield* fs.up({ targets: [".jj"], start: location.directory, mode: "first" }).pipe(
-      Effect.map((matches) => matches[0]),
-      Effect.orElseSucceed(() => undefined),
-    )
-    if (!metadata) return
-    const workspace = yield* fs
-      .realPath(path.dirname(metadata))
-      .pipe(Effect.orElseSucceed(() => path.dirname(metadata)))
-    if (workspace !== location.project.directory) return
+    const workspace = yield* ProjectJj.discover(fs, location.project.directory)
+    if (workspace?.directory !== location.project.directory) return
 
     const processes = yield* AppProcess.Service
     const adapter = make(processes, location.directory)
@@ -76,10 +69,12 @@ function make(proc: AppProcess.Interface, directory: string): Adapter {
   })
 
   const base = Effect.fnUntraced(function* () {
+    const trunk = (yield* bookmarks("trunk()"))[0]
+    if (trunk) return trunk
     const list = yield* bookmarks()
     if (list.includes("main")) return "main"
     if (list.includes("master")) return "master"
-    return (yield* bookmarks("trunk()"))[0]
+    return undefined
   })
 
   const changes = Effect.fnUntraced(function* (revision: string[], options?: DiffOptions) {
@@ -105,16 +100,16 @@ function make(proc: AppProcess.Interface, directory: string): Adapter {
       ["diff", ...revision, "--git", "--context", String(options?.context ?? PATCH_CONTEXT_LINES), "."],
       { metadata: true, maxOutputBytes: MAX_TOTAL_PATCH_BYTES },
     )
-    const patches = chunksByFile(
-      { text: result.exitCode === 0 ? result.text() : "", truncated: result.truncated },
-      (index) => items[index]?.file,
-    )
+    const patches = splitGitPatch({
+      text: result.exitCode === 0 ? result.text() : "",
+      truncated: result.truncated,
+    })
     return items
-      .toSorted((a, b) => a.file.localeCompare(b.file))
-      .map((item) => {
-        const patch = patches.get(item.file) ?? emptyPatch(item.file)
+      .map((item, index) => {
+        const patch = patches[index] ?? emptyPatch(item.file)
         return { ...item, patch, ...countPatch(patch) } satisfies FileDiff.Info
       })
+      .toSorted((a, b) => a.file.localeCompare(b.file))
   })
 
   return {
