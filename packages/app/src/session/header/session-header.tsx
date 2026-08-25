@@ -9,7 +9,11 @@ import { StatusPopover } from "@/shell/status/status-popover"
 import { TitlebarRight } from "@/shell/titlebar/right-slot"
 import { SessionHeaderActions, type SessionHeaderActionsState } from "./session-header-actions"
 
-export function SessionHeader() {
+export function SessionHeader(props: {
+  browserAvailable: boolean
+  browserOpened: boolean
+  onBrowserToggle: () => void
+}) {
   const command = useCommand()
   const language = useLanguage()
   const settings = useSettings()
@@ -25,6 +29,14 @@ export function SessionHeader() {
     reviewVisible: isDesktop(),
     reviewOpened: view().reviewPanel.opened(),
     onReviewToggle: () => view().reviewPanel.toggle(),
+    browser:
+      isDesktop() && props.browserAvailable
+        ? {
+            label: language.t("command.browser.toggle"),
+            opened: props.browserOpened,
+            onToggle: props.onBrowserToggle,
+          }
+        : undefined,
   }))
 
   return (

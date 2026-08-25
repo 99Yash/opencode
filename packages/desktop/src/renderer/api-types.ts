@@ -1,3 +1,9 @@
+import type {
+  BrowserPaneBinding,
+  BrowserPaneCommand,
+  BrowserPaneLayout,
+  BrowserPaneState,
+} from "@opencode-ai/app/desktop"
 import type { DesktopMenuAction } from "@opencode-ai/app/desktop-menu"
 import type { DesktopNativeBundle } from "@opencode-ai/app/i18n/desktop-native"
 import type { UpdaterState } from "@opencode-ai/app/updater"
@@ -14,6 +20,15 @@ import type {
 } from "../shared/ipc-contract"
 
 export type WslServersAPI = WslServersPlatform
+export type BrowserPaneAPI = {
+  register(binding: BrowserPaneBinding): Promise<void>
+  unregister(bindingID: string): Promise<void>
+  setLayout(bindingID: string, layout?: BrowserPaneLayout): void
+  command(bindingID: string, command: BrowserPaneCommand): Promise<void>
+  state(bindingID: string): Promise<BrowserPaneState>
+  onOpen(callback: (event: { readonly bindingID: string }) => void): () => void
+  onState(callback: (event: { readonly bindingID: string; readonly state: BrowserPaneState }) => void): () => void
+}
 export type UpdaterAPI = {
   subscribe(cb: (state: UpdaterState) => void): Promise<() => void>
   check(): Promise<UpdaterState>
@@ -23,6 +38,7 @@ export type UpdaterAPI = {
 export type ElectronAPI = {
   awaitInitialization(): Promise<ServerReadyData>
   reconnectService(): Promise<ServerReadyData>
+  browserPane: BrowserPaneAPI
   wslServers: WslServersAPI
   updater: UpdaterAPI
   consumeInitialDeepLinks(): Promise<string[]>

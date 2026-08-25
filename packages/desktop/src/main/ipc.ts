@@ -5,8 +5,10 @@ import { Effect, Layer } from "effect"
 import { RpcServer } from "effect/unstable/rpc"
 import { DesktopRpcs } from "../shared/ipc-rpc"
 import { IpcTransportPort } from "../shared/ipc-transport"
+import { BrowserPane } from "./browser-pane"
 import { DesktopFiles, openExternalURL } from "./files"
 import { appHandlers } from "./ipc-handlers/app"
+import { browserHandlers } from "./ipc-handlers/browser"
 import { eventHandlers } from "./ipc-handlers/events"
 import { fileHandlers } from "./ipc-handlers/files"
 import { menuHandlers } from "./ipc-handlers/menu"
@@ -24,9 +26,10 @@ import { Updater } from "./updater"
 import { getLastFocusedWindow } from "./windows"
 import { Wsl } from "./wsl/start"
 
-const services = Layer.mergeAll(DesktopFiles.layer, DesktopStorage.layer, Wsl.layer)
+const services = Layer.mergeAll(BrowserPane.layer, DesktopFiles.layer, DesktopStorage.layer, Wsl.layer)
 const handlers = Layer.mergeAll(
   appHandlers,
+  browserHandlers,
   storageHandlers,
   fileHandlers,
   windowHandlers,

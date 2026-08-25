@@ -39,6 +39,7 @@ export const groupNames = {
   "server.migration": "migration",
   "server.location": "location",
   "server.agent": "agent",
+  "server.browser": "browser",
   "server.plugin": "plugin",
   "server.session": "session",
   "server.message": "message",
@@ -65,5 +66,10 @@ export const groupNames = {
   "server.config": "config",
 } as const
 
-export const promiseOmitEndpoints = new Set(["pty.connect"])
-export const effectOmitEndpoints = new Set(["fs.read", "pty.connect"])
+export const promiseOmitEndpoints = new Set(["browser.control.connect", "browser.tunnel.connect", "pty.connect"])
+export const effectOmitEndpoints = new Set([
+  "browser.control.connect",
+  "browser.tunnel.connect",
+  "fs.read",
+  "pty.connect",
+])

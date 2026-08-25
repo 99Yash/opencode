@@ -42,4 +42,21 @@ describe("createSessionOwnership", () => {
       dispose()
     })
   })
+
+  test("opens a browser only for the current session", () => {
+    createRoot((dispose) => {
+      const [session, setSession] = createSignal("A")
+      const ownership = createSessionOwnership(session)
+      const previous = ownership.capture()
+      const opened: string[] = []
+
+      setSession("B")
+      const current = ownership.capture()
+      previous.run(() => opened.push("A"))
+      current.run(() => opened.push("B"))
+
+      expect(opened).toEqual(["B"])
+      dispose()
+    })
+  })
 })
