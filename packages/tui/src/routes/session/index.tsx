@@ -149,7 +149,7 @@ function use() {
   return ctx
 }
 
-export function Session(props: { verticalTabsWidth: number }) {
+export function Session(props: { verticalTabsWidth: number; promptMuted?: boolean }) {
   const setEpilogue = useEpilogue()
   const clipboard = useClipboard()
   const writeExport = async (file: string, content: string) => {
@@ -1346,6 +1346,7 @@ export function Session(props: { verticalTabsWidth: number }) {
                     visible={true}
                     ref={bind}
                     disabled={false}
+                    muted={props.promptMuted}
                     onSubmit={() => {
                       toBottom()
                     }}
