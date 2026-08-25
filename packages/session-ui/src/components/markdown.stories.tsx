@@ -54,14 +54,28 @@ export const StreamingResponse = {
 }
 
 function StreamingInlineCodeMarkdown() {
-  const words =
-    "Updated `apps/cloudflare/src/editor/CloudAuth.ts:29-43` and `packages/session-ui/src/components/markdown-solid.tsx`, then verified the changes with `bun typecheck` and `bun test`.".match(
-      /\S+\s*/g,
-    ) ?? []
+  const chunks = [
+    "Updated ",
+    "`apps/cloud",
+    "flare/src/",
+    "editor/Cloud",
+    "Auth.ts:29",
+    "-43` and ",
+    "`packages/",
+    "session-ui/src/",
+    "components/markdown",
+    "-solid.tsx`, ",
+    "then verified ",
+    "the changes with ",
+    "`bun type",
+    "check` and ",
+    "`bun te",
+    "st`.",
+  ]
   const [count, setCount] = createSignal(1)
-  const timer = setInterval(() => setCount((value) => (value >= words.length ? 1 : value + 1)), 220)
+  const timer = setInterval(() => setCount((value) => (value >= chunks.length ? 1 : value + 1)), 220)
   onCleanup(() => clearInterval(timer))
-  return <Markdown text={words.slice(0, count()).join("")} streaming />
+  return <Markdown text={chunks.slice(0, count()).join("")} streaming />
 }
 
 export const StreamingInlineCode = {
