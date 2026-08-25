@@ -4,7 +4,7 @@ import { Global } from "@opencode-ai/util/global"
 import { Effect, FileSystem, Option, Schema } from "effect"
 import { expect, test } from "bun:test"
 import { parse } from "jsonc-parser"
-import { lstat, symlink } from "node:fs/promises"
+import { lstat, mkdir, symlink } from "node:fs/promises"
 import path from "path"
 import { Config } from "../src/config"
 
@@ -605,7 +605,8 @@ test.each(["relative", "absolute"])("migrates a %s symlinked cli config without 
 test("fails to update a broken cli config symlink without replacing it", async () => {
   const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
   const file = path.join(directory, "cli.json")
-  await symlink("missing.json", file)
+  await mkdir(directory, { recursive: true })
+  await symlink("missing.json", file, "file")
 
   try {
     await expect(
@@ -630,15 +631,26 @@ test("fails to migrate through a broken cli config symlink without replacing it"
   const directory = await Bun.$`mktemp -d`.text().then((value) => value.trim())
   const file = path.join(directory, "cli.json")
   await Bun.write(path.join(directory, "tui.json"), JSON.stringify({ theme: "legacy" }))
-  await symlink("missing.json", file)
+  await symlink("missing.json", file, "file")
+  const node = await Effect.runPromise(FileSystem.FileSystem.pipe(Effect.provide(NodeFileSystem.layer)))
+  const fs = new Proxy(node, {
+    get(target, property, receiver) {
+      if (property === "exists")
+        return (target: string) => (target === file ? Effect.succeed(true) : node.exists(target))
+      return Reflect.get(target, property, receiver)
+    },
+  })
 
   try {
-    const config = await run(
-      directory,
+    const config = await Effect.runPromise(
       Effect.gen(function* () {
         const service = yield* Config.Service
         return yield* service.get()
-      }),
+      }).pipe(
+        Effect.provide(Config.layer),
+        Effect.provide(Global.layerWith({ config: directory, state: directory })),
+        Effect.provideService(FileSystem.FileSystem, fs),
+      ),
     )
 
     expect(config.theme).toEqual({ name: "legacy" })

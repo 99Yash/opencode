@@ -29,7 +29,12 @@ export const run = Effect.fn("cli.config.migrate")(function* (input: {
     return cause === undefined ? { info } : { info, cause }
   })
 
-  if (yield* fs.exists(input.file).pipe(Effect.orElseSucceed(() => false))) {
+  if (
+    yield* fs.realPath(input.file).pipe(
+      Effect.as(true),
+      Effect.orElseSucceed(() => false),
+    )
+  ) {
     const text = yield* fs.readFileString(input.file)
     const errors: ParseError[] = []
     const value: any = parse(text, errors, { allowTrailingComma: true })
