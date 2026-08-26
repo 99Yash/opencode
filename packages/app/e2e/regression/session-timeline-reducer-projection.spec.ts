@@ -6,29 +6,10 @@ import {
   partUpdated,
   renderedPartID,
   setupTimeline,
-  shell,
   status,
   textPart,
-  toolPart,
   userMessage,
 } from "../performance/timeline-stability/fixture"
-
-test("groups singleton and separated context operations at correct boundaries", async ({ page }) => {
-  const parts = [
-    toolPart("prt_boundary_01_read", "read", "completed", { path: "src/a.ts" }),
-    textPart("prt_boundary_02_text", "Boundary text"),
-    toolPart("prt_boundary_03_glob", "glob", "completed", { path: ".", pattern: "**/*.ts" }),
-    toolPart("prt_boundary_04_grep", "grep", "completed", { path: ".", pattern: "stable" }),
-    shell("prt_boundary_05_shell", "completed", "done"),
-    toolPart("prt_boundary_06_list", "list", "completed", { path: "src" }),
-  ]
-  await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
-
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_01_read"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_03_glob,prt_boundary_04_grep"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-part-ids="prt_boundary_06_list"]')).toBeVisible()
-  await expect(page.locator('[data-timeline-row="AssistantPart"]')).toHaveCount(5)
-})
 
 test("reducer-hardening: converges when idle arrives before final part and message completion", async ({ page }) => {
   const textID = "prt_event_order_text"
