@@ -1,20 +1,47 @@
-export * as VcsGit from "./git.js"
+export * as VcsGitPlugin from "./git.js"
 
+import { define } from "@opencode-ai/plugin/effect/plugin"
 import { Effect } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
-import { FileStatus, Info, Mode } from "@opencode-ai/schema/vcs"
+import { BranchList, FileStatus, Info, Mode } from "@opencode-ai/schema/vcs"
 import { AppProcess } from "@opencode-ai/util/process"
-import type { DiffOptions, Interface } from "../vcs.js"
-import { chunksByFile, emptyPatch, MAX_PATCH_BYTES, MAX_TOTAL_PATCH_BYTES, PATCH_CONTEXT_LINES } from "./patch.js"
-import type { Patch } from "./patch.js"
+import { Location } from "../../location.js"
+import type { Adapter, BranchOptions, DiffOptions } from "../../vcs.js"
+import { chunksByFile, emptyPatch, MAX_PATCH_BYTES, MAX_TOTAL_PATCH_BYTES, PATCH_CONTEXT_LINES } from "../../vcs/patch.js"
+import type { Patch } from "../../vcs/patch.js"
+
+export const Plugin = define({
+  id: "opencode.vcs.git",
+  effect: Effect.fn("VcsGitPlugin")(function* (ctx) {
+    const location = yield* Location.Service
+    if (location.vcs?.type !== "git") return
+
+    const processes = yield* AppProcess.Service
+    const adapter = make(processes, {
+      directory: location.directory,
+      worktree: location.project.directory,
+    })
+
+    yield* ctx.vcs.transform((draft) => {
+      draft.add({
+        id: "git",
+        name: "Git",
+        info: () => adapter.info(),
+        branches: (input) => adapter.branches({ search: input.search, limit: input.limit }),
+        status: () => adapter.status(),
+        diff: (input) => adapter.diff(input.mode, { context: input.context }),
+      })
+    })
+  }),
+})
 
 /**
  * Git adapter for the Vcs service. Ported from the V1 pipeline: patches are
  * batched through one `git diff` invocation where possible and capped by
  * per-file and total byte budgets, falling back to empty patches when capped.
  */
-export function make(proc: AppProcess.Interface, input: { directory: string; worktree: string }): Interface {
+function make(proc: AppProcess.Interface, input: { directory: string; worktree: string }): Adapter {
   // Listing commands scope pathspecs to the requested directory; per-file
   // commands run from the worktree root because git lists root-relative paths.
   const ctx: Ctx = { git: makeGit(proc), directory: input.directory, worktree: input.worktree }
@@ -25,6 +52,9 @@ export function make(proc: AppProcess.Interface, input: { directory: string; wor
         concurrency: 2,
       })
       return { branch: { current, default: root?.name } } satisfies Info
+    }),
+    branches: Effect.fn("VcsGit.branches")(function* (options?: BranchOptions) {
+      return yield* ctx.git.branches(ctx.directory, options)
     }),
     status: Effect.fn("VcsGit.status")(function* () {
       const git = ctx.git
@@ -176,6 +206,22 @@ function makeGit(proc: AppProcess.Interface) {
     return result.text().trim() || undefined
   })
 
+  const branches = Effect.fn("VcsGit.branches")(function* (cwd: string, options?: BranchOptions) {
+    const search = options?.search?.trim().replace(/[*?[\]\\]/g, "\\$&")
+    return (yield* lines(
+      [
+        "for-each-ref",
+        "--ignore-case",
+        "--sort=refname",
+        "--sort=-committerdate",
+        "--format=%(refname:short)",
+        ...(options?.limit ? [`--count=${options.limit}`] : []),
+        ...(search ? [`refs/heads/*${search}*`, `refs/remotes/*${search}*`] : ["refs/heads", "refs/remotes"]),
+      ],
+      { cwd },
+    )).filter((item) => !item.endsWith("/HEAD")) satisfies BranchList
+  })
+
   const defaultBranch = Effect.fn("VcsGit.defaultBranch")(function* (cwd: string) {
     const remote = yield* primary(cwd)
     if (remote) {
@@ -313,6 +359,7 @@ function makeGit(proc: AppProcess.Interface) {
 
   return {
     branch,
+    branches,
     defaultBranch,
     hasHead,
     mergeBase,
