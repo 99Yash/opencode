@@ -115,6 +115,7 @@ export const mergeGenerationOptions = (...items: ReadonlyArray<GenerationOptions
 }
 
 export class LanguageModelDefaults extends Schema.Class<LanguageModelDefaults>("LLM.LanguageModelDefaults")({
+  promptCacheKey: Schema.optional(Schema.String),
   generation: Schema.optional(GenerationOptions),
   providerOptions: Schema.optional(ProviderOptions),
   http: Schema.optional(HttpOptions),
@@ -124,6 +125,7 @@ export namespace LanguageModelDefaults {
   export type Input =
     | LanguageModelDefaults
     | {
+        readonly promptCacheKey?: string
         readonly generation?: GenerationOptions.Input
         readonly providerOptions?: ProviderOptions
         readonly http?: HttpOptions.Input
@@ -133,6 +135,7 @@ export namespace LanguageModelDefaults {
   export const make = (input: Input) => {
     if (input instanceof LanguageModelDefaults) return input
     return new LanguageModelDefaults({
+      promptCacheKey: input.promptCacheKey,
       generation: input.generation === undefined ? undefined : GenerationOptions.make(input.generation),
       providerOptions: input.providerOptions,
       http: input.http === undefined ? undefined : HttpOptions.make(input.http),

@@ -73,6 +73,7 @@ export type RouteLanguageModelInput = Omit<LanguageModel.Input, "provider" | "ro
 export type RouteRoutedLanguageModelInput = Omit<LanguageModel.Input, "route">
 
 export interface RouteDefaults {
+  readonly promptCacheKey?: string
   readonly headers?: Record<string, string>
   readonly generation?: GenerationOptions
   readonly providerOptions?: ProviderOptions
@@ -80,6 +81,7 @@ export interface RouteDefaults {
 }
 
 export interface RouteDefaultsInput {
+  readonly promptCacheKey?: string
   readonly headers?: Record<string, string>
   readonly generation?: GenerationOptions.Input
   readonly providerOptions?: ProviderOptions
@@ -117,6 +119,7 @@ const mergeRouteDefaults = (base: RouteDefaults | undefined, patch: RouteDefault
   return {
     ...base,
     ...patch,
+    promptCacheKey: patch.promptCacheKey ?? base?.promptCacheKey,
     headers,
     generation: mergeGenerationOptions(generationOptions(base?.generation), generationOptions(patch.generation)),
     providerOptions: mergeProviderOptions(base?.providerOptions, patch.providerOptions),
@@ -172,6 +175,7 @@ const resolveRequestOptions = (request: LLMRequest) => {
   const modelDefaults = request.model.defaults
   const generation = mergeGenerationOptions(routeDefaults.generation, modelDefaults?.generation, request.generation)
   return LLMRequest.update(request, {
+    promptCacheKey: request.promptCacheKey ?? modelDefaults?.promptCacheKey ?? routeDefaults.promptCacheKey,
     generation: generation ?? new GenerationOptions({}),
     providerOptions: mergeProviderOptions(
       routeDefaults.providerOptions,

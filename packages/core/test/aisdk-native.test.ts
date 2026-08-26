@@ -5,6 +5,26 @@ const map = (packageName: string, settings: Readonly<Record<string, unknown>>, m
   AISDKNative.map({ packageName, settings, modelID, providerID: "test-provider" })
 
 describe("AISDKNative", () => {
+  test("keeps configured prompt cache keys in common settings rather than provider options", () => {
+    for (const name of [
+      "@ai-sdk/openai",
+      "@ai-sdk/openai-compatible",
+      "@ai-sdk/azure",
+      "@ai-sdk/amazon-bedrock/mantle",
+      "@ai-sdk/anthropic",
+      "@ai-sdk/google",
+      "@ai-sdk/google-vertex",
+      "@ai-sdk/xai",
+      "@openrouter/ai-sdk-provider",
+    ]) {
+      for (const promptCacheKey of ["configured", "", undefined, 123]) {
+        const mapped = map(name, { baseURL: "https://provider.test/v1", promptCacheKey })
+        expect(mapped?.settings.promptCacheKey).toBe(typeof promptCacheKey === "string" ? promptCacheKey : undefined)
+        expect(mapped?.settings.providerOptions ?? {}).not.toHaveProperty("promptCacheKey")
+      }
+    }
+  })
+
   test("maps OpenAI-family packages and request options to native providers", () => {
     expect(
       map("@ai-sdk/openai", {

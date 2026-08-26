@@ -376,6 +376,8 @@ Request options in order of stability:
 
 Route/provider defaults are overridden by request-level values for each axis.
 
+`promptCacheKey` belongs at the top level, not inside `providerOptions`. It can also be set in provider configuration (for example, `OpenAI.configure({ promptCacheKey: "shared-prefix" })`) or `LanguageModel.defaults`. The effective key is resolved in request > model defaults > route defaults order. For Chat and Responses, `cache: "none"` suppresses the wire cache key even when a default is configured.
+
 The selected model supplies the provider-specific option type, so per-request overrides stay flat while the canonical runtime request remains provider-neutral:
 
 ```ts

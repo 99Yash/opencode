@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Ref, Schema } from "effect"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import { LLM, Message, ToolCallPart, mergeProviderOptions } from "../src/index.js"
-import { AnthropicMessages, OpenAIChat } from "../src/protocols.js"
+import { LLM, LLMRequest, Message, ToolCallPart, mergeProviderOptions } from "../src/index.js"
+import { AnthropicMessages, OpenAIChat, OpenAIResponses } from "../src/protocols.js"
 import { Auth, LLMClient } from "../src/route.js"
 import { compileRequest } from "../src/route/client.js"
 import { it } from "./lib/effect.js"
@@ -14,6 +14,37 @@ const TargetJson = Schema.fromJsonString(Schema.Unknown)
 const decodeJson = Schema.decodeUnknownSync(TargetJson)
 
 describe("request option precedence", () => {
+  it.effect("resolves top-level prompt cache keys from request, model, and route defaults", () =>
+    Effect.gen(function* () {
+      for (const route of [OpenAIChat.route, OpenAIResponses.route]) {
+        for (const [routeKey, modelKey, requestKey, expected] of [
+          [undefined, undefined, undefined, undefined],
+          ["route", undefined, undefined, "route"],
+          ["route", "model", undefined, "model"],
+          ["route", "model", "request", "request"],
+          ["route", "", undefined, ""],
+          ["route", "model", "", ""],
+        ]) {
+          const model = route
+            .with({ auth: Auth.bearer("test"), promptCacheKey: routeKey })
+            .with({ headers: { "x-test": "value" }, promptCacheKey: undefined })
+            .model({ id: "gpt-4o-mini", defaults: { promptCacheKey: modelKey } })
+          const request = LLM.request({ model, prompt: "Hi", promptCacheKey: requestKey })
+          const prepared = yield* compileRequest(request)
+          const disabled = yield* compileRequest(LLMRequest.update(request, { cache: "none" }))
+
+          expect(model.route.defaults.promptCacheKey).toBe(routeKey)
+          expect(model.defaults?.promptCacheKey).toBe(modelKey)
+          if (expected) expect(prepared.body).toMatchObject({ prompt_cache_key: expected })
+          if (!expected) expect(prepared.body).not.toHaveProperty("prompt_cache_key")
+          expect(disabled.body).not.toHaveProperty("prompt_cache_key")
+          expect(request.promptCacheKey).toBe(requestKey)
+          expect(request.providerOptions).toBeUndefined()
+        }
+      }
+    }),
+  )
+
   test("deep-merges provider option records and replaces arrays, primitives, and null", () => {
     const merged = mergeProviderOptions(
       {

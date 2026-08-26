@@ -4142,6 +4142,44 @@ describe("SessionRunnerLLM", () => {
     }),
   )
 
+  it.effect("prefers configured prompt cache keys over the automatic session key", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const context = yield* SessionContext.Service
+      const modelRequests = yield* SessionModelRequest.Service
+      const selected = yield* context.select(sessionID)
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      yield* InstructionState.prepare(database.db, bus, selected.instructions, sessionID)
+      const loaded = yield* context.load(selected)
+
+      for (const [routeKey, modelKey, expected] of [
+        [undefined, undefined, sessionID],
+        ["route-cache", undefined, "route-cache"],
+        ["route-cache", "model-cache", "model-cache"],
+        ["route-cache", "", ""],
+      ]) {
+        const prepared = yield* modelRequests.prepare({
+          scope: {
+            session: loaded.session,
+            agentID: loaded.agent.id,
+            model: {
+              ...loaded.model,
+              model: LanguageModel.update(loaded.model.model, {
+                route: loaded.model.model.route.with({ promptCacheKey: routeKey }),
+                defaults: { promptCacheKey: modelKey },
+              }),
+            },
+            tools: loaded.tools,
+          },
+          transcript: { system: [], messages: [] },
+        })
+        expect(prepared.request.promptCacheKey).toBe(expected)
+        expect(prepared.request.providerOptions ?? {}).not.toHaveProperty("promptCacheKey")
+      }
+    }),
+  )
+
   it.effect("bounds 64-character session prompt cache keys", () =>
     Effect.gen(function* () {
       const session = yield* setup

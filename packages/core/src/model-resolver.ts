@@ -170,6 +170,10 @@ const resolveCatalogModel = Effect.fn("ModelResolver.resolveCatalogModel")(funct
       const runtime = module.model(resolved.modelID ?? resolved.id, settings)
       return LanguageModel.update(runtime, {
         provider: resolved.providerID,
+        defaults:
+          typeof mapped.promptCacheKey === "string"
+            ? { ...runtime.defaults, promptCacheKey: mapped.promptCacheKey }
+            : runtime.defaults,
         compatibility: resolved.compatibility
           ? Object.assign({}, runtime.compatibility, resolved.compatibility)
           : runtime.compatibility,

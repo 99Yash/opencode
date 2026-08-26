@@ -121,6 +121,7 @@ describe("llm constructors", () => {
     const model = chatRoute.model({
       id: "kimi-k2",
       defaults: {
+        promptCacheKey: "model-cache",
         generation: { maxTokens: 1_024, stop: ["END"] },
         providerOptions: { parallelToolCalls: false },
         http: { body: { extra_body: true } },
@@ -129,6 +130,8 @@ describe("llm constructors", () => {
     })
     const request = LLM.request({ model, prompt: "Say hello." })
 
+    expect(request.model.defaults?.promptCacheKey).toBe("model-cache")
+    expect(request.promptCacheKey).toBeUndefined()
     expect(request.model.defaults?.generation).toEqual({ maxTokens: 1_024, stop: ["END"] })
     expect(request.model.defaults?.providerOptions).toEqual({ parallelToolCalls: false })
     expect(request.model.defaults?.http).toEqual({ body: { extra_body: true } })

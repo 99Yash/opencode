@@ -385,6 +385,43 @@ describe("ModelResolver", () => {
     ),
   )
 
+  it.effect("carries configured prompt cache keys into native request defaults", () =>
+    Effect.gen(function* () {
+      for (const [packageName, modelID, useCompletionUrls] of [
+        [Provider.aisdk("@ai-sdk/amazon-bedrock/mantle"), "openai.gpt-oss-120b", false],
+        [Provider.aisdk("@ai-sdk/amazon-bedrock/mantle"), "openai.gpt-oss-safeguard-20b", false],
+        [Provider.aisdk("@ai-sdk/openai"), "gpt-4o-mini", false],
+        [Provider.aisdk("@ai-sdk/openai-compatible"), "model", false],
+        [Provider.aisdk("@ai-sdk/azure"), "deployment", false],
+        [Provider.aisdk("@ai-sdk/azure"), "deployment", true],
+        ["@opencode-ai/ai/providers/openai", "gpt-4o-mini", false],
+      ] as const) {
+        const resolved = yield* ModelResolver.fromCatalogModel(
+          model(packageName, {
+            modelID,
+            settings: {
+              apiKey: "test",
+              baseURL: "https://provider.test/v1",
+              promptCacheKey: "configured-cache",
+              useCompletionUrls,
+            },
+          }),
+        )
+        expect(resolved.defaults?.promptCacheKey).toBe("configured-cache")
+        expect(resolved.route.defaults.providerOptions ?? {}).not.toHaveProperty("promptCacheKey")
+
+        const prepared = yield* compileRequest(LLM.request({ model: resolved, prompt: "Hi" }))
+        const overridden = yield* compileRequest(
+          LLM.request({ model: resolved, prompt: "Hi", promptCacheKey: "request-cache" }),
+        )
+        const disabled = yield* compileRequest(LLM.request({ model: resolved, prompt: "Hi", cache: "none" }))
+        expect(prepared.body).toMatchObject({ prompt_cache_key: "configured-cache" })
+        expect(overridden.body).toMatchObject({ prompt_cache_key: "request-cache" })
+        expect(disabled.body).not.toHaveProperty("prompt_cache_key")
+      }
+    }),
+  )
+
   it.effect("uses merged API settings for OpenAI-compatible auth and request defaults", () =>
     Effect.gen(function* () {
       const resolved = yield* ModelResolver.fromCatalogModel(
@@ -468,12 +505,13 @@ describe("ModelResolver", () => {
   it.effect("overlays selected OpenAI variant settings and bodies", () =>
     Effect.gen(function* () {
       const catalog = model(Provider.aisdk("@ai-sdk/openai"), {
-        settings: { baseURL: "https://openai.example/v1" },
+        settings: { baseURL: "https://openai.example/v1", promptCacheKey: "base-cache" },
         variants: [
           {
             id: VariantID.make("xhigh"),
             settings: {
               reasoningEffort: "xhigh",
+              promptCacheKey: "variant-cache",
               reasoningSummary: "auto",
               include: ["reasoning.encrypted_content"],
             },
@@ -507,6 +545,7 @@ describe("ModelResolver", () => {
       })
       const prepared = yield* compileRequest(LLM.request({ model: resolved, prompt: "Hello" }))
       expect(prepared.body).toMatchObject({
+        prompt_cache_key: "variant-cache",
         include: ["reasoning.encrypted_content"],
         reasoning: { effort: "xhigh", summary: "auto" },
       })

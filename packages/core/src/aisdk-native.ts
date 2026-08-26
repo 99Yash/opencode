@@ -148,7 +148,9 @@ export function map(input: MapInput): Mapping | undefined {
 }
 
 function mapProviderOptions(settings: Readonly<Record<string, unknown>>, excluded: ReadonlyArray<string>) {
-  const options = Object.fromEntries(Object.entries(settings).filter(([name]) => !excluded.includes(name)))
+  const options = Object.fromEntries(
+    Object.entries(settings).filter(([name]) => name !== "promptCacheKey" && !excluded.includes(name)),
+  )
   if (Object.keys(options).length === 0) return {}
   return { providerOptions: options }
 }
@@ -278,7 +280,6 @@ function mapOpenAIOptions(settings: Readonly<Record<string, unknown>>) {
     ...(typeof settings.reasoningSummary === "string" ? { reasoningSummary: settings.reasoningSummary } : {}),
     ...(Array.isArray(settings.include) ? { include: settings.include } : {}),
     ...(typeof settings.store === "boolean" ? { store: settings.store } : {}),
-    ...(typeof settings.promptCacheKey === "string" ? { promptCacheKey: settings.promptCacheKey } : {}),
     ...(typeof settings.textVerbosity === "string" ? { textVerbosity: settings.textVerbosity } : {}),
     ...(typeof settings.serviceTier === "string" ? { serviceTier: settings.serviceTier } : {}),
   }
@@ -289,6 +290,7 @@ function mapOpenAIOptions(settings: Readonly<Record<string, unknown>>) {
 function mapBaseSettings(settings: Readonly<Record<string, unknown>>) {
   return {
     ...(typeof settings.baseURL === "string" ? { baseURL: settings.baseURL } : {}),
+    ...(typeof settings.promptCacheKey === "string" ? { promptCacheKey: settings.promptCacheKey } : {}),
   }
 }
 
