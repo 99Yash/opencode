@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
 import {
@@ -31,7 +30,7 @@ import { EventTable } from "@opencode-ai/core/event/sql"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { Form } from "@opencode-ai/core/form"
-import { AbsolutePath } from "@opencode-ai/core/schema"
+import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { SessionEvent } from "@opencode-ai/core/session/event"
@@ -42,6 +41,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionModelRequest } from "@opencode-ai/core/session/model-request"
 import { SessionModelTransport } from "@opencode-ai/core/session/model-transport"
 import { Money } from "@opencode-ai/schema/money"
+import { Workspace } from "@opencode-ai/schema/workspace"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator"
@@ -84,6 +84,7 @@ import { TestClock } from "effect/testing"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { asc, desc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { git } from "./fixture/git"
 import { tmpdir } from "./fixture/tmpdir"
 import { permissionLayer } from "./lib/permission"
 import { agentHost, catalogHost, host } from "./plugin/host"
@@ -1496,37 +1497,86 @@ describe("SessionRunnerLLM", () => {
         Effect.promise(() => tmpdir()),
         (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
       )
-      const destination = AbsolutePath.make(path.join(tmp.path, "packages", "app"))
-      yield* Effect.promise(() => fs.mkdir(destination, { recursive: true }))
+      const root = path.join(tmp.path, "repository")
+      const alias = path.join(tmp.path, "alias")
+      const destination = AbsolutePath.make(path.join(alias, "packages", "app"))
+      yield* Effect.promise(() => fs.mkdir(path.join(root, "packages", "app"), { recursive: true }))
+      yield* Effect.promise(() => fs.symlink(root, alias, process.platform === "win32" ? "junction" : "dir"))
       const previous = yield* projects.resolve(destination)
       yield* SessionInbox.admit(db, bus, {
         id: SessionMessage.ID.create(),
         sessionID,
         item: {
           type: "move",
-          payload: { location: Location.Ref.make({ directory: destination }), projectID: previous.id },
+          payload: {
+            location: Location.Ref.make({ directory: destination }),
+            projectID: previous.id,
+            subpath: RelativePath.make(""),
+          },
           delivery: "queue",
         },
       })
 
-      yield* Effect.promise(() => $`git init`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() => git(root, "init"))
       yield* Effect.promise(() =>
-        $`git -c user.name=Test -c user.email=test@opencode.test -c commit.gpgsign=false commit --allow-empty -m root`
-          .cwd(tmp.path)
-          .quiet(),
+        git(
+          root,
+          "-c",
+          "user.name=Test",
+          "-c",
+          "user.email=test@opencode.test",
+          "-c",
+          "commit.gpgsign=false",
+          "commit",
+          "--allow-empty",
+          "-m",
+          "root",
+        ),
       )
-      const project = yield* projects.resolve(destination)
-      expect(project.id).not.toBe(previous.id)
       expect(yield* session.inbox(sessionID)).toMatchObject([{ payload: { projectID: previous.id } }])
 
       yield* session.resume(sessionID)
 
-      expect(yield* session.get(sessionID)).toMatchObject({
-        projectID: project.id,
+      const moved = yield* session.get(sessionID)
+      expect(moved).toMatchObject({
         location: { directory: destination },
         subpath: "packages/app",
       })
+      expect(moved.projectID).not.toBe(previous.id)
+      expect(moved.projectID).toBe((yield* projects.resolve(destination)).id)
       expect(yield* session.inbox(sessionID)).toEqual([])
+    }),
+  )
+
+  it.effect("preserves the admitted project when moving to an explicit workspace", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const bus = yield* Bus.Service
+      const db = (yield* Database.Service).db
+      yield* SessionInbox.admit(db, bus, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        item: {
+          type: "move",
+          payload: {
+            location: Location.Ref.make({
+              directory: AbsolutePath.make("/project"),
+              workspaceID: Workspace.ID.make("wrk_remote"),
+            }),
+            projectID: Project.ID.global,
+            subpath: RelativePath.make("remote/path"),
+          },
+          delivery: "queue",
+        },
+      })
+
+      yield* session.resume(sessionID)
+
+      expect(yield* session.get(sessionID)).toMatchObject({
+        projectID: Project.ID.global,
+        location: { directory: "/project", workspaceID: "wrk_remote" },
+        subpath: "remote/path",
+      })
     }),
   )
 
