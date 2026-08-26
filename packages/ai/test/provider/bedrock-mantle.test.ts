@@ -59,6 +59,27 @@ describe("Amazon Bedrock Mantle provider", () => {
     }),
   )
 
+  it.effect("keeps Responses on HTTP when a WebSocket executor is available", () =>
+    Effect.gen(function* () {
+      const model = AmazonBedrockMantle.configure({ apiKey: "test-key" }).responses("openai.gpt-oss-120b")
+
+      yield* LLMClient.generate(LLM.request({ model, prompt: "Hi" }), {
+        webSocket: { execute: () => Effect.die("unexpected Mantle WebSocket request") },
+      }).pipe(
+        Effect.provide(
+          dynamicResponse((input) => {
+            expect(input.request.url).toBe("https://bedrock-mantle.us-east-1.api.aws/v1/responses")
+            return Effect.succeed(
+              input.respond(sseEvents({ type: "response.completed", response: {} }), {
+                headers: { "content-type": "text/event-stream" },
+              }),
+            )
+          }),
+        ),
+      )
+    }),
+  )
+
   it.effect("supports bearer authentication and custom base URLs", () =>
     Effect.gen(function* () {
       const seen: Array<{ readonly url: string; readonly authorization: string | undefined }> = []

@@ -29,6 +29,11 @@ export interface Settings extends ProviderPackage.Settings {
 const responsesRoute = OpenAIResponses.route.with({
   id: "bedrock-mantle-responses",
   provider: id,
+  transport: OpenAIResponses.channelTransport({
+    id: "bedrock-mantle-responses",
+    name: "Bedrock Mantle Responses",
+    enabled: () => false,
+  }),
 })
 
 const chatRoute = OpenAIChat.route.with({
