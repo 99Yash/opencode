@@ -461,6 +461,23 @@ describe("CodeMode bigint values", () => {
     expect(Schema.decodeUnknownSync(CodeMode.Result)(JSON.parse(JSON.stringify(result)))).toStrictEqual(result)
   })
 
+  test("returns a structured diagnostic when an uncaught object contains bigint values", async () => {
+    const result = await Effect.runPromise(
+      CodeMode.execute({
+        code: `throw { value: 9007199254740993n, nested: [1n] }`,
+      }),
+    )
+
+    expect(result).toStrictEqual({
+      ok: false,
+      error: {
+        kind: "ExecutionFailure",
+        message: 'Uncaught: {"value":"9007199254740993","nested":["1"]}',
+      },
+      toolCalls: [],
+    })
+  })
+
   test("preserves native bigint values across chained schema-backed tool calls", async () => {
     const lookup = Tool.make({
       description: "Look up an exact integer",
