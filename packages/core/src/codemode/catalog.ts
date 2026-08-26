@@ -7,6 +7,7 @@ export const Entry = Schema.Struct({
   description: Schema.String,
   signature: Schema.String,
   pinned: Schema.optionalKey(Schema.Boolean),
+  namespaceInstructions: Schema.optionalKey(Schema.String),
 })
 export type Entry = typeof Entry.Type
 
@@ -19,6 +20,7 @@ const Namespace = Schema.Struct({
   name: Schema.String,
   count: Schema.Number,
   entries: Schema.Array(Listing),
+  instructions: Schema.optionalKey(Schema.String),
 })
 
 export const Summary = Schema.Struct({
@@ -42,6 +44,9 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
       return 0
     })
     .map(([name, namespaceEntries]) => {
+      const instructions = namespaceEntries.find(
+        (entry) => entry.namespaceInstructions !== undefined,
+      )?.namespaceInstructions
       const listings = namespaceEntries
         .map((entry) => {
           const firstLine = entry.description.split("\n", 1)[0]?.trim() ?? ""
@@ -64,6 +69,7 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
       )
       return {
         name,
+        ...(instructions === undefined ? {} : { instructions }),
         listings,
         selectionOrder: ranked.filter((candidate) => !pinned.has(candidate.listing)),
         selectedListings: pinned,
@@ -75,8 +81,20 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
   let remaining =
     budget -
     namespaces
-      .flatMap((namespace) => namespace.listings.filter((listing) => namespace.selectedListings.has(listing)))
-      .reduce((total, listing) => total + Math.round(listing.line.length / CHARACTERS_PER_TOKEN), 0)
+      .flatMap((namespace) => [
+        ...(namespace.instructions === undefined
+          ? []
+          : [
+              namespace.instructions
+                .split("\n")
+                .map((line) => `  ${line}`)
+                .join("\n"),
+            ]),
+        ...namespace.listings
+          .filter((listing) => namespace.selectedListings.has(listing))
+          .map((listing) => listing.line),
+      ])
+      .reduce((total, text) => total + Math.round(text.length / CHARACTERS_PER_TOKEN), 0)
   while (active.size > 0) {
     for (const namespace of active) {
       const candidate = namespace.selectionOrder[namespace.selectionIndex]
@@ -95,6 +113,7 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
     name: namespace.name,
     count: namespace.listings.length,
     entries: namespace.listings.filter((listing) => namespace.selectedListings.has(listing)),
+    ...(namespace.instructions === undefined ? {} : { instructions: namespace.instructions }),
   }))
   return {
     total: entries.length,

@@ -47,6 +47,32 @@ describe("CodeModeCatalog.summarize", () => {
     expect(catalog.namespaces.every((namespace) => namespace.entries.length === 0)).toBe(true)
   })
 
+  test("retains namespace instructions when no tool listing fits", () => {
+    const catalog = CodeModeCatalog.summarize(
+      [{ ...lookup, namespaceInstructions: "Use order tools only for verified customers." }],
+      0,
+    )
+
+    expect(catalog.namespaces).toEqual([
+      {
+        name: "orders",
+        count: 1,
+        entries: [],
+        instructions: "Use order tools only for verified customers.",
+      },
+    ])
+  })
+
+  test("charges namespace instructions against the tool listing budget", () => {
+    const guidance = "Ask before using these tools."
+    const guided = { ...lookup, namespaceInstructions: guidance }
+    const line = `  - ${lookup.signature} // Look up an order by ID`
+    const budget = Math.round(line.length / 4) + Math.round(`  ${guidance}`.length / 4)
+
+    expect(CodeModeCatalog.summarize([guided], budget).shown).toBe(1)
+    expect(CodeModeCatalog.summarize([guided], budget - 1).shown).toBe(0)
+  })
+
   test("always retains pinned tools beyond the inline budget", () => {
     const pinned = [entry("alpha.first", "First", undefined, true), entry("beta.second", "Second", undefined, true)]
     const catalog = CodeModeCatalog.summarize([...pinned, entry("alpha.unpinned", "Unpinned")], 0)
@@ -106,6 +132,26 @@ describe("CodeModeInstructions.render", () => {
     expect(partial).toContain("- search(input: {")
     expect(partial).toContain("  limit?: number,\n  offset?: number,")
     expect(partial).not.toContain("tools.orders.lookup(input:")
+  })
+
+  test("renders multiline namespace instructions once before tool listings", () => {
+    const guidance = "Use order tools only for verified customers.\nNever create orders without approval."
+    const instructions = render([
+      { ...lookup, namespaceInstructions: guidance },
+      { ...entry("orders.cancel", "Cancel an order"), namespaceInstructions: guidance },
+    ])
+
+    expect(instructions).toContain(
+      "- orders (2 tools)\n  Use order tools only for verified customers.\n  Never create orders without approval.",
+    )
+    expect(instructions.split("Use order tools only for verified customers.")).toHaveLength(2)
+  })
+
+  test("renders namespace instructions when no tool listing fits", () => {
+    const instructions = render([{ ...lookup, namespaceInstructions: "Verify the customer before searching." }], 0)
+
+    expect(instructions).toContain("- orders (1 tool, none shown)\n  Verify the customer before searching.")
+    expect(instructions).not.toContain("tools.orders.lookup(input:")
   })
 
   test("budgets signatures round-robin so every namespace remains visible", () => {
@@ -196,5 +242,32 @@ describe("CodeModeInstructions.update", () => {
     expect(text).toContain("search them again before relying on previous results")
     expect(text).not.toContain("tools.alpha.tool10(input:")
     expect(text).not.toContain("## Available tools")
+  })
+
+  test("replaces complete catalogs when namespace instructions change", () => {
+    const previous = { ...lookup, namespaceInstructions: "Ask before looking up orders." }
+    const current = { ...lookup, namespaceInstructions: "Only look up approved orders." }
+    const text = update([previous], [current])
+
+    expect(text).toContain("This catalog supersedes the previous Code Mode tool catalog.")
+    expect(text).toContain("- orders (1 tool)\n  Only look up approved orders.")
+    expect(text).not.toContain("Ask before looking up orders.")
+  })
+
+  test("replaces partial catalogs when namespace instructions change", () => {
+    const previous = { ...lookup, namespaceInstructions: "Ask before looking up orders." }
+    const current = { ...lookup, namespaceInstructions: "Only look up approved orders." }
+    const text = update([previous], [current], 0)
+
+    expect(text).toContain("This catalog supersedes the previous Code Mode tool catalog.")
+    expect(text).toContain("- orders (1 tool, none shown)\n  Only look up approved orders.")
+    expect(text).not.toContain("tools.orders.lookup(input:")
+  })
+
+  test("replaces catalogs when an instructed namespace is added or removed", () => {
+    const guided = { ...lookup, namespaceInstructions: "Ask before looking up orders." }
+
+    expect(update([echo], [echo, guided])).toContain("- orders (1 tool)\n  Ask before looking up orders.")
+    expect(update([echo, guided], [echo])).toContain("This catalog supersedes the previous Code Mode tool catalog.")
   })
 })

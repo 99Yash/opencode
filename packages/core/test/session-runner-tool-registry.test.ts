@@ -82,6 +82,107 @@ describe("Tool", () => {
     }),
   )
 
+  it.effect("rejects namespace instructions without a namespace", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const error = yield* transform(service, { echo: make() }, { namespaceInstructions: "Ask first." }).pipe(
+        Effect.flip,
+      )
+
+      expect(error).toBeInstanceOf(Tool.RegistrationError)
+      expect(error.message).toBe('Namespace instructions require a tool namespace: "echo"')
+      expect((yield* service.snapshot()).codeModeCatalog).toEqual([])
+    }),
+  )
+
+  it.effect("rejects conflicting namespace instructions before installing a registration batch", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const error = yield* service
+        .transform((draft) => {
+          draft.add({
+            ...make(),
+            name: "first",
+            options: { namespace: "sessions", namespaceInstructions: "Ask first." },
+          })
+          draft.add({
+            ...make(),
+            name: "second",
+            options: { namespace: "sessions", namespaceInstructions: "Never ask first." },
+          })
+        })
+        .pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(Tool.RegistrationError)
+      expect(error.message).toBe('Conflicting instructions for tool namespace: "sessions"')
+      expect((yield* service.snapshot()).codeModeCatalog).toEqual([])
+    }),
+  )
+
+  it.effect("rejects conflicting namespace instructions across registrations", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* transform(service, { first: make() }, { namespace: "sessions", namespaceInstructions: "Ask first." })
+      const error = yield* transform(
+        service,
+        { second: make() },
+        { namespace: "sessions.admin", namespaceInstructions: "Never ask first." },
+      ).pipe(Effect.flip)
+
+      expect(error.message).toBe('Conflicting instructions for tool namespace: "sessions"')
+      expect((yield* service.snapshot()).codeModeCatalog?.map((tool) => tool.path)).toEqual(["sessions.first"])
+    }),
+  )
+
+  it.effect("accepts matching namespace instructions across registrations", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const options = { namespace: "sessions", namespaceInstructions: "Ask first." }
+      yield* transform(service, { first: make() }, options)
+      yield* transform(service, { second: make() }, options)
+
+      expect((yield* service.snapshot()).codeModeCatalog?.map((tool) => tool.path)).toEqual([
+        "sessions.first",
+        "sessions.second",
+      ])
+    }),
+  )
+
+  it.effect("rejects instructions conflicting with a shadowed registration", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* transform(service, { first: make() }, { namespace: "sessions", namespaceInstructions: "Ask first." })
+      yield* transform(service, { first: make() }, { namespace: "sessions" })
+      const error = yield* transform(
+        service,
+        { second: make() },
+        { namespace: "sessions", namespaceInstructions: "Never ask first." },
+      ).pipe(Effect.flip)
+
+      expect(error.message).toBe('Conflicting instructions for tool namespace: "sessions"')
+      expect((yield* service.snapshot()).codeModeCatalog?.map((tool) => tool.path)).toEqual(["sessions.first"])
+    }),
+  )
+
+  it.effect("keeps namespace instructions when their declaring tool is denied", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* service.transform((draft) => {
+        draft.add({
+          ...make(),
+          name: "create",
+          options: { namespace: "sessions", namespaceInstructions: "Ask before using session tools." },
+        })
+        draft.add({ ...make(), name: "get", options: { namespace: "sessions" } })
+      })
+
+      const catalog = (yield* service.snapshot([{ action: "sessions_create", resource: "*", effect: "deny" }]))
+        .codeModeCatalog
+      expect(catalog?.map((tool) => tool.path)).toEqual(["sessions.get"])
+      expect(catalog?.[0]?.namespaceInstructions).toBe("Ask before using session tools.")
+    }),
+  )
+
   it.effect("rejects invalid and colliding normalized names", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service

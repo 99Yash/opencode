@@ -134,7 +134,7 @@ export const create = (
   } satisfies Info
 }
 
-export const catalog = (registrations: ReadonlyMap<string, Info>) => {
+export const catalog = (registrations: ReadonlyMap<string, Info>, instructions: ReadonlyMap<string, string>) => {
   const pinned = new Set(
     Array.from(registrations.values())
       .filter((registration) => registration.options?.pinned === true)
@@ -142,7 +142,14 @@ export const catalog = (registrations: ReadonlyMap<string, Info>) => {
   )
   return runtime(registrations, () => Effect.fail(toolError("Execute context is unavailable")))
     .catalog()
-    .map((entry) => ({ ...entry, pinned: pinned.has(entry.path) }))
+    .map((entry) => {
+      const guidance = instructions.get(entry.path.split(".", 1)[0] ?? entry.path)
+      return {
+        ...entry,
+        pinned: pinned.has(entry.path),
+        ...(guidance === undefined ? {} : { namespaceInstructions: guidance }),
+      }
+    })
 }
 
 function runtime(

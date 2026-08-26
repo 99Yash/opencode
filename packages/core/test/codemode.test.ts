@@ -40,4 +40,35 @@ describe("CodeMode", () => {
       ),
     ),
   )
+
+  it.effect("includes namespace instructions in the materialized catalog", () =>
+    Effect.gen(function* () {
+      const tools = yield* Tool.Service
+      yield* tools.transform((draft) =>
+        draft.add({
+          name: "create",
+          description: "Create a session",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          options: {
+            namespace: "sessions",
+            namespaceInstructions: "Create independent sessions only when explicitly requested.",
+          },
+          execute: () => Effect.succeed({ output: "created" }),
+        }),
+      )
+
+      expect((yield* tools.snapshot()).codeModeCatalog?.[0]).toMatchObject({
+        path: "sessions.create",
+        namespaceInstructions: "Create independent sessions only when explicitly requested.",
+      })
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        AppNodeBuilder.build(Tool.node, [
+          [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
+        ]),
+      ),
+    ),
+  )
 })

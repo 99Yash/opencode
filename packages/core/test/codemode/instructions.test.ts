@@ -69,6 +69,23 @@ describe("CodeModeInstructions", () => {
     }),
   )
 
+  it.effect("persists namespace instruction changes as durable catalog replacements", () =>
+    Effect.gen(function* () {
+      const initialized = yield* readInitial(
+        CodeModeInstructions.make([{ ...echo, namespaceInstructions: "Ask before using note tools." }]),
+      )
+      expect(initialized.text).toContain("- notes (1 tool)\n  Ask before using note tools.")
+
+      const changed = yield* readUpdate(
+        CodeModeInstructions.make([{ ...echo, namespaceInstructions: "Use note tools only when requested." }]),
+        initialized,
+      )
+      expect(changed.changed).toBe(true)
+      expect(changed.text).toContain("This catalog supersedes the previous Code Mode tool catalog.")
+      expect(changed.text).toContain("- notes (1 tool)\n  Use note tools only when requested.")
+    }),
+  )
+
   it.effect("stores a canonical sorted snapshot so registration order does not churn history", () => {
     const alpha = {
       name: "alpha",

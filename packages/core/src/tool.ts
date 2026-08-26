@@ -145,6 +145,16 @@ const layer = Layer.effect(
         validateNamespace,
         { discard: true },
       )
+      const unbound = tools.find(
+        (tool) => tool.options?.namespaceInstructions !== undefined && tool.options.namespace === undefined,
+      )
+      if (unbound)
+        return yield* Effect.fail(
+          new RegistrationError({
+            name: unbound.name,
+            message: `Namespace instructions require a tool namespace: "${unbound.name}"`,
+          }),
+        )
       const entries = normalizedEntries(tools)
       yield* Effect.forEach(entries, (entry) => validateName(normalizedName(entry.tool)), { discard: true })
       const collision = entries.find(
@@ -182,6 +192,24 @@ const layer = Layer.effect(
       yield* Effect.uninterruptible(
         lock.withPermit(
           Effect.gen(function* () {
+            const conflict = [
+              ...Map.groupBy(
+                [
+                  ...Array.from(local.values()).flatMap((registrations) => registrations.map((item) => item.tool)),
+                  ...tools,
+                ].filter((tool) => tool.options?.namespaceInstructions !== undefined),
+                (tool) => tool.options?.namespace?.split(".", 1)[0] ?? "",
+              ),
+            ].find(
+              ([, registrations]) => new Set(registrations.map((tool) => tool.options?.namespaceInstructions)).size > 1,
+            )
+            if (conflict)
+              return yield* Effect.fail(
+                new RegistrationError({
+                  name: conflict[0],
+                  message: `Conflicting instructions for tool namespace: "${conflict[0]}"`,
+                }),
+              )
             const token = {}
             for (const entry of entries)
               local.set(entry.key, [...(local.get(entry.key) ?? []), { token, tool: entry.tool }])
@@ -207,10 +235,16 @@ const layer = Layer.effect(
         lock.withPermit(
           Effect.gen(function* () {
             const active = new Map<string, Tool.Info>()
+            const guidance = new Map<string, string>()
             const rules = permissions ?? []
             for (const [name, entries] of local) {
               const tool = entries.at(-1)?.tool
               if (!tool) continue
+              if (tool.options?.namespace !== undefined && tool.options.namespaceInstructions !== undefined)
+                guidance.set(
+                  tool.options.namespace.split(".", 1)[0] ?? tool.options.namespace,
+                  tool.options.namespaceInstructions,
+                )
               if (whollyDisabled(tool.options?.permission ?? name, rules)) continue
               active.set(name, tool)
             }
@@ -221,7 +255,7 @@ const layer = Layer.effect(
             const codemodeTool = codemodeEnabled
               ? CodeModeTool.create(codemode, (name, tool, input, context) => executeTool(tool, name, input, context))
               : undefined
-            const codeModeCatalog = codemodeEnabled ? CodeModeTool.catalog(codemode) : undefined
+            const codeModeCatalog = codemodeEnabled ? CodeModeTool.catalog(codemode, guidance) : undefined
             return {
               ...(codeModeCatalog === undefined ? {} : { codeModeCatalog }),
               definitions: [

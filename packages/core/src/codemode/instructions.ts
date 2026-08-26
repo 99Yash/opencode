@@ -30,7 +30,11 @@ export function render(catalog: CodeModeCatalog.Summary) {
         : namespace.entries.length === 0
           ? `${count}, none shown`
           : `${count}, ${namespace.entries.length} shown`
-    return [`- ${namespace.name} (${label})`, ...namespace.entries.map((entry) => entry.line)]
+    return [
+      `- ${namespace.name} (${label})`,
+      ...(namespace.instructions?.split("\n").map((line) => `  ${line}`) ?? []),
+      ...namespace.entries.map((entry) => entry.line),
+    ]
   })
 
   return `${prompt(catalog.shown < catalog.total)}
@@ -46,6 +50,19 @@ ${render(current)}`
   const previousComplete = previous.shown === previous.total
   const currentComplete = current.shown === current.total
   if (previousComplete !== currentComplete) return replacement
+
+  const guidance = Instructions.diffByKey(
+    previous.namespaces,
+    current.namespaces,
+    (namespace) => namespace.name,
+    (before, after) => before.instructions !== after.instructions,
+  )
+  if (
+    guidance.changed.length > 0 ||
+    guidance.added.some((namespace) => namespace.instructions !== undefined) ||
+    guidance.removed.some((namespace) => namespace.instructions !== undefined)
+  )
+    return replacement
 
   const diff = Instructions.diffByKey(
     previous.namespaces.flatMap((namespace) => namespace.entries),
