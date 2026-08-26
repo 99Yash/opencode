@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { $ } from "bun"
+import fs from "fs/promises"
+import path from "path"
 import {
   AIError,
   LLMEvent,
@@ -81,6 +84,7 @@ import { TestClock } from "effect/testing"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { asc, desc, eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
+import { tmpdir } from "./fixture/tmpdir"
 import { permissionLayer } from "./lib/permission"
 import { agentHost, catalogHost, host } from "./plugin/host"
 import { CodeModeInstructions } from "@opencode-ai/core/codemode/instructions"
@@ -440,6 +444,7 @@ const it = testEffect(
     LayerNode.group([
       Database.node,
       Bus.node,
+      Project.node,
       Form.node,
       SessionProjector.node,
       SessionStore.node,
@@ -1478,6 +1483,50 @@ describe("SessionRunnerLLM", () => {
           .limit(2)
           .all()).map((event) => event.type),
       ).toEqual([Bus.versionedType(SessionEvent.Moved.type, 1), Bus.versionedType(SessionEvent.InboxDelivered.type, 1)])
+    }),
+  )
+
+  it.live("resolves a queued move's destination project when it is delivered", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const bus = yield* Bus.Service
+      const projects = yield* Project.Service
+      const db = (yield* Database.Service).db
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (directory) => Effect.promise(() => directory[Symbol.asyncDispose]()),
+      )
+      const destination = AbsolutePath.make(path.join(tmp.path, "packages", "app"))
+      yield* Effect.promise(() => fs.mkdir(destination, { recursive: true }))
+      const previous = yield* projects.resolve(destination)
+      yield* SessionInbox.admit(db, bus, {
+        id: SessionMessage.ID.create(),
+        sessionID,
+        item: {
+          type: "move",
+          payload: { location: Location.Ref.make({ directory: destination }), projectID: previous.id },
+          delivery: "queue",
+        },
+      })
+
+      yield* Effect.promise(() => $`git init`.cwd(tmp.path).quiet())
+      yield* Effect.promise(() =>
+        $`git -c user.name=Test -c user.email=test@opencode.test -c commit.gpgsign=false commit --allow-empty -m root`
+          .cwd(tmp.path)
+          .quiet(),
+      )
+      const project = yield* projects.resolve(destination)
+      expect(project.id).not.toBe(previous.id)
+      expect(yield* session.inbox(sessionID)).toMatchObject([{ payload: { projectID: previous.id } }])
+
+      yield* session.resume(sessionID)
+
+      expect(yield* session.get(sessionID)).toMatchObject({
+        projectID: project.id,
+        location: { directory: destination },
+        subpath: "packages/app",
+      })
+      expect(yield* session.inbox(sessionID)).toEqual([])
     }),
   )
 

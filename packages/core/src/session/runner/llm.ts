@@ -10,10 +10,13 @@ import {
   type ProviderErrorEvent,
   type ToolCall,
 } from "@opencode-ai/ai"
+import path from "path"
 import { Cause, Config, Data, Effect, Exit, Fiber, FiberMap, Layer, Option, Pull, Schedule, Stream } from "effect"
 import { Database } from "../../database/database.js"
 import { Bus } from "../../bus.js"
 import { Permission } from "../../permission.js"
+import { Project } from "../../project.js"
+import { RelativePath } from "../../schema.js"
 import { QuestionTool } from "../../tool/plugin/question.js"
 import { InstructionState } from "../instruction-state.js"
 import { SessionCompaction } from "../compaction.js"
@@ -127,6 +130,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const bus = yield* Bus.Service
+    const projects = yield* Project.Service
     const llm = yield* LLMClient.Service
     const store = yield* SessionStore.Service
     const context = yield* SessionContext.Service
@@ -680,6 +684,7 @@ const layer = Layer.effect(
         Effect.gen(function* () {
           const pending = yield* SessionInbox.nextPromotable(db, sessionID, promotable)
           if (pending?.type !== "move") return false
+          const project = yield* projects.resolve(pending.payload.location.directory)
           yield* modelTransport.close(sessionID)
           yield* bus.publishAll([
             [SessionEvent.InboxDelivered, { sessionID, inboxID: pending.id }],
@@ -688,8 +693,10 @@ const layer = Layer.effect(
               {
                 sessionID,
                 location: pending.payload.location,
-                projectID: pending.payload.projectID,
-                subpath: pending.payload.subpath,
+                projectID: project.id,
+                subpath: RelativePath.make(
+                  path.relative(project.directory, pending.payload.location.directory).replaceAll("\\", "/"),
+                ),
               },
             ],
           ])
@@ -732,6 +739,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     Bus.node,
+    Project.node,
     llmClient,
     SessionContext.node,
     SessionModelRequest.node,
