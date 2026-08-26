@@ -1,8 +1,9 @@
 import { getFilename } from "@opencode-ai/util/path"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
-import { useMutation } from "@tanstack/solid-query"
+import { useMutation, useQueryClient } from "@tanstack/solid-query"
 import { createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
+import { loadProjectsQuery } from "@/runtime/server/global-sync/bootstrap"
 import { useGlobal } from "@/runtime/server/runtime"
 import { type LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
@@ -10,6 +11,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 export function createEditProjectModel(props: { project: LocalProject; server: ServerConnection.Any }) {
   const dialog = useDialog()
   const global = useGlobal()
+  const queryClient = useQueryClient()
   const serverCtx = createMemo(() => global.ensureServerCtx(props.server))
   const folderName = createMemo(() => getFilename(props.project.worktree))
   const defaultName = createMemo(() => props.project.name || folderName())
@@ -70,13 +72,19 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
       const start = store.startup.trim()
 
       if (props.project.id && props.project.id !== "global") {
+        const color = store.color ?? ""
+        const override = store.iconOverride ?? ""
+        const colorChanged = color !== (props.project.icon?.color ?? "")
+        const overrideChanged = override !== (props.project.icon?.override ?? "")
+
         await serverCtx().sdk.api.project.update({
           projectID: props.project.id,
-          name,
-          icon: { color: store.color ?? "", override: store.iconOverride ?? "" },
-          commands: { start },
+          ...(name !== (props.project.name ?? "") ? { name } : {}),
+          ...(colorChanged || overrideChanged
+            ? { icon: { ...(colorChanged ? { color } : {}), ...(overrideChanged ? { override } : {}) } }
+            : {}),
+          ...(start !== (props.project.commands?.start ?? "") ? { commands: { start } } : {}),
         })
-        dialog.close()
         return
       }
 
@@ -85,6 +93,24 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
         icon: { color: store.color || undefined, override: store.iconOverride || undefined },
         commands: { start: start || undefined },
       })
+    },
+    onSuccess: async () => {
+      if (props.project.id && props.project.id !== "global") {
+        const context = serverCtx()
+        await queryClient.invalidateQueries({
+          queryKey: [context.sdk.scope, "project"],
+          exact: true,
+          refetchType: "none",
+        })
+        const projects = await queryClient.fetchQuery(
+          loadProjectsQuery(context.sdk.scope, context.sdk.api.project, context.sdk.api.worktree),
+        )
+        context.sync.set("project", projects)
+        void queryClient.invalidateQueries({
+          queryKey: [context.sdk.scope, "settings-workspace-projects"],
+          exact: true,
+        })
+      }
       dialog.close()
     },
   }))
