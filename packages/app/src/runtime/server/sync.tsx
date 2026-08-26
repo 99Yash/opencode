@@ -61,12 +61,15 @@ export function createServerSyncContextInner(serverSDK: ServerSDK, data: Data) {
   const queryOptionsApi = makeQueryOptionsApi(serverSDK.scope, () => serverSDK.api)
   const connected = () => serverSDK.connection.status() === "connected"
 
-  const [configQuery, pathQuery, projectQuery] = useQueries(() => ({
+  const [configQuery, pathQuery] = useQueries(() => ({
     queries: [
       { ...queryOptionsApi.globalConfig(), enabled: connected() },
       { ...queryOptionsApi.path(), enabled: connected() },
-      { ...loadProjectsQuery(serverSDK.scope, serverSDK.api.project, serverSDK.api.worktree), enabled: connected() },
     ],
+  }))
+  const projectQuery = useQuery(() => ({
+    ...loadProjectsQuery(serverSDK.scope, serverSDK.api.project, serverSDK.api.worktree),
+    enabled: connected(),
   }))
   const [globalStore, setGlobalStore] = createStore<GlobalStore>({
     get project() {
