@@ -241,7 +241,9 @@ export const Plugin = {
 
               const settleShell = Effect.fnUntraced(function* () {
                 const final = yield* shell.wait(info.id)
-                const capture = yield* ShellOutput.preview(info, shell, config)
+                const capture = yield* ShellOutput.preview(info, shell).pipe(
+                  Effect.provideService(Config.Service, config),
+                )
 
                 // `exit` is optionalKey in the Output schema; a present-but-undefined key
                 // fails output encoding, so omit it when the process has no exit code.

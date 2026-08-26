@@ -6,11 +6,8 @@ import { Config } from "../config.js"
 import { Shell } from "../shell.js"
 import { ToolOutput } from "../tool-output.js"
 
-export const preview = Effect.fn("ShellOutput.preview")(function* (
-  info: Info,
-  shell: Shell.Interface,
-  config: Config.Interface,
-) {
+export const preview = Effect.fn("ShellOutput.preview")(function* (info: Info, shell: Shell.Interface) {
+  const config = yield* Config.Service
   const configured = Config.latest(yield* config.entries(), "tool_output")
   const maxLines = configured?.max_lines ?? ToolOutput.MAX_LINES
   const maxBytes = configured?.max_bytes ?? ToolOutput.MAX_BYTES

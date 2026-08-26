@@ -47,7 +47,6 @@ import { Event } from "@opencode-ai/schema/event"
 import { Skill } from "./skill.js"
 import { Job } from "./job.js"
 import { Command } from "./command.js"
-import { Config } from "./config.js"
 import { Shell } from "./shell.js"
 import { ShellOutput } from "./shell/output.js"
 import { Global } from "@opencode-ai/util/global"
@@ -689,7 +688,6 @@ const layer = Layer.effect(
             )
             const completed = yield* Effect.gen(function* () {
               const shell = yield* Shell.Service
-              const config = yield* Config.Service
               const terminal = yield* shell.wait(started.id).pipe(
                 Effect.map((info) => ({ info, retained: true as const })),
                 Effect.catchTag("Shell.NotFoundError", () =>
@@ -697,7 +695,7 @@ const layer = Layer.effect(
                 ),
               )
               const output = terminal.retained
-                ? yield* ShellOutput.preview(started, shell, config).pipe(
+                ? yield* ShellOutput.preview(started, shell).pipe(
                     Effect.catchTag("Shell.NotFoundError", () => Effect.succeed(missingShellOutput())),
                   )
                 : missingShellOutput()
