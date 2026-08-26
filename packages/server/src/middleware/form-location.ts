@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { Database } from "@opencode-ai/core/database/database"
 import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
@@ -66,6 +67,8 @@ export const formLocationLayer = Layer.effect(
         })
         if (
           context.endpoint.identifier === "session.form.list" &&
+          location.workspaceID === undefined &&
+          !existsSync(location.directory) &&
           !(yield* LocationServiceMap.has(locations, location))
         )
           return HttpServerResponse.jsonUnsafe({ data: [] })

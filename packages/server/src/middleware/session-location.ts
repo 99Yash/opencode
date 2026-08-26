@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { Database } from "@opencode-ai/core/database/database"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { Location } from "@opencode-ai/core/location"
@@ -57,6 +58,8 @@ export const sessionLocationLayer = Layer.effect(
         })
         if (
           context.endpoint.identifier === "session.permission.list" &&
+          location.workspaceID === undefined &&
+          !existsSync(location.directory) &&
           !(yield* LocationServiceMap.has(locations, location))
         )
           return HttpServerResponse.jsonUnsafe({ data: [] })

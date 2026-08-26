@@ -1,5 +1,5 @@
 import { expect } from "bun:test"
-import { rm } from "node:fs/promises"
+import { mkdir, rm } from "node:fs/promises"
 import { createServer, type Server } from "node:http"
 import { makeMemoryDriver } from "@opencode-ai/core/environment/index"
 import { Session } from "@opencode-ai/core/session"
@@ -295,6 +295,34 @@ it.live("returns empty session blockers without starting a removed location", ()
         expect(yield* Effect.promise(() => response.json())).toEqual({ data: [] })
       }),
     )
+
+    yield* Effect.promise(() => mkdir(directory.path))
+    const healthy = yield* Effect.promise(() =>
+      handler(new Request(`http://opencode.local/api/session/${sessionID}/permission`)),
+    )
+    expect(healthy.status).toBe(200)
+    const locations = yield* Effect.promise(() =>
+      handler(new Request("http://opencode.local/api/debug/location")).then((response) => response.json()),
+    )
+    expect(locations).toContainEqual(expect.objectContaining({ directory: directory.path }))
+
+    const pending = yield* Effect.promise(() =>
+      handler(
+        new Request(`http://opencode.local/api/session/${sessionID}/form`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ title: "Pending approval", fields: [{ key: "answer", type: "string" }] }),
+        }),
+      ),
+    )
+    expect(pending.status).toBe(200)
+    yield* Effect.promise(() => rm(directory.path, { recursive: true }))
+
+    const retained = yield* Effect.promise(() =>
+      handler(new Request(`http://opencode.local/api/session/${sessionID}/form`)),
+    )
+    expect(retained.status).toBe(200)
+    expect(yield* Effect.promise(() => retained.json())).toMatchObject({ data: [{ title: "Pending approval" }] })
   }).pipe(Effect.scoped),
 )
 
