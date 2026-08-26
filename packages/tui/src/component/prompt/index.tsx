@@ -79,6 +79,7 @@ export type PromptProps = {
   sessionID?: string
   visible?: boolean
   disabled?: boolean
+  muted?: boolean
   onSubmit?: () => void
   onEmptySubmit?: () => boolean | Promise<boolean>
   ref?: (ref: PromptRef | undefined) => void
@@ -196,6 +197,7 @@ export function Prompt(props: PromptProps) {
   const [inputTarget, setInputTarget] = createSignal<TextareaRenderable | undefined>()
 
   const leader = Keymap.useLeaderActive()
+  const muted = () => leader() || props.muted
   const local = useLocal()
   const args = useArgs()
   const paths = useTuiPaths()
@@ -1614,7 +1616,7 @@ export function Prompt(props: PromptProps) {
     },
   )
   const highlight = createMemo(() => {
-    if (leader()) return theme.border.default
+    if (muted()) return theme.border.default
     if (store.mode === "shell") return theme.text.action.primary.selected
     return promptDisplay().agentColor ?? theme.border.default
   })
@@ -1641,10 +1643,10 @@ export function Prompt(props: PromptProps) {
     const value = (() => {
       if (store.mode === "shell") {
         if (!shell().length) return undefined
-        return `Run a command... "${shell()[store.placeholder % shell().length]}"`
+        return `Run a command… "${shell()[store.placeholder % shell().length]}"`
       }
       if (!list().length) return undefined
-      return `Ask anything... "${list()[store.placeholder % list().length]}"`
+      return `Ask anything… "${list()[store.placeholder % list().length]}"`
     })()
     if (!value) return undefined
     const width = dimensions().width < 44 ? dimensions().width - 5 : Math.min(75, dimensions().width - 4) - 5
@@ -1793,8 +1795,8 @@ export function Prompt(props: PromptProps) {
               width="100%"
               placeholder={placeholderText()}
               placeholderColor={theme.text.subdued}
-              textColor={leader() ? theme.text.subdued : theme.text.default}
-              focusedTextColor={leader() ? theme.text.subdued : theme.text.default}
+              textColor={muted() ? theme.text.subdued : theme.text.default}
+              focusedTextColor={muted() ? theme.text.subdued : theme.text.default}
               minHeight={1}
               maxHeight={maxHeight()}
               cursorStyle={config.cursor}
@@ -1891,7 +1893,7 @@ export function Prompt(props: PromptProps) {
                             minWidth={0}
                             wrapMode="none"
                             truncate
-                            fg={fadeColor(leader() ? theme.text.subdued : theme.text.default, modelMetaAlpha())}
+                            fg={fadeColor(muted() ? theme.text.subdued : theme.text.default, modelMetaAlpha())}
                           >
                             {promptDisplay().modelLabel}
                           </text>

@@ -319,7 +319,7 @@ function FailedCommandAndQuestionStory() {
         Fail running tools
       </button>
       <CurrentSessionProviders document={document()}>
-        <SessionTimeline document={document()} />
+        <SessionTimeline document={document()} shellToolDefaultOpen />
       </CurrentSessionProviders>
     </section>
   )

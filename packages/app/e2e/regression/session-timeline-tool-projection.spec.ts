@@ -11,6 +11,7 @@ test("preserves surviving grouped patch state when its first patch fails", async
   const failed = "prt_grouped_patch_failed"
   const surviving = "prt_grouped_patch_surviving"
   const timeline = await setupTimeline(page, {
+    settings: { editToolPartsExpanded: true },
     messages: [
       userMessage(),
       assistantMessage(
@@ -75,4 +76,50 @@ test("preserves surviving grouped patch state when its first patch fails", async
       return previous && next ? next.y - (previous.y + previous.height) : Number.NEGATIVE_INFINITY
     })
     .toBeGreaterThanOrEqual(-0.5)
+})
+
+test("groups instruction files loaded by the same read", async ({ page }) => {
+  const id = "prt_read_instructions"
+  await setupTimeline(page, {
+    messages: [
+      userMessage(),
+      assistantMessage([
+        toolPart(
+          id,
+          "read",
+          "completed",
+          { path: "src/a.ts" },
+          { metadata: { loaded: ["AGENTS.md", "packages/app/AGENTS.md", "packages/ui/AGENTS.md"] } },
+        ),
+      ]),
+    ],
+  })
+
+  const tool = page.locator(`[data-timeline-part-id="${id}"]`)
+  const loaded = tool.locator('[data-component="tool-loaded-item"]')
+  await expect(loaded).toHaveCount(1)
+  await expect(loaded).toHaveAttribute("aria-label", "Loaded AGENTS.md, packages/app/AGENTS.md, packages/ui/AGENTS.md")
+  await expect(loaded.locator('[data-slot="tool-loaded-value"]')).toHaveText(
+    "AGENTS.md, packages/app/AGENTS.md, packages/ui/AGENTS.md",
+  )
+  await expect(loaded.locator('[data-slot="tool-loaded-kind"]')).toHaveCount(0)
+})
+
+test("groups only consecutive successful skill tools", async ({ page }) => {
+  const parts = [
+    toolPart("prt_skill_first", "skill", "completed", { id: "ocpr" }),
+    toolPart("prt_skill_second", "skill", "completed", { id: "effect" }),
+    toolPart("prt_skill_third", "skill", "completed", { id: "ui-pr-screenshots" }),
+    toolPart("prt_skill_break", "read", "completed", { path: "src/a.ts" }),
+    toolPart("prt_skill_last", "skill", "completed", { id: "opencode" }),
+  ]
+  await setupTimeline(page, { messages: [userMessage(), assistantMessage(parts)] })
+
+  const group = page.locator(`[data-timeline-part-ids="${parts.map((part) => part.id).join(",")}"]`)
+  await group.getByRole("button").click()
+
+  const loaded = group.locator('[data-component="tool-loaded-item"]')
+  await expect(loaded).toHaveCount(2)
+  await expect(loaded.nth(0)).toHaveAttribute("aria-label", "Loaded ocpr, effect, ui-pr-screenshots skills")
+  await expect(loaded.nth(1)).toHaveAttribute("aria-label", "Loaded opencode skill")
 })

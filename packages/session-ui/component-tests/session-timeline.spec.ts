@@ -22,7 +22,7 @@ story("preserves a collapsed context group through count and status updates", as
 story("space activates a focused timeline button instead of scrolling", async ({ mount, page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" })
   const timeline = await mount("current-session-terminal-work--terminal-commands", { args: { scenario: "collapsed" } })
-  const trigger = timeline.locator('[data-timeline-part-id="tool_terminal_passed"] [data-slot="collapsible-trigger"]')
+  const trigger = timeline.getByRole("button", { name: "Used Shell", exact: true })
   await expect(trigger).toHaveAttribute("aria-expanded", "false")
   await trigger.focus()
   const before = await page.evaluate(() => window.scrollY)

@@ -126,7 +126,11 @@ export const TestFailed = {
 }
 
 function InteractiveCommandStory(props: { expanded?: boolean; streaming?: boolean }) {
-  const [state, setState] = createStore({ phase: props.streaming ? "streaming" : "completed", revision: 0 })
+  const [state, setState] = createStore({
+    phase: props.streaming ? "streaming" : "completed",
+    revision: 0,
+    busy: false,
+  })
   const document = createMemo(() => {
     const phase = state.phase as "streaming" | "running" | "completed"
     const command = phase === "streaming" ? "" : "printf ready"
@@ -136,7 +140,7 @@ function InteractiveCommandStory(props: { expanded?: boolean; streaming?: boolea
       }),
       ...(state.revision ? [{ type: "text" as const, text: "Sibling content" }] : []),
     ]
-    return storyDocument(content, phase !== "completed")
+    return storyDocument(content, phase !== "completed" || state.busy)
   })
   return (
     <section class="mx-auto flex w-full max-w-[720px] flex-col gap-4 p-6">
@@ -149,6 +153,12 @@ function InteractiveCommandStory(props: { expanded?: boolean; streaming?: boolea
         </button>
         <button type="button" onClick={() => setState("revision", (value) => value + 1)}>
           Update output
+        </button>
+        <button type="button" onClick={() => setState("busy", true)}>
+          Mark session busy
+        </button>
+        <button type="button" onClick={() => setState("busy", false)}>
+          Mark session idle
         </button>
       </div>
       <CurrentSessionProviders document={document()}>

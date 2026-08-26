@@ -14,6 +14,7 @@ test.describe("session timeline projection", () => {
     const first = "prt_patch_first"
     const second = "prt_patch_second"
     const timeline = await setupTimeline(page, {
+      settings: { editToolPartsExpanded: true },
       messages: [
         userMessage(),
         assistantMessage([
