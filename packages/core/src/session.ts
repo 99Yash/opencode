@@ -851,11 +851,6 @@ const layer = Layer.effect(
           }),
         )
         yield* persistProject(project)
-        const item = SessionInbox.Item.make({
-          type: "move",
-          payload,
-          delivery: input.delivery ?? "steer",
-        })
         const moved = yield* SessionInbox.serialized(
           input.sessionID,
           Effect.gen(function* () {
@@ -882,7 +877,11 @@ const layer = Layer.effect(
             yield* SessionInbox.admit(db, bus, {
               id: SessionMessage.ID.create(),
               sessionID: input.sessionID,
-              item,
+              item: SessionInbox.Item.make({
+                type: "move",
+                payload,
+                delivery: input.delivery ?? "steer",
+              }),
             })
             return true
           }),

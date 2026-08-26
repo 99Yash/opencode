@@ -68,8 +68,8 @@ export const formLocationLayer = Layer.effect(
         if (
           context.endpoint.identifier === "session.form.list" &&
           location.workspaceID === undefined &&
-          !existsSync(location.directory) &&
-          !(yield* LocationServiceMap.has(locations, location))
+          !(yield* LocationServiceMap.has(locations, location)) &&
+          !existsSync(location.directory)
         )
           return HttpServerResponse.jsonUnsafe({ data: [] })
 
