@@ -828,7 +828,11 @@ effect: (ctx) =>
         description: "Create a greeting",
         input: Schema.Struct({ name: Schema.String }),
         output: Schema.Struct({ greeting: Schema.String }),
-        options: { namespace: "acme", codemode: true },
+        options: {
+          namespace: "acme",
+          codemode: true,
+          namespaceInstructions: "Use Acme tools only when the user requests an Acme operation.",
+        },
         execute: ({ name }, context) =>
           Effect.gen(function* () {
             yield* context.progress({ status: "greeting" })
@@ -838,6 +842,10 @@ effect: (ctx) =>
     })
   }),
 ```
+
+Set `namespaceInstructions` on a namespaced Code Mode tool to add guidance once under its top-level namespace in the tool
+catalog. The instructions remain visible when individual tools are hidden, participate in durable instruction updates,
+and must match any instructions registered by other tools in the same top-level namespace.
 
 Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#schema-Tool.TextContent),
 [`Tool.FileContent`](/api#schema-Tool.FileContent).

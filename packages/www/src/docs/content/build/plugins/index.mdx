@@ -796,7 +796,11 @@ await ctx.tool.transform((draft) => {
       required: ["name"],
       additionalProperties: false,
     },
-    options: { namespace: "acme", codemode: true },
+    options: {
+      namespace: "acme",
+      codemode: true,
+      namespaceInstructions: "Use Acme tools only when the user requests an Acme operation.",
+    },
     execute: async (input, tool) => {
       await tool.progress({ status: "greeting" })
       return { content: `Hello ${(input as { name: string }).name}!` }
@@ -804,6 +808,10 @@ await ctx.tool.transform((draft) => {
   })
 })
 ```
+
+Set `namespaceInstructions` on a namespaced Code Mode tool to add guidance once under its top-level namespace in the tool
+catalog. The instructions remain visible when individual tools are hidden, participate in durable instruction updates,
+and must match any instructions registered by other tools in the same top-level namespace.
 
 #### Reference
 
