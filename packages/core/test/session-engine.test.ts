@@ -14,7 +14,7 @@ import { Bus } from "@opencode-ai/core/bus"
 import { Database } from "@opencode-ai/core/database/database"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
-import { SessionEnv } from "@opencode-ai/core/session-env"
+import { SessionEngine } from "@opencode-ai/core/session-engine"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
@@ -39,9 +39,9 @@ const it = testEffect(
       SessionStore.node,
       SessionExecution.node,
       Session.node,
-      SessionEnv.node,
+      SessionEngine.node,
     ]),
-    [...shared, [SessionEnv.node, SessionEnv.configured(shared)]],
+    [...shared, [SessionEngine.node, SessionEngine.configured(shared)]],
   ).pipe(Layer.provideMerge(testLLM)),
 )
 
@@ -68,19 +68,20 @@ const echo = {
     }),
 }
 
-describe("SessionEnv", () => {
+describe("SessionEngine", () => {
   it.effect("drains a durable session against a values-constructed environment", () =>
     Effect.gen(function* () {
+      executions.length = 0
       const directory = AbsolutePath.make(
-        yield* Effect.promise(() => mkdtemp(path.join(tmpdir(), "session-env-"))),
+        yield* Effect.promise(() => mkdtemp(path.join(tmpdir(), "session-engine-"))),
       )
-      const envs = yield* SessionEnv.Service
+      const envs = yield* SessionEngine.Service
       const env = yield* envs.make({
         directory,
         model,
         agents: (draft) => {
-          draft.update(Agent.ID.make("build"), () => {})
-          draft.default(Agent.ID.make("build"))
+          draft.update(Agent.defaultID, () => {})
+          draft.default(Agent.defaultID)
         },
         tools: (draft) => draft.add(echo),
       })
@@ -98,7 +99,11 @@ describe("SessionEnv", () => {
       const messages = yield* sessions.messages({ sessionID: session.id })
       const assistant = messages.filter((message) => message.type === "assistant")
       expect(assistant.length).toBeGreaterThan(0)
-      expect(JSON.stringify(assistant)).toContain("done")
+      const text = assistant
+        .flatMap((message) => message.content)
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join("\n")
+      expect(text).toContain("done")
 
       // Reconnect: the same call with the same ID adopts the existing Session.
       const reconnected = yield* env.session({ id: session.id, title: "ignored on adoption" })

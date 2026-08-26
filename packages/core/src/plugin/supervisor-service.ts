@@ -14,4 +14,4 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/PluginSupervisor") {}
 
 /** For values-constructed environments: no plugin generations exist, so flush settles immediately. */
-export const ready = Layer.succeed(Service, Service.of({ flush: Effect.void }))
+export const noop = Layer.succeed(Service, Service.of({ flush: Effect.void }))

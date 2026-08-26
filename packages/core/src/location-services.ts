@@ -66,7 +66,7 @@ export { LocationServiceMap } from "./location-service-map.js"
  * is semantic (compile provide-merges in order), so the tier is named
  * alongside, not split out.
  */
-const sessionEnvNodes = [
+const sessionEngineNodes = [
   // drain entry (execution.ts runs the runner; its layer wires the spine internally)
   SessionRunnerLLM.node,
   // prompt admission (session.ts attachment resize + skill mentions) and readiness
@@ -79,11 +79,11 @@ const sessionEnvNodes = [
   Catalog.node,
 ] as const satisfies readonly Node.LocationNode<unknown, unknown>[]
 
-export const sessionEnvGroup = LayerNode.group<typeof sessionEnvNodes>(sessionEnvNodes)
+export const sessionEngineGroup = LayerNode.group<typeof sessionEngineNodes>(sessionEngineNodes)
 
 /** What a session drain and its operations require. `LocationServices` is a superset. */
-export type SessionEnv = LayerNode.Output<typeof sessionEnvGroup>
-export type SessionEnvError = LayerNode.Error<typeof sessionEnvGroup>
+export type SessionEngine = LayerNode.Output<typeof sessionEngineGroup>
+export type SessionEngineError = LayerNode.Error<typeof sessionEngineGroup>
 
 const locationServiceNodes = [
   Location.node,
@@ -141,6 +141,27 @@ export const locationServices = LayerNode.group<typeof locationServiceNodes>(loc
 export type LocationServices = LayerNode.Output<typeof locationServices>
 export type LocationError = LayerNode.Error<typeof locationServices>
 
+// Compile-time guard: the engine tier must remain a subset of the full graph.
+const _sessionEngineIsSubset: [SessionEngine] extends [LocationServices] ? true : never = true
+void _sessionEngineIsSubset
+
+/**
+ * Compile a Location graph with its global nodes hoisted out. Replacements
+ * must be applied during hoist, not afterward: replacements can introduce new
+ * tagged dependencies (Location.boundNode depends on Project), and the hoist
+ * walk is the only pass that can still slice those back out. Callers must
+ * thread the application root's replacements through so hoisted globals
+ * compile to the same Layer references the root built and memoization dedupes
+ * them instead of constructing second instances.
+ */
+export function compileWithHoistedGlobals<A, E>(
+  root: LayerNode.Node<A, E, LayerNode.Tag | undefined>,
+  replacements: LayerNode.Replacements,
+): Layer.Layer<A, E> {
+  const sliced = LayerNode.hoist(root, Node.tags.values.global, replacements)
+  return LayerNode.compile(sliced.node).pipe(Layer.fresh, Layer.provide(LayerNode.compile(sliced.hoisted)))
+}
+
 export function buildLocationServiceMap(
   replacements: LayerNode.Replacements = [],
 ): Layer.Layer<LocationServiceMap.Service> {
@@ -158,14 +179,8 @@ export function buildLocationServiceMap(
         (ref: Location.Ref) => {
           const startedAt = performance.now()
           const allReplacements = replacements.concat([[Location.node, Location.boundNode(ref)]])
-          // Apply replacements during hoist, not afterward: replacements can
-          // introduce new tagged dependencies (Location.boundNode depends on
-          // Project), and the hoist walk is the only pass that can still slice
-          // those back out.
-          const location = LayerNode.hoist(locationServices, Node.tags.values.global, allReplacements)
 
-          return LayerNode.compile(location.node).pipe(
-            Layer.fresh,
+          return compileWithHoistedGlobals(locationServices, allReplacements).pipe(
             Layer.tap(() =>
               Effect.logInfo("location services booted", {
                 directory: ref.directory,
@@ -173,7 +188,6 @@ export function buildLocationServiceMap(
                 durationMs: Math.round(performance.now() - startedAt),
               }),
             ),
-            Layer.provide(LayerNode.compile(location.hoisted)),
           )
         },
         {
