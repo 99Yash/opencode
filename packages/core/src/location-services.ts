@@ -1,6 +1,5 @@
 import { Duration, Effect, Layer, LayerMap } from "effect"
 import { existsSync } from "fs"
-import path from "path"
 import { Agent } from "./agent.js"
 import { AISDK } from "./aisdk.js"
 import { Catalog } from "./catalog.js"
@@ -52,7 +51,6 @@ import { ReadToolFileSystem } from "./tool/read-filesystem.js"
 import { Tool } from "./tool.js"
 import { ToolOutput } from "./tool-output.js"
 import { Vcs } from "./vcs.js"
-import { AbsolutePath } from "./schema.js"
 
 export { LocationServiceMap } from "./location-service-map.js"
 
@@ -115,13 +113,6 @@ export type LocationError = LayerNode.Error<typeof locationServices>
 export function buildLocationServiceMap(
   replacements: LayerNode.Replacements = [],
 ): Layer.Layer<LocationServiceMap.Service> {
-  // Structural Equal distinguishes optional-key shape and Windows separator style.
-  // The RcMap caches the raw key before the build callback, so normalize both here.
-  const canonical = (ref: Location.Ref) =>
-    Location.Ref.make({
-      directory: AbsolutePath.make(process.platform === "win32" ? path.normalize(ref.directory) : ref.directory),
-      workspaceID: ref.workspaceID,
-    })
   return Layer.effect(
     LocationServiceMap.Service,
     Effect.map(
@@ -158,9 +149,9 @@ export function buildLocationServiceMap(
       ),
       (inner) => ({
         ...inner,
-        get: (ref: Location.Ref) => inner.get(canonical(ref)),
-        contextEffect: (ref: Location.Ref) => inner.contextEffect(canonical(ref)),
-        invalidate: (ref: Location.Ref) => inner.invalidate(canonical(ref)),
+        get: (ref: Location.Ref) => inner.get(LocationServiceMap.canonical(ref)),
+        contextEffect: (ref: Location.Ref) => inner.contextEffect(LocationServiceMap.canonical(ref)),
+        invalidate: (ref: Location.Ref) => inner.invalidate(LocationServiceMap.canonical(ref)),
       }),
     ),
   )

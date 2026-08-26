@@ -21,12 +21,23 @@ import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
 import { globalProjectLayer } from "./lib/project"
 
+const wakes: Session.ID[] = []
+const execution = Layer.succeed(
+  SessionExecution.Service,
+  SessionExecution.Service.of({
+    active: Effect.succeed(new Set()),
+    resume: () => Effect.void,
+    interrupt: () => Effect.succeed(false),
+    wake: (sessionID) => Effect.sync(() => void wakes.push(sessionID)),
+    awaitIdle: () => Effect.void,
+  }),
+)
 const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
     [
       [Project.node, globalProjectLayer],
-      [SessionExecution.node, SessionExecution.noopLayer],
+      [SessionExecution.node, execution],
     ],
   ),
 )
@@ -130,6 +141,37 @@ describe("Session.move", () => {
             { type: "move", payload: { location: { directory: destination } } },
             { type: "move", payload: { location: { directory: source } } },
           ])
+        }),
+      ),
+    ),
+  )
+
+  it.effect("preserves staged work and explicit queued moves in the current directory", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          const directory = AbsolutePath.make(tmp.path)
+          const staged = yield* session.create({ location: Location.Ref.make({ directory }) })
+          yield* session.prompt({ sessionID: staged.id, text: "pending", delivery: "queue", resume: false })
+          yield* session.move({ sessionID: staged.id, directory })
+
+          expect(yield* session.inbox(staged.id)).toMatchObject([
+            { type: "user", delivery: "queue" },
+            { type: "move", delivery: "steer" },
+          ])
+          expect(wakes.filter((sessionID) => sessionID === staged.id)).toHaveLength(1)
+
+          const queued = yield* session.create({ location: Location.Ref.make({ directory }) })
+          yield* session.move({ sessionID: queued.id, directory })
+          expect(wakes.filter((sessionID) => sessionID === queued.id)).toHaveLength(0)
+
+          yield* session.move({ sessionID: queued.id, directory, delivery: "queue" })
+          expect(yield* session.inbox(queued.id)).toMatchObject([{ type: "move", delivery: "queue" }])
+          expect(wakes.filter((sessionID) => sessionID === queued.id)).toHaveLength(1)
         }),
       ),
     ),

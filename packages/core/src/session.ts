@@ -861,11 +861,12 @@ const layer = Layer.effect(
           Effect.gen(function* () {
             const latest = yield* result.get(input.sessionID)
             if (
+              input.delivery !== "queue" &&
               payload.location.directory === latest.location.directory &&
               payload.location.workspaceID === latest.location.workspaceID &&
               payload.projectID === latest.projectID &&
               (payload.subpath ?? "") === (latest.subpath ?? "") &&
-              (yield* SessionInbox.moveIDs(db, input.sessionID)).length === 0
+              !(yield* SessionInbox.has(db, input.sessionID, "input"))
             )
               return false
             const source = yield* fs.stat(latest.location.directory).pipe(Effect.orElseSucceed(() => undefined))

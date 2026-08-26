@@ -651,15 +651,20 @@ describe("LocationServiceMap", () => {
             expect(Object.keys(present)).toEqual(["directory", "workspaceID"])
             expect(Equal.equals(absent, present)).toBe(false)
             if (process.platform === "win32") expect(absent.directory).not.toBe(present.directory)
+            expect(yield* LocationServiceMap.has(locations, absent)).toBe(false)
 
             const first = yield* locations.contextEffect(absent)
             expect(yield* locations.contextEffect(present)).toBe(first)
+            expect(yield* RcMap.has(locations.rcMap, absent)).toBe(false)
+            expect(yield* LocationServiceMap.has(locations, absent)).toBe(true)
+            expect(yield* LocationServiceMap.has(locations, present)).toBe(true)
             expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([
               Location.Ref.make({ directory, workspaceID: undefined }),
             ])
 
             // Invalidating with the shape opposite to the one that booted must evict.
             yield* locations.invalidate(present)
+            expect(yield* LocationServiceMap.has(locations, absent)).toBe(false)
             expect(Array.from(yield* RcMap.keys(locations.rcMap))).toHaveLength(0)
           }),
         ),

@@ -6,7 +6,7 @@ import { Session } from "@opencode-ai/core/session"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Workspace } from "@opencode-ai/core/workspace"
 import { eq } from "drizzle-orm"
-import { Effect, Layer, RcMap, Schema } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { HttpRouter, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { InvalidRequestError, SessionNotFoundError } from "@opencode-ai/protocol/errors"
@@ -55,7 +55,10 @@ export const sessionLocationLayer = Layer.effect(
           directory: AbsolutePath.make(row.directory),
           workspaceID: row.workspaceID ? Workspace.ID.make(row.workspaceID) : undefined,
         })
-        if (context.endpoint.identifier === "session.permission.list" && !(yield* RcMap.has(locations.rcMap, location)))
+        if (
+          context.endpoint.identifier === "session.permission.list" &&
+          !(yield* LocationServiceMap.has(locations, location))
+        )
           return HttpServerResponse.jsonUnsafe({ data: [] })
 
         return yield* effect.pipe(Effect.provide(locations.get(location)))
