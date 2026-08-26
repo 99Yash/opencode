@@ -162,6 +162,75 @@ test("closing the previous session tab does not leave settings", async ({ page }
   await expect(page).toHaveURL((url) => url.pathname === "/settings")
 })
 
+test("new tabs opened from settings keep the originating remote directory and model", async ({ page }) => {
+  await installSseTransport(page, { server: serverA })
+  await installSseTransport(page, { server: serverB })
+  await mockServers(page, [])
+  await configureServers(page)
+  await page.route(`${serverB}/api/model**`, (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/model") return route.fallback()
+    return json(route, {
+      location: { directory: directoryB },
+      data: [model(true), { ...model(true), id: "alternate", modelID: "alternate", name: "Alternate B Model" }],
+    })
+  })
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "opencode.global.dat:model",
+      JSON.stringify({
+        user: [{ providerID: "server-b", modelID: "alternate", visibility: "show" }],
+      }),
+    )
+  })
+  await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
+  await expect(page.getByRole("heading", { name: sessionB.title, exact: true })).toBeVisible()
+  const modelControl = page.locator('[data-action="composer-model"]')
+  await modelControl.click()
+  await page.getByRole("menuitemradio", { name: "Alternate B Model", exact: true }).click()
+  await expect(modelControl).toContainText("Alternate B Model")
+  await page.keyboard.press("Control+,")
+  await expect(page.getByTestId("settings-screen")).toBeFocused()
+  await page.locator('[data-slot="titlebar-v2"]').getByRole("button", { name: "New session", exact: true }).click()
+  await expect(page).toHaveURL((url) => url.pathname === "/new-session" && !!url.searchParams.get("draftId"))
+  await expect(page.locator('[data-component="composer-editor"][contenteditable="true"]')).toBeEditable()
+  await expect(modelControl).toContainText("Alternate B Model")
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const draftID = new URLSearchParams(location.search).get("draftId")
+        const tabs = JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]")
+        return tabs.find((tab: { draftID?: string }) => tab.draftID === draftID)
+      }),
+    )
+    .toMatchObject({ type: "draft", server: serverB, directory: directoryB })
+})
+
+test("settings navigation stays aligned with app Back and Forward commands", async ({ page }) => {
+  await installSseTransport(page, { server: serverA })
+  await installSseTransport(page, { server: serverB })
+  await mockServers(page, [])
+  await configureServers(page, [{ type: "session", server: serverB, sessionId: sessionB.id }])
+  await page.goto("/")
+  await page.locator(`[data-titlebar-tab-slot]:has(a[href$="/session/${sessionB.id}"])`).click()
+  const heading = page.getByRole("heading", { name: sessionB.title, exact: true })
+  await expect(heading).toBeVisible()
+  await page.keyboard.press("Control+,")
+  const settings = page.getByTestId("settings-screen")
+  await expect(settings).toBeFocused()
+  await settings.getByRole("tab", { name: "Models" }).click()
+  await expect(settings.getByRole("switch", { name: "Server B Model" })).toBeEnabled()
+  await settings.getByRole("button", { name: "Back to app" }).click()
+  await expect(heading).toBeVisible()
+  await page.keyboard.press("Control+[")
+  await expect(page).toHaveURL((url) => url.pathname === "/")
+  await page.keyboard.press("Control+]")
+  await expect(heading).toBeVisible()
+  await page.keyboard.press("Control+]")
+  await expect(settings.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true")
+  await settings.getByRole("button", { name: "Back to app" }).click()
+  await expect(heading).toBeVisible()
+})
+
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []

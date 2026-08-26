@@ -3,13 +3,15 @@ import { useLayout } from "@/shell/state/layout"
 import { useTabs } from "@/shell/tabs/tabs"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
+import { useTitlebarHistory } from "@/shell/titlebar/history-context"
 
 export function useSettingsNavigation() {
-  const location = useLocation<{ settings?: boolean }>()
+  const location = useLocation()
   const navigate = useNavigate()
   const layout = useLayout()
   const tabs = useTabs()
   const global = useGlobal()
+  const history = useTitlebarHistory()
 
   return {
     open(tab = "general") {
@@ -17,6 +19,7 @@ export function useSettingsNavigation() {
       const query = new URLSearchParams(route.type === "settings" ? location.search : "")
       query.set("tab", tab)
       if (route.type !== "settings") {
+        query.set("from", `${location.pathname}${location.search}${location.hash}`)
         const draft = route.type === "draft" ? tabs.draft(route.draftID) : undefined
         const server = route.type === "session" ? route.server : (draft?.server ?? layout.home.selection().server)
         const connection = global.servers.list().find((item) => ServerConnection.key(item) === server)
@@ -29,16 +32,11 @@ export function useSettingsNavigation() {
       }
       navigate(`/settings?${query}`, {
         replace: route.type === "settings",
-        state: route.type === "settings" ? location.state : { settings: true },
       })
     },
     close() {
       if (layout.route().type !== "settings") return
-      if (location.state?.settings) {
-        navigate(-1)
-        return
-      }
-      navigate("/", { replace: true })
+      history.back()
     },
   }
 }

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, onCleanup, onMount } from "solid-js"
+import { createEffect, createMemo, onMount } from "solid-js"
 import { useLocation, useNavigate } from "@solidjs/router"
 import { Tabs } from "@opencode-ai/ui/tabs"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -17,7 +17,6 @@ import { SettingsServerScope } from "./server-scope"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection, useServers } from "@/runtime/server/registry"
-import { useCommand } from "@/shell/commands/command"
 import { useSettingsNavigation } from "./navigation"
 import { useSettingsCommand } from "./command"
 import "@/settings/settings.css"
@@ -25,7 +24,6 @@ import "@/settings/settings.css"
 export function SettingsScreen() {
   const language = useLanguage()
   const dialog = useDialog()
-  const command = useCommand()
   const navigation = useSettingsNavigation()
   const location = useLocation()
   const navigate = useNavigate()
@@ -53,15 +51,13 @@ export function SettingsScreen() {
   const setTab = (value: string) => {
     const query = new URLSearchParams(location.search)
     query.set("tab", value)
-    navigate(`/settings?${query}`, { replace: true, state: location.state, scroll: false })
+    navigate(`/settings?${query}`, { replace: true, scroll: false })
   }
   let root: HTMLDivElement | undefined
 
   onMount(() => {
-    command.keybinds(false)
     root?.focus({ preventScroll: true })
   })
-  onCleanup(() => command.keybinds(true))
 
   const server = createMemo(
     () =>

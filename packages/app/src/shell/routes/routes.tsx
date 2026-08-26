@@ -6,6 +6,7 @@ import { useGlobal } from "@/runtime/server/runtime"
 import { ServerConnection } from "@/runtime/server/registry"
 import { SessionPanelFrame, SessionRouteFrame } from "@/session/session-frame"
 import { LayoutProvider } from "@/shell/state/layout"
+import { TitlebarHistoryProvider } from "@/shell/titlebar/history-context"
 import Shell from "@/shell/shell"
 import { requireServerKey } from "./session"
 
@@ -72,7 +73,9 @@ function TargetServerRoute(props: ParentProps) {
 function AppLayout(props: ParentProps) {
   return (
     <LayoutProvider>
-      <Shell>{props.children}</Shell>
+      <TitlebarHistoryProvider>
+        <Shell>{props.children}</Shell>
+      </TitlebarHistoryProvider>
     </LayoutProvider>
   )
 }
