@@ -42,10 +42,14 @@ export function copyOnSelectRelease(
 export function copy(renderer: Renderer, toast: Toast, clipboard: ClipboardService): boolean {
   const selection = renderer.getSelection()
   if (!selection) return false
-  // A word or line selection can start and finish without a drag.
-  if (selection.isStart && selection.behavior === "cell") return false
-
   const text = selection.getSelectedText()
+  // A word or line selection can start and finish without a drag.
+  if (selection.isStart && selection.behavior === "cell") {
+    // Embedded terminals select the clicked cell before a drag starts.
+    if (text) renderer.clearSelection()
+    return false
+  }
+
   if (!text) return false
 
   const focus = renderer.currentFocusedRenderable

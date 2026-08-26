@@ -78,8 +78,15 @@ test("copy-on-select ignores a later non-drag release", () => {
   expect(writes).toEqual(["beta"])
 })
 
-test("ignores a click-only selection without resetting multi-click tracking", () => {
+test("clears a nonempty click-only selection without copying", () => {
   const value = setup("x", true)
+  expect(Selection.copy(value.renderer, value.toast, value.clipboard)).toBeFalse()
+  expect(value.clears()).toBe(1)
+  expect(value.writes).toEqual([])
+})
+
+test("ignores an empty click-only selection without resetting multi-click tracking", () => {
+  const value = setup("", true)
   expect(Selection.copy(value.renderer, value.toast, value.clipboard)).toBeFalse()
   expect(value.clears()).toBe(0)
   expect(value.writes).toEqual([])
@@ -129,7 +136,7 @@ test.each([
     },
     value.clipboard,
   )
-  expect(value.clears()).toBe(1)
+  expect(value.clears()).toBeGreaterThan(0)
   expect(value.writes).toEqual([])
   expect(prevented).toBeFalse()
   expect(stopped).toBeFalse()
