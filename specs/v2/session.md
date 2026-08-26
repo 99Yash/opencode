@@ -6,6 +6,8 @@ Status: **Current semantic overview.** Protocol owns public operations, Schema o
 
 `Session.prompt(...)` publishes one durable `session.inbox.enqueued` fact whose projection inserts one `session_inbox` row before advisory execution begins. An inbox item remains outside model-visible Session History until delivery. The `session.inbox.delivered` projection consumes the row and inserts a visible user or synthetic message atomically; compaction and move control items are consumed without becoming transcript messages.
 
+`Session.synthetic({ resume: false })` admits without waking execution and delivers the notice immediately when the Session is idle, no revert is staged, and that notice is next in steer order. Delivery consumes only that notice, not neighboring inbox items. Running Sessions, earlier steers or control items, and explicit queue delivery keep the notice pending for the normal runner boundary. User prompts remain pending until runner delivery, including when `resume: false`.
+
 Reusing a Session ID adopts the existing Session. While a user or synthetic item remains pending, reusing its ID reconciles only when Session, item type, complete payload, metadata, and delivery match; conflicting reuse fails. After delivery, retry reconciliation for those message-producing items uses the projected message and does not require enqueue history or the original delivery mode. Compaction and move controls retain operation-specific conflict behavior.
 
 `resume` controls scheduling, not durability:

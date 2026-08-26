@@ -76,8 +76,7 @@ const locations = Layer.effect(
             Layer.mock(Snapshot.Service, {
               capture: () =>
                 ready ? Effect.undefined : Effect.die(new Error("Snapshot used before plugins were ready")),
-              restore: () =>
-                ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready")),
+              restore: () => (ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready"))),
             }),
             Layer.succeed(
               PluginSupervisor.Service,
@@ -102,6 +101,7 @@ const sessionID = Session.ID.make("ses_prompt_test")
 const messageID = SessionMessage.ID.create()
 
 const setup = Effect.gen(function* () {
+  yield* Effect.addFinalizer(() => Effect.sync(() => activeSessions.clear()))
   const { db } = yield* Database.Service
   yield* db
     .insert(ProjectTable)
@@ -302,13 +302,17 @@ describe("Session.prompt", () => {
       wakeCalls.length = 0
 
       const completion = yield* session.synthetic({ sessionID, text: "stale completion" })
+      const notice = yield* session.synthetic({ sessionID, text: "non-resuming completion", resume: false })
 
       expect(wakeCalls).toEqual([])
       expect(yield* SessionInbox.find(db, completion.id)).toMatchObject({ type: "synthetic" })
+      expect(yield* SessionInbox.find(db, notice.id)).toMatchObject({ type: "synthetic" })
+      expect(yield* session.message({ sessionID, messageID: notice.id })).toBeUndefined()
 
       yield* session.revert.commit(sessionID)
 
       expect(yield* SessionInbox.find(db, completion.id)).toBeUndefined()
+      expect(yield* SessionInbox.find(db, notice.id)).toBeUndefined()
     }),
   )
 
@@ -937,12 +941,11 @@ describe("Session.prompt", () => {
     }),
   )
 
-  it.effect("durably admits synthetic input before transcript promotion", () =>
+  it.effect("immediately delivers an idle synthetic message without resuming execution", () =>
     Effect.gen(function* () {
       yield* setup
       const session = yield* Session.Service
-      const bus = yield* Bus.Service
-      const { db } = yield* Database.Service
+      wakeCalls.length = 0
 
       const input = yield* session.synthetic({
         id: messageID,
@@ -953,20 +956,6 @@ describe("Session.prompt", () => {
         resume: false,
       })
 
-      expect(yield* session.messages({ sessionID })).toEqual([])
-      expect(yield* admitted(input.id)).toMatchObject({
-        type: "synthetic",
-        sessionID,
-        delivery: "steer",
-        payload: {
-          text: "Background work completed",
-          description: "shell completion",
-          metadata: { job: "shell" },
-        },
-      })
-
-      yield* SessionInbox.promote(db, bus, sessionID, "steer")
-
       expect(yield* session.messages({ sessionID })).toMatchObject([
         {
           id: messageID,
@@ -976,6 +965,90 @@ describe("Session.prompt", () => {
           metadata: { job: "shell" },
         },
       ])
+      expect(yield* admitted(input.id)).toBeUndefined()
+      expect(wakeCalls).toEqual([])
+    }),
+  )
+
+  it.effect("keeps a synthetic steer pending while its session is already running", () =>
+    Effect.gen(function* () {
+      yield* setup
+      activeSessions.add(sessionID)
+      const session = yield* Session.Service
+      const input = yield* session.synthetic({ sessionID, text: "Background work completed", resume: false })
+
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* admitted(input.id)).toMatchObject({ type: "synthetic", delivery: "steer" })
+    }),
+  )
+
+  it.effect("keeps an idle synthetic notice behind an earlier user steer", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const bus = yield* Bus.Service
+      const database = yield* Database.Service
+      wakeCalls.length = 0
+      const user = yield* session.prompt({ sessionID, text: "Prepare before running", resume: false })
+      const notice = yield* session.synthetic({ sessionID, text: "Background finished", resume: false })
+
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* session.inbox(sessionID)).toMatchObject([{ id: user.id }, { id: notice.id }])
+      expect(wakeCalls).toEqual([])
+      yield* SessionInbox.promote(database.db, bus, sessionID, "steer")
+      expect(yield* session.messages({ sessionID, order: "asc" })).toMatchObject([
+        { id: user.id, type: "user" },
+        { id: notice.id, type: "synthetic" },
+      ])
+    }),
+  )
+
+  it.effect("keeps an idle synthetic notice behind a pending control item", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const control = yield* session.compact({ sessionID })
+      wakeCalls.length = 0
+      const notice = yield* session.synthetic({ sessionID, text: "Background finished", resume: false })
+
+      expect(yield* session.messages({ sessionID })).toEqual([])
+      expect(yield* session.inbox(sessionID)).toMatchObject([
+        { id: control.id, type: "compaction" },
+        { id: notice.id, type: "synthetic" },
+      ])
+      expect(wakeCalls).toEqual([])
+    }),
+  )
+
+  it.effect("delivers only the retried idle notice without consuming later user work", () =>
+    Effect.gen(function* () {
+      yield* setup
+      activeSessions.add(sessionID)
+      const session = yield* Session.Service
+      const input = { sessionID, id: messageID, text: "Background finished", resume: false }
+      yield* session.synthetic(input)
+      const user = yield* session.prompt({ sessionID, text: "Later work", resume: false })
+      activeSessions.delete(sessionID)
+      wakeCalls.length = 0
+
+      yield* session.synthetic(input)
+      expect(yield* session.messages({ sessionID })).toMatchObject([{ id: messageID, type: "synthetic" }])
+      expect(yield* session.inbox(sessionID)).toMatchObject([{ id: user.id, type: "user" }])
+      expect(wakeCalls).toEqual([])
+    }),
+  )
+
+  it.effect("delivers an idle synthetic steer while queued work stays pending", () =>
+    Effect.gen(function* () {
+      yield* setup
+      const session = yield* Session.Service
+      const queued = yield* session.prompt({ sessionID, text: "Queued work", delivery: "queue", resume: false })
+      wakeCalls.length = 0
+      const notice = yield* session.synthetic({ sessionID, text: "Background finished", resume: false })
+
+      expect(yield* session.messages({ sessionID })).toMatchObject([{ id: notice.id, type: "synthetic" }])
+      expect(yield* session.inbox(sessionID)).toMatchObject([{ id: queued.id, delivery: "queue" }])
+      expect(wakeCalls).toEqual([])
     }),
   )
 

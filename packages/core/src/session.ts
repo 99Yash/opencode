@@ -307,6 +307,7 @@ export interface Interface {
   readonly background: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (sessionID: SessionSchema.ID, options?: { readonly continue?: boolean }) => Effect.Effect<boolean>
+  /** Non-resuming steers enter history immediately when idle and next in steer order; otherwise they stay pending. */
   readonly synthetic: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
@@ -952,8 +953,22 @@ const layer = Layer.effect(
             // retried payload, metadata, and delivery mode.
             if (admitted.type !== "synthetic" || admitted.sessionID !== input.sessionID)
               return yield* new SyntheticConflictError({ sessionID: input.sessionID, inputID })
-            if (input.resume !== false && !(yield* result.get(input.sessionID)).revert)
-              yield* execution.wake(input.sessionID)
+            if (!(yield* result.get(input.sessionID)).revert) {
+              if (input.resume !== false) yield* execution.wake(input.sessionID)
+              if (input.resume === false && admitted.delivery === "steer")
+                yield* SessionInbox.serialized(
+                  input.sessionID,
+                  Effect.gen(function* () {
+                    if ((yield* execution.active).has(input.sessionID)) return
+                    // Do not bypass earlier steers or consume user input outside the runner.
+                    if ((yield* SessionInbox.nextPromotable(db, input.sessionID, "steer"))?.id !== admitted.id) return
+                    yield* bus.publish(SessionEvent.InboxDelivered, {
+                      sessionID: input.sessionID,
+                      inboxID: admitted.id,
+                    })
+                  }),
+                )
+            }
             return admitted
           }),
         ),
