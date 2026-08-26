@@ -108,18 +108,18 @@ export function SessionScreen(props: { session: SessionModel }) {
           throw error()
         }}
       </Show>
-      <Show when={session.identity.params.id && isWorkspaceSetupPending(session.identity.params.id)}>
-        <div
-          data-component="workspace-setup-status"
-          role="status"
-          class="flex items-center gap-2 px-4 py-3 text-[13px] leading-text-compact text-v2-text-text-muted"
-        >
-          <Spinner class="size-3.5" />
-          <span>{language.t("session.workspace.initializing")}</span>
-        </div>
-      </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
+          <Match when={session.identity.params.id && isWorkspaceSetupPending(session.identity.params.id)}>
+            <div
+              data-component="workspace-setup-status"
+              role="status"
+              class="flex items-center justify-center gap-2 px-4 pt-8 text-[13px] leading-text-compact text-v2-text-text-muted"
+            >
+              <Spinner class="size-3.5" />
+              <span>{language.t("session.workspace.initializing")}</span>
+            </div>
+          </Match>
           <Match when={session.identity.params.id && review.mobile.changes()}>
             <SessionMobileReview review={review} />
           </Match>
