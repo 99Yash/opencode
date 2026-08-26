@@ -30,6 +30,7 @@ import { displayName, getProjectAvatarSource, projectForSession } from "@/shell/
 import { parseCommentNote, readPromptPresentation } from "@/composer/comment-note"
 import { useCommand } from "@/shell/commands/command"
 import { useSettings } from "@/settings/model"
+import { isWorkspaceSetupPending } from "@/workspaces/setup"
 import { SessionTitleHeader } from "../session-identity-header"
 
 type BackgroundTask = {
@@ -350,8 +351,7 @@ function MessageTimelineView(
     return { ...value, worktree: value.canonical, worktrees: [] }
   })
   const workspaceSession = createMemo(() => isWorkspaceDirectory(project(), sessionDirectory()))
-  const showProjectIcon = () =>
-    import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && settings.general.showProjectIcon()
+  const showProjectIcon = () => import.meta.env.VITE_OPENCODE_CHANNEL !== "prod" && settings.general.showProjectIcon()
   const avatarProject = createMemo(() => {
     if (!showProjectIcon()) return
     const session = props.session.data.info()
@@ -465,6 +465,8 @@ function MessageTimelineView(
     editToolDefaultOpen: props.data.editToolPartsExpanded,
     disclosure: virtualized.disclosure,
     centered: () => props.centered,
+    thinkingLabel: () =>
+      isWorkspaceSetupPending(sessionID() ?? "") ? language.t("session.workspace.initializing") : undefined,
     padding: turnPadding,
     anchor: props.anchor,
   })

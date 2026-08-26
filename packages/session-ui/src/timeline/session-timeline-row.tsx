@@ -49,6 +49,7 @@ export function createSessionTimelineRowRenderer(input: {
     set: (key: string, open: boolean) => void
   }
   centered?: Accessor<boolean>
+  thinkingLabel?: Accessor<string | undefined>
   padding?: Accessor<string>
   anchor?: (messageID: string) => string | undefined
 }) {
@@ -505,7 +506,7 @@ export function createSessionTimelineRowRenderer(input: {
                     <div data-slot="basic-tool-tool-info-structured">
                       <div data-slot="basic-tool-tool-info-main">
                         <span data-slot="basic-tool-tool-title">
-                          <TextShimmer text={i18n.t("ui.sessionTurn.status.thinking")} />
+                          <TextShimmer text={input.thinkingLabel?.() ?? i18n.t("ui.sessionTurn.status.thinking")} />
                         </span>
                         <Show when={!input.showReasoningSummaries()}>
                           <span data-slot="basic-tool-tool-subtitle">
