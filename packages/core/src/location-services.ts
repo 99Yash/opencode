@@ -56,6 +56,35 @@ import { AbsolutePath } from "./schema.js"
 
 export { LocationServiceMap } from "./location-service-map.js"
 
+/**
+ * Engine tier: the tags consumed from OUTSIDE the graph by the drain and by
+ * session operations, plus the registries that form the configuration surface.
+ * Everything else the engine needs (SessionContext, ModelRequest, Permission,
+ * ModelResolver, ...) is internal wiring reached through dependency closure
+ * during compile, where replacements can substitute capability sources.
+ * `locationServiceNodes` below stays the composed full graph — its list order
+ * is semantic (compile provide-merges in order), so the tier is named
+ * alongside, not split out.
+ */
+const sessionEnvNodes = [
+  // drain entry (execution.ts runs the runner; its layer wires the spine internally)
+  SessionRunnerLLM.node,
+  // prompt admission (session.ts attachment resize + skill mentions) and readiness
+  PluginSupervisor.node,
+  Image.node,
+  Skill.node,
+  // configuration surface: populated from values instead of discovery
+  Tool.node,
+  Agent.node,
+  Catalog.node,
+] as const satisfies readonly Node.LocationNode<unknown, unknown>[]
+
+export const sessionEnvGroup = LayerNode.group<typeof sessionEnvNodes>(sessionEnvNodes)
+
+/** What a session drain and its operations require. `LocationServices` is a superset. */
+export type SessionEnv = LayerNode.Output<typeof sessionEnvGroup>
+export type SessionEnvError = LayerNode.Error<typeof sessionEnvGroup>
+
 const locationServiceNodes = [
   Location.node,
   Environment.node,
