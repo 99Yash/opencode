@@ -3,8 +3,16 @@ export * as ServerProcess from "./process"
 import { NodeHttpServer } from "@effect/platform-node"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { hasPtyConnectTicketURL } from "@opencode-ai/protocol/groups/pty"
+import { hasPersistentPtyConnectTicketURL } from "@opencode-ai/protocol/groups/persistent-pty"
 import { Cause, Context, Effect, Exit, Latch, Layer, Option, Ref, Scope } from "effect"
-import { HttpMiddleware, HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import {
+  HttpMiddleware,
+  HttpPlatform,
+  HttpRouter,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http"
 import { createServer } from "node:http"
 import { ServerAuth } from "./auth"
 import { isAllowedCorsOrigin } from "./cors"
@@ -90,7 +98,7 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
           const host = address.family === "IPv6" ? `[${address.address}]` : address.address
           return ServerInfo.connectionURLs(`http://${host}:${address.port}`, hostname)
         },
-      ).pipe(Layer.provide(NodeHttpServer.layerHttpServices)),
+      ).pipe(Layer.provideMerge(NodeHttpServer.layerHttpServices)),
       applicationScope,
     )
     if (lifecycle) {
@@ -98,7 +106,12 @@ export const start = Effect.fn("ServerProcess.start")(function* <E, R>(
         Effect.provideService(Scope.Scope, applicationScope),
       )
     }
-    const app = Context.get(context, HttpRouter.HttpRouter).asHttpEffect()
+    const app = Context.get(context, HttpRouter.HttpRouter)
+      .asHttpEffect()
+      .pipe(
+        HttpMiddleware.compression(),
+        Effect.provideService(HttpPlatform.HttpPlatform, Context.get(context, HttpPlatform.HttpPlatform)),
+      )
     yield* Ref.set(application, Option.some(transform ? transform(app) : app))
     yield* status.ready
     return { address: bound.http.address, shutdown: shutdown.await }
@@ -170,7 +183,11 @@ function dispatch(
     const state = yield* status.current
     const app = yield* Ref.get(application)
     const ready = state.type === "ready" && Option.isSome(app)
-    if ((!ready || !hasPtyConnectTicketURL(url)) && !(yield* authorizedRequest(request, auth))) return unauthorized()
+    if (
+      (!ready || (!hasPtyConnectTicketURL(url) && !hasPersistentPtyConnectTicketURL(url))) &&
+      !(yield* authorizedRequest(request, auth))
+    )
+      return unauthorized()
     if (ready) return yield* app.value
     return unavailable(state)
   })

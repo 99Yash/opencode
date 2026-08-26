@@ -1,5 +1,6 @@
 import { base64Encode } from "@opencode-ai/util/encode"
 import { getDirectory } from "@opencode-ai/util/path"
+import type { SessionMessageUser } from "@opencode-ai/client/promise"
 import { startTransition } from "solid-js"
 import type { NewSessionComposerAdapter } from "@/composer/adapter"
 import { useComposerState } from "@/composer/persistence"
@@ -7,17 +8,19 @@ import { createComposerControls, createComposerModelSelection } from "@/composer
 import { createComposerProjectControls } from "./project/controller"
 import { useLanguage } from "@/runtime/i18n/language"
 import { useLocal } from "@/providers/models/selection"
-import { usePermission } from "@/session/requests/permission"
 import { useData, useServer } from "@/runtime/server/current"
-import { useServerSDK } from "@/runtime/server/client"
+import { type ServerSDK, useServerSDK } from "@/runtime/server/client"
 import { useTabs } from "@/shell/tabs/tabs"
 import { useWorkspaceLocation } from "@/workspaces/location"
 import { useSessionKey } from "@/session/session-layout"
 import { showToast } from "@/shell/notifications/toast"
+import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
+import { clearSessionMessageHandoff, setSessionMessageHandoff } from "@/session/handoff"
 
 export function createNewSessionComposerAdapter(props: {
   draftID: string
   worktree: () => string
+  branch: () => string | undefined
   submitted: () => void
 }) {
   const route = useSessionKey()
@@ -27,7 +30,6 @@ export function createNewSessionComposerAdapter(props: {
   const data = useData()
   const server = useServer()
   const serverSDK = useServerSDK()
-  const permission = usePermission()
   const tabs = useTabs()
   const location = useWorkspaceLocation()
   const language = useLanguage()
@@ -47,36 +49,43 @@ export function createNewSessionComposerAdapter(props: {
       const sessionDirectory = await resolveSessionDirectory({
         projectDirectory,
         worktree,
+        branch: props.branch(),
         data,
         serverSDK,
         language,
       })
       if (!sessionDirectory) return
 
-      const created = await serverSDK.api.session
-        .create({
-          agent: selection.agent,
-          model: {
-            id: selection.model.modelID,
-            providerID: selection.model.providerID,
-            variant: selection.variant,
-          },
-          location: { directory: sessionDirectory },
-        })
-        .catch((error) => {
+      const created = data.session.create({
+        agent: selection.agent,
+        model: {
+          id: selection.model.modelID,
+          providerID: selection.model.providerID,
+          variant: selection.variant,
+        },
+        location: { directory: sessionDirectory },
+      })
+      const creation = created.request.then(
+        () => ({ ok: true as const }),
+        (error) => {
           showToast({
             title: language.t("prompt.toast.sessionCreateFailed.title"),
             description: errorMessage(language, error),
           })
-        })
-      if (!created) return
-
-      data.session.remember(created)
-      await startTransition(() => {
-        tabs.updateDraft(props.draftID, { worktree: undefined })
-        if (permission.isAutoAcceptingDirectory(projectDirectory)) {
-          permission.enableAutoAccept(created.id, sessionDirectory)
-        }
+          return { ok: false as const, error }
+        },
+      )
+      const afterCreation = async <T>(run: () => Promise<T>) => {
+        const result = await creation
+        if (!result.ok) throw result.error
+        return run()
+      }
+      const sessionKey = SessionStateKey.from(
+        serverSDK.scope,
+        SessionRouteKey.fromRoute(base64Encode(sessionDirectory), created.id),
+      )
+      const cleanupReady = startTransition(() => {
+        tabs.updateDraft(props.draftID, { worktree: undefined, branch: undefined })
         local.session.promote(sessionDirectory, created.id, {
           agent: selection.agent,
           model: selection.model,
@@ -92,13 +101,32 @@ export function createNewSessionComposerAdapter(props: {
       })
 
       return {
-        id: created.id,
-        directory: sessionDirectory,
-        api: serverSDK.api.session,
-        data,
-        current: () => data.session.get(created.id) ?? created,
-        admitted: (messageID) =>
-          data.session.input.has(created.id, messageID) || !!data.session.message.get(created.id, messageID),
+        cleanupReady,
+        session: {
+          id: created.id,
+          directory: sessionDirectory,
+          handoff: createMessageHandoff(sessionKey, created.id, serverSDK.event),
+          api: {
+            command: (input) => afterCreation(() => serverSDK.api.session.command(input)),
+            shell: (input) => afterCreation(() => serverSDK.api.session.shell(input)),
+            switchAgent: (input) => afterCreation(() => serverSDK.api.session.switchAgent(input)),
+            switchModel: (input) => afterCreation(() => serverSDK.api.session.switchModel(input)),
+          },
+          data: {
+            location: data.location,
+            session: {
+              setStatus: data.session.setStatus,
+              prompt: (input) =>
+                data.session.prompt({
+                  ...input,
+                  gate: Promise.all([input.gate, afterCreation(async () => undefined)]),
+                }),
+            },
+          },
+          current: () => data.session.get(created.id),
+          admitted: (messageID) =>
+            data.session.input.has(created.id, messageID) || !!data.session.message.get(created.id, messageID),
+        },
       }
     },
   }
@@ -111,9 +139,31 @@ export function createNewSessionComposerAdapter(props: {
   }
 }
 
+function createMessageHandoff(key: string, sessionID: string, event: ServerSDK["event"]) {
+  let unsubscribe: VoidFunction | undefined
+  return {
+    set(message: SessionMessageUser) {
+      unsubscribe?.()
+      setSessionMessageHandoff(key, message)
+      unsubscribe = event.on("session.inbox.enqueued", (item) => {
+        if (item.data.sessionID !== sessionID || item.data.inboxID !== message.id) return
+        unsubscribe?.()
+        unsubscribe = undefined
+        clearSessionMessageHandoff(key, message.id)
+      })
+    },
+    clear(messageID: string) {
+      unsubscribe?.()
+      unsubscribe = undefined
+      clearSessionMessageHandoff(key, messageID)
+    },
+  }
+}
+
 async function resolveSessionDirectory(input: {
   projectDirectory: string
   worktree: string
+  branch?: string
   data: ReturnType<typeof useData>
   serverSDK: ReturnType<typeof useServerSDK>
   language: ReturnType<typeof useLanguage>
@@ -125,6 +175,7 @@ async function resolveSessionDirectory(input: {
     .create({
       projectID: input.data.location.info({ directory: input.projectDirectory })?.project.id ?? "",
       strategy: "git",
+      branch: input.branch,
       directory: getDirectory(
         input.data.location.info({ directory: input.projectDirectory })?.project.directory ?? input.projectDirectory,
       ),

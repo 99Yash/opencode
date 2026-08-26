@@ -102,6 +102,7 @@ export type PromptRef = {
 }
 
 const DRAFT_RETENTION_MIN_CHARS = 20
+const revealedPromptMetadata = new WeakSet<object>()
 
 function randomIndex(count: number) {
   if (count <= 0) return 0
@@ -1028,7 +1029,7 @@ export function Prompt(props: PromptProps) {
               return
             }
 
-            const item = history.move(props.sessionID, -1, input.plainText)
+            const item = history.move(-1, input.plainText)
             if (!item) return false
             input.setText(item.text)
             setStore("prompt", item)
@@ -1067,7 +1068,7 @@ export function Prompt(props: PromptProps) {
               return
             }
 
-            const item = history.move(props.sessionID, 1, input.plainText)
+            const item = history.move(1, input.plainText)
             if (!item) return false
             input.setText(item.text)
             setStore("prompt", item)
@@ -1260,7 +1261,7 @@ export function Prompt(props: PromptProps) {
     }
 
     const target = sessionID
-    history.append(target, entry)
+    history.append(entry)
     const dispatch = (send: () => Promise<unknown>) => {
       const setup = newSession
       if (setup) void setup.gate.then(send).catch(setup.recover)
@@ -1271,17 +1272,11 @@ export function Prompt(props: PromptProps) {
       dispatch(() => client.api.session.shell({ sessionID: target, command: inputText }))
       setStore("mode", "normal")
     } else if (slashHead && isCommand) {
-      move.startSubmit()
-      const model = { providerID: selection.providerID, id: selection.modelID, variant }
-      const cancelCommit = local.model.trackSessionCommit(target, model)
-
       const send = () =>
         client.api.session.command({
           sessionID: target,
           command: slashHead.name,
-          arguments: slashHead.arguments,
-          agent: agent.id,
-          model,
+          text: slashHead.arguments,
           files: entry.files,
           agents: entry.agents,
           skills: entry.skills?.length ? entry.skills : undefined,
@@ -1289,7 +1284,6 @@ export function Prompt(props: PromptProps) {
         })
       const setup = newSession
       void (setup ? setup.gate.then(send) : send()).catch((error) => {
-        cancelCommit()
         if (setup) return setup.recover(error)
         toast.show({ title: "Failed to run command", message: errorMessage(error), variant: "error" })
         restoreEntry()
@@ -1386,6 +1380,8 @@ export function Prompt(props: PromptProps) {
         })
       if (pendingEditorSelection) editor.markSelectionSent()
     }
+
+    sessionTabs.promote(target)
 
     // Optimistic admission puts the message in the store synchronously, so
     // the session view renders it on arrival.
@@ -1562,7 +1558,7 @@ export function Prompt(props: PromptProps) {
       (store.prompt.files?.length ?? 0) > 0 ||
       (store.prompt.agents?.length ?? 0) > 0
     ) {
-      history.append(props.sessionID, {
+      history.append({
         ...store.prompt,
         mode: store.mode,
       })
@@ -1613,12 +1609,20 @@ export function Prompt(props: PromptProps) {
     return promptDisplay().agentColor ?? theme.border.default
   })
   const agentLabel = createMemo(() => (store.mode === "shell" ? "Shell" : promptDisplay().agentLabel))
-  const agentMetaAlpha = createFadeIn(() => !!agentLabel(), animationsEnabled)
-  const modelMetaAlpha = createFadeIn(() => !!promptDisplay().agentLabel && store.mode === "normal", animationsEnabled)
+  const animateMetadata = !revealedPromptMetadata.has(local)
+  const metadataAnimationsEnabled = () => animationsEnabled() && animateMetadata
+  const agentMetaAlpha = createFadeIn(() => !!agentLabel(), metadataAnimationsEnabled)
+  const modelMetaAlpha = createFadeIn(
+    () => !!promptDisplay().agentLabel && store.mode === "normal",
+    metadataAnimationsEnabled,
+  )
   const variantMetaAlpha = createFadeIn(
     () => !!promptDisplay().agentLabel && store.mode === "normal" && !!promptDisplay().variant,
-    animationsEnabled,
+    metadataAnimationsEnabled,
   )
+  createEffect(() => {
+    if (agentLabel()) revealedPromptMetadata.add(local)
+  })
   const borderHighlight = createMemo(() => tint(theme.border.default, highlight(), agentMetaAlpha()))
   const footerInput = () => ({ sessionID: props.sessionID, mode: store.mode })
 

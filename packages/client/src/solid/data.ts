@@ -6,7 +6,9 @@
 import type {
   AgentInfo,
   CommandInfo,
+  FormCancelInput,
   FormInfo,
+  FormReplyInput,
   IntegrationInfo,
   LocationRef,
   LocationGetOutput,
@@ -37,7 +39,12 @@ import type {
 import { Worktree } from "@opencode-ai/schema/worktree"
 import { SessionID } from "@opencode-ai/schema/session-id"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
-import { isPermissionNotFoundError, type SessionPromptInput } from "../promise"
+import {
+  isFormAlreadySettledError,
+  isFormNotFoundError,
+  isPermissionNotFoundError,
+  type SessionPromptInput,
+} from "../promise"
 import { createStore, produce, reconcile } from "solid-js/store"
 import type { SessionInbox } from "@opencode-ai/schema/session-inbox"
 import { batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
@@ -60,6 +67,7 @@ export type CreateDataInput = {
 }
 
 const messageIDFromEvent = (eventID: string) => eventID.replace(/^evt_/, "msg_")
+const messagePageLimit = 20
 
 // Global MCP elicitations temporarily use "global" instead of a real session ID, so the
 // server cannot recover their Location when settling them. Preserve the event Location
@@ -117,6 +125,16 @@ export function locationKey(location: LocationRef) {
 
 function locationQuery(ref?: LocationRef) {
   return ref ? { directory: ref.directory, workspace: ref.workspaceID } : undefined
+}
+
+function formRequestOptions(sessionID: string, ref?: LocationRef) {
+  if (sessionID !== "global" || !ref) return undefined
+  return {
+    headers: {
+      "x-opencode-directory": encodeURIComponent(ref.directory),
+      ...(ref.workspaceID ? { "x-opencode-workspace": ref.workspaceID } : {}),
+    },
+  }
 }
 
 function createSync() {
@@ -225,6 +243,32 @@ export function createData(config: CreateDataInput) {
       sessionID,
       requests.filter((request) => request.id !== requestID),
     )
+  }
+
+  function removeForm(sessionID: string, formID: string, ref?: LocationRef) {
+    const forms = store.session.form[sessionID]
+    if (!forms) return false
+    const location = ref && locationKey(ref)
+    const next = forms.filter((form) => {
+      if (form.id !== formID) return true
+      if (sessionID !== "global" || !location) return false
+      return !form.location || locationKey(form.location) !== location
+    })
+    if (next.length === forms.length) return false
+    setStore("session", "form", sessionID, next)
+    return true
+  }
+
+  function settleForm(input: FormCancelInput, ref: LocationRef | undefined, request: Promise<void>) {
+    return request
+      .catch((error: unknown) => {
+        if ((!isFormNotFoundError(error) && !isFormAlreadySettledError(error)) || error.id !== input.formID) throw error
+      })
+      .then(() => {
+        if (!removeForm(input.sessionID, input.formID, ref)) return
+        result.session.form.invalidate(input.sessionID, ref)
+        void result.session.form.sync(input.sessionID, ref).catch(() => undefined)
+      })
   }
 
   function updatePending(sessionID: string, inboxID: string, delivery: SessionInbox.Delivery) {
@@ -476,6 +520,9 @@ export function createData(config: CreateDataInput) {
           .catch((error) => console.error("Failed to preload location", error))
         void result.location.vcs.sync().catch((error) => console.error("Failed to preload VCS info", error))
         void result.project.sync().catch((error) => console.error("Failed to preload projects", error))
+        return
+      case "project.updated":
+        setStore("project", "info", event.data.id, reconcile(event.data))
         return
       case "session.created":
         sessionOutbox.delete(event.data.sessionID)
@@ -997,13 +1044,38 @@ export function createData(config: CreateDataInput) {
         return
       case "form.replied":
       case "form.cancelled":
-        setStore(
-          "session",
-          "form",
-          event.data.sessionID,
-          (store.session.form[event.data.sessionID] ?? []).filter((form) => form.id !== event.data.id),
-        )
+        removeForm(event.data.sessionID, event.data.id, event.location)
         return
+    }
+
+    if (event.type === "credential.updated" || event.type === "credential.switched") {
+      Object.keys(store.location).forEach((key) => {
+        const ref = JSON.parse(key) as [string, string | null]
+        const location = { directory: ref[0], workspaceID: ref[1] ?? undefined }
+        if (event.type === "credential.updated") {
+          result.location.integration.invalidate(location)
+          void result.location.integration.sync(location)
+          return
+        }
+        setStore("location", key, (data) => ({
+          ...data,
+          integration: data?.integration?.map((integration) => {
+            if (integration.id !== event.data.integrationID) return integration
+            const active = integration.connections.find(
+              (connection) => connection.type === "credential" && connection.id === event.data.credentialID,
+            )
+            if (!active) return integration
+            return {
+              ...integration,
+              connections: [active, ...integration.connections.filter((connection) => connection !== active)],
+            }
+          }),
+        }))
+        result.location.model.invalidate(location)
+        result.location.provider.invalidate(location)
+        void Promise.all([result.location.model.sync(location), result.location.provider.sync(location)])
+      })
+      return
     }
 
     if (!event.location) return
@@ -1100,6 +1172,9 @@ export function createData(config: CreateDataInput) {
       },
       get(sessionID: string) {
         return store.session.info[sessionID]
+      },
+      creating(sessionID: string) {
+        return creating.has(sessionID)
       },
       remember(info: SessionInfo) {
         setStore("session", "info", info.id, reconcile(info))
@@ -1315,7 +1390,7 @@ export function createData(config: CreateDataInput) {
         },
         sync(sessionID: string) {
           return sync.run(`session.message:${sessionID}`, async () => {
-            const response = await api().message.list({ sessionID, limit: 200, order: "desc" })
+            const response = await api().message.list({ sessionID, limit: messagePageLimit, order: "desc" })
             const fetched = response.data.toReversed()
             // Same protection as the pending sync: a re-fetch racing an
             // admission must not wipe its local transcript row.
@@ -1345,7 +1420,7 @@ export function createData(config: CreateDataInput) {
           if (!cursor || store.session.messageLoading[sessionID]) return
           setStore("session", "messageLoading", sessionID, true)
           const response = await api()
-            .message.list({ sessionID, limit: 200, cursor })
+            .message.list({ sessionID, limit: messagePageLimit, cursor })
             .finally(() => setStore("session", "messageLoading", sessionID, false))
           const older = response.data.toReversed()
           const existing = store.session.message[sessionID] ?? []
@@ -1415,6 +1490,12 @@ export function createData(config: CreateDataInput) {
           sync.invalidate(
             `session.form:${sessionID}:${sessionID === "global" ? locationKey(ref ?? defaultLocation()) : ""}`,
           )
+        },
+        reply(input: FormReplyInput, ref?: LocationRef) {
+          return settleForm(input, ref, api().form.reply(input, formRequestOptions(input.sessionID, ref)))
+        },
+        cancel(input: FormCancelInput, ref?: LocationRef) {
+          return settleForm(input, ref, api().form.cancel(input, formRequestOptions(input.sessionID, ref)))
         },
       },
     },

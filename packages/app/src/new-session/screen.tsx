@@ -1,6 +1,5 @@
 import { createPromptProjectController } from "@/new-session/project/selector"
 import { useSettingsDialog } from "@/settings/command"
-import { useTitlebarRightMount } from "@/shell/titlebar/titlebar"
 import { useSettings } from "@/settings/model"
 import { useTabs, type DraftTab } from "@/shell/tabs/tabs"
 import { useSearchParams } from "@solidjs/router"
@@ -15,7 +14,6 @@ import { useNewSessionCommands } from "./commands"
 /** The draft-only Session page. Submitting promotes the draft into a real Session. */
 export default function NewSessionPage(props: { draftId: string }) {
   const settings = useSettings()
-  const rightMount = useTitlebarRightMount()
   const [search, setSearch] = useSearchParams<{ draftId?: string; prompt?: string }>()
   const tabs = useTabs()
   const openWorkspaces = useSettingsDialog("workspaces")
@@ -23,15 +21,20 @@ export default function NewSessionPage(props: { draftId: string }) {
     tabs.store.find((tab): tab is DraftTab => tab.type === "draft" && tab.draftID === search.draftId),
   )
   const workspace = createNewSessionWorkspaceController({
-    selected: () => draftTab()?.worktree,
-    setSelected: (worktree) => {
+    selectedWorktree: () => draftTab()?.worktree,
+    selectedBranch: () => draftTab()?.branch,
+    setSelectedWorktree: (worktree) => {
       if (search.draftId) tabs.updateDraft(search.draftId, { worktree })
+    },
+    setSelectedBranch: (branch) => {
+      if (search.draftId) tabs.updateDraft(search.draftId, { branch })
     },
     onViewAll: openWorkspaces,
   })
   const composer = createNewSessionComposerAdapter({
     draftID: props.draftId,
     worktree: workspace.selection.value,
+    branch: workspace.bar.branch,
     submitted: workspace.selection.remember,
   })
   const model = createComposerModel(composer.adapter)
@@ -69,7 +72,7 @@ export default function NewSessionPage(props: { draftId: string }) {
   return (
     <div class="relative size-full overflow-hidden flex flex-col">
       {suspendUntilPromptReady()}
-      <NewSessionStatus mount={rightMount()} visible={settings.visibility.status()} />
+      <NewSessionStatus visible={settings.visibility.status()} />
       <div class="flex-1 min-h-0 flex flex-col gap-2 p-2">
         <NewSessionView composer={model} project={project} workspace={workspace} />
       </div>

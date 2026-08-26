@@ -48,6 +48,16 @@ const MARQUEE_INTERVAL = 80
 const CONTEXT_MENU_WIDTH = 16
 const MIDDLE_MOUSE_BUTTON = 1
 const RIGHT_MOUSE_BUTTON = 2
+const MOUSE_CLOSE_HOLD_MS = 5_000
+
+type MouseCloseHold = {
+  items: string[]
+  ids: string[]
+  widths: number[]
+  closed: string
+  target: string
+  x: number
+}
 
 type TabContextMenuState = {
   x: number
@@ -70,11 +80,30 @@ export type SessionTabsController = Pick<ContextController, "tabs" | "current" |
   newTab?: () => boolean
   add?: () => void
   detail?: (sessionID: string) => string | undefined
+  isPreview?: (sessionID: string) => boolean
+  promote?: (sessionID: string) => void
   status(sessionID: string): SessionTabsStatus
 }
 const NEW_SESSION_TAB: SessionTab = { sessionID: "new", title: NEW_SESSION_TAB_TITLE }
 const glowTextColor = (base: RGBA, glow: RGBA, index: number, width: number, level = 1) =>
   tint(base, glow, 0.12 * unreadGlowIntensity(index, width) * level)
+
+function createPreviewDoubleClick(tabs: SessionTabsController) {
+  let previous: { sessionID: string; time: number } | undefined
+  return (sessionID: string) => {
+    if (!tabs.isPreview?.(sessionID)) {
+      previous = undefined
+      return
+    }
+    const now = Date.now()
+    if (previous?.sessionID === sessionID && now - previous.time < 300) {
+      previous = undefined
+      tabs.promote?.(sessionID)
+      return
+    }
+    previous = { sessionID, time: now }
+  }
+}
 
 function createNumberIgnition(runs: () => boolean, prompt: () => number, animations: () => boolean) {
   const ignition = createAnimatable({ level: 0 }, { enabled: animations, transition: tween({ duration: 0.7 }) })
@@ -99,6 +128,45 @@ function fadeTitleColor(color: RGBA, background: RGBA, index: number, length: nu
   const end = index - (length - FADE_WIDTH) + 1
   const opacity = Math.max(fade(start) * leading, fade(end))
   return opacity === 0 ? color : tint(color, background, opacity)
+}
+
+function heldSessionTabLayout(hold: MouseCloseHold, tabs: readonly SessionTab[]) {
+  const ids = tabs.map((tab) => tab.sessionID)
+  const expected = hold.items.filter((id) => id !== hold.closed)
+  const unchanged = ids.length === hold.items.length && ids.every((id, index) => id === hold.items[index])
+  const removed = ids.length === expected.length && ids.every((id, index) => id === expected[index])
+  if (!unchanged && !removed) return undefined
+
+  const visibleIDs = hold.ids.filter((id) => ids.includes(id))
+  if (removed && !visibleIDs.includes(hold.target)) {
+    visibleIDs.push(hold.target)
+    visibleIDs.sort((a, b) => ids.indexOf(a) - ids.indexOf(b))
+  }
+  const positions = visibleIDs.map((id) => ids.indexOf(id))
+  const start = positions[0]
+  if (start === undefined || positions.some((position, index) => position !== start + index)) return undefined
+  const visible = visibleIDs.flatMap((id) => tabs.find((tab) => tab.sessionID === id) ?? [])
+  if (visible.length !== visibleIDs.length) return undefined
+
+  const widths = visibleIDs.map((id) => hold.widths[hold.ids.indexOf(id)] ?? 1)
+  if (removed) {
+    const index = visibleIDs.indexOf(hold.target)
+    if (index === -1) return undefined
+    const leading = start > 0 ? sessionTabOverflowWidth(start) : 0
+    const preceding = widths.slice(0, index).reduce((sum, width) => sum + width, 0)
+    // The close glyph sits one cell in from the right edge: x = tab start + width - 2.
+    const width = hold.x - leading - preceding + 2
+    if (width < 1) return undefined
+    widths[index] = width
+  }
+  return {
+    tabs: visible,
+    widths,
+    before: start,
+    after: tabs.length - start - visible.length,
+    start,
+    total: widths.reduce((sum, width) => sum + width, 0),
+  }
 }
 
 export function createMarquee(animations: () => boolean) {
@@ -204,6 +272,9 @@ function TabContextMenu(props: { state: TabContextMenuState; tabs: SessionTabsCo
       ...(props.tabs.add ? [{ title: "New tab", run: () => props.tabs.add?.() }] : []),
       ...(sessionID
         ? [
+            ...(props.tabs.promote && props.tabs.isPreview?.(sessionID)
+              ? [{ title: "Keep open", run: () => props.tabs.promote?.(sessionID) }]
+              : []),
             {
               title: "Rename",
               run: () => DialogSessionRename.show(dialog, sessionID, props.state.title),
@@ -317,6 +388,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
   const [addHovered, setAddHovered] = createSignal(false)
   const marquee = createTabMarquee(animations)
   const hovered = marquee.hovered
+  const handleClick = createPreviewDoubleClick(tabs)
   // OpenTUI captures the first drag target, which may differ from the tab pressed on a fast move.
   const [dragging, setDragging] = createSignal<string>()
   const [preview, setPreview] = createSignal<{ sessionID: string; index: number }>()
@@ -602,6 +674,7 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                       return
                     }
                     didDrag = false
+                    handleClick(tab.sessionID)
                     marquee.enter(tab.sessionID, title(), hoveredTitleWidth())
                     setDragging(tab.sessionID)
                   }}
@@ -689,7 +762,10 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                         fg={foreground()}
                         wrapMode="none"
                         selectable={false}
-                        attributes={selected() ? TextAttributes.BOLD : undefined}
+                        attributes={
+                          (selected() ? TextAttributes.BOLD : 0) |
+                            (tabs.isPreview?.(tab.sessionID) ? TextAttributes.ITALIC : 0) || undefined
+                        }
                       >
                         <Show
                           when={scrolling() || titleGlow.value().level > 0 || titleFades()}
@@ -851,6 +927,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   const [addHovered, setAddHovered] = createSignal(false)
   const marquee = createTabMarquee(animations)
   const hovered = marquee.hovered
+  const handleClick = createPreviewDoubleClick(tabs)
   // OpenTUI captures the first drag target, which may differ from the tab pressed on a fast move.
   const [dragging, setDragging] = createSignal<string>()
   // A drag reorders a local preview and persists one move on release instead of writing
@@ -858,9 +935,23 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   // so the strip never flashes the pre-drag order while the write is in flight.
   const [preview, setPreview] = createSignal<{ sessionID: string; index: number }>()
   const [contextMenu, setContextMenu] = createSignal<TabContextMenuState>()
-  let strip: { screenX: number; screenY: number } | undefined
+  const [closeHold, setCloseHold] = createSignal<MouseCloseHold>()
+  let strip: { screenX: number; screenY: number; width: number; height: number } | undefined
   let didDrag = false
   let addPressed = false
+  let closeHoldTimer: ReturnType<typeof setTimeout> | undefined
+  let releasingCloseHold = false
+  const clearCloseHold = () => {
+    setCloseHold(undefined)
+    if (closeHoldTimer) clearTimeout(closeHoldTimer)
+    closeHoldTimer = undefined
+  }
+  const releaseCloseHold = () => {
+    if (!closeHold()) return
+    releasingCloseHold = true
+    clearCloseHold()
+  }
+  onCleanup(clearCloseHold)
   // A captured drag ends with a synthetic up on its drop target; do not turn that into a click.
   let suppressClick = false
   const hueStep = () => (mode() === "light" ? 800 : 200)
@@ -884,14 +975,23 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
     const index = tabs.tabs().findIndex((tab) => tab.sessionID === pending.sessionID)
     if (index === -1 || index === Math.min(pending.index, tabs.tabs().length - 1)) setPreview(undefined)
   })
-  const layout = createMemo((previous: ReturnType<typeof adaptiveSessionTabLayout> | undefined) =>
-    adaptiveSessionTabLayout(
-      items(),
-      activeID(),
-      dimensions().width - (showPlus() ? ADD_TAB_WIDTH : 0),
-      previous?.start,
-    ),
+  const heldLayout = createMemo(() => {
+    const hold = closeHold()
+    return hold ? heldSessionTabLayout(hold, items()) : undefined
+  })
+  const layout = createMemo(
+    (previous: ReturnType<typeof adaptiveSessionTabLayout> | undefined) =>
+      heldLayout() ??
+      adaptiveSessionTabLayout(
+        items(),
+        activeID(),
+        dimensions().width - (showPlus() ? ADD_TAB_WIDTH : 0),
+        previous?.start,
+      ),
   )
+  createEffect(() => {
+    if (closeHold() && !heldLayout()) clearCloseHold()
+  })
   createEffect(() => {
     const active = marquee.active()
     if (active && !layout().tabs.some((tab) => tab.sessionID === active)) marquee.reset()
@@ -927,6 +1027,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   )
   let signature = ""
   let total = 0
+  let terminalWidth = dimensions().width
 
   // createComputed runs before render effects, so seeded widths are visible on the first frame
   // of a membership change instead of flashing the final layout.
@@ -935,12 +1036,29 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
     const nextSignature = identity()
     const changed = Boolean(signature) && signature !== nextSignature
     const resized = Boolean(total) && total !== layout().total
+    const terminalResized = terminalWidth !== dimensions().width
     const previous = signature
     signature = nextSignature
     total = layout().total
+    terminalWidth = dimensions().width
+    const releasing = releasingCloseHold
+    releasingCloseHold = false
+    if (terminalResized && closeHold()) {
+      clearCloseHold()
+      return
+    }
+    if (closeHold() && heldLayout()) {
+      const current = untrack(motion.value)
+      const seeded = changed
+        ? seedSessionTabMotion(previous.split(":"), layout().tabs.map((tab) => tab.sessionID), current, next)
+        : current
+      if (!seeded) return motion.jump(next)
+      motion.jump({ ...seeded, widths: next.widths })
+      return motion.animate(next)
+    }
     if (!changed && !resized) return motion.animate(next)
     // Identity-stable total changes are terminal resizes and still jump.
-    if (!changed) return motion.jump(next)
+    if (!changed) return releasing ? motion.animate(next) : motion.jump(next)
     const seeded = seedSessionTabMotion(
       previous.split(":"),
       layout().tabs.map((tab) => tab.sessionID),
@@ -959,18 +1077,41 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
     const active = activeIndex()
     const remainder = layout().total - widths.reduce((sum, width) => sum + width, 0)
     // Absorb only rounding slack; membership animations leave a real gap while widths grow into place.
-    if (active !== -1 && Math.abs(remainder) <= layout().tabs.length) widths[active]! += remainder
+    if (active !== -1 && Math.abs(remainder) <= layout().tabs.length) widths[active] += remainder
     return new Map(
       layout().tabs.map((tab, index) => [
         tab.sessionID,
         {
-          width: widths[index]!,
+          width: widths[index],
           selection: current.selections[index] ?? Number(tab.sessionID === activeID()),
           activity: current.activities[index] ?? Number(statuses().get(tab.sessionID)!.complete),
         },
       ]),
     )
   })
+
+  const holdCloseCell = (sessionID: string, x: number) => {
+    if (!strip) return clearCloseHold()
+    const current = layout()
+    const index = current.tabs.findIndex((tab) => tab.sessionID === sessionID)
+    const all = items()
+    const itemIndex = all.findIndex((tab) => tab.sessionID === sessionID)
+    const target = all[itemIndex + 1] ?? all[itemIndex - 1]
+    if (index === -1 || itemIndex === -1 || !target) return clearCloseHold()
+    const ids = current.tabs.map((tab) => tab.sessionID)
+    const values = ids.map((id) => visuals().get(id))
+    if (values.some((value) => !value)) return clearCloseHold()
+    setCloseHold({
+      items: all.map((tab) => tab.sessionID),
+      ids,
+      widths: values.map((value) => value!.width),
+      closed: sessionID,
+      target: target.sessionID,
+      x: x - strip.screenX,
+    })
+    if (closeHoldTimer) clearTimeout(closeHoldTimer)
+    closeHoldTimer = setTimeout(releaseCloseHold, MOUSE_CLOSE_HOLD_MS)
+  }
 
   // Map an absolute pointer column to the items index of the visible slot beneath it.
   const slotAt = (x: number) => {
@@ -1015,7 +1156,17 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
       position="relative"
       flexDirection="row"
       zIndex={1}
-      onMouseOut={marquee.leaveHovered}
+      onMouseOut={(event) => {
+        marquee.leaveHovered()
+        if (!strip) return
+        if (
+          event.x < strip.screenX ||
+          event.x >= strip.screenX + strip.width ||
+          event.y < strip.screenY ||
+          event.y >= strip.screenY + strip.height
+        )
+          releaseCloseHold()
+      }}
       onMouseUp={(event) => {
         if (event.button === RIGHT_MOUSE_BUTTON) return
         release()
@@ -1127,6 +1278,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
               onMouseOut={() => marquee.leave(tab.sessionID)}
               onMouseDown={(event) => {
                 if (event.button === MIDDLE_MOUSE_BUTTON) {
+                  releaseCloseHold()
                   didDrag = false
                   setDragging(undefined)
                   tabs.close(tab === NEW_SESSION_TAB ? undefined : tab.sessionID)
@@ -1135,6 +1287,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                   return
                 }
                 if (event.button === RIGHT_MOUSE_BUTTON) {
+                  releaseCloseHold()
                   didDrag = false
                   setDragging(undefined)
                   setContextMenu({
@@ -1148,6 +1301,8 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                   return
                 }
                 didDrag = false
+                releaseCloseHold()
+                handleClick(tab.sessionID)
                 marquee.enter(tab.sessionID, title(), hoveredTitleWidth())
                 setDragging(tab.sessionID)
               }}
@@ -1174,7 +1329,9 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                   fg={foreground()}
                   wrapMode="none"
                   selectable={false}
-                  attributes={bold()}
+                  attributes={
+                    (bold() ?? 0) | (tabs.isPreview?.(tab.sessionID) ? TextAttributes.ITALIC : 0) || undefined
+                  }
                 >
                   <Show when={scrolling() || glows() || titleFades()} fallback={visibleTitle()}>
                     <Index each={visibleTitleParts()}>
@@ -1205,6 +1362,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                     // land here first, and must select the tab instead of closing it invisibly.
                     if (hovered() !== tab.sessionID) return
                     event.stopPropagation()
+                    holdCloseCell(tab.sessionID, event.x)
                     tabs.close(tab === NEW_SESSION_TAB ? undefined : tab.sessionID)
                   }}
                 >
@@ -1229,6 +1387,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
           onMouseOver={() => setAddHovered(true)}
           onMouseOut={() => setAddHovered(false)}
           onMouseDown={(event) => {
+            releaseCloseHold()
             didDrag = false
             setDragging(undefined)
             addPressed = event.button !== RIGHT_MOUSE_BUTTON

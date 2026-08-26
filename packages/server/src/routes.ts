@@ -11,6 +11,7 @@ import { Credential } from "@opencode-ai/core/credential"
 import { Config } from "@opencode-ai/core/config"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
+import { PersistentPty } from "@opencode-ai/core/persistent-pty"
 import { Project } from "@opencode-ai/core/project"
 import { Session } from "@opencode-ai/core/session"
 import { SessionTransfer } from "@opencode-ai/core/session/transfer"
@@ -20,6 +21,7 @@ import { MCP } from "@opencode-ai/core/mcp/index"
 import { Global } from "@opencode-ai/util/global"
 import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { LocationActivity } from "@opencode-ai/core/location-activity"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
 import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
@@ -58,14 +60,16 @@ const applicationServiceNodes = [
   SdkPlugins.node,
   PermissionSaved.node,
   PtyTicket.node,
+  PersistentPty.node,
   Credential.node,
   WellKnown.node,
   PtyEnvironment.node,
   LocationServiceMap.node,
+  LocationActivity.node,
   SessionRestart.node,
+  Workspace.node,
 ] as const
 const applicationServices = LayerNode.group(applicationServiceNodes)
-const embeddedApplicationServices = LayerNode.group([...applicationServiceNodes, Workspace.node])
 
 export function createRoutes(
   options: ServerOptions = {},
@@ -79,12 +83,11 @@ export function createRoutes(
     options,
     serviceURLs,
     overrides,
-    false,
   )
 }
 
 export function createEmbeddedRoutes(options: ServerOptions = {}, overrides: LayerNode.Replacements = []) {
-  return makeRoutes(ServerAuth.Config.configLayer({ password: Option.none() }), options, () => [], overrides, true)
+  return makeRoutes(ServerAuth.Config.configLayer({ password: Option.none() }), options, () => [], overrides)
 }
 
 function makeRoutes<AuthError, AuthServices>(
@@ -93,7 +96,6 @@ function makeRoutes<AuthError, AuthServices>(
   serviceURLs: () => ReadonlyArray<string>,
   // Runtime-profile replacements (e.g. workerd) applied after the standard set, so later entries win.
   overrides: LayerNode.Replacements,
-  embedded: boolean,
 ) {
   const pluginRuntimeCell = PluginRuntime.makeCell()
   const standard: LayerNode.Replacements = [
@@ -132,13 +134,10 @@ function makeRoutes<AuthError, AuthServices>(
         Effect.gen(function* () {
           const { simulationReplacements } = yield* Effect.promise(() => import("@opencode-ai/simulation/backend"))
           const simulation = yield* simulationReplacements({ version: App.make(options.app).version })
-          return AppNodeBuilder.build(embedded ? embeddedApplicationServices : applicationServices, [
-            ...replacements,
-            ...simulation,
-          ])
+          return AppNodeBuilder.build(applicationServices, [...replacements, ...simulation])
         }),
       )
-    : AppNodeBuilder.build(embedded ? embeddedApplicationServices : applicationServices, replacements)
+    : AppNodeBuilder.build(applicationServices, replacements)
   return serviceLayer.pipe(
     Layer.flatMap((context) => {
       const services = Layer.succeedContext(context)
