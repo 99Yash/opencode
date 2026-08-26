@@ -29,10 +29,12 @@ export type Options = BaseOptions &
     | {
         readonly codemode?: true
         readonly pinned?: boolean
+        readonly namespaceInstructions?: string
       }
     | {
         readonly codemode: boolean
         readonly pinned?: never
+        readonly namespaceInstructions?: never
       }
   )
 
