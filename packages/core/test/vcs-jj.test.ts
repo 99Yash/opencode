@@ -26,8 +26,8 @@ const provide = (directory: string, input: { worktree: string; colocated?: boole
         Location.node,
         Layer.succeed(
           Location.Service,
-          Location.Service.of(
-            location(
+          Location.Service.of({
+            ...location(
               { directory: AbsolutePath.make(directory) },
               {
                 projectDirectory: AbsolutePath.make(input.worktree),
@@ -36,7 +36,8 @@ const provide = (directory: string, input: { worktree: string; colocated?: boole
                   : { type: "jj", store: AbsolutePath.make(path.join(input.worktree, ".jj", "repo")) },
               },
             ),
-          ),
+            ...(input.colocated ? { vcsBackend: "jj" } : {}),
+          }),
         ),
       ],
     ]),

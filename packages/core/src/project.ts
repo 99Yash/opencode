@@ -2,7 +2,7 @@ export * as Project from "./project.js"
 
 import { Context, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
-import { and, asc, desc, eq } from "drizzle-orm"
+import { and, asc, desc, eq, gte, isNull, lte } from "drizzle-orm"
 import path from "path"
 import { AbsolutePath } from "./schema.js"
 import { Bus } from "./bus.js"
@@ -13,6 +13,7 @@ import { Git } from "./git.js"
 import { AppProcess } from "@opencode-ai/util/process"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 import { Hash } from "@opencode-ai/util/hash"
+import { ProjectMarkers } from "./project/markers.js"
 import { ProjectSchema } from "./project/schema.js"
 import { ProjectJj } from "./project/jj.js"
 import { ProjectTable, upsertProject } from "./project/sql.js"
@@ -43,11 +44,16 @@ export interface Resolved {
   readonly directory: AbsolutePath
   readonly canonical: AbsolutePath
   readonly vcs?: Vcs
+  readonly vcsBackend?: string
 }
 
 // Keep this filesystem-only; permission checks use it and should not execute VCS commands.
-export const root = Effect.fn("Project.root")(function* (fs: FSUtil.Interface, input: AbsolutePath) {
-  return yield* fs.up({ targets: [".git", ".hg", ".jj"], start: input, mode: "first" }).pipe(
+export const root = Effect.fn("Project.root")(function* (
+  fs: FSUtil.Interface,
+  input: AbsolutePath,
+  markers: readonly string[] = [".git", ".hg"],
+) {
+  return yield* fs.up({ targets: [...markers], start: input, mode: "first" }).pipe(
     Effect.map((matches) => (matches[0] ? AbsolutePath.make(path.dirname(matches[0])) : undefined)),
     Effect.orElseSucceed(() => undefined),
   )
@@ -91,13 +97,29 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const git = yield* Git.Service
+    const markers = yield* ProjectMarkers.Service
     const proc = yield* AppProcess.Service
     const bus = yield* Bus.Service
     const db = (yield* Database.Service).db
 
     const announcing = new Set<string>()
     const persist = Effect.fnUntraced(function* (project: Resolved) {
+      const previous = yield* db
+        .select({ canonical: ProjectTable.worktree })
+        .from(ProjectTable)
+        .where(eq(ProjectTable.id, project.id))
+        .get()
+        .pipe(Effect.orDie)
       yield* upsertProject(db, project).pipe(Effect.orDie)
+      if (previous && previous.canonical !== project.canonical) {
+        const row = yield* db
+          .select()
+          .from(ProjectTable)
+          .where(eq(ProjectTable.id, project.id))
+          .get()
+          .pipe(Effect.orDie)
+        if (row) yield* bus.publish(ProjectSchema.Event.Updated, fromRow(row))
+      }
       if (!project.vcs) return project
       const directories: Array<{ projectID: ID; directory: AbsolutePath; strategy?: string }> = [
         { projectID: project.id, directory: project.canonical },
@@ -106,7 +128,7 @@ const layer = Layer.effect(
         directories.push({
           projectID: project.id,
           directory: project.directory,
-          strategy: project.vcs.type === "git" && project.vcs.workspace !== "jj" ? "git" : undefined,
+          strategy: project.vcs.type === "git" && project.vcsBackend !== "jj" ? "git" : undefined,
         })
       // A missing directory row means this directory's resolution is a new durable
       // fact (copy.ts registers copy directories directly; those never strand
@@ -126,9 +148,38 @@ const layer = Layer.effect(
             .get()
             .pipe(Effect.orDie)
           if (stored) return
+          const directory = AbsolutePath.make(yield* fs.resolve(item.directory))
+          const markerless = yield* db
+            .select({ id: ProjectTable.id, directory: ProjectTable.worktree })
+            .from(ProjectTable)
+            .where(
+              and(
+                isNull(ProjectTable.vcs),
+                gte(ProjectTable.worktree, directory),
+                lte(ProjectTable.worktree, AbsolutePath.make(directory + "\uffff")),
+              ),
+            )
+            .all()
+            .pipe(Effect.orDie)
+          const adopted = yield* Effect.filter(markerless, (candidate) =>
+            Effect.gen(function* () {
+              if (candidate.id === item.projectID) return false
+              if (!FSUtil.contains(directory, candidate.directory)) return false
+              const found = yield* fs
+                .up({ targets: [...markers.targets()], start: candidate.directory, stop: directory, mode: "first" })
+                .pipe(Effect.orElseSucceed(() => []))
+              if (!found[0]) return false
+              return (yield* fs.resolve(path.dirname(found[0]))) === directory
+            }),
+          )
           yield* bus.publish(
             Worktree.Event.Resolved,
-            { projectID: item.projectID, directory: item.directory, previous: project.previous ?? ID.global },
+            {
+              projectID: item.projectID,
+              directory: item.directory,
+              previous: project.previous ?? ID.global,
+              ...(adopted.length ? { adopted: adopted.map((candidate) => candidate.id) } : {}),
+            },
             {
               commit: () =>
                 db
@@ -247,12 +298,7 @@ const layer = Layer.effect(
       return node ? ID.make(node) : undefined
     })
 
-    const hgDiscover = Effect.fnUntraced(function* (input: AbsolutePath) {
-      const dotHg = yield* fs.up({ targets: [".hg"], start: input, mode: "first" }).pipe(
-        Effect.map((matches) => matches[0]),
-        Effect.orElseSucceed(() => undefined),
-      )
-      if (!dotHg) return undefined
+    const hgDiscover = Effect.fnUntraced(function* (dotHg: AbsolutePath) {
       const worktree = AbsolutePath.make(path.dirname(dotHg))
       const store = AbsolutePath.make(dotHg)
       const previous = yield* cached(store)
@@ -266,31 +312,58 @@ const layer = Layer.effect(
     })
 
     const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
-      const repositories = yield* ProjectJj.repositories(fs, git, input)
-      const selected = repositories.git
-      const jj = repositories.jj
-      if (selected) {
-        const previous = yield* cached(selected.commonDirectory)
-        const id = (yield* remote(selected)) ?? previous ?? (yield* rootCommit(selected))
-        const workspace = jj && jj.directory !== selected.worktree
+      const directory = AbsolutePath.make(yield* fs.resolve(input))
+      const marker = yield* markers.discover(directory)
+      const discovered = marker?.type === "jj" ? yield* ProjectJj.discover(fs, marker.marker) : undefined
+      const native = yield* fs.up({ targets: [".git", ".hg"], start: directory, mode: "first" }).pipe(
+        Effect.map((matches) => matches[0]),
+        Effect.orElseSucceed(() => undefined),
+      )
+      const repository =
+        native && path.basename(native) === ".git"
+          ? yield* git.repo.discover(AbsolutePath.make(path.dirname(native)))
+          : undefined
+      const jj =
+        discovered &&
+        repository &&
+        repository.worktree !== discovered.directory &&
+        FSUtil.contains(discovered.directory, repository.worktree)
+          ? undefined
+          : discovered
+      const backing =
+        jj && (!repository || repository.worktree !== jj.directory)
+          ? yield* git.repo.discover(jj.canonical)
+          : repository
+      const repo = jj && backing?.worktree !== jj.canonical && backing?.worktree !== jj.directory ? undefined : backing
+      if (repo && (!marker || FSUtil.contains(marker.directory, repo.worktree) || jj?.canonical === repo.worktree)) {
+        const previous = yield* cached(repo.commonDirectory)
+        const id = (yield* remote(repo)) ?? previous ?? (yield* rootCommit(repo))
+        const workspace = jj && jj.directory !== repo.worktree
         const canonical = workspace
-          ? selected.worktree
-          : selected.gitDirectory === selected.commonDirectory
-            ? selected.worktree
-            : yield* git.worktree.list(selected).pipe(
-                Effect.map((items) => items.find((item) => item.kind === "main")?.directory ?? selected.worktree),
-                Effect.orElseSucceed(() => selected.worktree),
+          ? repo.worktree
+          : repo.gitDirectory === repo.commonDirectory
+            ? repo.worktree
+            : yield* git.worktree.list(repo).pipe(
+                Effect.map((items) => items.find((item) => item.kind === "main")?.directory ?? repo.worktree),
+                Effect.orElseSucceed(() => repo.worktree),
               )
         return yield* persist({
           previous,
           id: id ?? ID.global,
-          directory: workspace ? jj.directory : selected.worktree,
+          directory: workspace ? jj.directory : repo.worktree,
           canonical,
-          vcs: {
-            type: "git" as const,
-            store: selected.commonDirectory,
-            ...(workspace ? { workspace: "jj" as const } : {}),
-          },
+          vcs: { type: "git" as const, store: repo.commonDirectory },
+          ...(marker && marker.directory === repo.worktree && marker.type !== "git" ? { vcsBackend: marker.type } : {}),
+          ...(jj ? { vcsBackend: "jj" } : {}),
+        })
+      }
+
+      const hg = native && path.basename(native) === ".hg" ? yield* hgDiscover(AbsolutePath.make(native)) : undefined
+      if (hg && (!marker || FSUtil.contains(marker.directory, hg.directory))) {
+        return yield* persist({
+          ...hg,
+          canonical: hg.directory,
+          ...(marker?.directory === hg.directory && marker.type !== "hg" ? { vcsBackend: marker.type } : {}),
         })
       }
 
@@ -301,14 +374,27 @@ const layer = Layer.effect(
           id: previous ?? ID.make(Hash.fast(`jj-repository:${jj.store}`)),
           directory: jj.directory,
           canonical: jj.canonical,
-          vcs: { type: "jj" as const, store: jj.store },
+          vcs: { type: "jj", store: jj.store },
         })
       }
 
-      const hg = yield* hgDiscover(input)
-      if (hg) return yield* persist({ ...hg, canonical: hg.directory })
-      const directory = AbsolutePath.make(path.parse(input).root)
-      return yield* persist({ id: ID.global, directory, canonical: directory, vcs: undefined })
+      if (marker && marker.type !== "jj") {
+        const previous = yield* cached(marker.marker)
+        return yield* persist({
+          previous,
+          id: previous ?? ID.make(Hash.fast(`vcs-repository:${marker.type}:${marker.marker}`)),
+          directory: marker.directory,
+          canonical: marker.directory,
+          vcs: { type: marker.type, store: marker.marker },
+        })
+      }
+
+      return yield* persist({
+        id: ID.make(Hash.fast(`directory:${directory}`)),
+        directory,
+        canonical: directory,
+        vcs: undefined,
+      })
     })
 
     return Service.of({ list, update, resolve })
@@ -318,5 +404,5 @@ const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer: layer,
-  deps: [Bus.node, Database.node, FSUtil.node, Git.node, AppProcess.node],
+  deps: [Bus.node, Database.node, FSUtil.node, Git.node, ProjectMarkers.node, AppProcess.node],
 })

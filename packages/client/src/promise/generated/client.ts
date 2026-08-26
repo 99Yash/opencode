@@ -132,6 +132,8 @@ import type {
   McpResourceCatalogOutput,
   CredentialUpdateInput,
   CredentialUpdateOutput,
+  CredentialActivateInput,
+  CredentialActivateOutput,
   CredentialRemoveInput,
   CredentialRemoveOutput,
   ProjectListOutput,
@@ -190,6 +192,21 @@ import type {
   PtyRemoveOutput,
   PtyConnectTokenInput,
   PtyConnectTokenOutput,
+  ExperimentalPersistentPtyListInput,
+  ExperimentalPersistentPtyListOutput,
+  ExperimentalPersistentPtyCreateInput,
+  ExperimentalPersistentPtyCreateOutput,
+  ExperimentalPersistentPtyShutdownOutput,
+  ExperimentalPersistentPtyGetInput,
+  ExperimentalPersistentPtyGetOutput,
+  ExperimentalPersistentPtyUpdateInput,
+  ExperimentalPersistentPtyUpdateOutput,
+  ExperimentalPersistentPtySnapshotInput,
+  ExperimentalPersistentPtySnapshotOutput,
+  ExperimentalPersistentPtyRemoveInput,
+  ExperimentalPersistentPtyRemoveOutput,
+  ExperimentalPersistentPtyConnectTokenInput,
+  ExperimentalPersistentPtyConnectTokenOutput,
   ShellListInput,
   ShellListOutput,
   ShellCreateInput,
@@ -1255,6 +1272,18 @@ export function make(options: ClientOptions) {
           },
           requestOptions,
         ),
+      activate: (input: CredentialActivateInput, requestOptions?: RequestOptions) =>
+        request<CredentialActivateOutput>(
+          {
+            method: "POST",
+            path: `/api/credential/${encodeURIComponent(input.credentialID)}/activate`,
+            query: { location: input["location"] },
+            successStatus: 204,
+            declaredStatuses: [401, 400],
+            empty: true,
+          },
+          requestOptions,
+        ),
       remove: (input: CredentialRemoveInput, requestOptions?: RequestOptions) =>
         request<CredentialRemoveOutput>(
           {
@@ -1635,6 +1664,108 @@ export function make(options: ClientOptions) {
             },
             requestOptions,
           ),
+      },
+    },
+    experimental: {
+      persistentPty: {
+        list: (input: ExperimentalPersistentPtyListInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtyListOutput }>(
+            {
+              method: "GET",
+              path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
+              successStatus: 200,
+              declaredStatuses: [400, 503, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        create: (input: ExperimentalPersistentPtyCreateInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtyCreateOutput }>(
+            {
+              method: "POST",
+              path: `/api/experimental/session/${encodeURIComponent(input.sessionID)}/terminal`,
+              body: {
+                command: input["command"],
+                args: input["args"],
+                cwd: input["cwd"],
+                title: input["title"],
+                env: input["env"],
+                size: input["size"],
+              },
+              successStatus: 200,
+              declaredStatuses: [400, 503, 401],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        shutdown: (requestOptions?: RequestOptions) =>
+          request<ExperimentalPersistentPtyShutdownOutput>(
+            {
+              method: "POST",
+              path: `/api/experimental/persistent-pty/shutdown`,
+              successStatus: 204,
+              declaredStatuses: [503, 401, 400],
+              empty: true,
+            },
+            requestOptions,
+          ),
+        get: (input: ExperimentalPersistentPtyGetInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtyGetOutput }>(
+            {
+              method: "GET",
+              path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+              successStatus: 200,
+              declaredStatuses: [404, 503, 401, 400],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        update: (input: ExperimentalPersistentPtyUpdateInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtyUpdateOutput }>(
+            {
+              method: "PUT",
+              path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+              body: { attachmentID: input["attachmentID"], size: input["size"] },
+              successStatus: 200,
+              declaredStatuses: [404, 503, 401, 400],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        snapshot: (input: ExperimentalPersistentPtySnapshotInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtySnapshotOutput }>(
+            {
+              method: "GET",
+              path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/snapshot`,
+              successStatus: 200,
+              declaredStatuses: [404, 503, 401, 400],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
+        remove: (input: ExperimentalPersistentPtyRemoveInput, requestOptions?: RequestOptions) =>
+          request<ExperimentalPersistentPtyRemoveOutput>(
+            {
+              method: "DELETE",
+              path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}`,
+              successStatus: 204,
+              declaredStatuses: [404, 503, 401, 400],
+              empty: true,
+            },
+            requestOptions,
+          ),
+        connectToken: (input: ExperimentalPersistentPtyConnectTokenInput, requestOptions?: RequestOptions) =>
+          request<{ readonly data: ExperimentalPersistentPtyConnectTokenOutput }>(
+            {
+              method: "POST",
+              path: `/api/experimental/persistent-pty/${encodeURIComponent(input.ptyID)}/connect-token`,
+              headers: { "x-opencode-ticket": input["x-opencode-ticket"] },
+              successStatus: 200,
+              declaredStatuses: [403, 404, 503, 401, 400],
+              empty: false,
+            },
+            requestOptions,
+          ).then((value) => value.data),
       },
     },
     shell: {

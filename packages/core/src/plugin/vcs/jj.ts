@@ -5,7 +5,6 @@ import { ChildProcess } from "effect/unstable/process"
 import { define } from "@opencode-ai/plugin/effect/plugin"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { BranchList, FileStatus, Info, Mode } from "@opencode-ai/schema/vcs"
-import { FSUtil } from "@opencode-ai/util/fs-util"
 import { AppProcess } from "@opencode-ai/util/process"
 import { Location } from "../../location.js"
 import { ProjectJj } from "../../project/jj.js"
@@ -13,14 +12,11 @@ import type { Adapter, BranchOptions, DiffOptions } from "../../vcs.js"
 import { countPatch, emptyPatch, MAX_TOTAL_PATCH_BYTES, PATCH_CONTEXT_LINES, splitGitPatch } from "../../vcs/patch.js"
 
 export const Plugin = define({
-  id: "opencode.vcs.jj",
+  id: ProjectJj.id,
+  vcs: ProjectJj.vcs,
   effect: Effect.fn("VcsJjPlugin")(function* (ctx) {
     const location = yield* Location.Service
-    if (location.vcs?.type !== "jj" && location.vcs?.type !== "git") return
-
-    const fs = yield* FSUtil.Service
-    const workspace = yield* ProjectJj.discover(fs, location.project.directory)
-    if (workspace?.directory !== location.project.directory) return
+    if (location.vcs?.type !== "jj" && location.vcsBackend !== "jj") return
 
     const processes = yield* AppProcess.Service
     const adapter = make(processes, location.directory)
@@ -34,7 +30,6 @@ export const Plugin = define({
         status: () => adapter.status(),
         diff: (input) => adapter.diff(input.mode, { context: input.context }),
       })
-      if (location.vcs?.type === "git") draft.default.set("jj")
     })
   }),
 })
