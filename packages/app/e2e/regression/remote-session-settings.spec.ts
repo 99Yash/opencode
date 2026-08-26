@@ -26,10 +26,13 @@ test("session settings use the remote server context", async ({ page }) => {
   await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
   const sessionHeading = page.getByRole("heading", { name: sessionB.title, exact: true, includeHidden: true })
   await expect(sessionHeading).toBeVisible()
+  const activeTabs = page.locator('[data-titlebar-tab-slot][data-active="true"]')
+  await expect(activeTabs).toHaveCount(1)
   await page.keyboard.press("Control+,")
 
   const settings = page.getByTestId("settings-screen")
   await expect(settings).toBeVisible()
+  await expect(activeTabs).toHaveCount(0)
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(settings.getByRole("tablist")).toHaveCSS("width", "328px")
   await expect(sessionHeading).toBeAttached()
@@ -67,6 +70,13 @@ test("session settings use the remote server context", async ({ page }) => {
   await settings.getByRole("button", { name: "Back to app" }).click()
   await expect(settings).toBeHidden()
   await expect(sessionHeading).toBeVisible()
+  await expect(activeTabs).toHaveCount(1)
+  await page.keyboard.press("Control+,")
+  await expect(settings).toBeVisible()
+  await page.locator(`[data-titlebar-tab-slot]:has(a[href$="/session/${sessionB.id}"])`).click()
+  await expect(settings).toBeHidden()
+  await expect(sessionHeading).toBeVisible()
+  await expect(activeTabs).toHaveCount(1)
 })
 
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
