@@ -30,17 +30,18 @@ Leaves own resolution, permission, and side-effect ordering. Translate only expe
 
 ## Registration
 
-Built-ins, plugins, and MCP install tools through `ToolRegistry.Service.transform`, adding complete tool objects to the draft. A tool may provide a namespace, which flattens direct model names to `<namespace>_<tool>`, and defaults into CodeMode (`codemode` defaults true; `codemode: false` keeps the tool on the provider's native tool list).
+Built-ins, plugins, and MCP install tools through `Tool.Service.transform`, adding complete tool objects to the draft. A tool may provide a namespace, which flattens direct model names to `<namespace>_<tool>`, and defaults into CodeMode (`codemode` defaults true; `codemode: false` keeps the tool on the provider's native tool list).
 
 Registrations are scoped:
 
-- The latest active same-placement registration wins.
-- Closing any registration removes only that registration and reveals the next active one.
+- Tool transforms use the shared `State.create` lifecycle, like agents and skills: `add`, `update`, and `remove` replay in registration order when state is rebuilt.
+- `update` and `remove` do nothing for missing tools. `add` requires a complete tool definition.
+- Disposing a registration or closing its scope removes its transform and rebuilds the remaining state. `reload` replays transforms after their external inputs change.
 - Each model request captures the effective tools it advertises; later registration changes affect later requests.
 
 Type safety ends at registration. The registry validates model input and declared output at runtime and should not carry producer schema generics through storage or execution.
 
-`ToolRegistry.Service` is Location-scoped. Do not make the registry process-global or construct a separate application-tool service for each Location.
+`Tool.Service` is Location-scoped. Do not make the registry process-global or construct a separate application-tool service for each Location.
 
 ## Permissions
 
@@ -56,4 +57,4 @@ Producer capture limits remain local to producers. For example, Bash keeps `AppP
 
 ## Current Gaps
 
-- MCP and future Session-scoped registrations still need an explicit canonical registration design.
+- Future Session-scoped registrations still need an explicit canonical registration design.

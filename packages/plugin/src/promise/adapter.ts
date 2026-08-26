@@ -99,20 +99,6 @@ export function fromPromise(plugin: Plugin) {
 
         const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromiseWith(context)(effect)
 
-        const promiseTool = (tool: Tool.Info): Info => {
-          const execute = tool.execute
-          return {
-            ...tool,
-            execute: (input, context) =>
-              run(
-                execute(input, {
-                  ...context,
-                  progress: (update) => Effect.promise(() => context.progress(update)),
-                }),
-              ),
-          }
-        }
-
         const adaptApiMethod = <PromiseMethod>(
           endpoint: HttpApiEndpoint.Top,
           method: (input: never) => Effect.Effect<unknown, unknown>,
@@ -308,18 +294,24 @@ export function fromPromise(plugin: Plugin) {
             scan: (options) => run(host.storage.scan(options)),
           },
           tool: {
+            reload: () => run(host.tool.reload()),
             transform: (callback) =>
               register(
                 host.tool.transform((draft) =>
                   callback({
-                    list: () => draft.list().map(([id, tool]) => [id, promiseTool(tool)] as const),
-                    get: (id) => {
-                      const tool = draft.get(id)
-                      return tool ? promiseTool(tool) : undefined
-                    },
                     update: (id, update) =>
                       draft.update(id, (tool) => {
-                        const value = promiseTool(tool)
+                        const execute = tool.execute
+                        const value: Info = {
+                          ...tool,
+                          execute: (input, context) =>
+                            run(
+                              execute(input, {
+                                ...context,
+                                progress: (update) => Effect.promise(() => context.progress(update)),
+                              }),
+                            ),
+                        }
                         update(value)
                         Object.assign(tool, {
                           ...value,

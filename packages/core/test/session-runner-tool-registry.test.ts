@@ -7,6 +7,7 @@ import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { Session } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Tool } from "@opencode-ai/core/tool"
+import { State } from "@opencode-ai/core/state"
 import type { Info } from "@opencode-ai/schema/tool"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { executeTool, toolDefinitions } from "./lib/tool"
@@ -71,37 +72,107 @@ const transform = (service: Tool.Interface, tools: Readonly<Record<string, Info>
   )
 
 describe("Tool", () => {
-  it.effect("lists, gets, updates, and removes effective tools within a scope", () =>
+  it.live("replays updates and removals on reload and restores definitions on disposal", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service
-      yield* transform(service, { echo: constant("original") }, { namespace: "acme", codemode: false })
-      yield* transform(service, { echo: make() }, { namespace: "other", codemode: false })
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          yield* service.transform((draft) => {
-            expect(draft.list().map(([id]) => id)).toEqual(["acme_echo", "other_echo"])
-            expect(draft.get("acme_echo")?.name).toBe("echo")
-            expect(draft.get("missing")).toBeUndefined()
-            draft.update("missing", () => {
-              throw new Error("must not create a tool")
-            })
-            draft.remove("missing")
-            draft.update("acme_echo", (tool) => {
-              tool.description = "Updated echo"
-              tool.execute = constant("updated").execute
-            })
-            draft.remove("other_echo")
-            expect(draft.get("other_echo")).toBeUndefined()
-          })
-          const updated = yield* service.snapshot()
-          expect(updated.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "execute"])
-          expect(updated.definitions[0]?.description).toBe("Updated echo")
-          expect((yield* updated.execute(call("acme_echo"))).output).toEqual({ text: "updated" })
+      let text = "original"
+      const source = yield* service.transform((draft) =>
+        draft.add({
+          ...constant(text),
+          name: "echo",
+          description: text,
+          options: { namespace: "acme", codemode: false },
         }),
       )
+      yield* transform(service, { echo: make() }, { namespace: "other", codemode: false })
+      const before = yield* service.snapshot()
+      const update = yield* service.transform((draft) => {
+        draft.update("missing", () => {
+          throw new Error("must not create a tool")
+        })
+        draft.update("acme_echo", (tool) => {
+          tool.description += " updated"
+          const execute = tool.execute
+          tool.execute = (input, context) =>
+            execute(input, context).pipe(
+              Effect.map((result) => ({ ...result, output: { text: `${result.output.text} updated` } })),
+            )
+        })
+      })
+      const removal = yield* service.transform((draft) => {
+        draft.remove("missing")
+        draft.remove("other_echo")
+      })
+      const updated = yield* service.snapshot()
+      expect(updated.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "execute"])
+      expect(updated.definitions[0]?.description).toBe("original updated")
+      expect((yield* updated.execute(call("acme_echo"))).output).toEqual({ text: "original updated" })
+      text = "refreshed"
+      yield* service.reload()
+      const reloaded = yield* service.snapshot()
+      expect(reloaded.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "execute"])
+      expect(reloaded.definitions[0]?.description).toBe("refreshed updated")
+      expect((yield* reloaded.execute(call("acme_echo"))).output).toEqual({ text: "refreshed updated" })
+      expect((yield* before.execute(call("acme_echo"))).output).toEqual({ text: "original" })
+      yield* removal.dispose
+      yield* removal.dispose
+      yield* update.dispose
       const restored = yield* service.snapshot()
       expect(restored.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "other_echo", "execute"])
-      expect((yield* restored.execute(call("acme_echo"))).output).toEqual({ text: "original" })
+      expect((yield* restored.execute(call("acme_echo"))).output).toEqual({ text: "refreshed" })
+      yield* source.dispose
+      expect((yield* service.snapshot()).definitions.map((tool) => tool.name)).toEqual(["other_echo", "execute"])
+    }),
+  )
+
+  it.effect("does not retain an updated tool after its source scope closes", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const scope = yield* Scope.make()
+      yield* transform(service, { echo: make() }, { codemode: false }).pipe(Scope.provide(scope))
+      yield* service.transform((draft) =>
+        draft.update("echo", (tool) => {
+          tool.description = "Updated"
+        }),
+      )
+      yield* Scope.close(scope, Exit.void)
+      expect((yield* service.snapshot()).definitions.map((tool) => tool.name)).toEqual(["execute"])
+    }),
+  )
+
+  it.effect("batches tool transforms with the shared state lifecycle", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      let runs = 0
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* service.transform((draft) => {
+            runs++
+            draft.add({ ...make(), options: { codemode: false } })
+          })
+          yield* service.transform((draft) =>
+            draft.update("echo", (tool) => {
+              tool.description = "Batched"
+            }),
+          )
+          expect(runs).toBe(0)
+        }),
+      )
+      expect(runs).toBe(1)
+      expect((yield* service.snapshot()).definitions[0]?.description).toBe("Batched")
+    }),
+  )
+
+  it.effect("skips invalid updates without dropping the existing definition", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* transform(service, { echo: make() }, { codemode: false })
+      yield* service.transform((draft) =>
+        draft.update("echo", (tool) => {
+          Object.assign(tool, { description: undefined })
+        }),
+      )
+      expect((yield* service.snapshot()).definitions[0]?.description).toBe("Echo text")
     }),
   )
 
@@ -118,7 +189,6 @@ describe("Tool", () => {
         })
         draft.add({ ...make(), name: "removed" })
         draft.remove("removed")
-        expect(draft.get("removed")).toBeUndefined()
         draft.add({ ...make(), name: "removed" })
         draft.remove("removed")
       })

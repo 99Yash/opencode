@@ -783,7 +783,7 @@ interface StorageScanResult {
 
 ### Tools
 
-Register, inspect, update, and remove tools with a transform.
+Register, update, and remove tools with a transform.
 
 ```ts
 await ctx.tool.transform((draft) => {
@@ -809,13 +809,14 @@ await ctx.tool.transform((draft) => {
 })
 ```
 
-`list()` returns `[id, tool]` pairs and `get(id)` returns an executable definition or `undefined`. IDs are effective
-registry names, including the namespace: `acme_greeting` in the example above. Dots in namespaces and unsupported
-characters in tool names become `_`.
+`update` and `remove` use effective registry names, including the namespace: `acme_greeting` in the example above.
+Dots in namespaces and unsupported characters in tool names become `_`.
 
 `update` does nothing when the ID is missing. Unlike agent upserts, creating a tool requires `add` with a complete
 definition. Updates preserve the tool's name and namespace; replace its schemas and options by assigning new values.
-Updates and removals are scoped overrides, just like added tools. They apply once when registered, not on a replay.
+As with agents and skills, transforms replay in registration order when registered, reloaded, or disposed. Later
+transforms see earlier changes. Call `await ctx.tool.reload()` after external state used by a transform changes.
+Calling `await registration.dispose()` removes that transform and rebuilds the tools; plugin unload does the same.
 
 #### Reference
 
@@ -825,11 +826,10 @@ Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#s
 ```ts
 interface ToolContext {
   transform(callback: (draft: ToolDraft) => void): Promise<Registration>
+  reload(): Promise<void>
 }
 
 interface ToolDraft {
-  list(): readonly (readonly [string, ToolInfo])[]
-  get(id: string): ToolInfo | undefined
   add(tool: ToolInfo): void
   update(id: string, update: (tool: Types.Mutable<ToolInfo>) => void): void
   remove(id: string): void

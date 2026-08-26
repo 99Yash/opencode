@@ -23,8 +23,6 @@ export type Info<
 }
 
 interface ToolDraft {
-  list(): readonly (readonly [string, Info])[]
-  get(id: string): Info | undefined
   add<Input extends Tool.ValueSchema<any>, Output extends Tool.ValueSchema<any> | undefined>(
     tool: Info<Input, Output>,
   ): void
@@ -64,5 +62,6 @@ interface ToolHooks {
 
 export interface ToolDomain {
   readonly transform: Transform<ToolDraft>
+  readonly reload: () => Promise<void>
   readonly hook: Hooks<ToolHooks>
 }

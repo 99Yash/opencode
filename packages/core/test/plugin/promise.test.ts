@@ -637,13 +637,16 @@ describe("fromPromise", () => {
     }),
   )
 
-  it.effect("adapts draft reads, updates, and removals for existing tools", () =>
+  it.live("adapts tool mutation, replay, and disposal through the Promise API", () =>
     Effect.gen(function* () {
       const plugins = yield* Plugin.Service
       const registry = yield* Tool.Service
       const host = yield* PluginHost.make(plugins)
       const progress: Tool.Metadata[] = []
+      let greeting = "Hello"
+      let registration: { dispose(): Promise<void> } | undefined
       yield* host.tool.transform((draft) => {
+        const text = greeting
         draft.add({
           name: "hello",
           description: "Hello",
@@ -651,32 +654,36 @@ describe("fromPromise", () => {
           input: Schema.Struct({ name: Schema.String }),
           output: Schema.String,
           execute: ({ name }, context) =>
-            context.progress({ phase: "original" }).pipe(Effect.as({ output: `Hello, ${name}!` })),
+            context.progress({ phase: "original" }).pipe(Effect.as({ output: `${text}, ${name}!` })),
+        })
+        draft.add({
+          name: "temporary",
+          description: "Temporary",
+          input: Schema.Struct({}),
+          options: { codemode: false },
+          execute: () => Effect.succeed({ content: "temporary" }),
         })
       })
       yield* PluginPromise.fromPromise(
         define({
           id: "promise-update",
           setup: async (ctx) => {
-            await ctx.tool.transform((draft) => {
-              expect(draft.list().map(([id]) => id)).toEqual(["acme_hello"])
-              expect(draft.get("missing")).toBeUndefined()
+            registration = await ctx.tool.transform((draft) => {
               draft.update("missing", () => {
                 throw new Error("must not create a tool")
               })
-              const original = draft.get("acme_hello")
-              if (!original) throw new Error("Expected original tool")
               draft.update("acme_hello", (tool) => {
+                const execute = tool.execute
                 tool.description = "Wrapped"
                 tool.execute = async (input, context) => {
-                  const result = await original.execute(input, context)
+                  const result = await execute(input, context)
                   return { ...result, output: `${result.output} Wrapped.` }
                 }
               })
-              draft.add({ ...original, name: "temporary" })
-              draft.remove("acme_temporary")
-              expect(draft.get("acme_temporary")).toBeUndefined()
+              draft.remove("temporary")
             })
+            greeting = "Hi"
+            await ctx.tool.reload()
           },
         }),
       ).effect(host)
@@ -691,8 +698,15 @@ describe("fromPromise", () => {
           progress: (value) => Effect.sync(() => progress.push(value)),
           call: { type: "tool-call", id: "call_promise_update", name: "acme_hello", input: { name: "world" } },
         }),
-      ).toMatchObject({ output: "Hello, world! Wrapped." })
+      ).toMatchObject({ output: "Hi, world! Wrapped." })
       expect(progress).toEqual([{ phase: "original" }])
+      const registered = registration
+      if (!registered) throw new Error("Expected registration")
+      yield* Effect.promise(() => registered.dispose())
+      yield* Effect.promise(() => registered.dispose())
+      const restored = yield* registry.snapshot()
+      expect(restored.definitions.map((tool) => tool.name)).toEqual(["acme_hello", "temporary", "execute"])
+      expect(restored.definitions[0]?.description).toBe("Hello")
     }),
   )
 })

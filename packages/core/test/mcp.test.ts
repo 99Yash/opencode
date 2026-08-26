@@ -1229,7 +1229,7 @@ test("serializes concurrent MCP lifecycle operations", async () => {
   )
 })
 
-testEffect(Layer.empty).live("isolates invalid MCP tools and keeps catalog updates alive", () =>
+testEffect(Layer.empty).live("isolates invalid MCP tools and reapplies plugin mutations on catalog updates", () =>
   Effect.gen(function* () {
     const tool = (server: string, name: string) =>
       new MCP.Tool({
@@ -1246,12 +1246,14 @@ testEffect(Layer.empty).live("isolates invalid MCP tools and keeps catalog updat
       const registry = yield* Tool.Service
       const registration = yield* McpTool.Service
       const bus = yield* Bus.Service
+      const policy = yield* registry.transform((draft) => {
+        draft.update("demo_search", (tool) => {
+          tool.description = "Updated search"
+        })
+        draft.remove("other_lookup")
+      })
       yield* registration.flush
-      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([
-        "demo_search",
-        "other_lookup",
-        "execute",
-      ])
+      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["demo_search", "execute"])
 
       yield* Ref.set(catalog, [tool("demo", "y".repeat(65)), ...healthy, tool("demo", "added"), namespace])
       yield* bus.publish(McpEvent.ToolsChanged, { server: "demo" })
@@ -1259,23 +1261,36 @@ testEffect(Layer.empty).live("isolates invalid MCP tools and keeps catalog updat
       expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([
         "demo_added",
         "demo_search",
-        "other_lookup",
         "execute",
       ])
-      yield* Effect.forEach(["demo_search", "other_lookup"], (name) =>
-        executeTool(registry, {
+      expect((yield* toolDefinitions(registry)).find((tool) => tool.name === "demo_search")?.description).toBe(
+        "Updated search",
+      )
+      expect(
+        yield* executeTool(registry, {
           sessionID: Session.ID.make("ses_mcp_invalid_catalog"),
           ...toolIdentity,
-          call: { type: "tool-call", id: `call_${name}`, name, input: {} },
-        }).pipe(Effect.tap((result) => Effect.sync(() => expect(result).toMatchObject({ status: "completed" })))),
-      )
+          call: { type: "tool-call", id: "call_demo_search", name: "demo_search", input: {} },
+        }),
+      ).toMatchObject({ status: "completed" })
 
-      yield* Ref.set(catalog, [tool("demo", "status"), ...healthy, tool("demo", "added"), tool("repaired", "lookup")])
+      yield* Ref.set(catalog, [
+        tool("demo", "status"),
+        tool("other", "lookup"),
+        tool("demo", "added"),
+        tool("repaired", "lookup"),
+      ])
       yield* bus.publish(McpEvent.ToolsChanged, { server: "demo" })
       yield* waitForTool(registry, "demo_status")
       expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([
         "demo_added",
-        "demo_search",
+        "demo_status",
+        "repaired_lookup",
+        "execute",
+      ])
+      yield* policy.dispose
+      expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([
+        "demo_added",
         "demo_status",
         "other_lookup",
         "repaired_lookup",
@@ -1309,7 +1324,7 @@ testEffect(Layer.empty).live("isolates invalid MCP tools and keeps catalog updat
   }),
 )
 
-it.effect("advertises MCP output schemas to Code Mode", () =>
+it.live("advertises MCP output schemas to Code Mode", () =>
   Effect.gen(function* () {
     const registry = yield* Tool.Service
     const toolSet = yield* waitForCodeModeTool(registry, "demo.search")
@@ -1326,7 +1341,7 @@ it.effect("advertises MCP output schemas to Code Mode", () =>
   }),
 )
 
-it.effect("returns content-only MCP results through Code Mode", () =>
+it.live("returns content-only MCP results through Code Mode", () =>
   Effect.gen(function* () {
     assertion = yield* Deferred.make<Permission.AssertInput>()
     decision = Effect.void
@@ -1351,7 +1366,7 @@ it.effect("returns content-only MCP results through Code Mode", () =>
   }),
 )
 
-it.effect("advertises MCP tools directly when Code Mode is disabled for the server", () =>
+it.live("advertises MCP tools directly when Code Mode is disabled for the server", () =>
   Effect.gen(function* () {
     const registry = yield* Tool.Service
     yield* waitForTool(registry, "direct_lookup")
@@ -1365,7 +1380,7 @@ it.effect("advertises MCP tools directly when Code Mode is disabled for the serv
 
 // Baseline (PLAN.md step 1): MCP isError must become one failed tool call, not a
 // success whose text happens to describe an error.
-it.effect("fails the call when MCP reports isError", () =>
+it.live("fails the call when MCP reports isError", () =>
   Effect.gen(function* () {
     assertion = yield* Deferred.make<Permission.AssertInput>()
     decision = Effect.void
@@ -1383,7 +1398,7 @@ it.effect("fails the call when MCP reports isError", () =>
 )
 
 // Baseline (PLAN.md step 1): mixed MCP text and media content must reach the model intact.
-it.effect("preserves MCP text and media content for the model", () =>
+it.live("preserves MCP text and media content for the model", () =>
   Effect.gen(function* () {
     assertion = yield* Deferred.make<Permission.AssertInput>()
     decision = Effect.void
@@ -1404,7 +1419,7 @@ it.effect("preserves MCP text and media content for the model", () =>
   }),
 )
 
-it.effect("waits for permission before calling an MCP tool", () =>
+it.live("waits for permission before calling an MCP tool", () =>
   Effect.gen(function* () {
     calls = 0
     assertion = yield* Deferred.make<Permission.AssertInput>()
@@ -1446,7 +1461,7 @@ it.effect("waits for permission before calling an MCP tool", () =>
   }),
 )
 
-it.effect("does not call MCP when permission is blocked", () =>
+it.live("does not call MCP when permission is blocked", () =>
   Effect.gen(function* () {
     calls = 0
     assertion = yield* Deferred.make<Permission.AssertInput>()

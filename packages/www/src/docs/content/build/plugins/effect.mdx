@@ -844,8 +844,6 @@ Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#s
 
 ```ts
 interface ToolDraft {
-  list(): readonly (readonly [string, Tool.Info])[]
-  get(id: string): Tool.Info | undefined
   add<Input extends Tool.ValueSchema<any>, Output extends Tool.ValueSchema<any> | undefined>(
     tool: Tool.Info<Input, Output>,
   ): void
@@ -855,13 +853,16 @@ interface ToolDraft {
 
 interface ToolDomain {
   readonly transform: Transform<ToolDraft>
+  readonly reload: () => Effect.Effect<void>
 }
 ```
 
-`list()` returns `[id, tool]` pairs. `get`, `update`, and `remove` use the effective registry name, such as
-`acme_greeting` above. `get` returns `undefined` for missing tools; `update` and `remove` do nothing. Creating a tool
-requires `add`, not an agent-style upsert. Updates preserve the name and namespace; assign new schemas and options to
-replace them. Updates and removals are scoped overrides, just like added tools, and apply once when registered.
+`update` and `remove` use the effective registry name, such as `acme_greeting` above, and do nothing for missing tools.
+Creating a tool requires `add`, not an agent-style upsert. Updates preserve the name and namespace; assign new schemas
+and options to replace them.
+
+As with agents and skills, transforms replay in registration order. Use `yield* ctx.tool.reload()` after external state
+changes. `yield* registration.dispose` removes that transform and rebuilds the tools. Scope cleanup does the same.
 
 ### VCS
 
