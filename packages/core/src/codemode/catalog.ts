@@ -81,19 +81,17 @@ export function summarize(entries: ReadonlyArray<Entry>, budget = INLINE_BUDGET)
   let remaining =
     budget -
     namespaces
-      .flatMap((namespace) => [
-        ...(namespace.instructions === undefined
-          ? []
-          : [
-              namespace.instructions
-                .split("\n")
-                .map((line) => `  ${line}`)
-                .join("\n"),
-            ]),
-        ...namespace.listings
+      .flatMap((namespace) => {
+        const listings = namespace.listings
           .filter((listing) => namespace.selectedListings.has(listing))
-          .map((listing) => listing.line),
-      ])
+          .map((listing) => listing.line)
+        if (namespace.instructions === undefined) return listings
+        const instructions = namespace.instructions
+          .split("\n")
+          .map((line) => `  ${line}`)
+          .join("\n")
+        return [instructions, ...listings]
+      })
       .reduce((total, text) => total + Math.round(text.length / CHARACTERS_PER_TOKEN), 0)
   while (active.size > 0) {
     for (const namespace of active) {
