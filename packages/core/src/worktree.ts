@@ -153,8 +153,12 @@ const layer = Layer.effect(
     const bus = yield* Bus.Service
     const processService = yield* AppProcess.Service
 
-    const changed = Effect.fnUntraced(function* (projectID: ProjectSchema.ID, update: boolean) {
-      if (update) yield* bus.publish(Event.Updated, { projectID })
+    const changed = Effect.fnUntraced(function* (
+      projectID: ProjectSchema.ID,
+      update: boolean,
+      directory?: AbsolutePath,
+    ) {
+      if (update) yield* bus.publish(Event.Updated, { projectID, directory })
     })
 
     const ops = {
@@ -265,6 +269,7 @@ const layer = Layer.effect(
           directory: result.directory,
           strategy: input.strategy,
         }),
+        result.directory,
       )
       const project = yield* db
         .select({ worktree: ProjectTable.worktree, commands: ProjectTable.commands })

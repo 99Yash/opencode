@@ -964,7 +964,7 @@ export type WorktreeUpdated = {
   metadata?: { [x: string]: any }
   type: "worktree.updated"
   location?: LocationRef
-  data: { projectID: string }
+  data: { projectID: string; directory?: string }
 }
 
 export type WorktreeResolved = {

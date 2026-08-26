@@ -16,6 +16,7 @@ import { useSessionKey } from "@/session/session-layout"
 import { showToast } from "@/shell/notifications/toast"
 import { SessionRouteKey, SessionStateKey } from "@/runtime/server/scope"
 import { clearSessionMessageHandoff, setSessionMessageHandoff } from "@/session/handoff"
+import { beginWorkspaceSetup } from "@/workspaces/setup"
 
 export function createNewSessionComposerAdapter(props: {
   draftID: string
@@ -46,7 +47,7 @@ export function createNewSessionComposerAdapter(props: {
     async start(selection, submission) {
       const projectDirectory = location().directory
       const worktree = props.worktree()
-      const sessionDirectory = await resolveSessionDirectory({
+      const workspace = await resolveSessionDirectory({
         projectDirectory,
         worktree,
         branch: props.branch(),
@@ -54,7 +55,8 @@ export function createNewSessionComposerAdapter(props: {
         serverSDK,
         language,
       })
-      if (!sessionDirectory) return
+      if (!workspace) return
+      const sessionDirectory = workspace.directory
 
       const created = data.session.create({
         agent: selection.agent,
@@ -84,6 +86,7 @@ export function createNewSessionComposerAdapter(props: {
         serverSDK.scope,
         SessionRouteKey.fromRoute(base64Encode(sessionDirectory), created.id),
       )
+      if (workspace.initializing) beginWorkspaceSetup(created.id, workspace.ready)
       const cleanupReady = startTransition(() => {
         tabs.updateDraft(props.draftID, { worktree: undefined, branch: undefined })
         local.session.promote(sessionDirectory, created.id, {
@@ -119,7 +122,7 @@ export function createNewSessionComposerAdapter(props: {
               prompt: (input) =>
                 data.session.prompt({
                   ...input,
-                  gate: Promise.all([input.gate, afterCreation(async () => undefined)]),
+                  gate: Promise.all([input.gate, afterCreation(async () => undefined), workspace.ready]),
                 }),
             },
           },
@@ -168,28 +171,54 @@ async function resolveSessionDirectory(input: {
   serverSDK: ReturnType<typeof useServerSDK>
   language: ReturnType<typeof useLanguage>
 }) {
-  if (input.worktree === "main") return input.projectDirectory
-  if (input.worktree !== "create") return input.worktree
+  if (input.worktree !== "create") {
+    return {
+      directory: input.worktree === "main" ? input.projectDirectory : input.worktree,
+      ready: Promise.resolve(),
+      initializing: false,
+    }
+  }
 
-  return input.serverSDK.api.worktree
+  const projectID = input.data.location.info({ directory: input.projectDirectory })?.project.id ?? ""
+  const pending = Promise.withResolvers<
+    { directory: string; ready: Promise<void>; initializing: boolean } | undefined
+  >()
+  const unsubscribe = input.serverSDK.event.on("worktree.updated", (event) => {
+    if (event.data.projectID !== projectID || !event.data.directory) return
+    unsubscribe()
+    pending.resolve({ directory: event.data.directory, ready, initializing: true })
+  })
+  const creation = input.serverSDK.api.worktree
     .create({
-      projectID: input.data.location.info({ directory: input.projectDirectory })?.project.id ?? "",
+      projectID,
       strategy: "git",
       branch: input.branch,
       directory: getDirectory(
         input.data.location.info({ directory: input.projectDirectory })?.project.directory ?? input.projectDirectory,
       ),
     })
-    .then(async (created) => {
-      await input.serverSDK.api.location.get({ location: { directory: created.directory } })
-      return created.directory
+    .then(
+      (created) => ({ ok: true as const, created }),
+      (error) => ({ ok: false as const, error }),
+    )
+  const ready = creation.then((result) => {
+    unsubscribe()
+    if (result.ok) {
+      pending.resolve({ directory: result.created.directory, ready: Promise.resolve(), initializing: false })
+      return
+    }
+    showToast({
+      title: input.language.t("prompt.toast.worktreeCreateFailed.title"),
+      description: errorMessage(input.language, result.error),
     })
-    .catch((error) => {
-      showToast({
-        title: input.language.t("prompt.toast.worktreeCreateFailed.title"),
-        description: errorMessage(input.language, error),
-      })
-    })
+    pending.resolve(undefined)
+    throw result.error
+  })
+  void ready.catch(() => undefined)
+  const workspace = await pending.promise
+  if (!workspace) return
+  await input.serverSDK.api.location.get({ location: { directory: workspace.directory } })
+  return workspace
 }
 
 function errorMessage(language: ReturnType<typeof useLanguage>, error: unknown) {

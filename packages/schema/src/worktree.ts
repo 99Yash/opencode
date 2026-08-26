@@ -47,7 +47,7 @@ export type List = typeof List.Type
 
 const Updated = ephemeral({
   type: "worktree.updated",
-  schema: { projectID: Project.ID },
+  schema: { projectID: Project.ID, directory: optional(AbsolutePath) },
 })
 
 const Resolved = durable({

@@ -2,10 +2,13 @@ import { ErrorBoundary, Show, Match, Switch, createMemo, createEffect, createCom
 import { createStore } from "solid-js/store"
 import createPresence from "solid-presence"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
+import { Spinner } from "@opencode-ai/ui/spinner"
 import { SessionHeader } from "@/session/header/session-header"
 import { useLayout } from "@/shell/state/layout"
 import { useServerSDK } from "@/runtime/server/client"
 import { useSettings } from "@/settings/model"
+import { useLanguage } from "@/runtime/i18n/language"
+import { isWorkspaceSetupPending } from "@/workspaces/setup"
 import { MessageTimeline } from "@/session/timeline/message-timeline"
 import type { SessionModel } from "@/session/model"
 import { SESSION_PANEL_WIDTH_MIN } from "@/session/session-panel-width"
@@ -25,6 +28,7 @@ export function SessionScreen(props: { session: SessionModel }) {
   const layout = useLayout()
   const serverSDK = useServerSDK()
   const settings = useSettings()
+  const language = useLanguage()
   const isDesktop = session.isDesktop
   const screen = createSessionScreenLayout(session, serverSDK.scope)
   const timeline = createSessionTimelineInteraction(session)
@@ -103,6 +107,16 @@ export function SessionScreen(props: { session: SessionModel }) {
         {(error) => {
           throw error()
         }}
+      </Show>
+      <Show when={session.identity.params.id && isWorkspaceSetupPending(session.identity.params.id)}>
+        <div
+          data-component="workspace-setup-status"
+          role="status"
+          class="flex items-center gap-2 px-4 py-3 text-[13px] leading-text-compact text-v2-text-text-muted"
+        >
+          <Spinner class="size-3.5" />
+          <span>{language.t("session.workspace.initializing")}</span>
+        </div>
       </Show>
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>

@@ -183,7 +183,10 @@ describe("Worktree", () => {
           { directory: created.directory, strategy: "git" },
         ].toSorted((a, b) => a.directory.localeCompare(b.directory)),
       )
-      expect(Array.from(yield* Fiber.join(fiber))[0]?.data).toEqual({ projectID: input.projectID })
+      expect(Array.from(yield* Fiber.join(fiber))[0]?.data).toEqual({
+        projectID: input.projectID,
+        directory: created.directory,
+      })
 
       yield* worktree.remove({ projectID: input.projectID, directory: created.directory, force: false })
 
@@ -196,6 +199,7 @@ describe("Worktree", () => {
     Effect.gen(function* () {
       const input = yield* setup()
       const worktree = yield* Worktree.Service
+      const bus = yield* Bus.Service
       const temp = yield* Effect.promise(() => fs.realpath(path.dirname(input.root.path)))
       const parent = abs(path.join(temp, path.basename(input.root.path) + "-worktree-setup"))
       yield* Effect.addFinalizer(() =>
@@ -212,12 +216,20 @@ describe("Worktree", () => {
         .where(eq(ProjectTable.id, input.projectID))
         .run()
         .pipe(Effect.orDie)
-      const created = yield* worktree.create({
-        projectID: input.projectID,
-        strategy: gitWorktree,
-        directory: parent,
-        name: "worktree",
-      })
+      const updated = yield* bus
+        .subscribe(Worktree.Event.Updated)
+        .pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
+      yield* Effect.yieldNow
+      const creating = yield* worktree
+        .create({
+          projectID: input.projectID,
+          strategy: gitWorktree,
+          directory: parent,
+          name: "worktree",
+        })
+        .pipe(Effect.forkScoped)
+      expect(Array.from(yield* Fiber.join(updated))[0]?.data.directory).toBe(abs(path.join(parent, "worktree")))
+      const created = yield* Fiber.join(creating)
 
       expect(yield* Effect.promise(() => Bun.file(path.join(created.directory, "setup.json")).json())).toEqual([
         input.sourceDirectory,
