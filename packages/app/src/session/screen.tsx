@@ -111,6 +111,7 @@ export function SessionScreen(props: { session: SessionModel }) {
       <div class="flex-1 min-h-0 overflow-hidden">
         <Switch>
           <Match when={session.identity.params.id && isWorkspaceSetupPending(session.identity.params.id)}>
+            <SessionIdentityHeader sessionID={session.identity.params.id ?? ""} session={session.data.info()} />
             <div
               data-component="workspace-setup-status"
               role="status"
