@@ -3673,13 +3673,19 @@ describe("SessionRunnerLLM", () => {
         input: { agent: "general" },
         executed: false,
       })
+      yield* bus.publish(SessionEvent.Tool.Delegated, {
+        sessionID,
+        assistantMessageID,
+        id: "call-interrupted-subagent",
+        childSessionID: Session.ID.make("ses_existing_child"),
+      })
       yield* database.db
         .update(SessionMessageTable)
         .set({
           data: sql`json_set(
             ${SessionMessageTable.data},
-            '$.content[0].state.metadata',
-            json('{"sessionID":"ses_existing_child","status":"running","internal":"private"}')
+            '$.content[0].state.metadata.internal',
+            'private'
           )`,
         })
         .where(eq(SessionMessageTable.id, assistantMessageID))

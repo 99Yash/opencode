@@ -61,6 +61,76 @@ const assistantRow = (
 }
 
 describe("SessionProjector", () => {
+  it.effect("replays child bindings without child history and leaves other or settled tools unchanged", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const bus = yield* Bus.Service
+      yield* database.db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+        .run()
+      yield* bus.publish(SessionEvent.Created, {
+        sessionID,
+        projectID: Project.ID.global,
+        location: { directory: AbsolutePath.make("/project") },
+        slug: "test",
+        version: "test",
+      })
+      const first = SessionMessage.ID.create()
+      const second = SessionMessage.ID.create()
+      for (const assistantMessageID of [first, second]) {
+        yield* bus.publish(SessionEvent.Step.Started, { sessionID, assistantMessageID, agent: build, model })
+        yield* bus.publish(SessionEvent.Tool.Input.Started, {
+          sessionID,
+          assistantMessageID,
+          id: "call-child",
+          name: "subagent",
+        })
+        yield* bus.publish(SessionEvent.Tool.Called, {
+          sessionID,
+          assistantMessageID,
+          id: "call-child",
+          input: {},
+          executed: false,
+        })
+      }
+      const binding = {
+        id: Event.ID.create(),
+        type: Bus.versionedType(SessionEvent.Tool.Delegated.type, 1),
+        aggregateID: sessionID,
+        seq: (yield* Bus.latestSequence(database.db, sessionID)) + 1,
+        data: { sessionID, assistantMessageID: first, id: "call-child", childSessionID: "ses_child" },
+      }
+      yield* bus.replay(binding)
+      yield* bus.replay(binding)
+      const message = (id: SessionMessage.ID) =>
+        database.db.select().from(SessionMessageTable).where(eq(SessionMessageTable.id, id)).get()
+      expect((yield* message(first))?.data).toMatchObject({
+        content: [{ state: { status: "running", metadata: { sessionID: "ses_child", status: "running" } } }],
+      })
+      expect((yield* message(second))?.data).toMatchObject({
+        content: [{ state: { status: "running", metadata: {} } }],
+      })
+      expect(JSON.stringify((yield* message(second))?.data)).not.toContain("ses_child")
+      yield* bus.publish(SessionEvent.Tool.Success, {
+        sessionID,
+        assistantMessageID: first,
+        id: "call-child",
+        content: [{ type: "text", text: "Finished" }],
+        executed: false,
+      })
+      yield* bus.publish(SessionEvent.Tool.Delegated, {
+        ...binding.data,
+        childSessionID: Session.ID.make("ses_other_child"),
+      })
+      expect((yield* message(first))?.data).toMatchObject({
+        content: [{ state: { status: "completed", content: [{ type: "text", text: "Finished" }] } }],
+      })
+      expect(JSON.stringify((yield* message(first))?.data)).not.toContain("ses_other_child")
+      expect(yield* database.db.select().from(SessionTable).all()).toHaveLength(1)
+    }),
+  )
+
   it.effect("does not settle a pending manual compaction on an auto failure", () =>
     Effect.gen(function* () {
       const db = (yield* Database.Service).db

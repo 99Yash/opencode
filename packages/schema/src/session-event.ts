@@ -491,6 +491,17 @@ export namespace Tool {
   })
   export type Called = typeof Called.Type
 
+  /** Binds a tool call to its child Session before admitting work to that child. */
+  export const Delegated = Event.durable({
+    type: "session.tool.delegated",
+    ...options,
+    schema: {
+      ...ToolBase,
+      childSessionID: SessionID,
+    },
+  })
+  export type Delegated = typeof Delegated.Type
+
   /** Live replacement metadata for a running tool. */
   export const Progress = Event.ephemeral({
     type: "session.tool.progress",
@@ -652,6 +663,7 @@ export const Definitions = Event.inventory(
   Tool.Input.Delta,
   Tool.Input.Ended,
   Tool.Called,
+  Tool.Delegated,
   Tool.Progress,
   Tool.Success,
   Tool.Failed,

@@ -760,6 +760,16 @@ export type SessionToolInputEnded = {
   data: { sessionID: string; assistantMessageID: string; id: string; text: string }
 }
 
+export type SessionToolDelegated = {
+  id: string
+  created: number
+  metadata?: { [x: string]: any }
+  type: "session.tool.delegated"
+  durable: { aggregateID: string; seq: number; version: 1 }
+  location?: LocationRef
+  data: { sessionID: string; assistantMessageID: string; id: string; childSessionID: string }
+}
+
 export type SessionRetryScheduled = {
   id: string
   created: number
@@ -2188,6 +2198,7 @@ export type SessionEventDurable =
   | SessionToolInputStarted
   | SessionToolInputEnded
   | SessionToolCalled
+  | SessionToolDelegated
   | SessionToolSuccess
   | SessionToolFailed
   | SessionRetryScheduled
@@ -2251,6 +2262,7 @@ export type V2Event =
   | SessionToolInputDelta
   | SessionToolInputEnded
   | SessionToolCalled
+  | SessionToolDelegated
   | SessionToolProgress
   | SessionToolSuccess
   | SessionToolFailed

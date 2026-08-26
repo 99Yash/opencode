@@ -871,6 +871,16 @@ export function createData(config: CreateDataInput) {
           match.state = { status: "running", input: event.data.input, metadata: {} }
         })
         return
+      case "session.tool.delegated":
+        message.update(event.data.sessionID, (draft, index) => {
+          const match = message.latestTool(
+            message.assistant(draft, index, event.data.assistantMessageID),
+            event.data.id,
+          )
+          if (match?.state.status === "running")
+            match.state.metadata = { ...match.state.metadata, sessionID: event.data.childSessionID, status: "running" }
+        })
+        return
       case "session.tool.progress":
         message.update(event.data.sessionID, (draft, index) => {
           const match = message.latestTool(

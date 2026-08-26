@@ -4,10 +4,12 @@ import { ToolFailure } from "@opencode-ai/ai"
 import type { Context as PluginContext } from "@opencode-ai/plugin/effect/plugin"
 import { Effect, Schema, Scope } from "effect"
 import { Agent } from "../../agent.js"
+import { Bus } from "../../bus.js"
 import { Config } from "../../config.js"
 import { PluginRuntime } from "../../plugin/runtime.js"
 import { Permission } from "../../permission.js"
 import { SessionSchema } from "../../session/schema.js"
+import { SessionEvent } from "../../session/event.js"
 
 export const name = "subagent"
 
@@ -54,6 +56,7 @@ export const Plugin = {
   id: "opencode.tool.subagent",
   effect: Effect.fn("SubagentTool.Plugin")(function* (ctx: PluginContext) {
     const runtime = yield* PluginRuntime.Service
+    const bus = yield* Bus.Service
     const agents = yield* Agent.Service
     const config = yield* Config.Service
     const permission = yield* Permission.Service
@@ -213,6 +216,12 @@ export const Plugin = {
                   ))
 
               const background = input.background === true
+              yield* bus.publish(SessionEvent.Tool.Delegated, {
+                sessionID: context.sessionID,
+                assistantMessageID: context.messageID,
+                id: context.id,
+                childSessionID: child.id,
+              })
               yield* context.progress({ sessionID: child.id, status: "running" })
 
               // Standard prompt admission outside the job: Job.start joining a running child skips

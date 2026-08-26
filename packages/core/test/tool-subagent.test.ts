@@ -102,7 +102,7 @@ const subagentPluginSupervisor = makeLocationNode({
     PluginSupervisor.Service,
     registerToolPlugin(SubagentTool.Plugin).pipe(Effect.as(PluginSupervisor.Service.of({ flush: Effect.void }))),
   ),
-  deps: [Agent.node, Config.node, Permission.node, PluginRuntime.node, Tool.node],
+  deps: [Agent.node, Bus.node, Config.node, Permission.node, PluginRuntime.node, Tool.node],
 })
 
 const nodes = LayerNode.group([
@@ -323,6 +323,84 @@ describe("SubagentTool", () => {
           })
           const fallbackChild = yield* sessions.get(outputSessionID(fallback.metadata))
           expect(fallbackChild).toMatchObject({ parentID: parent.id, model: parentModel })
+        }),
+      ),
+    ),
+  )
+
+  it.live("persists new and continued child bindings before prompt admission", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((dir) =>
+        Effect.gen(function* () {
+          const sessions = yield* Session.Service
+          const bus = yield* Bus.Service
+          const parent = yield* sessions.create({
+            location: Location.Ref.make({ directory: AbsolutePath.make(dir.path) }),
+            model: parentModel,
+          })
+          yield* withSubagent(parent.location)
+          const locations = yield* LocationServiceMap.Service
+          const registry = yield* Tool.Service.pipe(Effect.provide(locations.get(parent.location)))
+          const execute = (existing?: Session.ID) =>
+            Effect.gen(function* () {
+              const assistantMessageID = SessionMessage.ID.create()
+              const call = {
+                type: "tool-call" as const,
+                id: existing ? "call-continued-subagent" : "call-new-subagent",
+                name: SubagentTool.name,
+                input: {
+                  agent: "reviewer",
+                  description: "review",
+                  prompt: "review this",
+                  ...(existing ? { sessionID: existing } : {}),
+                },
+              }
+              yield* bus.publish(SessionEvent.Step.Started, {
+                sessionID: parent.id,
+                assistantMessageID,
+                agent: toolIdentity.agent,
+                model: parentModel,
+              })
+              yield* bus.publish(SessionEvent.Tool.Input.Started, {
+                sessionID: parent.id,
+                assistantMessageID,
+                id: call.id,
+                name: call.name,
+              })
+              yield* bus.publish(SessionEvent.Tool.Called, {
+                sessionID: parent.id,
+                assistantMessageID,
+                id: call.id,
+                input: call.input,
+                executed: false,
+              })
+              const settled = yield* executeTool(registry, {
+                sessionID: parent.id,
+                agent: toolIdentity.agent,
+                messageID: assistantMessageID,
+                call,
+                progress: (update) =>
+                  Effect.gen(function* () {
+                    const childID = outputSessionID(update)
+                    expect((yield* sessions.get(childID)).parentID).toBe(parent.id)
+                    expect(yield* sessions.inbox(childID)).toHaveLength(existing ? 1 : 0)
+                    expect(
+                      yield* sessions.message({ sessionID: parent.id, messageID: assistantMessageID }),
+                    ).toMatchObject({
+                      content: [
+                        { type: "tool", id: call.id, state: { status: "running", metadata: { sessionID: childID } } },
+                      ],
+                    })
+                  }).pipe(Effect.orDie),
+              })
+              expect(settled.status).toBe("completed")
+              return outputSessionID(settled.metadata)
+            })
+          const childID = yield* execute()
+          expect(yield* execute(childID)).toBe(childID)
         }),
       ),
     ),

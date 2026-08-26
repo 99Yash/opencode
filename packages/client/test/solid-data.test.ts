@@ -13,6 +13,68 @@ const session = (viewed: number): SessionInfo => ({
   location: { directory: "/project" },
 })
 
+test("projects child bindings into only the owning running tool", () => {
+  const listeners = new Set<Parameters<CreateDataInput["event"]["listen"]>[0]>()
+  const setup = createRoot((dispose) => ({
+    data: createData({
+      api: () => OpenCode.make({ baseUrl: "http://opencode.local" }),
+      directory: "/project",
+      event: {
+        on: () => () => {},
+        listen(handler) {
+          listeners.add(handler)
+          return () => listeners.delete(handler)
+        },
+      },
+    }),
+    dispose,
+  }))
+  const send = (event: OpenCodeEvent) => listeners.forEach((listener) => listener({ name: event.type, details: event }))
+  const base = { sessionID: "ses_parent", assistantMessageID: "msg_parent", id: "call_child" }
+  const envelope = { id: "evt_fixture", created: 0, durable: { aggregateID: base.sessionID, seq: 0, version: 1 } }
+  try {
+    send({
+      ...envelope,
+      type: "session.step.started",
+      data: {
+        sessionID: base.sessionID,
+        assistantMessageID: base.assistantMessageID,
+        agent: "build",
+        model: { id: "test", providerID: "test" },
+      },
+    })
+    send({ ...envelope, type: "session.tool.input.started", data: { ...base, name: "subagent" } })
+    send({ ...envelope, type: "session.tool.called", data: { ...base, input: {}, executed: false } })
+    const binding: OpenCodeEvent = {
+      ...envelope,
+      type: "session.tool.delegated",
+      data: { ...base, childSessionID: "ses_child" },
+    }
+    send({ ...binding, data: { ...binding.data, sessionID: "ses_other" } })
+    send({ ...binding, data: { ...binding.data, assistantMessageID: "msg_other" } })
+    send({ ...binding, data: { ...binding.data, id: "call_other" } })
+    const message = () => setup.data.session.message.get(base.sessionID, base.assistantMessageID)
+    expect(message()).toMatchObject({ content: [{ state: { status: "running", metadata: {} } }] })
+    expect(JSON.stringify(message())).not.toContain("ses_child")
+    send(binding)
+    expect(message()).toMatchObject({
+      content: [{ state: { status: "running", metadata: { sessionID: "ses_child", status: "running" } } }],
+    })
+    send({
+      ...envelope,
+      type: "session.tool.success",
+      data: { ...base, content: [{ type: "text", text: "Finished" }], executed: false },
+    })
+    send(binding)
+    expect(message()).toMatchObject({
+      content: [{ state: { status: "completed", content: [{ type: "text", text: "Finished" }] } }],
+    })
+    expect(JSON.stringify(message())).not.toContain("ses_child")
+  } finally {
+    setup.dispose()
+  }
+})
+
 test("revalidates after an event overtakes an active session read", async () => {
   let release!: () => void
   const gate = new Promise<void>((resolve) => (release = resolve))
