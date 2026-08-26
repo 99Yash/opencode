@@ -45,7 +45,9 @@ story("renders every tool error outcome without leaking hidden tools", async ({ 
   await expect(group.locator('[data-component="tag"]')).toHaveText(String(names.length))
   await group.getByRole("button").click()
   await expect(timeline.locator('[data-kind="tool-error-card"]')).toHaveCount(names.length + 1)
-  await expect(timeline.locator('[data-timeline-part-id="tool_error_question_dismissed"]')).toContainText(/dismissed/i)
+  const dismissed = timeline.locator('[data-timeline-part-id="tool_error_question_dismissed"]')
+  await expect(dismissed.getByText(/dismissed/i)).toBeVisible()
+  await expect(dismissed).toContainText(/dismissed/i)
   await expect(timeline.locator('[data-timeline-part-id="tool_error_todo"]')).toHaveCount(0)
   for (const name of names) await expect(timeline.locator(`[data-timeline-part-id="tool_error_${name}"]`)).toBeVisible()
 })
@@ -85,8 +87,8 @@ story("labels completed searches with result counts", async ({ mount }) => {
 
 // Moved from packages/app/e2e/regression/session-timeline-tool-projection.spec.ts
 story("labels read tools from their path input", async ({ mount }) => {
-  const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "results" } })
-  const group = timeline.locator('[data-timeline-part-ids="tool_label_glob,tool_label_grep,tool_label_read"]')
+  const timeline = await mount("current-session-research-agents--agent-research", { args: { scenario: "read" } })
+  const group = timeline.locator('[data-timeline-part-ids="prt_read_path"]')
   await group.locator('[data-slot="collapsible-trigger"]').click()
   await expect(
     group
