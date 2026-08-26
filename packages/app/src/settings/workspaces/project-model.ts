@@ -3,7 +3,6 @@ import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useMutation, useQueryClient } from "@tanstack/solid-query"
 import { createMemo } from "solid-js"
 import { createStore } from "solid-js/store"
-import { loadProjectsQuery } from "@/runtime/server/global-sync/bootstrap"
 import { useGlobal } from "@/runtime/server/runtime"
 import { type LocalProject } from "@/shell/state/layout"
 import { ServerConnection } from "@/runtime/server/registry"
@@ -96,20 +95,7 @@ export function createEditProjectModel(props: { project: LocalProject; server: S
     },
     onSuccess: async () => {
       if (props.project.id && props.project.id !== "global") {
-        const context = serverCtx()
-        await queryClient.invalidateQueries({
-          queryKey: [context.sdk.scope, "project"],
-          exact: true,
-          refetchType: "none",
-        })
-        const projects = await queryClient.fetchQuery(
-          loadProjectsQuery(context.sdk.scope, context.sdk.api.project, context.sdk.api.worktree),
-        )
-        context.sync.set("project", projects)
-        void queryClient.invalidateQueries({
-          queryKey: [context.sdk.scope, "settings-workspace-projects"],
-          exact: true,
-        })
+        await queryClient.invalidateQueries({ queryKey: [serverCtx().sdk.scope, "project"], exact: true })
       }
       dialog.close()
     },
