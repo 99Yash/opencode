@@ -4,7 +4,8 @@ export type { Context, Metadata, Options, Result } from "@opencode-ai/schema/too
 
 import { ToolDefinition, type ToolCall } from "@opencode-ai/ai"
 import { Tool } from "@opencode-ai/schema/tool"
-import { Context, Effect, Layer, Schema, SchemaIssue, Scope, Semaphore } from "effect"
+import type { ToolDraft } from "@opencode-ai/plugin/effect/tool"
+import { Context, Effect, Layer, Schema, SchemaIssue, Scope, Semaphore, Types } from "effect"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import type { Agent } from "./agent.js"
 import { CodeModeCatalog } from "./codemode/catalog.js"
@@ -23,9 +24,7 @@ export class RegistrationError extends Schema.TaggedError<RegistrationError>()("
 }) {}
 
 export interface Interface {
-  readonly transform: (
-    callback: (draft: { readonly add: (tool: Tool.Info) => void }) => void,
-  ) => Effect.Effect<void, never, Scope.Scope>
+  readonly transform: (callback: (draft: ToolDraft) => void) => Effect.Effect<void, never, Scope.Scope>
   readonly snapshot: (permissions?: Permission.Ruleset) => Effect.Effect<Snapshot>
 }
 
@@ -79,7 +78,7 @@ const layer = Layer.effect(
       ]
     })
 
-    const local = new Map<string, Array<{ readonly token: object; readonly tool: Tool.Info }>>()
+    const local = new Map<string, Array<{ readonly token: object; readonly tool: Tool.Info | undefined }>>()
     const lock = Semaphore.makeUnsafe(1)
 
     const executeTool = Effect.fn("Tool.execute")(function* (
@@ -138,8 +137,44 @@ const layer = Layer.effect(
     })
 
     const transform: Interface["transform"] = Effect.fn("Tool.transform")(function* (callback) {
-      const tools: Array<Tool.Info> = []
-      yield* Effect.sync(() => callback({ add: (tool) => tools.push(tool) }))
+      let tools: Array<Tool.Info> = []
+      const removed = new Set<string>()
+      const draft = new Map(
+        Array.from(local).flatMap(([id, entries]) => {
+          const tool = entries.at(-1)?.tool
+          return tool ? [[id, tool] as const] : []
+        }),
+      )
+      yield* Effect.sync(() =>
+        callback({
+          list: () => Array.from(draft),
+          get: (id) => draft.get(id),
+          add: (tool) => {
+            const id = effectiveName(tool)
+            tools.push(tool)
+            draft.set(id, tool)
+            removed.delete(id)
+          },
+          update: (id, update) => {
+            const current = draft.get(id)
+            if (!current) return
+            const name = current.name
+            const namespace = current.options?.namespace
+            // An update is a scoped override, so closing its scope reveals the original registration.
+            const tool: Types.Mutable<Tool.Info> = tools.includes(current) ? current : { ...current }
+            update(tool)
+            tool.name = name
+            if (tool.options?.namespace !== namespace) tool.options = { ...tool.options, namespace }
+            if (!tools.includes(tool)) tools.push(tool)
+            draft.set(id, tool)
+          },
+          remove: (id) => {
+            if (!draft.delete(id)) return
+            tools = tools.filter((tool) => effectiveName(tool) !== id)
+            removed.add(id)
+          },
+        }),
+      )
       const valid = yield* Effect.filter(normalizedEntries(tools), (entry) =>
         Effect.gen(function* () {
           if (entry.tool.options?.namespace !== undefined) yield* validateNamespace(entry.tool.options.namespace)
@@ -168,17 +203,18 @@ const layer = Layer.effect(
           new RegistrationError({ name: entry.key, message: `Duplicate normalized tool name: ${entry.key}` }),
         )
       })
-      if (entries.length === 0) return
+      const changes = [...entries, ...Array.from(removed, (key) => ({ key, tool: undefined }))]
+      if (changes.length === 0) return
       yield* Effect.uninterruptible(
         lock.withPermit(
           Effect.gen(function* () {
             const token = {}
-            for (const entry of entries)
+            for (const entry of changes)
               local.set(entry.key, [...(local.get(entry.key) ?? []), { token, tool: entry.tool }])
             yield* Effect.addFinalizer(() =>
               lock.withPermit(
                 Effect.sync(() => {
-                  for (const entry of entries) {
+                  for (const entry of changes) {
                     const remaining = local.get(entry.key)?.filter((item) => item.token !== token) ?? []
                     if (remaining.length > 0) local.set(entry.key, remaining)
                     else local.delete(entry.key)

@@ -636,4 +636,63 @@ describe("fromPromise", () => {
       })
     }),
   )
+
+  it.effect("adapts draft reads, updates, and removals for existing tools", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const registry = yield* Tool.Service
+      const host = yield* PluginHost.make(plugins)
+      const progress: Tool.Metadata[] = []
+      yield* host.tool.transform((draft) => {
+        draft.add({
+          name: "hello",
+          description: "Hello",
+          options: { namespace: "acme", codemode: false },
+          input: Schema.Struct({ name: Schema.String }),
+          output: Schema.String,
+          execute: ({ name }, context) =>
+            context.progress({ phase: "original" }).pipe(Effect.as({ output: `Hello, ${name}!` })),
+        })
+      })
+      yield* PluginPromise.fromPromise(
+        define({
+          id: "promise-update",
+          setup: async (ctx) => {
+            await ctx.tool.transform((draft) => {
+              expect(draft.list().map(([id]) => id)).toEqual(["acme_hello"])
+              expect(draft.get("missing")).toBeUndefined()
+              draft.update("missing", () => {
+                throw new Error("must not create a tool")
+              })
+              const original = draft.get("acme_hello")
+              if (!original) throw new Error("Expected original tool")
+              draft.update("acme_hello", (tool) => {
+                tool.description = "Wrapped"
+                tool.execute = async (input, context) => {
+                  const result = await original.execute(input, context)
+                  return { ...result, output: `${result.output} Wrapped.` }
+                }
+              })
+              draft.add({ ...original, name: "temporary" })
+              draft.remove("acme_temporary")
+              expect(draft.get("acme_temporary")).toBeUndefined()
+            })
+          },
+        }),
+      ).effect(host)
+      const snapshot = yield* registry.snapshot()
+      expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["acme_hello", "execute"])
+      expect(snapshot.definitions[0]?.description).toBe("Wrapped")
+      expect(
+        yield* snapshot.execute({
+          sessionID: Session.ID.make("ses_promise_update"),
+          agent: Agent.ID.make("build"),
+          messageID: SessionMessage.ID.make("msg_promise_update"),
+          progress: (value) => Effect.sync(() => progress.push(value)),
+          call: { type: "tool-call", id: "call_promise_update", name: "acme_hello", input: { name: "world" } },
+        }),
+      ).toMatchObject({ output: "Hello, world! Wrapped." })
+      expect(progress).toEqual([{ phase: "original" }])
+    }),
+  )
 })

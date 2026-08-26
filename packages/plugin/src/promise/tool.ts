@@ -5,7 +5,7 @@ import { Tool } from "@opencode-ai/schema/tool"
 import type { Agent } from "@opencode-ai/schema/agent"
 import type { Session } from "@opencode-ai/schema/session"
 import type { SessionMessage } from "@opencode-ai/schema/session-message"
-import type { JsonSchema } from "effect"
+import type { JsonSchema, Types } from "effect"
 import type { Hooks, Transform } from "./registration.js"
 
 export interface ToolContext extends Omit<Tool.Context, "progress"> {
@@ -23,9 +23,14 @@ export type Info<
 }
 
 interface ToolDraft {
+  list(): readonly (readonly [string, Info])[]
+  get(id: string): Info | undefined
   add<Input extends Tool.ValueSchema<any>, Output extends Tool.ValueSchema<any> | undefined>(
     tool: Info<Input, Output>,
   ): void
+  /** Updates an existing tool; missing IDs are ignored. */
+  update(id: string, update: (tool: Types.Mutable<Info>) => void): void
+  remove(id: string): void
 }
 
 interface ToolHooks {

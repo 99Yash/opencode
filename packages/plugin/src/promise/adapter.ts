@@ -99,6 +99,20 @@ export function fromPromise(plugin: Plugin) {
 
         const run = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromiseWith(context)(effect)
 
+        const promiseTool = (tool: Tool.Info): Info => {
+          const execute = tool.execute
+          return {
+            ...tool,
+            execute: (input, context) =>
+              run(
+                execute(input, {
+                  ...context,
+                  progress: (update) => Effect.promise(() => context.progress(update)),
+                }),
+              ),
+          }
+        }
+
         const adaptApiMethod = <PromiseMethod>(
           endpoint: HttpApiEndpoint.Top,
           method: (input: never) => Effect.Effect<unknown, unknown>,
@@ -298,6 +312,21 @@ export function fromPromise(plugin: Plugin) {
               register(
                 host.tool.transform((draft) =>
                   callback({
+                    list: () => draft.list().map(([id, tool]) => [id, promiseTool(tool)] as const),
+                    get: (id) => {
+                      const tool = draft.get(id)
+                      return tool ? promiseTool(tool) : undefined
+                    },
+                    update: (id, update) =>
+                      draft.update(id, (tool) => {
+                        const value = promiseTool(tool)
+                        update(value)
+                        Object.assign(tool, {
+                          ...value,
+                          execute: (input: unknown, context: Tool.Context) => executePromiseTool(value, input, context),
+                        })
+                      }),
+                    remove: (id) => draft.remove(id),
                     add: (tool: Info) =>
                       draft.add({
                         ...tool,

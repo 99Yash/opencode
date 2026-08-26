@@ -71,6 +71,69 @@ const transform = (service: Tool.Interface, tools: Readonly<Record<string, Info>
   )
 
 describe("Tool", () => {
+  it.effect("lists, gets, updates, and removes effective tools within a scope", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* transform(service, { echo: constant("original") }, { namespace: "acme", codemode: false })
+      yield* transform(service, { echo: make() }, { namespace: "other", codemode: false })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* service.transform((draft) => {
+            expect(draft.list().map(([id]) => id)).toEqual(["acme_echo", "other_echo"])
+            expect(draft.get("acme_echo")?.name).toBe("echo")
+            expect(draft.get("missing")).toBeUndefined()
+            draft.update("missing", () => {
+              throw new Error("must not create a tool")
+            })
+            draft.remove("missing")
+            draft.update("acme_echo", (tool) => {
+              tool.description = "Updated echo"
+              tool.execute = constant("updated").execute
+            })
+            draft.remove("other_echo")
+            expect(draft.get("other_echo")).toBeUndefined()
+          })
+          const updated = yield* service.snapshot()
+          expect(updated.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "execute"])
+          expect(updated.definitions[0]?.description).toBe("Updated echo")
+          expect((yield* updated.execute(call("acme_echo"))).output).toEqual({ text: "updated" })
+        }),
+      )
+      const restored = yield* service.snapshot()
+      expect(restored.definitions.map((tool) => tool.name)).toEqual(["acme_echo", "other_echo", "execute"])
+      expect((yield* restored.execute(call("acme_echo"))).output).toEqual({ text: "original" })
+    }),
+  )
+
+  it.effect("updates newly added tools and applies removals in order", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* service.transform((draft) => {
+        draft.add({ ...make(), options: { codemode: false } })
+        draft.update("echo", (tool) => {
+          tool.description = "Updated"
+          tool.input = Schema.Struct({ value: Schema.Number })
+          tool.output = Schema.Number
+          tool.execute = ({ value }) => Effect.succeed({ output: value * 2 })
+        })
+        draft.add({ ...make(), name: "removed" })
+        draft.remove("removed")
+        expect(draft.get("removed")).toBeUndefined()
+        draft.add({ ...make(), name: "removed" })
+        draft.remove("removed")
+      })
+      const snapshot = yield* service.snapshot()
+      expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["echo", "execute"])
+      expect(snapshot.definitions[0]?.description).toBe("Updated")
+      expect(
+        (yield* snapshot.execute({
+          ...call("echo"),
+          call: { type: "tool-call", id: "updated", name: "echo", input: { value: 3 } },
+        })).output,
+      ).toBe(6)
+    }),
+  )
+
   it.effect("logs and skips invalid dotted namespaces", () => {
     const output: unknown[] = []
     const logger = Logger.map(Logger.formatStructured, (entry) => {

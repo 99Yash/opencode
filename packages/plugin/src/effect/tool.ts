@@ -2,13 +2,18 @@ import { Tool } from "@opencode-ai/schema/tool"
 import type { Agent } from "@opencode-ai/schema/agent"
 import type { Session } from "@opencode-ai/schema/session"
 import type { SessionMessage } from "@opencode-ai/schema/session-message"
-import type { JsonSchema } from "effect"
+import type { JsonSchema, Types } from "effect"
 import type { Hooks, Transform } from "./registration.js"
 
 export interface ToolDraft {
+  list(): readonly (readonly [string, Tool.Info])[]
+  get(id: string): Tool.Info | undefined
   add<Input extends Tool.ValueSchema<any>, Output extends Tool.ValueSchema<any> | undefined>(
     tool: Tool.Info<Input, Output>,
   ): void
+  /** Updates an existing tool; missing IDs are ignored. */
+  update(id: string, update: (tool: Types.Mutable<Tool.Info>) => void): void
+  remove(id: string): void
 }
 
 export interface ToolHooks {

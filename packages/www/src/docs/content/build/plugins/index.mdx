@@ -783,7 +783,7 @@ interface StorageScanResult {
 
 ### Tools
 
-Register tools with a transform.
+Register, inspect, update, and remove tools with a transform.
 
 ```ts
 await ctx.tool.transform((draft) => {
@@ -802,8 +802,20 @@ await ctx.tool.transform((draft) => {
       return { content: `Hello ${(input as { name: string }).name}!` }
     },
   })
+  draft.update("acme_greeting", (tool) => {
+    tool.description = "Greet someone by name"
+  })
+  draft.remove("legacy")
 })
 ```
+
+`list()` returns `[id, tool]` pairs and `get(id)` returns an executable definition or `undefined`. IDs are effective
+registry names, including the namespace: `acme_greeting` in the example above. Dots in namespaces and unsupported
+characters in tool names become `_`.
+
+`update` does nothing when the ID is missing. Unlike agent upserts, creating a tool requires `add` with a complete
+definition. Updates preserve the tool's name and namespace; replace its schemas and options by assigning new values.
+Updates and removals are scoped overrides, just like added tools. They apply once when registered, not on a replay.
 
 #### Reference
 
@@ -816,7 +828,11 @@ interface ToolContext {
 }
 
 interface ToolDraft {
+  list(): readonly (readonly [string, ToolInfo])[]
+  get(id: string): ToolInfo | undefined
   add(tool: ToolInfo): void
+  update(id: string, update: (tool: Types.Mutable<ToolInfo>) => void): void
+  remove(id: string): void
 }
 ```
 

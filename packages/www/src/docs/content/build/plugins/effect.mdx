@@ -844,15 +844,24 @@ Schemas: [`Tool.Content`](/api#schema-Tool.Content), [`Tool.TextContent`](/api#s
 
 ```ts
 interface ToolDraft {
+  list(): readonly (readonly [string, Tool.Info])[]
+  get(id: string): Tool.Info | undefined
   add<Input extends Tool.ValueSchema<any>, Output extends Tool.ValueSchema<any> | undefined>(
     tool: Tool.Info<Input, Output>,
   ): void
+  update(id: string, update: (tool: Types.Mutable<Tool.Info>) => void): void
+  remove(id: string): void
 }
 
 interface ToolDomain {
   readonly transform: Transform<ToolDraft>
 }
 ```
+
+`list()` returns `[id, tool]` pairs. `get`, `update`, and `remove` use the effective registry name, such as
+`acme_greeting` above. `get` returns `undefined` for missing tools; `update` and `remove` do nothing. Creating a tool
+requires `add`, not an agent-style upsert. Updates preserve the name and namespace; assign new schemas and options to
+replace them. Updates and removals are scoped overrides, just like added tools, and apply once when registered.
 
 ### VCS
 
