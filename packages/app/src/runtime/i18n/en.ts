@@ -460,7 +460,8 @@ export const dict = {
   "dialog.project.edit.color": "Color",
   "dialog.project.edit.color.select": "Select {{color}} color",
   "dialog.project.edit.worktree.startup": "Workspace startup script",
-  "dialog.project.edit.worktree.startup.description": "Runs after creating a new workspace (worktree).",
+  "dialog.project.edit.worktree.startup.description":
+    "Runs after creating a new workspace (worktree). Use $OPENCODE_WORKTREE_BASE for the base worktree and $OPENCODE_WORKTREE_PATH for the new worktree.",
   "dialog.project.edit.worktree.startup.placeholder": "e.g. bun install",
 
   "dialog.releaseNotes.action.getStarted": "Get started",
@@ -499,7 +500,7 @@ export const dict = {
   "context.stats.lastActivity": "Last Activity",
 
   "context.usage.tokens": "Tokens",
-  "context.usage.usage": "Usage",
+  "context.usage.usage": "Context Usage",
   "context.usage.cost": "Cost",
   "context.usage.clickToView": "Click to view context",
   "context.usage.view": "View context usage",
@@ -883,6 +884,7 @@ export const dict = {
 
   "settings.section.desktop": "Desktop",
   "settings.section.server": "Server",
+  "settings.backToApp": "Back to app",
   "settings.tab.general": "General",
   "settings.tab.preferences": "Preferences",
   "settings.tab.shortcuts": "Shortcuts",
@@ -1151,6 +1153,8 @@ export const dict = {
   "session.new.workspace.local.tooltip": "Use current checkout",
   "session.new.workspace.new.tooltip": "Create isolated checkout",
   "session.new.workspace.fromBranch": "from {{branch}}",
+  "session.new.workspace.createFrom": "Create from branch",
+  "session.new.workspace.branch.search.placeholder": "Search branches",
   "session.new.workspace.trigger.tooltip": "Select where to run session",
   "session.new.workspace.search.placeholder": "Search workspaces",
   "settings.tab.workspaces": "Workspaces",

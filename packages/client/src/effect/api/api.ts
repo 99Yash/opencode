@@ -1333,6 +1333,15 @@ export type CredentialUpdateOperation<E = never> = (
   input: CredentialUpdateInput,
 ) => Effect.Effect<CredentialUpdateOutput, E>
 
+export type CredentialActivateInput = {
+  readonly credentialID: Credential.ID
+  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+}
+export type CredentialActivateOutput = void
+export type CredentialActivateOperation<E = never> = (
+  input: CredentialActivateInput,
+) => Effect.Effect<CredentialActivateOutput, E>
+
 export type CredentialRemoveInput = {
   readonly credentialID: Credential.ID
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -1344,11 +1353,21 @@ export type CredentialRemoveOperation<E = never> = (
 
 export interface CredentialApi<E = never> {
   readonly update: CredentialUpdateOperation<E>
+  readonly activate: CredentialActivateOperation<E>
   readonly remove: CredentialRemoveOperation<E>
 }
 
 export type ProjectListOutput = ReadonlyArray<Project.Info>
 export type ProjectListOperation<E = never> = () => Effect.Effect<ProjectListOutput, E>
+
+export type ProjectUpdateInput = {
+  readonly projectID: Project.ID
+  readonly name?: string | undefined
+  readonly icon?: Project.Icon | undefined
+  readonly commands?: Project.Commands | undefined
+}
+export type ProjectUpdateOutput = Project.Info
+export type ProjectUpdateOperation<E = never> = (input: ProjectUpdateInput) => Effect.Effect<ProjectUpdateOutput, E>
 
 export type ProjectCurrentInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
@@ -1358,6 +1377,7 @@ export type ProjectCurrentOperation<E = never> = (input?: ProjectCurrentInput) =
 
 export interface ProjectApi<E = never> {
   readonly list: ProjectListOperation<E>
+  readonly update: ProjectUpdateOperation<E>
   readonly current: ProjectCurrentOperation<E>
 }
 
@@ -1582,6 +1602,152 @@ export interface PtyApi<E = never> {
   readonly connect: { readonly token: PtyConnectTokenOperation<E> }
 }
 
+export type ExperimentalPersistentPtyListInput = { readonly sessionID: Session.ID }
+export type ExperimentalPersistentPtyListOutput = ReadonlyArray<{
+  readonly id: Pty.ID
+  readonly title: string
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly status: "running" | "exited"
+  readonly pid: number
+  readonly exitCode?: number | undefined
+  readonly sessionID: Session.ID
+  readonly foregroundProcess: string | null
+  readonly size: { readonly cols: number; readonly rows: number }
+  readonly output: { readonly head: number; readonly tail: number }
+}>
+export type ExperimentalPersistentPtyListOperation<E = never> = (
+  input: ExperimentalPersistentPtyListInput,
+) => Effect.Effect<ExperimentalPersistentPtyListOutput, E>
+
+export type ExperimentalPersistentPtyCreateInput = {
+  readonly sessionID: Session.ID
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly title: string
+  readonly env: { readonly [x: string]: string }
+  readonly size?: { readonly cols: number; readonly rows: number } | undefined
+}
+export type ExperimentalPersistentPtyCreateOutput = {
+  readonly id: Pty.ID
+  readonly title: string
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly status: "running" | "exited"
+  readonly pid: number
+  readonly exitCode?: number | undefined
+  readonly sessionID: Session.ID
+  readonly foregroundProcess: string | null
+  readonly size: { readonly cols: number; readonly rows: number }
+  readonly output: { readonly head: number; readonly tail: number }
+}
+export type ExperimentalPersistentPtyCreateOperation<E = never> = (
+  input: ExperimentalPersistentPtyCreateInput,
+) => Effect.Effect<ExperimentalPersistentPtyCreateOutput, E>
+
+export type ExperimentalPersistentPtyShutdownOutput = void
+export type ExperimentalPersistentPtyShutdownOperation<E = never> = () => Effect.Effect<
+  ExperimentalPersistentPtyShutdownOutput,
+  E
+>
+
+export type ExperimentalPersistentPtyGetInput = { readonly ptyID: Pty.ID }
+export type ExperimentalPersistentPtyGetOutput = {
+  readonly id: Pty.ID
+  readonly title: string
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly status: "running" | "exited"
+  readonly pid: number
+  readonly exitCode?: number | undefined
+  readonly sessionID: Session.ID
+  readonly foregroundProcess: string | null
+  readonly size: { readonly cols: number; readonly rows: number }
+  readonly output: { readonly head: number; readonly tail: number }
+}
+export type ExperimentalPersistentPtyGetOperation<E = never> = (
+  input: ExperimentalPersistentPtyGetInput,
+) => Effect.Effect<ExperimentalPersistentPtyGetOutput, E>
+
+export type ExperimentalPersistentPtyUpdateInput = {
+  readonly ptyID: Pty.ID
+  readonly attachmentID?: string | undefined
+  readonly size: { readonly cols: number; readonly rows: number }
+}
+export type ExperimentalPersistentPtyUpdateOutput = {
+  readonly id: Pty.ID
+  readonly title: string
+  readonly command: string
+  readonly args: ReadonlyArray<string>
+  readonly cwd: string
+  readonly status: "running" | "exited"
+  readonly pid: number
+  readonly exitCode?: number | undefined
+  readonly sessionID: Session.ID
+  readonly foregroundProcess: string | null
+  readonly size: { readonly cols: number; readonly rows: number }
+  readonly output: { readonly head: number; readonly tail: number }
+}
+export type ExperimentalPersistentPtyUpdateOperation<E = never> = (
+  input: ExperimentalPersistentPtyUpdateInput,
+) => Effect.Effect<ExperimentalPersistentPtyUpdateOutput, E>
+
+export type ExperimentalPersistentPtySnapshotInput = { readonly ptyID: Pty.ID }
+export type ExperimentalPersistentPtySnapshotOutput = {
+  readonly info: {
+    readonly id: Pty.ID
+    readonly title: string
+    readonly command: string
+    readonly args: ReadonlyArray<string>
+    readonly cwd: string
+    readonly status: "running" | "exited"
+    readonly pid: number
+    readonly exitCode?: number | undefined
+    readonly sessionID: Session.ID
+    readonly foregroundProcess: string | null
+    readonly size: { readonly cols: number; readonly rows: number }
+    readonly output: { readonly head: number; readonly tail: number }
+  }
+  readonly text: string
+  readonly checkpoint: globalThis.Uint8Array
+  readonly cursor: { readonly x: number; readonly y: number }
+}
+export type ExperimentalPersistentPtySnapshotOperation<E = never> = (
+  input: ExperimentalPersistentPtySnapshotInput,
+) => Effect.Effect<ExperimentalPersistentPtySnapshotOutput, E>
+
+export type ExperimentalPersistentPtyRemoveInput = { readonly ptyID: Pty.ID }
+export type ExperimentalPersistentPtyRemoveOutput = void
+export type ExperimentalPersistentPtyRemoveOperation<E = never> = (
+  input: ExperimentalPersistentPtyRemoveInput,
+) => Effect.Effect<ExperimentalPersistentPtyRemoveOutput, E>
+
+export type ExperimentalPersistentPtyConnectTokenInput = {
+  readonly ptyID: Pty.ID
+  readonly "x-opencode-ticket"?: string | undefined
+}
+export type ExperimentalPersistentPtyConnectTokenOutput = PtyTicket.ConnectToken
+export type ExperimentalPersistentPtyConnectTokenOperation<E = never> = (
+  input: ExperimentalPersistentPtyConnectTokenInput,
+) => Effect.Effect<ExperimentalPersistentPtyConnectTokenOutput, E>
+
+export interface ExperimentalApi<E = never> {
+  readonly persistentPty: {
+    readonly list: ExperimentalPersistentPtyListOperation<E>
+    readonly create: ExperimentalPersistentPtyCreateOperation<E>
+    readonly shutdown: ExperimentalPersistentPtyShutdownOperation<E>
+    readonly get: ExperimentalPersistentPtyGetOperation<E>
+    readonly update: ExperimentalPersistentPtyUpdateOperation<E>
+    readonly snapshot: ExperimentalPersistentPtySnapshotOperation<E>
+    readonly remove: ExperimentalPersistentPtyRemoveOperation<E>
+    readonly connectToken: ExperimentalPersistentPtyConnectTokenOperation<E>
+  }
+}
+
 export type ShellListInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
 }
@@ -1664,6 +1830,7 @@ export type WorktreeCreateInput = {
   readonly projectID: Project.ID
   readonly strategy: Worktree.StrategyID
   readonly from?: AbsolutePath | undefined
+  readonly branch?: string | undefined
   readonly directory: AbsolutePath
   readonly name?: string | undefined
 }
@@ -1720,6 +1887,14 @@ export type VcsStatusInput = {
 export type VcsStatusOutput = { readonly location: Location.Info; readonly data: ReadonlyArray<Vcs.FileStatus> }
 export type VcsStatusOperation<E = never> = (input?: VcsStatusInput) => Effect.Effect<VcsStatusOutput, E>
 
+export type VcsBranchesInput = {
+  readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  readonly search?: string | undefined
+  readonly limit?: number | undefined
+}
+export type VcsBranchesOutput = { readonly location: Location.Info; readonly data: Vcs.BranchList }
+export type VcsBranchesOperation<E = never> = (input?: VcsBranchesInput) => Effect.Effect<VcsBranchesOutput, E>
+
 export type VcsDiffInput = {
   readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
   readonly mode: Vcs.Mode
@@ -1731,6 +1906,7 @@ export type VcsDiffOperation<E = never> = (input: VcsDiffInput) => Effect.Effect
 export interface VcsApi<E = never> {
   readonly get: VcsGetOperation<E>
   readonly status: VcsStatusOperation<E>
+  readonly branches: VcsBranchesOperation<E>
   readonly diff: VcsDiffOperation<E>
 }
 
@@ -1822,6 +1998,7 @@ export interface AppApi<E = never> {
   readonly skill: SkillApi<E>
   readonly event: EventApi<E>
   readonly pty: PtyApi<E>
+  readonly experimental: ExperimentalApi<E>
   readonly shell: ShellApi<E>
   readonly reference: ReferenceApi<E>
   readonly worktree: WorktreeApi<E>

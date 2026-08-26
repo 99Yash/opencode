@@ -29,6 +29,7 @@ export type DraftTab = {
   server: ServerConnection.Key
   directory: string
   worktree?: string
+  branch?: string
 }
 
 export type Tab = SessionTab | DraftTab
@@ -243,6 +244,14 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
             produce((tab) => Object.assign(tab, draft)),
           )
         })
+      },
+      initializeDraftWorktrees(server: ServerConnection.Key, directory: string, worktree: string) {
+        setStore(
+          (tab) => tab.type === "draft" && tab.server === server && tab.directory === directory && !tab.worktree,
+          produce((tab) => {
+            if (tab.type === "draft") tab.worktree = worktree
+          }),
+        )
       },
       promoteDraft(draftID: string, session: Omit<SessionTab, "type">) {
         // Keep the replacement and navigation atomic so /new-session never renders

@@ -327,7 +327,11 @@ function RejectPrompt(props: {
         id: "app.exit",
         title: "Cancel permission rejection",
         group: "Permission",
-        run() {
+        run(_input, event) {
+          if (event?.ctrl && event.name === "c" && input.plainText) {
+            input.setText("")
+            return
+          }
           props.onCancel()
         },
       },
@@ -464,6 +468,13 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
   const shortcuts = Keymap.useShortcuts()
   const id = () => props.id ?? "session.permission"
   const group = () => props.group ?? "Permission"
+  const dismiss = () => {
+    if (store.expanded) {
+      setStore("expanded", false)
+      return
+    }
+    if (props.escapeKey) props.onSelect(props.escapeKey)
+  }
 
   Keymap.createLayer(() => ({
     mode: "base",
@@ -475,7 +486,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
               title: "Reject permission",
               group: group(),
               bind: false as const,
-              run: () => props.onSelect(props.escapeKey!),
+              run: dismiss,
             },
           ]
         : []),
@@ -518,9 +529,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
         group: group(),
         run: () => props.onSelect(store.selected),
       },
-      ...(props.escapeKey
-        ? [{ bind: "escape", title: "Reject permission", group: group(), run: () => props.onSelect(props.escapeKey!) }]
-        : []),
+      ...(props.escapeKey ? [{ bind: "escape", title: "Reject permission", group: group(), run: dismiss }] : []),
     ],
     bindings: [...(props.escapeKey ? ["app.exit"] : []), ...(props.fullscreen ? ["permission.prompt.fullscreen"] : [])],
   }))

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { Effect } from "effect"
 import { Agent } from "@opencode-ai/schema/agent"
 import { Command } from "@opencode-ai/schema/command"
 import { Connection } from "@opencode-ai/schema/connection"
@@ -9,6 +10,7 @@ import { Model } from "@opencode-ai/schema/model"
 import { Provider } from "@opencode-ai/schema/provider"
 import { Reference } from "@opencode-ai/schema/reference"
 import { Skill } from "@opencode-ai/schema/skill"
+import { Vcs } from "@opencode-ai/schema/vcs"
 import { WebSearch } from "@opencode-ai/schema/websearch"
 
 const Plugin = await import("../src/effect/index")
@@ -29,6 +31,7 @@ test.each([
   expect(entrypoint.Provider).toBe(Provider)
   expect(entrypoint.Reference).toBe(Reference)
   expect(entrypoint.Skill).toBe(Skill)
+  expect(entrypoint.Vcs).toBe(Vcs)
   expect(entrypoint.WebSearch).toBe(WebSearch)
   expect(Object.keys(entrypoint).sort()).toEqual([
     "Agent",
@@ -42,8 +45,16 @@ test.each([
     "Provider",
     "Reference",
     "Skill",
+    "Vcs",
     "WebSearch",
   ])
+})
+
+test.each([
+  ["effect", Plugin.Plugin.define({ id: "svn", vcs: { markers: [".svn"] }, effect: () => Effect.void })],
+  ["promise", PromisePlugin.Plugin.define({ id: "svn", vcs: { markers: [".svn"] }, setup() {} })],
+])("%s plugin definitions retain repository markers", (_name, plugin) => {
+  expect(plugin.vcs).toEqual({ markers: [".svn"] })
 })
 
 test("tui entrypoint exposes the plugin definition", () => {
