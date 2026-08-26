@@ -301,6 +301,8 @@ export type ProjectCommands = { start?: string }
 
 export type ProjectTime = { created: number; updated: number; initialized?: number }
 
+export type ProjectIconCandidate = { path: string; url: string }
+
 export type ProjectCurrent = { id: string; directory: string; canonical: string }
 
 export type FormMetadata = { [x: string]: JsonValue }
@@ -4405,6 +4407,14 @@ export type CredentialRemoveInput = {
 export type CredentialRemoveOutput = void
 
 export type ProjectListOutput = Array<Project>
+
+export type ProjectIconsInput = {
+  readonly location?: {
+    readonly location?: { readonly directory?: string | undefined; readonly workspace?: string | undefined } | undefined
+  }["location"]
+}
+
+export type ProjectIconsOutput = Array<ProjectIconCandidate>
 
 export type ProjectUpdateInput = {
   readonly projectID: { readonly projectID: string }["projectID"]
