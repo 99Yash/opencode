@@ -95,6 +95,19 @@ describe("Tool", () => {
     }),
   )
 
+  it.effect("rejects namespace instructions on direct-only tools", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const options = { namespace: "sessions", codemode: false as const }
+      Reflect.set(options, "namespaceInstructions", "Ask first.")
+      const error = yield* transform(service, { echo: make() }, options).pipe(Effect.flip)
+
+      expect(error).toBeInstanceOf(Tool.RegistrationError)
+      expect(error.message).toBe('Namespace instructions require a Code Mode tool: "echo"')
+      expect((yield* service.snapshot()).codeModeCatalog).toEqual([])
+    }),
+  )
+
   it.effect("rejects conflicting namespace instructions before installing a registration batch", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service

@@ -145,14 +145,18 @@ const layer = Layer.effect(
         validateNamespace,
         { discard: true },
       )
-      const unbound = tools.find(
-        (tool) => tool.options?.namespaceInstructions !== undefined && tool.options.namespace === undefined,
-      )
-      if (unbound)
+      const invalid = tools.find((tool) => {
+        const direct = tool.options?.codemode === false
+        return tool.options?.namespaceInstructions !== undefined && (tool.options.namespace === undefined || direct)
+      })
+      if (invalid)
         return yield* Effect.fail(
           new RegistrationError({
-            name: unbound.name,
-            message: `Namespace instructions require a tool namespace: "${unbound.name}"`,
+            name: invalid.name,
+            message:
+              invalid.options?.namespace === undefined
+                ? `Namespace instructions require a tool namespace: "${invalid.name}"`
+                : `Namespace instructions require a Code Mode tool: "${invalid.name}"`,
           }),
         )
       const entries = normalizedEntries(tools)
