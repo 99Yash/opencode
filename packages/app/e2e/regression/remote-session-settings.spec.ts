@@ -231,6 +231,42 @@ test("settings navigation stays aligned with app Back and Forward commands", asy
   await expect(heading).toBeVisible()
 })
 
+test("new session works while draft settings are open", async ({ page }) => {
+  await installSseTransport(page, { server: serverA })
+  await installSseTransport(page, { server: serverB })
+  await mockServers(page, [])
+  await configureServers(page)
+
+  await page.goto(`/server/${base64Encode(serverB)}/session/${sessionB.id}`)
+  await expect(page.getByRole("heading", { name: sessionB.title, exact: true })).toBeVisible()
+  const newSession = page.locator('[data-slot="titlebar-v2"]').getByRole("button", { name: "New session", exact: true })
+  await newSession.click()
+  await expect(page).toHaveURL((url) => url.pathname === "/new-session" && !!url.searchParams.get("draftId"))
+  const draftURL = page.url()
+  const editor = page.locator('[data-component="composer-editor"][contenteditable="true"]')
+  await expect(editor).toBeEditable()
+  await editor.fill("Keep the original draft")
+  const tabs = page.locator("[data-titlebar-tab-slot]")
+  const activeTabs = page.locator('[data-titlebar-tab-slot][data-active="true"]')
+  await expect(tabs).toHaveCount(2)
+  await expect(activeTabs).toHaveCount(1)
+  await page.keyboard.press("Control+,")
+  const settings = page.getByTestId("settings-screen")
+  await expect(settings).toBeVisible()
+  await expect(activeTabs).toHaveCount(0)
+
+  await newSession.click()
+  await expect(page).toHaveURL(
+    (url) => url.pathname === "/new-session" && !!url.searchParams.get("draftId") && url.href !== draftURL,
+  )
+  await expect(settings).toBeHidden()
+  await expect(tabs).toHaveCount(3)
+  await expect(activeTabs).toHaveCount(1)
+  await expect(activeTabs.locator("a")).toHaveAttribute("href", `/new-session${new URL(page.url()).search}`)
+  await expect(editor).toBeEditable()
+  await expect(editor).toBeEmpty()
+})
+
 test("auto-accept responds for an unfocused server session", async ({ page }) => {
   const permissionRequests: string[] = []
   const permissionResponses: PermissionResponse[] = []

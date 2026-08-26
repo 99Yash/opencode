@@ -221,7 +221,7 @@ export function Titlebar(props: {
                   return
                 }
                 case "draft": {
-                  const activeTab = currentTab()
+                  const activeTab = matchRoute(route)
                   if (activeTab?.type !== "draft") return
 
                   const model = tabs.stateValue<ComposerState>(activeTab, "prompt")?.model.current()
