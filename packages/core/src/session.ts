@@ -47,7 +47,9 @@ import { Event } from "@opencode-ai/schema/event"
 import { Skill } from "./skill.js"
 import { Job } from "./job.js"
 import { Command } from "./command.js"
+import { Config } from "./config.js"
 import { Shell } from "./shell.js"
+import { ShellOutput } from "./shell/output.js"
 import { Global } from "@opencode-ai/util/global"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
 import { KeyedMutex } from "./effect/keyed-mutex.js"
@@ -687,6 +689,7 @@ const layer = Layer.effect(
             )
             const completed = yield* Effect.gen(function* () {
               const shell = yield* Shell.Service
+              const config = yield* Config.Service
               const terminal = yield* shell.wait(started.id).pipe(
                 Effect.map((info) => ({ info, retained: true as const })),
                 Effect.catchTag("Shell.NotFoundError", () =>
@@ -694,9 +697,9 @@ const layer = Layer.effect(
                 ),
               )
               const output = terminal.retained
-                ? yield* shell
-                    .output(started.id, { limit: SHELL_MAX_CAPTURE_BYTES })
-                    .pipe(Effect.catchTag("Shell.NotFoundError", () => Effect.succeed(missingShellOutput())))
+                ? yield* ShellOutput.preview(started, shell, config).pipe(
+                    Effect.catchTag("Shell.NotFoundError", () => Effect.succeed(missingShellOutput())),
+                  )
                 : missingShellOutput()
               return { shell: terminal.info, output }
             }).pipe(Effect.provide(locations.get(session.location)))
@@ -1119,9 +1122,6 @@ function positiveInt(value: string | null) {
   const parsed = Number(value)
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined
 }
-
-// Mirrors the shell tool's in-memory preview safety limit.
-const SHELL_MAX_CAPTURE_BYTES = 1024 * 1024
 
 export const node = makeGlobalNode({
   service: Service,
