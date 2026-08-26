@@ -116,6 +116,11 @@ it.live("returns 404 when a previously readable file is deleted", () =>
         yield* Effect.promise(() => fs.unlink(file))
         const missing = yield* Effect.promise(() => handler(new Request(url)))
         expect(missing.status).toBe(404)
+        expect(yield* Effect.promise(() => missing.json())).toEqual({
+          _tag: "FileNotFoundError",
+          path: "deleted.txt",
+          message: "File not found: deleted.txt",
+        })
       }),
     (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
   ).pipe(Effect.scoped),
