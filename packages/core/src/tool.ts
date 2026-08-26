@@ -146,7 +146,7 @@ const layer = Layer.effect(
         { discard: true },
       )
       const entries = normalizedEntries(tools)
-      yield* Effect.forEach(entries, (entry) => validateName(normalizedName(entry.tool)), { discard: true })
+      yield* Effect.forEach(entries, (entry) => validateName(entry.tool), { discard: true })
       const collision = entries.find(
         (entry, index) => entries.findIndex((candidate) => candidate.key === entry.key) !== index,
       )
@@ -270,10 +270,15 @@ function schemaMakeError(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
-const validateName = (name: string) =>
-  /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)
+const validateName = (tool: Tool.Info) => {
+  const native = tool.options?.codemode === false
+  const name = native ? effectiveName(tool) : normalizedName(tool)
+  // Code Mode uses bracket access; only native names need the provider-safe prefix.
+  const pattern = native ? /^[A-Za-z][A-Za-z0-9_-]{0,63}$/ : /^[A-Za-z0-9_-]{1,64}$/
+  return tool.name.length > 0 && pattern.test(name)
     ? Effect.void
     : Effect.fail(new RegistrationError({ name, message: `Invalid tool name: ${name}` }))
+}
 
 const validateNamespace = (namespace: string) =>
   namespace.split(".").every((segment) => /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(segment))

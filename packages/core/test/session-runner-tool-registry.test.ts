@@ -111,6 +111,79 @@ describe("Tool", () => {
     }),
   )
 
+  it.effect("executes digit-leading Code Mode names alongside other servers in one batch", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* service.transform((draft) => {
+        draft.add({ ...make(), name: "2d_get_scene", options: { namespace: "spline" } })
+        draft.add({ ...make(), name: "3d_get_scene", options: { namespace: "spline", codemode: true } })
+        draft.add({ ...make(), name: "lookup", options: { namespace: "context7" } })
+        draft.add({ ...make(), name: "123" })
+      })
+
+      const snapshot = yield* service.snapshot()
+      expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["execute"])
+      expect(snapshot.codeModeCatalog?.map((tool) => tool.path)).toEqual([
+        "123",
+        "context7.lookup",
+        "spline.2d_get_scene",
+        "spline.3d_get_scene",
+      ])
+      const result = yield* snapshot.execute({
+        ...call("execute"),
+        call: {
+          type: "tool-call",
+          id: "call-digit-leading",
+          name: "execute",
+          input: {
+            code: `const results = await Promise.all([
+              tools.spline["2d_get_scene"]({ text: "2d" }),
+              tools.spline["3d_get_scene"]({ text: "3d" }),
+              tools.context7.lookup({ text: "other" }),
+              tools["123"]({ text: "root" }),
+            ]); return results.map(result => result.text).join(",");`,
+          },
+        },
+      })
+      expect(result.content).toEqual([{ type: "text", text: "2d,3d,other,root" }])
+    }),
+  )
+
+  it.effect("validates and executes the namespaced name of native tools", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      yield* transform(service, { "2d_get_scene": make() }, { namespace: "spline", codemode: false })
+
+      const snapshot = yield* service.snapshot()
+      expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["spline_2d_get_scene", "execute"])
+      expect((yield* snapshot.execute(call("spline_2d_get_scene"))).output).toEqual({ text: "spline_2d_get_scene" })
+
+      const error = yield* transform(
+        service,
+        { ["x".repeat(64)]: make() },
+        { namespace: "spline", codemode: false },
+      ).pipe(Effect.flip)
+      expect(error.message).toBe(`Invalid tool name: spline_${"x".repeat(64)}`)
+      const empty = yield* transform(service, { "": make() }, { namespace: "spline", codemode: false }).pipe(
+        Effect.flip,
+      )
+      expect(empty.message).toBe("Invalid tool name: spline_")
+    }),
+  )
+
+  it.effect("keeps Code Mode names nonempty without limiting the combined namespace length", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const error = yield* transform(service, { "": make() }, { namespace: "spline" }).pipe(Effect.flip)
+      expect(error.message).toBe("Invalid tool name: ")
+
+      yield* transform(service, { ["x".repeat(64)]: make() }, { namespace: "spline" })
+      expect((yield* service.snapshot()).codeModeCatalog?.map((tool) => tool.path)).toEqual([
+        `spline.${"x".repeat(64)}`,
+      ])
+    }),
+  )
+
   it.effect("rejects invalid tool definitions before installing any tools", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service
