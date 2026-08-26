@@ -39,6 +39,7 @@ import { marqueeCycleWidth, marqueeOverflows, marqueeTextParts } from "../util/m
 import { useDialog } from "../ui/dialog"
 import { DialogSessionRename } from "./dialog-session-rename"
 import { Keymap } from "../context/keymap"
+import { Spinner } from "./spinner"
 
 // A long title fades out over its last cells instead of cutting hard.
 const FADE_WIDTH = 4
@@ -377,13 +378,13 @@ export function SessionTabs(
 }
 
 function VerticalSessionTabs(props: { controller?: SessionTabsController; animations?: boolean; width?: number }) {
-  const contextTabs = useSessionTabs()
-  const tabs: SessionTabsController = props.controller ?? contextTabs
+  const tabs: SessionTabsController = props.controller ?? useSessionTabs()
   const data = useData()
   const theme = useTheme("elevated")
   const { mode } = useThemes()
   const config = useConfig().data
   const animations = () => props.animations ?? config.animations ?? true
+  const statusIcons = () => config.experimental?.["tab-status-icons"] === true
   const width = () => props.width ?? SESSION_SIDEBAR_WIDTH
   const hueStep = () => (mode() === "light" ? 800 : 200)
   const accent = () => theme.hue.accent[hueStep()]
@@ -755,14 +756,26 @@ function VerticalSessionTabs(props: { controller?: SessionTabsController; animat
                       onLevel={setSweepLevel}
                     />
                     <box zIndex={1} width="100%" flexDirection="row" paddingRight={1}>
-                      <text
-                        width={numberWidth() + 1}
-                        fg={numberColor()}
-                        selectable={false}
-                        attributes={selected() ? TextAttributes.BOLD : undefined}
+                      <Show
+                        when={statusIcons() && runs()}
+                        fallback={
+                          <text
+                            width={numberWidth() + 1}
+                            fg={numberColor()}
+                            selectable={false}
+                            attributes={selected() ? TextAttributes.BOLD : undefined}
+                          >
+                            {(statusIcons() && !status().busy && status().unread !== undefined
+                              ? "•"
+                              : sessionTabNumberLabel(index())
+                            ).padStart(numberWidth())}
+                          </text>
+                        }
                       >
-                        {sessionTabNumberLabel(index()).padStart(numberWidth())}
-                      </text>
+                        <box width={numberWidth() + 1} flexShrink={0} paddingLeft={numberWidth() - 1}>
+                          <Spinner color={theme.text.subdued} animations={animations()} />
+                        </box>
+                      </Show>
                       <text
                         width={titleWidth()}
                         fg={foreground()}
@@ -930,6 +943,7 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
   const { mode } = useThemes()
   const config = useConfig().data
   const animations = () => props.animations ?? config.animations ?? true
+  const statusIcons = () => config.experimental?.["tab-status-icons"] === true
   const [addHovered, setAddHovered] = createSignal(false)
   const marquee = createTabMarquee(animations)
   const hovered = marquee.hovered
@@ -1332,9 +1346,23 @@ function HorizontalSessionTabs(props: { controller?: SessionTabsController; anim
                 onLevel={setSweepLevel}
               />
               <box zIndex={1} width="100%" flexDirection="row">
-                <text width={numberWidth() + 1} fg={numberColor()} selectable={false} attributes={bold()}>
-                  {(tab === NEW_SESSION_TAB ? "+" : sessionTabNumberLabel(tabNumber() - 1)).padStart(numberWidth())}
-                </text>
+                <Show
+                  when={statusIcons() && runs()}
+                  fallback={
+                    <text width={numberWidth() + 1} fg={numberColor()} selectable={false} attributes={bold()}>
+                      {(tab === NEW_SESSION_TAB
+                        ? "+"
+                        : statusIcons() && !status().busy && status().unread !== undefined
+                          ? "•"
+                          : sessionTabNumberLabel(tabNumber() - 1)
+                      ).padStart(numberWidth())}
+                    </text>
+                  }
+                >
+                  <box width={numberWidth() + 1} flexShrink={0} paddingLeft={numberWidth() - 1}>
+                    <Spinner color={theme.text.subdued} animations={animations()} />
+                  </box>
+                </Show>
                 <text
                   width={availableTitleWidth()}
                   fg={foreground()}

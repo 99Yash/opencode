@@ -15,6 +15,11 @@ type Experiment = {
 // unconditional) or dies (delete the entry and the branch it gated).
 export const experiments: Experiment[] = [
   {
+    id: "tab-status-icons",
+    title: "Tab status icons",
+    description: "Show a spinner while working, a small dot when unread, and tab numbers otherwise",
+  },
+  {
     id: "session-preview-tabs",
     title: "Session preview tabs",
     description: "Preview sessions in temporary tabs before keeping them open",
