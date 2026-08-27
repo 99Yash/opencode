@@ -58,6 +58,23 @@ void checkError
 
 LayerNode.compile(a, [[a, Layer.succeed(A, A.of({}))]])
 LayerNode.compile(a, [[a, make({ service: A, layer: Layer.succeed(A, A.of({})), deps: [] })]])
+LayerNode.compile(a, [[a, make({ service: A, layer: Layer.mergeAll(aLayer, Layer.succeed(B, B.of({}))), deps: [] })]])
+
+const invalidMissingOutputs = () => {
+  const empty = make({ service: A, layer: Layer.empty, deps: [] })
+  const bundle = make({ name: "bundle", layer: Layer.mergeAll(aLayer, Layer.succeed(B, B.of({}))), deps: [] })
+  const partial = make({ name: "bundle", layer: aLayer, deps: [] })
+
+  // @ts-expect-error A node replacement cannot remove all source outputs
+  LayerNode.compile(a, [[a, empty]])
+  // @ts-expect-error A node replacement must preserve every bundled output
+  LayerNode.compile(bundle, [[bundle, partial]])
+  // @ts-expect-error Hoisting enforces the same replacement output coverage
+  LayerNode.hoist(bundle, tags.values.app, [[bundle, partial]])
+  // @ts-expect-error Effective-graph inspection validates replacements too
+  LayerNode.hasUnbound(inputDependent, inputA, [[a, empty]])
+}
+void invalidMissingOutputs
 
 // @ts-expect-error Replacement must provide A
 LayerNode.compile(a, [[a, Layer.succeed(B, B.of({}))]])

@@ -118,9 +118,15 @@ type CheckReplacementErrors<SourceError, ReplacementError> = [Exclude<Replacemen
   ? unknown
   : { readonly "New replacement errors": Exclude<ReplacementError, SourceError> }
 
+type CheckReplacementOutputs<SourceOutput, ReplacementOutput> = [Exclude<SourceOutput, ReplacementOutput>] extends [
+  never,
+]
+  ? unknown
+  : { readonly "Missing replacement outputs": Exclude<SourceOutput, ReplacementOutput> }
+
 type CheckReplacement<Item> = Item extends readonly [Node<infer A, infer E, infer T>, infer Replacement]
-  ? Replacement extends Node<NoInfer<A>, infer E2, T>
-    ? CheckReplacementErrors<E, NoInfer<E2>>
+  ? Replacement extends Node<infer A2, infer E2, T>
+    ? CheckReplacementOutputs<A, NoInfer<A2>> & CheckReplacementErrors<E, NoInfer<E2>>
     : Replacement extends Layer.Layer<NoInfer<A>, infer E2, never>
       ? CheckReplacementErrors<E, NoInfer<E2>>
       : { readonly "Invalid replacement": Replacement }
@@ -218,28 +224,41 @@ export function hoist<A, E, T extends Tag, const Items extends Replacements = re
 } {
   const hoisted = new Map<string, AnyNode>()
   const replacementMap = replacementMapFrom(replacements)
-
-  const node = walk<AnyNode>(
+  const definitions = new Map<string, AnyNode>()
+  // Validate the entire effective closure, including dependencies below hoisted roots.
+  const effective = walk<AnyNode>(
     root,
     (node, context) => {
-      if (node.kind === "group") {
-        return { ...node, dependencies: node.dependencies.map(context.visit) }
-      }
-      if (node.tag === tag) {
-        const existing = hoisted.get(node.name)
-        if (existing && existing.implementation !== node.implementation) {
+      const dependencies = node.dependencies.map(context.visit)
+      const result = dependencies.every((dependency, index) => dependency === node.dependencies[index])
+        ? node
+        : { ...node, dependencies }
+      if (node.kind !== "group" && node.tag === tag) {
+        const existing = definitions.get(node.name)
+        if (existing && !sameDefinition(existing, result)) {
           throw new Error(`Tag ${tag} has conflicting implementations for ${node.name}`)
         }
-        hoisted.set(node.name, rewriteReplacementDependencies(node, replacementMap))
-        return group([])
+        if (existing) return existing
+        definitions.set(node.name, result)
       }
-      if (node.kind === "unbound") {
-        return node
-      }
-      return { ...node, dependencies: node.dependencies.map(context.visit) }
+      return result
     },
-    { resolve: (node) => replacementMap.get(node.name) ?? node },
+    { resolve: (node) => resolveReplacement(node, replacementMap) },
   )
+
+  const node = walk<AnyNode>(effective, (node, context) => {
+    if (node.kind === "group") {
+      return { ...node, dependencies: node.dependencies.map(context.visit) }
+    }
+    if (node.tag === tag) {
+      hoisted.set(node.name, node)
+      return group([])
+    }
+    if (node.kind === "unbound") {
+      return node
+    }
+    return { ...node, dependencies: node.dependencies.map(context.visit) }
+  })
 
   return {
     node: node as Node<A, E>,
@@ -264,7 +283,7 @@ export function compile<A, E, const Items extends Replacements = readonly []>(
           ? implementation
           : implementation.pipe(Layer.provide(dependencies as [RuntimeLayer, ...RuntimeLayer[]]))
       },
-      { cache, resolve: (node) => replacementMap.get(node.name) ?? node },
+      { cache, resolve: (node) => resolveReplacement(node, replacementMap) },
     )
   const layers = flatten(root).map((node) => compileNode(node))
   const layer = layers.reduce<RuntimeLayer>((result, layer) => layer.pipe(Layer.provideMerge(result)), Layer.empty)
@@ -272,58 +291,51 @@ export function compile<A, E, const Items extends Replacements = readonly []>(
 }
 
 function replacementMapFrom(replacements?: Replacements) {
+  // Resolve dependencies only after the last override wins, not in intermediate graphs.
+  return new Map(replacements?.map(([source, replacement]) => [source.name, replacementNode(source, replacement)]))
+}
+
+function resolveReplacement(node: AnyNode, replacements: ReturnType<typeof replacementMapFrom>) {
+  const replacement = replacements.get(node.name)
+  if (!replacement) return node
+  if (node.tag !== replacement.tag) {
+    throw new Error(`Cannot replace ${node.name} across tags`)
+  }
+  return replacement
+}
+
+function sameDefinition(left: AnyNode, right: AnyNode): boolean {
+  if (left === right) return true
+  if (
+    left.kind !== right.kind ||
+    left.name !== right.name ||
+    left.tag !== right.tag ||
+    left.implementation !== right.implementation
+  )
+    return false
+  const leftDependencies = left.dependencies.flatMap(flatten)
+  const rightDependencies = right.dependencies.flatMap(flatten)
   return (
-    replacements?.reduce((map, [source, replacement]) => {
-      const normalized = rewriteReplacementDependencies(replacementNode(source, replacement), map)
-      const current = new Map([[source.name, normalized]])
-      for (const [name, node] of map) map.set(name, rewriteReplacementDependencies(node, current))
-      map.set(source.name, normalized)
-      return map
-    }, new Map<string, AnyNode>()) ?? new Map<string, AnyNode>()
+    leftDependencies.length === rightDependencies.length &&
+    leftDependencies.every((dependency, index) => sameDefinition(dependency, rightDependencies[index]))
   )
 }
 
-function rewriteReplacementDependencies(root: AnyNode, replacements: ReadonlyMap<string, AnyNode>) {
-  if (replacements.size === 0) return root
-  const cache = new Map<AnyNode, AnyNode>()
-  const visiting = new Set<AnyNode>()
-  const stack: AnyNode[] = []
-
-  const recur = (node: AnyNode, isRoot = false): AnyNode => {
-    const target = isRoot ? node : (replacements.get(node.name) ?? node)
-    const cached = cache.get(target)
-    if (cached !== undefined || cache.has(target)) return cached!
-    if (visiting.has(target)) {
-      const start = stack.indexOf(target)
-      throw new Error(
-        `Cycle detected in layer tree: ${[...stack.slice(start), target].map((item) => item.name).join(" -> ")}`,
-      )
-    }
-
-    visiting.add(target)
-    stack.push(target)
-    try {
-      const dependencies = target.dependencies.map((dependency) => recur(dependency))
-      const result = dependencies.every((dependency, index) => dependency === target.dependencies[index])
-        ? target
-        : { ...target, dependencies }
-      cache.set(target, result)
-      return result
-    } finally {
-      stack.pop()
-      visiting.delete(target)
-    }
-  }
-
-  return recur(root, true)
-}
-
-export function hasUnbound(root: Node<unknown, unknown, any>, source: AnyNode): boolean {
+export function hasUnbound<const Items extends Replacements = readonly []>(
+  root: Node<unknown, unknown, any>,
+  source: AnyNode,
+  replacements?: ValidReplacements<Items>,
+): boolean {
   if (source.kind !== "unbound") throw new Error(`Cannot check non-unbound layer node: ${source.name}`)
-  return walk<boolean>(root, (node, context) => {
-    if (node === source) return true
-    return node.dependencies.some(context.visit)
-  })
+  const replacementMap = replacementMapFrom(replacements)
+  return walk<boolean>(
+    root,
+    (node, context) => {
+      if (node === source) return true
+      return node.dependencies.some(context.visit)
+    },
+    { resolve: (node) => resolveReplacement(node, replacementMap) },
+  )
 }
 
 function flatten(node: AnyNode): readonly AnyNode[] {

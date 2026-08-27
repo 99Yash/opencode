@@ -31,6 +31,26 @@ describe("node build", () => {
     expect(await Effect.runPromise(program)).toBe("plain")
   })
 
+  test("binds a location service map introduced by a replacement", async () => {
+    const original = Node.makeGlobalNode({
+      service: Result,
+      layer: Layer.succeed(Result, Result.of({ value: "original" })),
+      deps: [],
+    })
+    const replacement = Node.makeGlobalNode({
+      service: Result,
+      layer: Layer.effect(Result, Effect.as(LocationServiceMap.Service, Result.of({ value: "bound" }))),
+      deps: [LocationServiceMap.node],
+    })
+    const value = await Effect.runPromise(
+      Effect.map(Result, (result) => result.value).pipe(
+        Effect.provide(AppNodeBuilder.build(original, [[original, replacement]])),
+      ),
+    )
+
+    expect(value).toBe("bound")
+  })
+
   test("detects cycles through a replaced location service map", async () => {
     const a = Node.makeGlobalNode({
       service: CycleA,
