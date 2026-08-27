@@ -5,6 +5,7 @@ import { testRender } from "@opentui/solid"
 import type {
   Context,
   Destination,
+  DialogOptions,
   KeymapCommand,
   KeymapLayer,
   Page,
@@ -20,7 +21,7 @@ import diffViewerPlugin from "../../../src/feature-plugins/system/diff-viewer"
 import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { TestTuiContexts } from "../../fixture/tui-environment"
 import { createApi, createEventStream, createFetch, json } from "../../fixture/tui-client"
-import { DialogProvider } from "../../../src/ui/dialog"
+import { DialogProvider, useDialog } from "../../../src/ui/dialog"
 import { ToastProvider } from "../../../src/ui/toast"
 import { createSignal } from "solid-js"
 
@@ -56,6 +57,43 @@ test("ctrl+c closes the diff viewer without exiting the application", async () =
     viewer.app.mockInput.pressKey("c", { ctrl: true })
     await viewer.app.waitFor(() => viewer.current().type !== "plugin")
     expect(viewer.current()).toEqual(startRoute)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test("diff help advertises and runs the configured close shortcut", async () => {
+  const viewer = await renderDiffViewer([], { keybinds: { "diff.close": "x" } })
+
+  try {
+    viewer.commands.get("diff.help")!.run()
+    await viewer.app.waitForFrame((frame) => frame.includes("Diff shortcuts"))
+    expect(viewer.app.captureCharFrame()).toContain("x    Close viewer")
+
+    viewer.clearDialog()
+    await viewer.app.waitForFrame((frame) => !frame.includes("Diff shortcuts"))
+    expect(viewer.current().type).toBe("plugin")
+
+    viewer.app.mockInput.pressKey("x")
+    await viewer.app.waitFor(() => viewer.current().type !== "plugin")
+    expect(viewer.current()).toEqual(startRoute)
+  } finally {
+    viewer.app.renderer.destroy()
+  }
+})
+
+test.each([
+  [undefined, "escapClose viewer"],
+  ["none" as const, "-    Close viewer"],
+])("diff help preserves the default and unbound close display", async (binding, expected) => {
+  const viewer = await renderDiffViewer([], {
+    keybinds: binding === undefined ? undefined : { "diff.close": binding },
+  })
+
+  try {
+    viewer.commands.get("diff.help")!.run()
+    await viewer.app.waitForFrame((frame) => frame.includes("Diff shortcuts"))
+    expect(viewer.app.captureCharFrame()).toContain(expected)
   } finally {
     viewer.app.renderer.destroy()
   }
@@ -163,6 +201,7 @@ async function renderDiffViewer(
   let renderCommands: SlotClaim<"app">["render"] | undefined
   let vcsDiffInput: unknown
   let shortcut: (command: string) => string | undefined = () => undefined
+  let clearDialog = () => {}
   const config = createTuiResolvedConfig({ keybinds: options.keybinds })
   const transport = createFetch((url) => {
     if (url.pathname !== "/api/vcs/diff") return
@@ -182,6 +221,8 @@ async function renderDiffViewer(
     function Content() {
       const keymap = Keymap.use()
       const shortcuts = Keymap.useShortcuts()
+      const dialog = useDialog()
+      clearDialog = dialog.clear
       shortcut = shortcuts.get
       theme = useThemes().currentTokens()
       const context = {
@@ -207,9 +248,12 @@ async function renderDiffViewer(
         },
         ui: {
           dialog: {
-            show: () => () => {},
-            set() {},
-            clear() {},
+            show: dialog.replace,
+            set(options: DialogOptions) {
+              dialog.setSize(options.size ?? "medium")
+              dialog.setCentered(options.centered ?? false)
+            },
+            clear: dialog.clear,
           },
           router: {
             register(page: Page) {
@@ -272,6 +316,7 @@ async function renderDiffViewer(
     app,
     commands,
     current,
+    clearDialog: () => clearDialog(),
     shortcut: (command: string) => shortcut(command),
     vcsDiffInput: () => vcsDiffInput,
   }

@@ -949,7 +949,7 @@ function DiffViewerHelpDialog(props: { context: Plugin.Context }) {
   const shortcut = (id: string) => () => props.context.keymap.shortcuts(id)[0]
   const rows = [
     {
-      shortcut: () => "q",
+      shortcut: shortcut("diff.close"),
       action: "Close viewer",
       description: "Quit the diff viewer",
     },
