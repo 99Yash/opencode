@@ -39,6 +39,40 @@ function makeSource() {
 }
 
 describe("EventFeed", () => {
+  it.effect("delivers typed RPC events without SSE encoding and filters internal events", () =>
+    Effect.gen(function* () {
+      const source = makeSource()
+      const feed = yield* EventFeed.make(source.observe, {
+        capacity: 1,
+        encode: () => {
+          throw new Error("RPC-only subscribers must not encode SSE")
+        },
+      })
+      const stream = yield* feed.subscribeEvents
+      yield* source.publish(internal("one"))
+      yield* source.publish(internal("two"))
+      const payload = event("rpc")
+      yield* source.publish(payload)
+      expect(yield* stream.pipe(Stream.take(1), Stream.runCollect)).toEqual([payload])
+    }),
+  )
+
+  it.effect("bounds RPC subscriber lag independently of HTTP subscribers", () =>
+    Effect.gen(function* () {
+      const source = makeSource()
+      const feed = yield* EventFeed.make(source.observe, { capacity: 1 })
+      const slow = yield* feed.subscribeEvents
+      yield* source.publish(event("one"))
+      const http = yield* feed.subscribe
+      const payload = event("two")
+      yield* source.publish(payload)
+      const exit = yield* slow.pipe(Stream.runCollect, Effect.exit)
+      expect(Exit.isFailure(exit)).toBeTrue()
+      expect(Option.getOrUndefined(Exit.findErrorOption(exit))).toBeInstanceOf(EventFeed.SubscriberOverflowError)
+      expect(yield* http.pipe(Stream.take(1), Stream.runCollect)).toEqual([EventFeed.frame(payload)])
+    }),
+  )
+
   test("preserves the public SSE frame encoding", () => {
     const payload = event("wire")
     expect(EventFeed.frame(payload)).toBe(`data: ${JSON.stringify(payload)}\n\n`)

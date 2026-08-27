@@ -36,6 +36,8 @@ import { Context, Effect, Layer, Option } from "effect"
 import { Api } from "./api"
 import { ServerAuth } from "./auth"
 import { handlers } from "./handlers"
+import { rpcRoutes } from "./rpc"
+import { EventFeed } from "./event-feed"
 import { authorizationLayer } from "./middleware/authorization"
 import { schemaErrorLayer } from "./middleware/schema-error"
 import { PtyEnvironment } from "./pty-environment"
@@ -147,7 +149,8 @@ function makeRoutes<AuthError, AuthServices>(
         ),
         ServerInfo.layer(serviceURLs, options.app),
       )
-      const api = HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }).pipe(
+      const api = Layer.merge(HttpApiBuilder.layer(Api, { openapiPath: "/openapi.json" }), rpcRoutes).pipe(
+        Layer.provide(EventFeed.layer.pipe(Layer.provide(services))),
         Layer.provide(handlers.pipe(Layer.provide(services))),
         Layer.provide(formLocationLayer),
         Layer.provide(sessionLocationLayer),

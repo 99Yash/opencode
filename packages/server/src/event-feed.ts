@@ -22,6 +22,7 @@ export type Error = SubscriberOverflowError | EncodingError
 
 export interface Interface {
   readonly subscribe: Effect.Effect<Stream.Stream<string, Error>, never, Scope.Scope>
+  readonly subscribeEvents: Effect.Effect<Stream.Stream<OpenCodeEvent, Error>, never, Scope.Scope>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/server/EventFeed") {}
@@ -37,6 +38,7 @@ export const make = Effect.fn("EventFeed.make")(function* (
   const capacity = options?.capacity ?? SubscriberCapacity
   const render = options?.encode ?? frame
   const subscribers = new Set<Queue.Queue<string, Error>>()
+  const events = new Set<Queue.Queue<OpenCodeEvent, Error>>()
 
   const fail = (error: Error) =>
     Effect.sync(() => {
@@ -47,6 +49,11 @@ export const make = Effect.fn("EventFeed.make")(function* (
 
   const publish = Effect.fnUntraced(function* (event: Event.Payload) {
     if (!isOpenCodeEvent(event)) return
+    for (const subscriber of events) {
+      if (Queue.offerUnsafe(subscriber, event)) continue
+      events.delete(subscriber)
+      Queue.failCauseUnsafe(subscriber, Cause.fail(new SubscriberOverflowError({ capacity })))
+    }
     if (subscribers.size === 0) return
     const encoded = yield* Effect.try({
       try: () => render(event),
@@ -72,6 +79,10 @@ export const make = Effect.fn("EventFeed.make")(function* (
   yield* Effect.addFinalizer(() => unsubscribe)
 
   return Service.of({
+    subscribeEvents: Effect.acquireRelease(
+      Queue.dropping<OpenCodeEvent, Error>(capacity).pipe(Effect.tap((queue) => Effect.sync(() => events.add(queue)))),
+      (queue) => Effect.sync(() => events.delete(queue)).pipe(Effect.andThen(Queue.shutdown(queue)), Effect.asVoid),
+    ).pipe(Effect.map(Stream.fromQueue)),
     subscribe: Effect.acquireRelease(
       Queue.dropping<string, Error>(capacity).pipe(Effect.tap((queue) => Effect.sync(() => subscribers.add(queue)))),
       (queue) =>

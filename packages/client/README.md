@@ -6,6 +6,7 @@ Private generation target for clients derived directly from OpenCode's authorita
 
 - `@opencode-ai/client`: zero-Effect Promise client using `fetch`.
 - `@opencode-ai/client/effect`: rich Effect network client using an environment-provided `HttpClient`.
+- `@opencode-ai/client/effect/rpc`: native Effect RPC over a single scoped WebSocket.
 
 The generated surface includes every standard HTTP group from Server's concrete API. The build compiler reads `@opencode-ai/server/api`; the generated Effect runtime imports a client-local projection built from Protocol, with a generation-equivalence test preventing transport drift. Custom transports such as the PTY WebSocket connection remain outside the generic HTTP client. Run `bun run generate` after changing the contract and `bun run check:generated` to detect committed-output drift.
 
@@ -25,3 +26,36 @@ yield *
   })
 yield * client.sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Hello" }) })
 ```
+
+## WebSocket RPC
+
+The additive `/api/rpc` transport derives its operation contracts from Protocol's HTTP schemas; existing HTTP clients are unchanged. Use operation identifiers directly, with decoded `params`, `query`, and `payload` fields where declared. Numeric queries are numbers, not HTTP strings. Optional `location: { directory, workspace? }` selects per-call location context; session-specific operations retain their existing session location rules.
+
+```ts
+import { OpenCodeRpc } from "@opencode-ai/client/effect/rpc"
+import { Effect, Redacted, Stream } from "effect"
+
+declare const token: string // Base64 of "opencode:<server password>", not the raw password.
+
+const program = Effect.gen(function* () {
+  const client = yield* OpenCodeRpc.make({
+    url: "wss://opencode.example/api/rpc",
+    authToken: Redacted.make(token),
+  })
+  const events = yield* client["event.subscribe"]({}).pipe(
+    Stream.runForEach((event) => Effect.log(event.type)),
+    Effect.forkScoped,
+  )
+  const sessions = yield* client["session.list"]({ query: {} })
+  // Both requests share the connection; interrupting events cancels only that subscription.
+  return sessions
+})
+
+Effect.runPromise(Effect.scoped(program))
+```
+
+Keep the scope open while consuming streams. Scope closure closes the socket and cancels outstanding work. Connection failures are surfaced rather than replaying potentially mutating requests; create a new scoped client to reconnect. Browsers use their native WebSocket constructor, with an optional `webSocketConstructor` override for other runtimes. Authentication uses the server's existing `auth_token` upgrade mechanism; treat the resulting URL as sensitive and do not log it.
+
+Streaming operations return native Effect Streams of the original typed items, not SSE text. No-content operations return `void`. `fs.read` takes `params: { path: "relative/file" }` plus `query: {}` and returns `{ content: Uint8Array, mime: string }`, with bytes encoded as base64 on the wire. Raw `pty.connect` and `persistentPty.connect` remain on their existing WebSocket routes.
+
+From `packages/server`, run `bun run script/benchmark-rpc.ts` for an isolated loopback comparison of HTTP and RPC session-list calls. It uses an in-memory database, temporary configuration, and schema-decoding clients at concurrency 1 and 16. This measures transport overhead, not end-to-end desktop/web speed; the apps still use HTTP until explicitly switched.

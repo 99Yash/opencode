@@ -6,17 +6,19 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { response } from "../location"
 
+export const readFile = Effect.fn("Server.readFile")(function* (path: RelativePath) {
+  const fs = yield* FileSystem.Service
+  return yield* fs.read({ path })
+})
+
 export const FileSystemHandler = HttpApiBuilder.group(Api, "server.fs", (handlers) =>
   Effect.gen(function* () {
     return handlers
       .handleRaw("fs.read", (ctx) =>
         Effect.gen(function* () {
-          const fs = yield* FileSystem.Service
-          const file = yield* fs.read({
-            path: RelativePath.make(
-              decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13)),
-            ),
-          })
+          const file = yield* readFile(
+            RelativePath.make(decodeURIComponent(new URL(ctx.request.url, "http://localhost").pathname.slice(13))),
+          )
           return HttpServerResponse.uint8Array(file.content, { contentType: file.mime })
         }),
       )
