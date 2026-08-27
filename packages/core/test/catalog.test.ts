@@ -30,6 +30,70 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("Catalog", () => {
+  it.effect("refreshes scoped sources and replays only changed snapshots", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const source = { fresh: false, calls: 0 }
+      yield* catalog.transform((draft) => {
+        if (!source.fresh) return
+        draft.model.update(Provider.ID.make("example"), Model.ID.make("chat"), () => {})
+        draft.model.default.set(Provider.ID.make("example"), Model.ID.make("chat"))
+      })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* catalog.onRefresh(() =>
+            Effect.sync(() => {
+              source.calls++
+              if (source.fresh) return false
+              source.fresh = true
+              return true
+            }),
+          )
+          expect(yield* catalog.model.default()).toBeUndefined()
+          const refresh = yield* catalog.refresh().pipe(Effect.forkScoped)
+          yield* TestClock.adjust("1 second")
+          yield* Fiber.join(refresh)
+          expect((yield* catalog.model.default())?.id).toBe(Model.ID.make("chat"))
+          expect(source.calls).toBe(1)
+          yield* catalog.refresh()
+          expect(source.calls).toBe(2)
+        }),
+      )
+      yield* catalog.refresh()
+      expect(source.calls).toBe(2)
+    }),
+  )
+
+  it.effect("finishes replay before releasing an interrupted refresh", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const source = { fresh: false }
+      yield* catalog.transform((draft) => {
+        if (source.fresh) draft.model.update(Provider.ID.make("example"), Model.ID.make("chat"), () => {})
+      })
+      yield* catalog.onRefresh(() =>
+        Effect.sync(() => {
+          if (source.fresh) return false
+          source.fresh = true
+          return true
+        }),
+      )
+      const refresh = yield* catalog.refresh().pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* TestClock.adjust("0 millis")
+      const interrupted = yield* Fiber.interrupt(refresh).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* TestClock.adjust("0 millis")
+      const retry = yield* catalog.refresh().pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* TestClock.adjust("0 millis")
+      expect(retry.pollUnsafe()).toBeUndefined()
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(interrupted)
+      yield* Fiber.join(retry)
+      expect((yield* catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat")))?.id).toBe(
+        Model.ID.make("chat"),
+      )
+    }),
+  )
+
   it.effect("publishes an updated event after catalog changes", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

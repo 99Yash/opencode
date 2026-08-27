@@ -1,9 +1,10 @@
-import { Duration, Effect, Schema, Semaphore, Stream } from "effect"
+import { Cause, Duration, Effect, Schedule, Schema, Stream } from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { define } from "@opencode-ai/plugin/effect/plugin"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Bus } from "../../bus.js"
+import { Catalog } from "../../catalog.js"
 import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
 import { Model } from "../../model.js"
@@ -12,6 +13,8 @@ import { ConfigProviderV1 } from "../../v1/config/provider.js"
 import { Money } from "@opencode-ai/schema/money"
 import { ConfigProviderOptionsV1 } from "../../v1/config/provider-options.js"
 import { ConfigV1 } from "../../v1/config/config.js"
+import { SessionEvent } from "../../session/event.js"
+import { isDeepStrictEqual } from "node:util"
 
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
@@ -82,28 +85,43 @@ function oauth(http: HttpClient.HttpClient) {
   } satisfies IntegrationOAuthMethodRegistration
 }
 
-export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Scope>({
+export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catalog.Service | Scope.Scope>({
   id: "opencode.provider.opencode",
   effect: Effect.fn(function* (ctx) {
     const bus = yield* Bus.Service
+    const catalog = yield* Catalog.Service
     const http = yield* HttpClient.HttpClient
-    const loading = Semaphore.makeUnsafe(1)
-    let connected = false
     let providers: typeof ConfigV1.Info.Type.provider | undefined
+    let source: string | undefined
+    let retrying = false
 
     const load = Effect.fn("OpencodePlugin.load")(function* () {
       const connection = yield* ctx.integration.connection.active("opencode")
-      const credential = connection
-        ? yield* ctx.integration.connection.resolve(connection).pipe(Effect.orElseSucceed(() => undefined))
-        : undefined
-      connected = connection !== undefined
-      providers = credential
-        ? yield* fetchProviders(http, credential).pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(Effect.as(undefined)),
+      const id = connection?.type === "credential" ? connection.id : connection?.name
+      const next = connection
+        ? yield* ctx.integration.connection.resolve(connection).pipe(
+            Effect.flatMap((credential) => (credential ? fetchProviders(http, credential) : Effect.undefined)),
+            Effect.retry({ while: retryable, times: 2, schedule: Schedule.exponential(200) }),
+            Effect.timeout("5 seconds"),
+            Effect.tap(() =>
+              Effect.sync(() => {
+                retrying = false
+              }),
             ),
+            Effect.catch((cause) => {
+              retrying = retryable(cause)
+              // Retain inventory through same-account outages, never across an account switch.
+              return Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
+                Effect.as(id === source ? providers : undefined),
+              )
+            }),
           )
         : undefined
+      if (!connection) retrying = false
+      const changed = source !== id || !isDeepStrictEqual(providers, next)
+      source = id
+      providers = next
+      return changed
     })
 
     yield* ctx.integration.transform((draft) => {
@@ -176,7 +194,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
 
       const item = catalog.provider.get(Provider.ID.opencode)
       if (!item) return
-      const hasKey = Boolean(process.env.OPENCODE_API_KEY || connected || item.provider.settings?.apiKey)
+      const hasKey = Boolean(process.env.OPENCODE_API_KEY || source !== undefined || item.provider.settings?.apiKey)
       catalog.provider.update(item.provider.id, (provider) => {
         if (!hasKey) {
           provider.activation = "enabled"
@@ -192,14 +210,39 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
       }
     })
 
-    const refresh = () => loading.withPermit(load().pipe(Effect.andThen(ctx.catalog.reload())))
-    yield* bus.subscribe(Credential.Event.Switched).pipe(
-      Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
-      Stream.runForEach(refresh),
+    yield* catalog.onRefresh(load)
+    yield* bus.subscribe([Credential.Event.Switched, SessionEvent.Moved]).pipe(
+      Stream.filter((event) =>
+        event.type === "credential.switched"
+          ? event.data.integrationID === Integration.ID.make("opencode")
+          : event.data.location.directory === ctx.location.directory &&
+            event.data.location.workspaceID === ctx.location.workspaceID,
+      ),
+      Stream.runForEach(() => catalog.refresh()),
       Effect.forkScoped({ startImmediately: true }),
     )
+    // A failed startup must recover even when no session or account action triggers another lookup.
+    let delay = 5_000
+    yield* Effect.gen(function* () {
+      yield* Effect.sleep(delay)
+      if (retrying) yield* catalog.refresh()
+      delay = retrying ? Math.min(delay * 2, 30_000) : 5_000
+    }).pipe(Effect.forever, Effect.forkScoped)
   }),
 })
+
+function retryable(cause: unknown): boolean {
+  if (cause instanceof Integration.AuthorizationError) return retryable(cause.cause)
+  if (Cause.isTimeoutError(cause)) return true
+  if (!HttpClientError.isHttpClientError(cause)) return false
+  return (
+    cause.reason._tag === "TransportError" ||
+    (cause.reason._tag === "StatusCodeError" &&
+      (cause.reason.response.status === 408 ||
+        cause.reason.response.status === 429 ||
+        cause.reason.response.status >= 500))
+  )
+}
 
 function fetchProviders(http: HttpClient.HttpClient, value: Credential.Value) {
   const metadata = value.metadata

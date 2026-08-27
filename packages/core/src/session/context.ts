@@ -91,7 +91,15 @@ const layer = Layer.effect(
     const store = yield* SessionStore.Service
     const registry = yield* Tool.Service
 
-    const resolveModel = (session: SessionSchema.Info) => models.resolve(session, catalog.model.available)
+    const resolveModel = Effect.fn("SessionContext.resolveModel")(function* (session: SessionSchema.Info) {
+      const resolve = models.resolve(session, catalog.model.available)
+      // Retry once against a refreshed inventory without bypassing Location policy.
+      return yield* resolve.pipe(
+        Effect.catchTag("SessionRunnerModel.ModelUnavailableError", () =>
+          catalog.refresh().pipe(Effect.andThen(resolve)),
+        ),
+      )
+    })
 
     const selectTitle = Effect.fn("SessionContext.selectTitle")(function* (session: SessionSchema.Info) {
       const agent = yield* agents.get(Agent.ID.make("title"))
