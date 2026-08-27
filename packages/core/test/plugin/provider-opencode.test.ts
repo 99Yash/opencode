@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
-import { Effect } from "effect"
+import { Duration, Effect, Stream } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Bus } from "@opencode-ai/core/bus"
@@ -8,22 +8,21 @@ import { Integration } from "@opencode-ai/core/integration"
 import { Model } from "@opencode-ai/core/model"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
-import { OpencodePlugin } from "@opencode-ai/core/plugin/provider/opencode"
+import { make } from "@opencode-ai/core/plugin/provider/opencode"
 import { Provider } from "@opencode-ai/core/provider"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
 
 const it = testEffect(PluginTestLayer)
 
-const addPlugin = Effect.fn(function* () {
+const addPlugin = Effect.fn(function* (interval?: Duration.Input) {
   const plugin = yield* Plugin.Service
   const host = yield* PluginHost.make(plugin)
   const bus = yield* Bus.Service
   const integration = yield* Integration.Service
-  yield* OpencodePlugin.effect(host).pipe(
-    Effect.provideService(Bus.Service, bus),
-    Effect.provideService(Integration.Service, integration),
-  )
+  yield* make(interval)
+    .effect(host)
+    .pipe(Effect.provideService(Bus.Service, bus), Effect.provideService(Integration.Service, integration))
 })
 
 function required<T>(value: T | undefined): T {
@@ -358,6 +357,106 @@ describe("OpencodePlugin", () => {
         }),
       ({ server }) => Effect.promise(() => server.stop(true)),
     ),
+  )
+
+  it.live("retries initial inventory failures and refreshes periodically without changing accounts", () =>
+    Effect.gen(function* () {
+      const inventory = { name: "Initial Chat", fail: true, requests: 0 }
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch: () => {
+              inventory.requests++
+              if (inventory.fail) return new Response("Unavailable", { status: 503 })
+              return Response.json({
+                config: { provider: { example: { models: { chat: { name: inventory.name } } } } },
+              })
+            },
+          }),
+        ),
+        (server) => Effect.promise(() => server.stop(true)),
+      )
+      const credentials = yield* Credential.Service
+      const catalog = yield* Catalog.Service
+      yield* credentials.create({
+        integrationID: Integration.ID.make("opencode"),
+        value: Credential.Key.make({ type: "key", key: "fixture-key", metadata: { server: server.url.origin } }),
+      })
+      yield* addPlugin("10 millis")
+      expect(yield* catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat"))).toBeUndefined()
+      inventory.fail = false
+      yield* eventually(
+        catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat")),
+        (model) => model?.name === "Initial Chat",
+      )
+      inventory.name = "Updated Chat"
+      expect(
+        (yield* eventually(
+          catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat")),
+          (model) => model?.name === "Updated Chat",
+        ))?.name,
+      ).toBe("Updated Chat")
+      expect(inventory.requests).toBeGreaterThan(1)
+    }),
+  )
+
+  it.live("retains same-account inventory on failure but clears it after a failed account switch", () =>
+    Effect.gen(function* () {
+      const inventory = { fail: false, requests: 0 }
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch: () => {
+              inventory.requests++
+              if (inventory.fail) return new Response("Unavailable", { status: 503 })
+              return Response.json({
+                config: { provider: { example: { models: { chat: { name: "Example Chat" } } } } },
+              })
+            },
+          }),
+        ),
+        (server) => Effect.promise(() => server.stop(true)),
+      )
+      const credentials = yield* Credential.Service
+      const catalog = yield* Catalog.Service
+      const bus = yield* Bus.Service
+      yield* credentials.create({
+        integrationID: Integration.ID.make("opencode"),
+        value: Credential.Key.make({ type: "key", key: "first", metadata: { server: server.url.origin } }),
+      })
+      yield* addPlugin()
+      const updates: number[] = []
+      yield* bus.subscribe(Catalog.Event.Updated).pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            updates.push(event.created)
+          }),
+        ),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+      yield* catalog.model.available()
+      expect(inventory.requests).toBe(1)
+      yield* catalog.refresh()
+      expect(inventory.requests).toBe(2)
+      expect(updates).toEqual([])
+
+      inventory.fail = true
+      yield* catalog.refresh()
+      expect((yield* catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat")))?.name).toBe("Example Chat")
+      expect(updates).toEqual([])
+
+      yield* credentials.create({
+        integrationID: Integration.ID.make("opencode"),
+        value: Credential.Key.make({ type: "key", key: "second", metadata: { server: server.url.origin } }),
+      })
+      yield* eventually(
+        catalog.model.get(Provider.ID.make("example"), Model.ID.make("chat")),
+        (model) => model === undefined,
+      )
+      expect(inventory.requests).toBe(4)
+    }),
   )
 
   it.effect("uses a public key and disables paid models without credentials", () =>

@@ -30,6 +30,40 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("Catalog", () => {
+  it.effect("refreshes scoped sources before reads and replays only changed snapshots", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const source = { fresh: false }
+      const calls: boolean[] = []
+      yield* catalog.transform((draft) => {
+        if (!source.fresh) return
+        draft.model.update(Provider.ID.make("example"), Model.ID.make("chat"), () => {})
+        draft.model.default.set(Provider.ID.make("example"), Model.ID.make("chat"))
+      })
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* catalog.onRefresh((force) =>
+            Effect.sync(() => {
+              calls.push(force)
+              if (source.fresh) return false
+              source.fresh = true
+              return true
+            }),
+          )
+          const read = yield* catalog.model.default().pipe(Effect.forkScoped)
+          yield* TestClock.adjust("1 second")
+          expect((yield* Fiber.join(read))?.id).toBe(Model.ID.make("chat"))
+          expect(calls.every((force) => !force)).toBe(true)
+          yield* catalog.refresh()
+          expect(calls.at(-1)).toBe(true)
+        }),
+      )
+      const count = calls.length
+      yield* catalog.refresh()
+      expect(calls).toHaveLength(count)
+    }),
+  )
+
   it.effect("publishes an updated event after catalog changes", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service

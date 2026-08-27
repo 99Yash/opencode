@@ -1,7 +1,7 @@
 export * as Catalog from "./catalog.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { Array, Context, Effect, Layer, Order, pipe } from "effect"
+import { Array, Context, Effect, Layer, Order, pipe, Scope, Semaphore } from "effect"
 import { Catalog } from "@opencode-ai/schema/catalog"
 import { Model } from "./model.js"
 import { Provider } from "./provider.js"
@@ -42,6 +42,9 @@ export type Draft = {
 }
 
 export interface Interface extends State.Transformable<Draft> {
+  /** Internal sources update captured data and report whether ordered transforms need replaying. */
+  readonly onRefresh: (source: (force: boolean) => Effect.Effect<boolean>) => Effect.Effect<void, never, Scope.Scope>
+  readonly refresh: (force?: boolean) => Effect.Effect<void>
   readonly provider: {
     readonly get: (providerID: Provider.ID) => Effect.Effect<Provider.Info | undefined>
     readonly all: () => Effect.Effect<Provider.Info[]>
@@ -63,6 +66,8 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const integrations = yield* Integration.Service
+    const sources = new Set<(force: boolean) => Effect.Effect<boolean>>()
+    const refreshing = Semaphore.makeUnsafe(1)
 
     const available = (provider: Provider.Info, integration: Integration.Info | undefined) => {
       if (provider.activation === "disabled") return false
@@ -138,9 +143,26 @@ const layer = Layer.effect(
         yield* bus.publish(Catalog.Event.Updated, {})
       }),
     })
+    const refresh = Effect.fn("Catalog.refresh")((force = true) =>
+      refreshing.withPermit(
+        Effect.gen(function* () {
+          const changed = yield* Effect.forEach(sources, (source) => source(force))
+          if (changed.some(Boolean)) yield* state.reload()
+        }),
+      ),
+    )
     const result: Interface = {
       transform: state.transform,
       reload: state.reload,
+      onRefresh: (source) =>
+        Effect.acquireRelease(
+          Effect.sync(() => sources.add(source)),
+          () =>
+            Effect.sync(() => {
+              sources.delete(source)
+            }),
+        ).pipe(Effect.asVoid),
+      refresh,
 
       provider: {
         get: Effect.fn("Catalog.provider.get")(function* (providerID) {
@@ -152,6 +174,7 @@ const layer = Layer.effect(
         }),
 
         available: Effect.fn("Catalog.provider.available")(function* () {
+          yield* refresh(false)
           const active = new Map((yield* integrations.list()).map((integration) => [integration.id, integration]))
           return (yield* result.provider.all()).filter((provider) =>
             available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))),
@@ -194,6 +217,7 @@ const layer = Layer.effect(
         }),
 
         default: Effect.fn("Catalog.model.default")(function* () {
+          yield* refresh(false)
           const defaultModel = state.get().defaultModel
           if (defaultModel) {
             const provider = yield* result.provider.get(defaultModel.providerID)
