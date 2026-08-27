@@ -45,7 +45,7 @@ const cleanup = Effect.fn("ToolOutput.cleanup")(function* (fs: FSUtil.Interface,
   )
 })
 
-const layer = Layer.effect(
+export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service

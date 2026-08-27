@@ -14,6 +14,7 @@ import { SessionStore } from "./store.js"
 import { toSessionError } from "./to-session-error.js"
 import { UserInterruptedError } from "./error.js"
 import { SessionInbox } from "./inbox.js"
+import { SessionResolve } from "./resolve.js"
 
 export interface Interface {
   /** Snapshots active execution owned by this process. */
@@ -52,6 +53,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
+    const resolve = yield* SessionResolve.Service
     const bus = yield* Bus.Service
     const jobs = yield* Job.Service
     const db = (yield* Database.Service).db
@@ -86,10 +88,14 @@ export const layer = Layer.effect(
       return Effect.gen(function* () {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
-        const result = yield* SessionRunner.Service.use((runner) =>
-          runner.drain({ sessionID, force, continuation, promotable }),
+        const pinned = resolve.pinned(sessionID)
+        const result = yield* (
+          pinned
+            ? pinned.drain({ sessionID, force, continuation, promotable })
+            : SessionRunner.Service.use((runner) => runner.drain({ sessionID, force, continuation, promotable })).pipe(
+                Effect.provide(locations.get(session.location)),
+              )
         ).pipe(
-          Effect.provide(locations.get(session.location)),
           Effect.tapCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.void
@@ -102,10 +108,16 @@ export const layer = Layer.effect(
     }
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError, InterruptReason>({
       started: (sessionID) =>
-        reportLifecycle(
-          sessionID,
-          bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
-        ),
+        resolve
+          .pin(sessionID)
+          .pipe(
+            Effect.andThen(
+              reportLifecycle(
+                sessionID,
+                bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
+              ),
+            ),
+          ),
       drain: (sessionID, force, promotable) => drain(sessionID, force, undefined, promotable),
       // One terminal observation per busy period, covering every coalesced drain.
       settled: (sessionID, exit, reason) =>
@@ -137,7 +149,7 @@ export const layer = Layer.effect(
               releaseOnCommit(sessionID),
             )
           }),
-        ),
+        ).pipe(Effect.ensuring(resolve.settle(sessionID))),
     })
 
     return Service.of({
@@ -160,8 +172,13 @@ export const layer = Layer.effect(
             yield* coordinator.wake(sessionID, "steer")
           return interrupted
         }),
-      resume: coordinator.run,
-      wake: coordinator.wake,
+      resume: (sessionID) =>
+        Effect.gen(function* () {
+          if (!(yield* resolve.available(sessionID)))
+            return yield* Effect.die(new Error(`Session must be reopened with capabilities: ${sessionID}`))
+          yield* coordinator.run(sessionID)
+        }),
+      wake: (sessionID) => coordinator.wake(sessionID).pipe(Effect.when(resolve.available(sessionID)), Effect.asVoid),
       awaitIdle: coordinator.awaitIdle,
     })
   }),
@@ -170,7 +187,7 @@ export const layer = Layer.effect(
 export const node = makeGlobalNode({
   service: Service,
   layer,
-  deps: [SessionStore.node, LocationServiceMap.node, Bus.node, Database.node, Job.node],
+  deps: [SessionStore.node, LocationServiceMap.node, Bus.node, Database.node, Job.node, SessionResolve.node],
 })
 
 /** Low-level compatibility layer for callers that only need durable Session recording. */

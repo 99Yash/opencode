@@ -1,5 +1,6 @@
 export * as Session from "./session.js"
 export * from "./session/schema.js"
+export type { Capabilities, OpenInput, Handle } from "./session/capabilities.js"
 
 import { Cause, Effect, Layer, Schema, Context, RcMap, Stream, Scope } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
@@ -56,6 +57,9 @@ import { fileURLToPath } from "url"
 import { SessionEnvironment } from "./session/environment.js"
 import { SessionHistory } from "./session/history.js"
 import { InstructionEntry } from "./session/instruction-entry.js"
+import { SessionResolve } from "./session/resolve.js"
+import type { SessionCapabilities } from "./session/capabilities.js"
+import { Hash } from "@opencode-ai/util/hash"
 
 // get project -> project.locations
 //
@@ -188,6 +192,7 @@ export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
 export interface Interface {
+  readonly open: (input: SessionCapabilities.OpenInput) => Effect.Effect<SessionCapabilities.Handle, NotFoundError>
   readonly list: (input?: ListInput) => Effect.Effect<{
     readonly data: SessionSchema.Info[]
   }>
@@ -342,6 +347,7 @@ const layer = Layer.effect(
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
     const locations = yield* LocationServiceMap.Service
+    const resolve = yield* SessionResolve.Service
     const fs = yield* FSUtil.Service
     const jobs = yield* Job.Service
     const environments = yield* SessionEnvironment.Service
@@ -349,6 +355,13 @@ const layer = Layer.effect(
     const activeShells = new Set<SessionSchema.ID>()
     const shellLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const closeTransport = Effect.fn("Session.closeTransport")(function* (session: SessionSchema.Info) {
+      if (yield* resolve.owned(session.id)) {
+        if (!(yield* resolve.available(session.id))) return
+        return yield* Effect.gen(function* () {
+          const capabilities = yield* resolve.resolve(session)
+          if (capabilities) yield* capabilities.transport.close(session.id)
+        }).pipe(Effect.scoped)
+      }
       const location = Location.Ref.make({
         directory: session.location.directory,
         workspaceID: session.location.workspaceID,
@@ -384,61 +397,91 @@ const layer = Layer.effect(
         }),
       )
 
+    const create = Effect.fn("Session.create")(function* (input: CreateInput, resolved?: Project.Resolved) {
+      const sessionID = input.id ?? SessionSchema.ID.create()
+      const recorded = yield* store.get(sessionID)
+      if (recorded) return recorded
+      const parent = input.parentID ? yield* store.get(input.parentID) : undefined
+      if (input.parentID && parent === undefined) return yield* new NotFoundError({ sessionID: input.parentID })
+      const location = parent?.location ?? input.location
+      if (location === undefined)
+        return yield* Effect.die(new Error("Session.create requires either location or an existing parentID"))
+      const project = resolved ?? (yield* projects.resolve(location.directory))
+      yield* persistProject(project)
+      const projected = yield* bus
+        .publish(
+          SessionEvent.Created,
+          {
+            sessionID,
+            slug: Slug.create(),
+            version: app.version,
+            projectID: project.id,
+            parentID: input.parentID,
+            location,
+            subpath: RelativePath.make(path.relative(project.directory, location.directory).replaceAll("\\", "/")),
+            title: input.title,
+            agent: input.agent,
+            model: input.model
+              ? {
+                  id: Model.ID.make(input.model.id),
+                  providerID: input.model.providerID,
+                  variant: input.model.variant,
+                }
+              : undefined,
+          },
+          { location },
+        )
+        .pipe(
+          Effect.as({ type: "created" } as const),
+          Effect.catchDefect((defect) => {
+            if (!(defect instanceof SessionProjector.SessionAlreadyProjected)) {
+              return Effect.die(defect)
+            }
+            // Concurrent creation lost the projection race. The existing Session identity wins.
+            return store
+              .get(sessionID)
+              .pipe(
+                Effect.flatMap((session) =>
+                  session ? Effect.succeed({ type: "existing", session } as const) : Effect.die(defect),
+                ),
+              )
+          }),
+        )
+      if (projected.type === "existing") return projected.session
+      // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
+      return yield* result.get(sessionID).pipe(Effect.orDie)
+    })
     const result = Service.of({
-      create: Effect.fn("Session.create")(function* (input) {
-        const sessionID = input.id ?? SessionSchema.ID.create()
-        const recorded = yield* store.get(sessionID)
-        if (recorded) return recorded
-        const parent = input.parentID ? yield* store.get(input.parentID) : undefined
-        if (input.parentID && parent === undefined) return yield* new NotFoundError({ sessionID: input.parentID })
-        const location = parent?.location ?? input.location
-        if (location === undefined)
-          return yield* Effect.die(new Error("Session.create requires either location or an existing parentID"))
-        const project = yield* projects.resolve(location.directory)
-        yield* persistProject(project)
-        const projected = yield* bus
-          .publish(
-            SessionEvent.Created,
-            {
-              sessionID,
-              slug: Slug.create(),
-              version: app.version,
-              projectID: project.id,
-              parentID: input.parentID,
-              location,
-              subpath: RelativePath.make(path.relative(project.directory, location.directory).replaceAll("\\", "/")),
-              title: input.title,
-              agent: input.agent,
-              model: input.model
-                ? {
-                    id: Model.ID.make(input.model.id),
-                    providerID: input.model.providerID,
-                    variant: input.model.variant,
-                  }
-                : undefined,
-            },
-            { location },
-          )
-          .pipe(
-            Effect.as({ type: "created" } as const),
-            Effect.catchDefect((defect) => {
-              if (!(defect instanceof SessionProjector.SessionAlreadyProjected)) {
-                return Effect.die(defect)
-              }
-              // Concurrent creation lost the projection race. The existing Session identity wins.
-              return store
-                .get(sessionID)
-                .pipe(
-                  Effect.flatMap((session) =>
-                    session ? Effect.succeed({ type: "existing", session } as const) : Effect.die(defect),
-                  ),
-                )
-            }),
-          )
-        if (projected.type === "existing") return projected.session
-        // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
-        return yield* result.get(sessionID).pipe(Effect.orDie)
-      }),
+      create,
+      open: Effect.fn("Session.open")((input) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const directory = AbsolutePath.make(process.cwd())
+            // Transitional placement is unused by supplied capabilities, but listings group
+            // these Sessions under the deterministic cwd-derived project. Adoption never moves it.
+            const session = yield* db
+              .transaction(() =>
+                create(
+                  { id: input.id, title: input.title, location: Location.Ref.make({ directory }) },
+                  { id: Project.ID.make(Hash.fast(`directory:${directory}`)), directory, canonical: directory },
+                ).pipe(Effect.tap((session) => resolve.own(session.id))),
+              )
+              .pipe(Effect.orDie)
+            yield* resolve.attach(session.id, input)
+            return {
+              id: session.id,
+              prompt: (prompt) =>
+                Effect.gen(function* () {
+                  const admitted = yield* result.prompt({ ...prompt, sessionID: session.id, resume: false })
+                  if (prompt.resume !== false) yield* result.resume(session.id)
+                  return admitted
+                }),
+              resume: () => result.resume(session.id),
+              interrupt: (options) => result.interrupt(session.id, options),
+            } satisfies SessionCapabilities.Handle
+          }),
+        ),
+      ),
       fork: Effect.fn("Session.fork")(function* (input) {
         const parent = yield* result.get(input.sessionID)
         const boundary = yield* db
@@ -511,6 +554,7 @@ const layer = Layer.effect(
         yield* Effect.forEach(children.data, (child) => result.remove(child.id), { concurrency: 1, discard: true })
         yield* environments.clear(sessionID)
         yield* bus.publish(SessionEvent.Deleted, { sessionID })
+        yield* resolve.remove(sessionID)
         yield* bus.remove(sessionID)
       }),
       list: Effect.fn("Session.list")(function* (input = {}) {
@@ -652,11 +696,25 @@ const layer = Layer.effect(
                 delivery: input.delivery ?? "steer",
               })
               if (existing) return existing
+              const capabilities = yield* resolve.resolve(session)
               const item = yield* restore(
-                preparePrompt(input, messageID).pipe(
-                  Effect.provide(locations.get(session.location)),
-                  Effect.provideService(FSUtil.Service, fs),
-                ),
+                (capabilities
+                  ? preparePrompt(input, messageID, Effect.succeed(capabilities.image), Effect.undefined)
+                  : Effect.gen(function* () {
+                      const plugins = yield* PluginSupervisor.Service
+                      yield* plugins.flush
+                      const hooks = yield* PluginHooks.Service
+                      const image = yield* Image.Service
+                      const skills = yield* Skill.Service
+                      return yield* preparePrompt(
+                        input,
+                        messageID,
+                        Effect.succeed(image),
+                        Effect.succeed(skills),
+                        hooks,
+                      )
+                    }).pipe(Effect.provide(locations.get(session.location)))
+                ).pipe(Effect.provideService(FSUtil.Service, fs)),
               )
               // Commit a staged revert only after preparation succeeds, before admitting new work.
               if (session.revert) yield* SessionRevert.commit(session).pipe(Effect.provideService(Bus.Service, bus))
@@ -682,7 +740,7 @@ const layer = Layer.effect(
             }
             return admitted
           }),
-        ),
+        ).pipe(Effect.scoped),
       ),
       generate: Effect.fn("Session.generate")(function* (input) {
         const session = yield* result.get(input.sessionID)
@@ -770,6 +828,7 @@ const layer = Layer.effect(
       }),
       skill: Effect.fn("Session.skill")(function* (input) {
         const session = yield* result.get(input.sessionID)
+        if (yield* resolve.owned(session.id)) return yield* new SkillNotFoundError({ skill: input.skill })
         const skills = yield* Skill.Service.pipe(Effect.provide(locations.get(session.location)))
         const skill = yield* skills.get(input.skill)
         if (!skill) return yield* new SkillNotFoundError({ skill: input.skill })
@@ -1013,11 +1072,11 @@ function synthesizeTerminalShellInfo(started: ShellSchema.Info): ShellSchema.Inf
 const preparePrompt = Effect.fn("Session.preparePrompt")(function* (
   request: Parameters<Interface["prompt"]>[0],
   messageID: SessionMessage.ID,
+  image: Effect.Effect<Image.Interface>,
+  skills: Effect.Effect<Skill.Interface | undefined>,
+  hooks?: PluginHooks.Interface,
 ) {
-  const plugins = yield* PluginSupervisor.Service
-  yield* plugins.flush
-  const hooks = yield* PluginHooks.Service
-  const event = yield* hooks.trigger("session", "prompt", {
+  const initial: PluginHooks.Domains["session"]["prompt"] = {
     sessionID: request.sessionID,
     messageID,
     prompt: structuredClone({
@@ -1028,16 +1087,19 @@ const preparePrompt = Effect.fn("Session.preparePrompt")(function* (
     }),
     metadata: structuredClone(request.metadata),
     delivery: request.delivery ?? "steer",
-  })
+  }
+  // Supplied capabilities have no configured prompt interceptors; discovery owns those hooks.
+  const event = hooks ? yield* hooks.trigger("session", "prompt", initial) : initial
   const input = event.prompt
   const fs = yield* FSUtil.Service
   const files = input.files
-    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file), { concurrency: 8 })
+    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file, image), { concurrency: 8 })
     : undefined
   const requested = input.skills
   const selected = yield* Effect.gen(function* () {
     if (!requested?.length) return undefined
-    const skillService = yield* Skill.Service
+    const skillService = yield* skills
+    if (!skillService) return yield* new SkillNotFoundError({ skill: requested[0].id })
     const prepared = new Map<Skill.ID, Skill.Name>()
     return yield* Effect.forEach(requested, (attachment) =>
       Effect.gen(function* () {
@@ -1075,6 +1137,7 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const materializeAttachment = Effect.fn("Session.materializeAttachment")(function* (
   fs: FSUtil.Interface,
   input: PromptInput.FileAttachment,
+  image: Effect.Effect<Image.Interface>,
 ) {
   const resolved = input.uri.startsWith("data:")
     ? {
@@ -1103,7 +1166,7 @@ const materializeAttachment = Effect.fn("Session.materializeAttachment")(functio
             .join("\n"),
         )
       : resolved.bytes
-  const normalized = yield* normalizeImageAttachment(input, Buffer.from(content).toString("base64"), mime)
+  const normalized = yield* normalizeImageAttachment(input, Buffer.from(content).toString("base64"), mime, image)
   return FileAttachment.create({
     data: normalized.data,
     mime: normalized.mime,
@@ -1118,9 +1181,10 @@ const normalizeImageAttachment = Effect.fn("Session.normalizeImageAttachment")(f
   input: PromptInput.FileAttachment,
   data: string,
   mime: string,
+  image: Effect.Effect<Image.Interface>,
 ) {
   if (!mime.startsWith("image/")) return { data: Base64.make(data), mime }
-  const service = yield* Image.Service
+  const service = yield* image
   const label = input.name ?? (input.uri.startsWith("data:") ? "inline attachment" : input.uri)
   const content = { uri: label, content: data, encoding: "base64" as const, mime }
   const normalized = yield* service.normalize(label, content).pipe(
@@ -1218,6 +1282,7 @@ export const node = makeGlobalNode({
     Project.node,
     SessionExecution.node,
     SessionStore.node,
+    SessionResolve.node,
     LocationServiceMap.node,
     SessionProjector.node,
     FSUtil.node,

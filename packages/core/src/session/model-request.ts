@@ -84,14 +84,16 @@ export const baseTranscript = (input: {
   readonly tools: Tool.Snapshot
   readonly initial: string
   readonly messages: ReadonlyArray<SessionMessage.Info>
+  readonly system?: string
 }) => {
   const providerMetadataKey = input.model.model.route.providerMetadataKey ?? input.model.model.provider
   return {
     providerMetadataKey,
     system: [
-      input.agent.system
-        ? input.agent.system
-        : SessionSystemPrompt.make(input.tools.definitions.map((tool) => tool.name)),
+      input.system ??
+        (input.agent.system
+          ? input.agent.system
+          : SessionSystemPrompt.make(input.tools.definitions.map((tool) => tool.name))),
       input.initial,
     ]
       .filter((part) => part.length > 0)

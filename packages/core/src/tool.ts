@@ -252,7 +252,7 @@ const make = Effect.gen(function* () {
   })
 })
 
-export const layer = Layer.effect(Service, make)
+const layer = Layer.effect(Service, make)
 
 export const snapshot = Effect.fn("Tool.snapshotValues")(function* (
   values: readonly Tool.Info[],

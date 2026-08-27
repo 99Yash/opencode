@@ -1,6 +1,6 @@
 export * as SessionContext from "./context.js"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { Agent } from "../agent.js"
 import { Catalog } from "../catalog.js"
 import { CodeModeInstructions } from "../codemode/instructions.js"
@@ -17,6 +17,13 @@ import { PluginSupervisor } from "../plugin/supervisor.js"
 import { ReferenceInstructions } from "../reference/instructions.js"
 import { SkillInstructions } from "../skill/instructions.js"
 import { Tool } from "../tool.js"
+import { Permission } from "../permission.js"
+import { Permissions } from "../permissions.js"
+import { Image } from "../image.js"
+import { PluginHooks } from "../plugin/hooks.js"
+import { Source } from "../source.js"
+import type { SessionCapabilities } from "./capabilities.js"
+import { SessionSystemPrompt } from "./system-prompt.js"
 import { AgentNotFoundError } from "./error.js"
 import { SessionHistory } from "./history.js"
 import { InstructionEntry } from "./instruction-entry.js"
@@ -31,6 +38,7 @@ export interface Selection {
   readonly agent: Agent.Selection & { readonly info: Agent.Info }
   readonly instructions: Instructions.List
   readonly tools: Tool.Snapshot
+  readonly system?: string
 }
 
 export interface Loaded {
@@ -40,6 +48,7 @@ export interface Loaded {
   readonly initial: string
   readonly messages: ReadonlyArray<SessionMessage.Info>
   readonly tools: Tool.Snapshot
+  readonly system?: string
 }
 
 /**
@@ -157,22 +166,123 @@ const layer = Layer.effect(
       }
     })
 
-    const load = Effect.fn("SessionContext.load")(function* (selection: Selection) {
-      const model = yield* resolveModel(selection.session)
-      const history = yield* SessionHistory.entriesForRunner(db, selection.session.id, selection.instructions)
-      return {
-        session: selection.session,
-        agent: selection.agent,
-        model,
-        initial: history.initial,
-        messages: history.entries.map((entry) => entry.message),
-        tools: selection.tools,
-      }
+    return Service.of({
+      select,
+      load: load(db, resolveModel),
+      resolveModel,
+      selectTitle,
+      prepare: modelRequests.prepare,
     })
-
-    return Service.of({ select, load, resolveModel, selectTitle, prepare: modelRequests.prepare })
   }),
 )
+
+/** The values path shares instruction persistence and history assembly with discovery. */
+export const values = (input: SessionCapabilities.OpenInput) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const db = (yield* Database.Service).db
+      const store = yield* SessionStore.Service
+      const entries = yield* InstructionEntry.Service
+      const requests = yield* SessionModelRequest.Service
+      const hooks = yield* PluginHooks.Service
+      const image = yield* Image.Service
+      const tools = Source.from(input.tools ?? [])
+      const instructions = Source.from(input.instructions ?? [])
+      const limits = Source.from(input.limits ?? {})
+      const permissions = input.permissions ?? Permissions.allowAll
+      const model = Source.from(input.model)
+      const resolveModel: Interface["resolveModel"] = (session) => model.get(session)
+      const select: Interface["select"] = Effect.fn("SessionContext.selectValues")(function* (sessionID) {
+        const session = yield* store.get(sessionID)
+        if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
+        const rules = yield* permissions.visibility.get(session)
+        const selected = yield* Effect.all({ tools: tools.get(session), limits: limits.get(session) })
+        const snapshot = yield* Tool.snapshot(selected.tools, rules).pipe(
+          Effect.provideService(PluginHooks.Service, hooks),
+          Effect.provideService(Image.Service, image),
+        )
+        const id = session.agent ?? Agent.defaultID
+        return {
+          session,
+          agent: { id, info: { ...Agent.Info.default(id), permissions: rules, steps: selected.limits.steps } },
+          // System text participates in the epoch instead of changing the privileged prefix.
+          system: "",
+          tools: snapshot,
+          instructions: Instructions.combine([
+            Instructions.make({
+              key: Instructions.Key.make("session/system"),
+              codec: Schema.String,
+              read:
+                input.system === undefined
+                  ? Effect.succeed(SessionSystemPrompt.make(snapshot.definitions.map((tool) => tool.name)))
+                  : Source.from(input.system)
+                      .get(session)
+                      .pipe(Effect.map((value) => (value === "" ? Instructions.removed : value))),
+              render: {
+                initial: (value) => value,
+                changed: (_previous, value) =>
+                  `The system instructions changed and supersede the previous value:\n${value}`,
+                removed: () => "The previous system instructions no longer apply.",
+              },
+            }),
+            CodeModeInstructions.make(snapshot.codeModeCatalog),
+            Instructions.make({
+              key: Instructions.Key.make("session/instructions"),
+              codec: Schema.Array(Schema.String),
+              read: instructions
+                .get(session)
+                .pipe(
+                  Effect.map((value) =>
+                    Array.isArray(value) && !value.some((part) => part.length > 0) ? Instructions.removed : value,
+                  ),
+                ),
+              render: {
+                initial: (value) => value.join("\n\n"),
+                changed: (_previous, value) =>
+                  `The session instructions changed and supersede the previous value:\n${value.join("\n\n")}`,
+                removed: () => "The previous session instructions no longer apply.",
+              },
+            }),
+            Instructions.make({
+              key: Instructions.Key.make("session/permissions"),
+              codec: Schema.toCodecJson(Permission.Ruleset),
+              read: Effect.succeed(rules.length > 0 ? rules : Instructions.removed),
+              render: {
+                initial: (value) => `Permission rules:\n${JSON.stringify(value)}`,
+                changed: (_previous, value) => `Permission rules changed:\n${JSON.stringify(value)}`,
+                removed: () => "The previous permission rules no longer apply.",
+              },
+            }),
+            yield* entries.load(sessionID),
+          ]),
+        }
+      })
+      return Service.of({
+        select,
+        load: load(db, resolveModel),
+        resolveModel,
+        selectTitle: () => Effect.undefined,
+        prepare: requests.prepare,
+      })
+    }),
+  )
+
+function load(db: Database.Interface["db"], resolveModel: Interface["resolveModel"]): Interface["load"] {
+  return Effect.fn("SessionContext.load")(function* (selection: Selection) {
+    const model = yield* resolveModel(selection.session)
+    const history = yield* SessionHistory.entriesForRunner(db, selection.session.id, selection.instructions)
+    return {
+      session: selection.session,
+      agent: selection.agent,
+      model,
+      initial: history.initial,
+      messages: history.entries.map((entry) => entry.message),
+      tools: selection.tools,
+      ...(selection.system === undefined ? {} : { system: selection.system }),
+    }
+  })
+}
 
 /** Variant IDs that minimize reasoning output, in preference order. */
 const MINIMAL_REASONING_VARIANTS = ["none", "minimal", "low"].map((id) => Model.VariantID.make(id))
