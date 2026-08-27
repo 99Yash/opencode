@@ -34,7 +34,7 @@ import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
 import { Instructions } from "@opencode-ai/core/instructions/index"
 import { SkillInstructions } from "@opencode-ai/core/skill/instructions"
 import { ReferenceInstructions } from "@opencode-ai/core/reference/instructions"
-import { McpInstructions } from "@opencode-ai/core/mcp/instructions"
+import { MCPInstructions } from "@opencode-ai/core/mcp/instructions"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { SystemPromptPlugin } from "@opencode-ai/core/plugin/system-prompt"
@@ -83,7 +83,7 @@ const skillInstructions = Layer.mock(SkillInstructions.Service, { load: () => Ef
 const referenceInstructions = Layer.mock(ReferenceInstructions.Service, {
   load: () => Effect.succeed(Instructions.empty),
 })
-const mcpInstructions = Layer.mock(McpInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
+const mcpInstructions = Layer.mock(MCPInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const config = Config.testLayer()
 const pluginSupervisor = Layer.succeed(PluginSupervisor.Service, PluginSupervisor.Service.of({ flush: Effect.void }))
 const promptCatalog = Layer.mock(Catalog.Service, {
@@ -110,7 +110,7 @@ const runnerLayer = (llmClient: Layer.Layer<typeof LLMClient.Service>) =>
     [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
     [SkillInstructions.node, skillInstructions],
     [ReferenceInstructions.node, referenceInstructions],
-    [McpInstructions.node, mcpInstructions],
+    [MCPInstructions.node, mcpInstructions],
     [Config.node, config],
     [Permission.node, permission],
     [PluginSupervisor.node, pluginSupervisor],

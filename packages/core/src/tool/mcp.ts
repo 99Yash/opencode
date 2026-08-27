@@ -1,4 +1,4 @@
-export * as McpTool from "./mcp.js"
+export * as MCPTool from "./mcp.js"
 
 import { ToolFailure } from "@opencode-ai/ai"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"

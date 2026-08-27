@@ -71,7 +71,7 @@ import { InstructionBuiltIns } from "@opencode-ai/core/instructions/builtins"
 import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
 import { SkillInstructions } from "@opencode-ai/core/skill/instructions"
 import { ReferenceInstructions } from "@opencode-ai/core/reference/instructions"
-import { McpInstructions } from "@opencode-ai/core/mcp/instructions"
+import { MCPInstructions } from "@opencode-ai/core/mcp/instructions"
 import { SessionSystemPrompt } from "@opencode-ai/core/session/system-prompt"
 import { ID } from "@opencode-ai/core/model"
 import { Location } from "@opencode-ai/core/location"
@@ -358,7 +358,7 @@ const skillInstructions = Layer.mock(SkillInstructions.Service, {
 const referenceInstructions = Layer.mock(ReferenceInstructions.Service, {
   load: () => Effect.succeed(Instructions.empty),
 })
-const mcpInstructions = Layer.mock(McpInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
+const mcpInstructions = Layer.mock(MCPInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const config = Config.testLayer([
   new Document({
     type: "document",
@@ -402,7 +402,7 @@ const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
   [ReferenceInstructions.node, referenceInstructions],
   [Permission.node, permission],
   [Config.node, config],
-  [McpInstructions.node, mcpInstructions],
+  [MCPInstructions.node, mcpInstructions],
   [PluginSupervisor.node, pluginSupervisor],
   [SessionModelTransport.node, modelTransport],
 ])

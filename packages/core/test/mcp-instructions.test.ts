@@ -3,9 +3,9 @@ import { Effect, Layer } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { MCP } from "@opencode-ai/core/mcp/index"
-import { McpInstructions } from "@opencode-ai/core/mcp/instructions"
+import { MCPInstructions } from "@opencode-ai/core/mcp/instructions"
 import { Permission } from "@opencode-ai/core/permission"
-import { McpTool } from "@opencode-ai/core/tool/mcp"
+import { MCPTool } from "@opencode-ai/core/tool/mcp"
 import { it } from "./lib/effect"
 import { readInitial, readUpdate } from "./lib/instructions"
 
@@ -22,7 +22,7 @@ const instructions = (server: string, text: string) =>
 const tool = (server: string, name = "search") => new MCP.Tool({ server: MCP.ServerName.make(server), name })
 
 const layer = (catalog: () => MCP.ServerInstructions[], tools: () => MCP.Tool[]) =>
-  AppNodeBuilder.build(McpInstructions.node, [
+  AppNodeBuilder.build(MCPInstructions.node, [
     [
       MCP.node,
       Layer.mock(MCP.Service, {
@@ -32,15 +32,15 @@ const layer = (catalog: () => MCP.ServerInstructions[], tools: () => MCP.Tool[])
     ],
   ])
 
-describe("McpInstructions", () => {
+describe("MCPInstructions", () => {
   it.effect("renders instructions for servers with at least one permitted tool", () =>
     Effect.gen(function* () {
-      const service = yield* McpInstructions.Service
+      const service = yield* MCPInstructions.Service
       const generation = yield* service
         .load(
           selection([
-            { action: McpTool.name("alpha", "restricted"), resource: "*", effect: "deny" },
-            { action: McpTool.name("hidden", "search"), resource: "*", effect: "deny" },
+            { action: MCPTool.name("alpha", "restricted"), resource: "*", effect: "deny" },
+            { action: MCPTool.name("hidden", "search"), resource: "*", effect: "deny" },
           ]),
         )
         .pipe(Effect.flatMap(readInitial))
@@ -77,7 +77,7 @@ describe("McpInstructions", () => {
 
   it.effect("omits instructions when the agent cannot use execute", () =>
     Effect.gen(function* () {
-      const service = yield* McpInstructions.Service
+      const service = yield* MCPInstructions.Service
       const generation = yield* service
         .load(selection([{ action: "execute", resource: "*", effect: "deny" }]))
         .pipe(Effect.flatMap(readInitial))
@@ -95,7 +95,7 @@ describe("McpInstructions", () => {
 
   it.effect("keeps MCP instructions when Code Mode is disabled and execute is denied", () =>
     Effect.gen(function* () {
-      const service = yield* McpInstructions.Service
+      const service = yield* MCPInstructions.Service
       const generation = yield* service
         .load(selection([{ action: "execute", resource: "*", effect: "deny" }]))
         .pipe(Effect.flatMap(readInitial))
@@ -122,7 +122,7 @@ describe("McpInstructions", () => {
   it.effect("restates guidance when Code Mode is disabled for a server", () => {
     let tools = [tool("alpha")]
     return Effect.gen(function* () {
-      const service = yield* McpInstructions.Service
+      const service = yield* MCPInstructions.Service
       const initialized = yield* service.load(selection()).pipe(Effect.flatMap(readInitial))
 
       tools = [new MCP.Tool({ server: MCP.ServerName.make("alpha"), name: "search", codemode: false })]
@@ -151,7 +151,7 @@ describe("McpInstructions", () => {
     let catalog = [instructions("alpha", "Alpha instructions")]
     const tools = [tool("alpha"), tool("beta")]
     return Effect.gen(function* () {
-      const service = yield* McpInstructions.Service
+      const service = yield* MCPInstructions.Service
       const initialized = yield* service.load(selection()).pipe(Effect.flatMap(readInitial))
 
       catalog = [instructions("alpha", "Alpha instructions"), instructions("beta", "Beta instructions")]

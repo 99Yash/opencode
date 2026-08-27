@@ -47,7 +47,7 @@ import { InstructionBuiltIns } from "./instructions/builtins.js"
 import { InstructionEntry } from "./session/instruction-entry.js"
 import { SessionInstructions } from "./session/instructions.js"
 import { SessionGenerateNode } from "./session/generate-node.js"
-import { McpTool } from "./tool/mcp.js"
+import { MCPTool } from "./tool/mcp.js"
 import { ReadToolFileSystem } from "./tool/read-filesystem.js"
 import { Tool } from "./tool.js"
 import { ToolOutput } from "./tool-output.js"
@@ -94,7 +94,7 @@ const locationServiceNodes = [
   Generate.node,
   SessionGenerateNode.node,
   ReadToolFileSystem.node,
-  McpTool.node,
+  MCPTool.node,
   SessionInstructions.node,
   SessionRunnerModel.node,
   SessionModelTransport.node,

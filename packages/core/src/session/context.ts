@@ -9,8 +9,8 @@ import { InstructionDiscovery } from "../instruction-discovery.js"
 import { Instructions } from "../instructions/index.js"
 import { InstructionBuiltIns } from "../instructions/builtins.js"
 import { Location } from "../location.js"
-import { McpInstructions } from "../mcp/instructions.js"
-import { McpTool } from "../tool/mcp.js"
+import { MCPInstructions } from "../mcp/instructions.js"
+import { MCPTool } from "../tool/mcp.js"
 import { PluginSupervisor } from "../plugin/supervisor.js"
 import { ReferenceInstructions } from "../reference/instructions.js"
 import { SkillInstructions } from "../skill/instructions.js"
@@ -64,8 +64,8 @@ const layer = Layer.effect(
     const discovery = yield* InstructionDiscovery.Service
     const entries = yield* InstructionEntry.Service
     const location = yield* Location.Service
-    const mcpInstructions = yield* McpInstructions.Service
-    const mcpTools = yield* McpTool.Service
+    const mcpInstructions = yield* MCPInstructions.Service
+    const mcpTools = yield* MCPTool.Service
     const models = yield* SessionRunnerModel.Service
     const plugins = yield* PluginSupervisor.Service
     const referenceInstructions = yield* ReferenceInstructions.Service
@@ -138,8 +138,8 @@ export const node = makeLocationNode({
     InstructionDiscovery.node,
     InstructionEntry.node,
     Location.node,
-    McpInstructions.node,
-    McpTool.node,
+    MCPInstructions.node,
+    MCPTool.node,
     PluginSupervisor.node,
     ReferenceInstructions.node,
     SessionRunnerModel.node,

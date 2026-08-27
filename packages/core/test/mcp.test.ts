@@ -33,7 +33,7 @@ import { MCPStdio } from "@opencode-ai/core/mcp/stdio"
 import { Permission } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
-import { McpTool } from "@opencode-ai/core/tool/mcp"
+import { MCPTool } from "@opencode-ai/core/tool/mcp"
 import { Tool } from "@opencode-ai/core/tool"
 import { DateTime, Deferred, Effect, Exit, Fiber, Layer, PubSub, Ref, Schedule, Schema, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
@@ -351,7 +351,7 @@ const permissions = Layer.mock(Permission.Service, {
 })
 const events = Layer.mock(Bus.Service, { subscribe: () => Stream.never })
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([Tool.node, McpTool.node]), [
+  AppNodeBuilder.build(LayerNode.group([Tool.node, MCPTool.node]), [
     [MCP.node, mcp],
     [Permission.node, permissions],
     [Bus.node, events],
@@ -371,8 +371,8 @@ describe("MCP errors", () => {
 })
 
 test("MCP tool names match V1 sanitization", () => {
-  expect(McpTool.namespace("context 7")).toBe("context_7")
-  expect(McpTool.name("context 7", "resolve.library/id")).toBe("context_7_resolve_library_id")
+  expect(MCPTool.namespace("context 7")).toBe("context_7")
+  expect(MCPTool.name("context 7", "resolve.library/id")).toBe("context_7_resolve_library_id")
 })
 
 test("preserves output schema validation across paginated tool discovery", async () => {
@@ -1298,7 +1298,7 @@ testEffect(Layer.empty).live("isolates invalid MCP tools and preserves plugin tr
 
     yield* Effect.gen(function* () {
       const registry = yield* Tool.Service
-      const registration = yield* McpTool.Service
+      const registration = yield* MCPTool.Service
       const bus = yield* Bus.Service
       yield* registration.flush
       expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual([
@@ -1408,7 +1408,7 @@ testEffect(Layer.empty).live("isolates invalid MCP tools and preserves plugin tr
     }).pipe(
       Effect.provide(
         Layer.fresh(
-          AppNodeBuilder.build(LayerNode.group([Tool.node, McpTool.node, Bus.node]), [
+          AppNodeBuilder.build(LayerNode.group([Tool.node, MCPTool.node, Bus.node]), [
             [
               MCP.node,
               Layer.mock(MCP.Service, {
@@ -1437,7 +1437,7 @@ testEffect(Layer.empty).effect("coalesces queued MCP tool notifications after in
   let reads = 0
   return Effect.gen(function* () {
     const registry = yield* Tool.Service
-    const registration = yield* McpTool.Service
+    const registration = yield* MCPTool.Service
     const bus = yield* Bus.Service
     yield* registration.flush
     expect(reads).toBe(1)
@@ -1451,7 +1451,7 @@ testEffect(Layer.empty).effect("coalesces queued MCP tool notifications after in
     expect((yield* toolDefinitions(registry)).map((tool) => tool.name)).toEqual(["demo_read_3", "execute"])
   }).pipe(
     Effect.provide(
-      AppNodeBuilder.build(LayerNode.group([Tool.node, McpTool.node, Bus.node]), [
+      AppNodeBuilder.build(LayerNode.group([Tool.node, MCPTool.node, Bus.node]), [
         [
           MCP.node,
           Layer.mock(MCP.Service, {

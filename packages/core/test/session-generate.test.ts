@@ -21,7 +21,7 @@ import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
 import { Instructions } from "@opencode-ai/core/instructions/index"
 import { InstructionBuiltIns } from "@opencode-ai/core/instructions/builtins"
 import { Location } from "@opencode-ai/core/location"
-import { McpInstructions } from "@opencode-ai/core/mcp/instructions"
+import { MCPInstructions } from "@opencode-ai/core/mcp/instructions"
 import { ID } from "@opencode-ai/core/model"
 import { Project } from "@opencode-ai/core/project"
 import { Provider } from "@opencode-ai/core/provider"
@@ -109,7 +109,7 @@ const discovery = Layer.mock(InstructionDiscovery.Service, {
 })
 const skills = Layer.mock(SkillInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const references = Layer.mock(ReferenceInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
-const mcp = Layer.mock(McpInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
+const mcp = Layer.mock(MCPInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const plugins = Layer.mock(PluginSupervisor.Service, { flush: Effect.void })
 const tools = Layer.mock(Tool.Service, {
   snapshot: () =>
@@ -148,7 +148,7 @@ const it = testEffect(
       [InstructionDiscovery.node, discovery],
       [SkillInstructions.node, skills],
       [ReferenceInstructions.node, references],
-      [McpInstructions.node, mcp],
+      [MCPInstructions.node, mcp],
       [PluginSupervisor.node, plugins],
       [Tool.node, tools],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],

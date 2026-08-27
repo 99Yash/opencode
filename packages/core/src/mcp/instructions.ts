@@ -1,10 +1,10 @@
-export * as McpInstructions from "./instructions.js"
+export * as MCPInstructions from "./instructions.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Agent } from "../agent.js"
 import { Permission } from "../permission.js"
-import { McpTool } from "../tool/mcp.js"
+import { MCPTool } from "../tool/mcp.js"
 import { MCP } from "./index.js"
 import { Instructions } from "../instructions/index.js"
 
@@ -20,7 +20,7 @@ const entries = (servers: ReadonlyArray<Summary>) =>
     const result = [`  <server name="${server.server}">`]
     if (server.codemode !== false)
       result.push(
-        `    Use tools from this server through \`execute\` under \`tools[${JSON.stringify(McpTool.namespace(server.server))}]\`.`,
+        `    Use tools from this server through \`execute\` under \`tools[${JSON.stringify(MCPTool.namespace(server.server))}]\`.`,
       )
     result.push(...server.instructions.split("\n").map((line) => `    ${line}`), "  </server>")
     return result
@@ -93,7 +93,7 @@ export const layer = Layer.effect(
             if (
               !owned.some(
                 (tool) =>
-                  Permission.evaluate(McpTool.name(tool.server, tool.name), "*", agent.permissions).effect !== "deny",
+                  Permission.evaluate(MCPTool.name(tool.server, tool.name), "*", agent.permissions).effect !== "deny",
               )
             )
               return []
