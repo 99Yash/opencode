@@ -19,6 +19,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { Skill } from "@opencode-ai/core/skill"
+import { Reference } from "@opencode-ai/core/reference"
 import { testEffect } from "./lib/effect"
 
 const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
@@ -33,6 +34,7 @@ const info = Skill.Info.make({
   content: "Use Effect",
 })
 const skills = Layer.mergeAll(
+  Layer.mock(Reference.Service, { refresh: () => Effect.void }),
   LayerNode.compile(PluginHooks.node),
   Layer.mock(Skill.Service, {
     get: (id) => Effect.succeed(id === info.id ? info : undefined),

@@ -56,6 +56,7 @@ import { fileURLToPath } from "url"
 import { SessionEnvironment } from "./session/environment.js"
 import { SessionHistory } from "./session/history.js"
 import { InstructionEntry } from "./session/instruction-entry.js"
+import { Reference } from "./reference.js"
 
 // get project -> project.locations
 //
@@ -660,11 +661,14 @@ const layer = Layer.effect(
               )
               // Commit a staged revert only after preparation succeeds, before admitting new work.
               if (session.revert) yield* SessionRevert.commit(session).pipe(Effect.provideService(Bus.Service, bus))
-              return yield* SessionInbox.admit(db, bus, {
+              const admitted = yield* SessionInbox.admit(db, bus, {
                 id: messageID,
                 sessionID: session.id,
                 item,
               })
+              const references = yield* Reference.Service.pipe(Effect.provide(locations.get(session.location)))
+              yield* references.refresh()
+              return admitted
             }).pipe(
               Effect.catchDefect((defect) =>
                 defect instanceof SessionInbox.LifecycleConflict

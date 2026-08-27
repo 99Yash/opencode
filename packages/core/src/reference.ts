@@ -36,6 +36,8 @@ type Draft = {
 
 export interface Interface extends State.Transformable<Draft> {
   readonly list: () => Effect.Effect<Info[]>
+  /** Schedules daily refresh checks in the Location scope without waiting for Git. */
+  readonly refresh: () => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Reference") {}
@@ -48,6 +50,25 @@ const layer = Layer.effect(
     const cache = yield* RepositoryCache.Service
     const scope = yield* Scope.Scope
     const materialized = new Map<string, Info>()
+    const refresh = Effect.fn("Reference.refresh")(function* () {
+      yield* Effect.forEach(
+        Array.from(materialized.values()),
+        (reference) =>
+          Effect.gen(function* () {
+            if (reference.source.type !== "git") return
+            yield* cache.ensure({
+              reference: Repository.parseRemote(reference.source.repository),
+              branch: reference.source.branch,
+              refresh: "daily",
+            })
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to materialize reference", { name: reference.name, cause }),
+            ),
+          ),
+        { concurrency: 4, discard: true },
+      ).pipe(Effect.forkIn(scope), Effect.asVoid)
+    })
     const state = State.create<Data, Draft>({
       name: "reference",
       initial: () => ({ sources: new Map() }),
@@ -92,17 +113,8 @@ const layer = Layer.effect(
                 source,
               }),
             )
-            yield* cache.ensure({ reference: repository, branch: source.branch, refresh: true }).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("failed to materialize reference", {
-                  name,
-                  repository: source.repository,
-                  cause,
-                }),
-              ),
-              Effect.forkIn(scope),
-            )
           }
+          yield* refresh()
           yield* bus.publish(Reference.Event.Updated, {})
         }),
     })
@@ -110,6 +122,7 @@ const layer = Layer.effect(
     return Service.of({
       transform: state.transform,
       reload: state.reload,
+      refresh,
       list: Effect.fn("Reference.list")(function* () {
         return Array.from(materialized.values())
       }),
