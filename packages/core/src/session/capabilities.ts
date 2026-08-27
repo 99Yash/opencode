@@ -1,20 +1,14 @@
 export * as SessionCapabilities from "./capabilities.js"
 
 import type { Effect } from "effect"
-import type { Image } from "../image.js"
 import type { Instructions } from "../instructions/index.js"
 import type { Permissions } from "../permissions.js"
 import type { Source } from "../source.js"
 import type { Tool } from "../tool.js"
 import type { Session } from "../session.js"
-import type { SessionContext } from "./context.js"
 import type { SessionRunner } from "./runner/index.js"
 import type { SessionRunnerModel } from "./runner/model.js"
 import type { SessionSchema } from "./schema.js"
-import type { SessionCompaction } from "./compaction.js"
-import type { Snapshot } from "../snapshot.js"
-import type { ToolOutput } from "../tool-output.js"
-import type { SessionModelTransport } from "./model-transport.js"
 
 export interface OpenInput {
   readonly id?: SessionSchema.ID
@@ -39,17 +33,6 @@ export interface Handle {
   >
   readonly resume: () => ReturnType<Session.Interface["resume"]>
   readonly interrupt: (options?: { readonly continue?: boolean }) => Effect.Effect<boolean>
-}
-
-/**
- * Live operations, never an attempt snapshot. Title, request hooks, compaction,
- * media/skills, snapshots, output, and transport customization are deferred;
- * open supplies their internal defaults without directory discovery.
- */
-export interface Capabilities extends SessionContext.Interface {
-  readonly image: Image.Interface
-  readonly compaction: SessionCompaction.Interface
-  readonly snapshots: Snapshot.Interface
-  readonly output: ToolOutput.Interface
-  readonly transport: SessionModelTransport.Interface
+  /** Releases this open's capabilities after settlement without interrupting or deleting the Session. */
+  readonly close: () => Effect.Effect<void>
 }

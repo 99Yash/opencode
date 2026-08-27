@@ -41,22 +41,19 @@ describe("capability-owned Session recovery", () => {
     it.effect(`leaves an owned Session ${claimed ? "with an exhausted claim" : "without a claim"} inert`, () =>
       Effect.gen(function* () {
         const database = yield* Database.Service
-        const kv = yield* KV.Service
         const resolve = yield* SessionResolve.Service
         const restart = yield* SessionRestart.Service
         const sessionID = Session.ID.make("ses_capability_recovery")
         yield* seedSession(sessionID, claimed ? { time_suspended: 123, resume_attempts: 10 } : {})
-        yield* kv.set(`session.capabilities/${sessionID}`, true)
+        yield* resolve.own(Effect.succeed({ id: sessionID }))
         const before = yield* accounting(database)
 
-        expect(yield* resolve.owned(sessionID)).toBe(true)
-        expect(yield* resolve.available(sessionID)).toBe(false)
-        expect(yield* restart.recoverable).toEqual(claimed ? [sessionID] : [])
+        expect(resolve.status(sessionID)).toBe("owned-detached")
         yield* restart.resumeSuspendedSessions
         yield* restart.resumeSuspendedSessions
 
         expect(yield* accounting(database)).toEqual(before)
-        expect(yield* kv.get(`session.capabilities/${sessionID}`)).toBe(true)
+        expect(resolve.status(sessionID)).toBe("owned-detached")
         yield* assertInert()
       }),
     )
@@ -65,14 +62,14 @@ describe("capability-owned Session recovery", () => {
   it.effect("keeps a completed Job pending for an unclaimed owned parent without waking it", () =>
     Effect.gen(function* () {
       const database = yield* Database.Service
-      const kv = yield* KV.Service
+      const resolve = yield* SessionResolve.Service
       const jobs = yield* Job.Service
       const restart = yield* SessionRestart.Service
       const parent = Session.ID.make("ses_capability_completed_parent")
       const child = Session.ID.make("ses_capability_completed_child")
       yield* seedSession(parent)
       yield* seedSession(child, { parent_id: parent })
-      yield* kv.set(`session.capabilities/${parent}`, true)
+      yield* resolve.own(Effect.succeed({ id: parent }))
       yield* seedJob(
         { kind: "subagent", parentSessionID: parent, childSessionID: child, agent: "explore", description: "Inspect" },
         "completed",
@@ -81,7 +78,6 @@ describe("capability-owned Session recovery", () => {
       const before = yield* accounting(database)
 
       expect(pending).toMatchObject([{ status: "completed", output: "Recovered result" }])
-      expect((yield* restart.recoverable).toSorted()).toEqual([child, parent].toSorted())
       yield* restart.resumeSuspendedSessions
       yield* restart.resumeSuspendedSessions
 
@@ -96,7 +92,7 @@ describe("capability-owned Session recovery", () => {
     it.effect(`preserves child claims with a capability-owned ${owner} and pending running Job`, () =>
       Effect.gen(function* () {
         const database = yield* Database.Service
-        const kv = yield* KV.Service
+        const resolve = yield* SessionResolve.Service
         const jobs = yield* Job.Service
         const restart = yield* SessionRestart.Service
         const parent = Session.ID.make("ses_capability_running_parent")
@@ -105,8 +101,8 @@ describe("capability-owned Session recovery", () => {
         yield* seedSession(parent, owner === "parent" ? { time_suspended: 789, resume_attempts: 10 } : {})
         yield* seedSession(child, { parent_id: parent, time_suspended: 123, resume_attempts: 10 })
         yield* seedSession(orphan, { parent_id: parent, time_suspended: 456, resume_attempts: 1 })
-        yield* kv.set(`session.capabilities/${owner === "parent" ? parent : child}`, true)
-        yield* kv.set(`session.capabilities/${orphan}`, true)
+        yield* resolve.own(Effect.succeed({ id: owner === "parent" ? parent : child }))
+        yield* resolve.own(Effect.succeed({ id: orphan }))
         yield* seedJob(
           {
             kind: "subagent",
@@ -121,7 +117,6 @@ describe("capability-owned Session recovery", () => {
         const before = yield* accounting(database)
 
         expect(pending).toMatchObject([{ status: "running" }])
-        expect((yield* restart.recoverable).toSorted()).toEqual([child, orphan, parent].toSorted())
         yield* restart.resumeSuspendedSessions
         yield* restart.resumeSuspendedSessions
 
@@ -137,17 +132,16 @@ describe("capability-owned Session recovery", () => {
     it.effect(`keeps a ${status} shell Job pending for an owned Session`, () =>
       Effect.gen(function* () {
         const database = yield* Database.Service
-        const kv = yield* KV.Service
+        const resolve = yield* SessionResolve.Service
         const jobs = yield* Job.Service
         const restart = yield* SessionRestart.Service
         const sessionID = Session.ID.make("ses_capability_shell")
         yield* seedSession(sessionID)
-        yield* kv.set(`session.capabilities/${sessionID}`, true)
+        yield* resolve.own(Effect.succeed({ id: sessionID }))
         yield* seedJob({ kind: "shell", sessionID, shellID: "sh_recovery", command: "echo result" }, status)
         const pending = yield* jobs.pendingBackground
         const before = yield* accounting(database)
 
-        expect(yield* restart.recoverable).toEqual([sessionID])
         yield* restart.resumeSuspendedSessions
 
         expect(yield* jobs.pendingBackground).toEqual(pending)
@@ -156,23 +150,6 @@ describe("capability-owned Session recovery", () => {
       }),
     )
   }
-
-  it.effect("inventories every claim and pending Job target without duplicating Sessions", () =>
-    Effect.gen(function* () {
-      const store = yield* SessionStore.Service
-      const restart = yield* SessionRestart.Service
-      const root = Session.ID.make("ses_inventory_root")
-      const child = Session.ID.make("ses_inventory_child")
-      yield* seedSession(root, { time_suspended: 123 })
-      yield* seedSession(child, { parent_id: root, time_suspended: 456 })
-      yield* seedJob({ kind: "shell", sessionID: root, shellID: "sh_inventory", command: "echo result" }, "completed")
-
-      expect(yield* store.listSuspended()).toEqual([root])
-      expect((yield* store.listClaimed()).toSorted()).toEqual([child, root].toSorted())
-      expect((yield* restart.recoverable).toSorted()).toEqual([child, root].toSorted())
-      yield* assertInert()
-    }),
-  )
 })
 
 function seedSession(

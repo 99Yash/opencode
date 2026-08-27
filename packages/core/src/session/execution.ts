@@ -107,17 +107,14 @@ export const layer = Layer.effect(
       })
     }
     const coordinator = yield* SessionRunCoordinator.make<SessionSchema.ID, SessionRunner.RunError, InterruptReason>({
-      started: (sessionID) =>
-        resolve
-          .pin(sessionID)
-          .pipe(
-            Effect.andThen(
-              reportLifecycle(
-                sessionID,
-                bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
-              ),
-            ),
-          ),
+      eligible: (sessionID) => resolve.status(sessionID) !== "owned-detached",
+      started: (sessionID) => {
+        resolve.pin(sessionID)
+        return reportLifecycle(
+          sessionID,
+          bus.publish(SessionEvent.Execution.Started, { sessionID }, claimOnCommit(sessionID)),
+        )
+      },
       drain: (sessionID, force, promotable) => drain(sessionID, force, undefined, promotable),
       // One terminal observation per busy period, covering every coalesced drain.
       settled: (sessionID, exit, reason) =>
@@ -174,11 +171,11 @@ export const layer = Layer.effect(
         }),
       resume: (sessionID) =>
         Effect.gen(function* () {
-          if (!(yield* resolve.available(sessionID)))
-            return yield* Effect.die(new Error(`Session must be reopened with capabilities: ${sessionID}`))
+          // TODO: typed unavailable-operation errors belong to the capability-gated operations phase.
+          if (resolve.status(sessionID) === "owned-detached") return yield* SessionResolve.unavailable(sessionID)
           yield* coordinator.run(sessionID)
         }),
-      wake: (sessionID) => coordinator.wake(sessionID).pipe(Effect.when(resolve.available(sessionID)), Effect.asVoid),
+      wake: coordinator.wake,
       awaitIdle: coordinator.awaitIdle,
     })
   }),

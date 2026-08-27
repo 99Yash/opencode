@@ -1,6 +1,6 @@
 export * as Session from "./session.js"
 export * from "./session/schema.js"
-export type { Capabilities, OpenInput, Handle } from "./session/capabilities.js"
+export type { OpenInput, Handle } from "./session/capabilities.js"
 
 import { Cause, Effect, Layer, Schema, Context, RcMap, Stream, Scope } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
@@ -59,7 +59,6 @@ import { SessionHistory } from "./session/history.js"
 import { InstructionEntry } from "./session/instruction-entry.js"
 import { SessionResolve } from "./session/resolve.js"
 import type { SessionCapabilities } from "./session/capabilities.js"
-import { Hash } from "@opencode-ai/util/hash"
 
 // get project -> project.locations
 //
@@ -192,7 +191,7 @@ export const MessageNotFoundError = SessionRevert.MessageNotFoundError
 export type MessageNotFoundError = SessionRevert.MessageNotFoundError
 
 export interface Interface {
-  readonly open: (input: SessionCapabilities.OpenInput) => Effect.Effect<SessionCapabilities.Handle, NotFoundError>
+  readonly open: (input: SessionCapabilities.OpenInput) => Effect.Effect<SessionCapabilities.Handle>
   readonly list: (input?: ListInput) => Effect.Effect<{
     readonly data: SessionSchema.Info[]
   }>
@@ -355,13 +354,9 @@ const layer = Layer.effect(
     const activeShells = new Set<SessionSchema.ID>()
     const shellLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const closeTransport = Effect.fn("Session.closeTransport")(function* (session: SessionSchema.Info) {
-      if (yield* resolve.owned(session.id)) {
-        if (!(yield* resolve.available(session.id))) return
-        return yield* Effect.gen(function* () {
-          const capabilities = yield* resolve.resolve(session)
-          if (capabilities) yield* capabilities.transport.close(session.id)
-        }).pipe(Effect.scoped)
-      }
+      const resolved = yield* resolve.resolve(session)
+      if (resolved.status === "attached") return yield* resolved.capabilities.transport.close(session.id)
+      if (resolved.status === "owned-detached") return
       const location = Location.Ref.make({
         directory: session.location.directory,
         workspaceID: session.location.workspaceID,
@@ -370,7 +365,7 @@ const layer = Layer.effect(
       yield* SessionModelTransport.Service.use((transport) => transport.close(session.id)).pipe(
         Effect.provide(locations.get(location)),
       )
-    })
+    }, Effect.scoped)
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const persistProject = (project: Project.Resolved) => upsertProject(db, project).pipe(Effect.orDie)
 
@@ -459,15 +454,13 @@ const layer = Layer.effect(
             const directory = AbsolutePath.make(process.cwd())
             // Transitional placement is unused by supplied capabilities, but listings group
             // these Sessions under the deterministic cwd-derived project. Adoption never moves it.
-            const session = yield* db
-              .transaction(() =>
-                create(
-                  { id: input.id, title: input.title, location: Location.Ref.make({ directory }) },
-                  { id: Project.ID.make(Hash.fast(`directory:${directory}`)), directory, canonical: directory },
-                ).pipe(Effect.tap((session) => resolve.own(session.id))),
-              )
-              .pipe(Effect.orDie)
-            yield* resolve.attach(session.id, input)
+            const session = yield* resolve.own(
+              create(
+                { id: input.id, title: input.title, location: Location.Ref.make({ directory }) },
+                Project.markerless(directory),
+              ).pipe(Effect.orDie),
+            )
+            const close = yield* resolve.attach(session.id, input)
             return {
               id: session.id,
               prompt: (prompt) =>
@@ -478,6 +471,7 @@ const layer = Layer.effect(
                 }),
               resume: () => result.resume(session.id),
               interrupt: (options) => result.interrupt(session.id, options),
+              close,
             } satisfies SessionCapabilities.Handle
           }),
         ),
@@ -696,11 +690,13 @@ const layer = Layer.effect(
                 delivery: input.delivery ?? "steer",
               })
               if (existing) return existing
-              const capabilities = yield* resolve.resolve(session)
+              const resolved = yield* resolve.resolve(session)
+              // TODO: typed unavailable-operation errors belong to the capability-gated operations phase.
+              if (resolved.status === "owned-detached" && (input.files?.length || input.skills?.length))
+                return yield* SessionResolve.unavailable(session.id)
               const item = yield* restore(
-                (capabilities
-                  ? preparePrompt(input, messageID, Effect.succeed(capabilities.image), Effect.undefined)
-                  : Effect.gen(function* () {
+                (resolved.status === "unowned"
+                  ? Effect.gen(function* () {
                       const plugins = yield* PluginSupervisor.Service
                       yield* plugins.flush
                       const hooks = yield* PluginHooks.Service
@@ -714,6 +710,14 @@ const layer = Layer.effect(
                         hooks,
                       )
                     }).pipe(Effect.provide(locations.get(session.location)))
+                  : preparePrompt(
+                      input,
+                      messageID,
+                      resolved.status === "attached"
+                        ? Effect.succeed(resolved.capabilities.image)
+                        : SessionResolve.unavailable(session.id),
+                      Effect.undefined,
+                    )
                 ).pipe(Effect.provideService(FSUtil.Service, fs)),
               )
               // Commit a staged revert only after preparation succeeds, before admitting new work.
@@ -828,7 +832,7 @@ const layer = Layer.effect(
       }),
       skill: Effect.fn("Session.skill")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        if (yield* resolve.owned(session.id)) return yield* new SkillNotFoundError({ skill: input.skill })
+        if (resolve.status(session.id) !== "unowned") return yield* new SkillNotFoundError({ skill: input.skill })
         const skills = yield* Skill.Service.pipe(Effect.provide(locations.get(session.location)))
         const skill = yield* skills.get(input.skill)
         if (!skill) return yield* new SkillNotFoundError({ skill: input.skill })

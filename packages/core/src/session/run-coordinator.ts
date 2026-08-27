@@ -52,6 +52,8 @@ type Execution<E, Reason> = {
  */
 export const make = <Key, E, Reason = never>(options: {
   readonly drain: (key: Key, force: boolean, scope: Promotable) => Effect.Effect<void, E>
+  /** Controls new busy periods, including late successors; existing execution may finish. */
+  readonly eligible?: (key: Key) => boolean
   /** Runs once when a process-local busy period begins, before its first drain. */
   readonly started?: (key: Key) => Effect.Effect<void>
   /**
@@ -107,7 +109,7 @@ export const make = <Key, E, Reason = never>(options: {
     // A doorbell that survives the execution loop (rung after the loop decided to end, or
     // during failure or interruption cleanup) starts a fresh execution for the remaining work.
     const settle = (key: Key, execution: Execution<E, Reason>, exit: Exit.Exit<void, E>) => {
-      if (execution.pendingWake) start(key, false, execution.pendingWake)
+      if (execution.pendingWake && (options.eligible?.(key) ?? true)) start(key, false, execution.pendingWake)
       else executions.delete(key)
       Deferred.doneUnsafe(execution.done, exit)
     }
@@ -121,11 +123,13 @@ export const make = <Key, E, Reason = never>(options: {
             return Deferred.await(execution.done).pipe(Effect.ignoreCause, Effect.andThen(run(key)))
           return Deferred.await(execution.done)
         }
+        if (options.eligible?.(key) === false) return Effect.interrupt
         return Deferred.await(start(key, true, "input").done)
       })
 
     const wake = (key: Key, scope: Promotable = "input") =>
       Effect.sync(() => {
+        if (options.eligible?.(key) === false) return
         const execution = executions.get(key)
         if (execution !== undefined) {
           // Coalesced wakes keep the widest scope: "input" subsumes "steer".

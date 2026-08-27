@@ -4,7 +4,7 @@ import type { LLMClientService } from "@opencode-ai/ai"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Global } from "@opencode-ai/util/global"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
-import { Context, Effect, Exit, Layer, Scope } from "effect"
+import { Context, Deferred, Effect, Exit, Layer, Scope } from "effect"
 import { Bus } from "../bus.js"
 import { App } from "../app.js"
 import { Database } from "../database/database.js"
@@ -15,28 +15,50 @@ import type { SessionRunner } from "./runner/index.js"
 import { SessionSchema } from "./schema.js"
 import { SessionStore } from "./store.js"
 import { Socket } from "effect/unstable/socket"
+import type { Image } from "../image.js"
+import type { SessionContext } from "./context.js"
+import type { SessionModelTransport } from "./model-transport.js"
 
 const prefix = "session.capabilities/"
 
+/**
+ * Live operations, never an attempt snapshot. Title, request hooks, compaction,
+ * media/skills, snapshots, output, and transport customization are deferred;
+ * open supplies their internal defaults without directory discovery.
+ */
+interface Capabilities extends SessionContext.Interface {
+  readonly image: Image.Interface
+  readonly transport: SessionModelTransport.Interface
+}
+
+type Status = "attached" | "owned-detached" | "unowned"
+type Resolved =
+  | { readonly status: "attached"; readonly capabilities: Capabilities }
+  | { readonly status: "owned-detached" | "unowned" }
+
 type Opened = {
-  readonly capabilities: SessionCapabilities.Capabilities
+  readonly capabilities: Capabilities
   readonly runner: SessionRunner.Interface
   readonly scope: Scope.Closeable
-  readonly retire: () => Effect.Effect<void>
+  readonly onRetire: () => Effect.Effect<void>
+  readonly done: Deferred.Deferred<void>
   current: boolean
   users: number
 }
 
 export interface Interface {
-  readonly own: (id: SessionSchema.ID) => Effect.Effect<void>
-  readonly owned: (id: SessionSchema.ID) => Effect.Effect<boolean>
+  readonly own: <A extends { readonly id: SessionSchema.ID }, R>(
+    record: Effect.Effect<A, never, R>,
+  ) => Effect.Effect<A, never, R>
+  readonly status: (id: SessionSchema.ID) => Status
   readonly ownedIDs: Effect.Effect<ReadonlyArray<SessionSchema.ID>>
-  readonly available: (id: SessionSchema.ID) => Effect.Effect<boolean>
-  readonly attach: (id: SessionSchema.ID, input: SessionCapabilities.OpenInput) => Effect.Effect<void>
-  readonly resolve: (
-    session: SessionSchema.Info,
-  ) => Effect.Effect<SessionCapabilities.Capabilities | undefined, never, Scope.Scope>
-  readonly pin: (id: SessionSchema.ID) => Effect.Effect<void>
+  readonly attach: (
+    id: SessionSchema.ID,
+    input: SessionCapabilities.OpenInput,
+  ) => Effect.Effect<() => Effect.Effect<void>>
+  readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Resolved, never, Scope.Scope>
+  /** Called synchronously when the coordinator installs a busy period, before its first fiber yield. */
+  readonly pin: (id: SessionSchema.ID) => void
   readonly pinned: (id: SessionSchema.ID) => SessionRunner.Interface | undefined
   readonly settle: (id: SessionSchema.ID) => Effect.Effect<void>
   readonly remove: (id: SessionSchema.ID) => Effect.Effect<void>
@@ -48,6 +70,12 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const kv = yield* KV.Service
+    const db = (yield* Database.Service).db
+    const owned = new Set(
+      (yield* kv.scanAll(prefix))
+        .filter((entry) => entry.value === true)
+        .map((entry) => SessionSchema.ID.make(entry.key.slice(prefix.length))),
+    )
     const globals = yield* Effect.context<
       | Database.Service
       | Bus.Service
@@ -59,36 +87,26 @@ export const layer = Layer.effect(
     >()
     const current = new Map<SessionSchema.ID, Opened>()
     const pinned = new Map<SessionSchema.ID, Opened>()
-    const opened = new Set<Opened>()
+    const opened = new Map<Deferred.Deferred<void>, Opened>()
+    // LayerMap invalidation cannot choose synchronously at coordinator start or
+    // run a host hook after all generation-specific users settle. Keep explicit leases.
     const retire = (value: Opened) =>
       Effect.suspend(() => {
-        if (value.current || value.users > 0 || !opened.delete(value)) return Effect.void
-        return Scope.close(value.scope, Exit.void).pipe(Effect.andThen(value.retire()))
+        if (value.current || value.users > 0 || !opened.delete(value.done)) return Effect.void
+        return Scope.close(value.scope, Exit.void).pipe(
+          Effect.andThen(value.onRetire()),
+          Effect.onExit((exit) => Deferred.done(value.done, exit)),
+        )
       })
     const release = (value: Opened) =>
       Effect.sync(() => {
         value.users--
       }).pipe(Effect.andThen(retire(value)))
-    const owned = (id: SessionSchema.ID) => kv.get(prefix + id).pipe(Effect.map((value) => value === true))
-    const ownedIDs = Effect.gen(function* () {
-      const ids: SessionSchema.ID[] = []
-      let after: string | undefined
-      do {
-        const page = yield* kv.scan({ prefix, after })
-        ids.push(
-          ...page.entries
-            .filter((entry) => entry.value === true)
-            .map((entry) => SessionSchema.ID.make(entry.key.slice(prefix.length))),
-        )
-        after = page.next
-      } while (after !== undefined)
-      return ids
-    })
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => current.clear()).pipe(
         Effect.andThen(
           Effect.forEach(
-            opened,
+            opened.values(),
             (value) => {
               value.current = false
               return retire(value)
@@ -101,25 +119,57 @@ export const layer = Layer.effect(
 
     return Service.of({
       // Ownership is transitionally one-way: retirement never hands a Session back to discovery.
-      own: (id) => kv.set(prefix + id, true),
-      owned,
-      ownedIDs,
-      available: (id) =>
-        Effect.suspend(() => (current.has(id) ? Effect.succeed(true) : owned(id).pipe(Effect.map((value) => !value)))),
+      own: (record) =>
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const session = yield* db
+              .transaction(() =>
+                Effect.gen(function* () {
+                  const session = yield* record
+                  if (!owned.has(session.id)) yield* kv.set(prefix + session.id, true)
+                  return session
+                }),
+              )
+              .pipe(Effect.orDie)
+            // Publish the memory index only after the durable transaction commits.
+            owned.add(session.id)
+            return session
+          }),
+        ),
+      status: (id) => (current.has(id) ? "attached" : owned.has(id) ? "owned-detached" : "unowned"),
+      ownedIDs: Effect.sync(() => Array.from(owned)),
       attach: Effect.fn("SessionResolve.attach")(function* (id, input) {
-        const { Image } = yield* Effect.promise(() => import("../image.js"))
-        const { PluginHooks } = yield* Effect.promise(() => import("../plugin/hooks.js"))
-        const { PluginSupervisor } = yield* Effect.promise(() => import("../plugin/supervisor-service.js"))
-        const { Snapshot } = yield* Effect.promise(() => import("../snapshot.js"))
-        const { ToolOutput } = yield* Effect.promise(() => import("../tool-output.js"))
-        const { SessionCompaction } = yield* Effect.promise(() => import("./compaction.js"))
-        const { SessionContext } = yield* Effect.promise(() => import("./context.js"))
-        const { InstructionEntry } = yield* Effect.promise(() => import("./instruction-entry.js"))
-        const { SessionModelRequest } = yield* Effect.promise(() => import("./model-request.js"))
-        const { SessionModelTransport } = yield* Effect.promise(() => import("./model-transport.js"))
-        const { SessionRunner } = yield* Effect.promise(() => import("./runner/index.js"))
-        const { SessionRunnerLLM } = yield* Effect.promise(() => import("./runner/llm.js"))
-        const { SessionTitle } = yield* Effect.promise(() => import("./title.js"))
+        const [
+          { Image },
+          { PluginHooks },
+          { PluginSupervisor },
+          { Snapshot },
+          { ToolOutput },
+          { SessionCompaction },
+          { SessionContext },
+          { InstructionEntry },
+          { SessionModelRequest },
+          { SessionModelTransport },
+          { SessionRunner },
+          { SessionRunnerLLM },
+          { SessionTitle },
+        ] = yield* Effect.promise(() =>
+          Promise.all([
+            import("../image.js"),
+            import("../plugin/hooks.js"),
+            import("../plugin/supervisor-service.js"),
+            import("../snapshot.js"),
+            import("../tool-output.js"),
+            import("./compaction.js"),
+            import("./context.js"),
+            import("./instruction-entry.js"),
+            import("./model-request.js"),
+            import("./model-transport.js"),
+            import("./runner/index.js"),
+            import("./runner/llm.js"),
+            import("./title.js"),
+          ]),
+        )
         const scope = yield* Scope.make()
         const base = Layer.mergeAll(
           PluginHooks.layer,
@@ -145,47 +195,56 @@ export const layer = Layer.effect(
           capabilities: {
             ...Context.get(services, SessionContext.Service),
             image: Context.get(services, Image.Service),
-            compaction: Context.get(services, SessionCompaction.Service),
-            snapshots: Context.get(services, Snapshot.Service),
-            output: Context.get(services, ToolOutput.Service),
             transport: Context.get(services, SessionModelTransport.Service),
           },
           runner: Context.get(services, SessionRunner.Service),
           scope,
-          retire: input.retire ?? (() => Effect.void),
+          onRetire: input.retire ?? (() => Effect.void),
+          done: Deferred.makeUnsafe<void>(),
           current: true,
           users: 0,
         }
         const previous = current.get(id)
         current.set(id, value)
-        opened.add(value)
-        if (!previous) return
-        previous.current = false
-        yield* retire(previous)
+        opened.set(value.done, value)
+        if (previous) {
+          previous.current = false
+          yield* retire(previous)
+        }
+        // Closed handles retain only completion, not retired capability functions or layers.
+        const done = value.done
+        return () =>
+          Effect.gen(function* () {
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                const value = opened.get(done)
+                if (!value) return
+                if (current.get(id) === value) current.delete(id)
+                value.current = false
+                yield* retire(value)
+              }),
+            )
+            yield* Deferred.await(done)
+          })
       }),
       resolve: (session) =>
         Effect.gen(function* () {
           const value = current.get(session.id)
-          if (!value) {
-            if (yield* owned(session.id))
-              return yield* Effect.die(new Error(`Session must be reopened with capabilities: ${session.id}`))
-            return
-          }
+          if (!value) return { status: owned.has(session.id) ? ("owned-detached" as const) : ("unowned" as const) }
           yield* Effect.acquireRelease(
             Effect.sync(() => {
               value.users++
             }),
             () => release(value),
           )
-          return value.capabilities
+          return { status: "attached" as const, capabilities: value.capabilities }
         }),
-      pin: (id) =>
-        Effect.sync(() => {
-          const value = current.get(id)
-          if (!value) return
-          value.users++
-          pinned.set(id, value)
-        }),
+      pin: (id) => {
+        const value = current.get(id)
+        if (!value) return
+        value.users++
+        pinned.set(id, value)
+      },
       pinned: (id) => pinned.get(id)?.runner,
       settle: (id) =>
         Effect.suspend(() => {
@@ -202,7 +261,9 @@ export const layer = Layer.effect(
             value.current = false
             yield* retire(value)
           }
+          if (!owned.has(id)) return
           yield* kv.remove(prefix + id)
+          owned.delete(id)
         }),
     })
   }),
@@ -220,6 +281,11 @@ export const node = makeGlobalNode({
     FSUtil.node,
     Global.node,
     webSocketConstructor,
+    // Request preparation reads this Reference from the captured globals, not its fallback metadata.
     App.node,
   ],
 })
+
+/** TODO: replace this defect with the typed error in the capability-gated operations phase. */
+export const unavailable = (sessionID: SessionSchema.ID) =>
+  Effect.die(new Error(`Session must be reopened with capabilities: ${sessionID}`))

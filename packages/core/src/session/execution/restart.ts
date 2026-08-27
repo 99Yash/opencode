@@ -32,8 +32,6 @@ export interface Options {
 const DEFAULT_MAX_ATTEMPTS = 10
 
 export interface Interface {
-  /** All claimed Sessions and pending Job targets/parents, regardless of capability ownership. */
-  readonly recoverable: Effect.Effect<ReadonlyArray<SessionSchema.ID>>
   /**
    * Resumes Sessions whose execution claim was never released — turns orphaned
    * by a process that died without teardown, or interrupted by a graceful
@@ -80,7 +78,7 @@ export const layer = (options?: Options) =>
 
       const prepareResume = Effect.fnUntraced(function* (sessionID: SessionSchema.ID) {
         // Reopening capabilities does not opt a Session into automatic recovery.
-        if (yield* resolve.owned(sessionID)) return undefined
+        if (resolve.status(sessionID) !== "unowned") return undefined
         // Durable before the resume runs, so a crash inside the resumed turn is
         // counted by the next sweep and the budget cannot be dodged.
         const attempts = yield* store.countResume(sessionID)
@@ -103,10 +101,13 @@ export const layer = (options?: Options) =>
         return true
       })
 
-      const eligibleJob = Effect.fnUntraced(function* (recovery: Job.Recovery) {
-        if (recovery.kind === "shell") return !(yield* resolve.owned(recovery.sessionID))
-        return !(yield* resolve.owned(recovery.parentSessionID)) && !(yield* resolve.owned(recovery.childSessionID))
-      })
+      const eligibleJob = (recovery: Job.Recovery) => {
+        if (recovery.kind === "shell") return resolve.status(recovery.sessionID) === "unowned"
+        return (
+          resolve.status(recovery.parentSessionID) === "unowned" &&
+          resolve.status(recovery.childSessionID) === "unowned"
+        )
+      }
 
       const recoverShell = Effect.fnUntraced(function* (
         background: Job.Background,
@@ -156,7 +157,7 @@ export const layer = (options?: Options) =>
 
         const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error">) {
           if (result.status === "running") return
-          if (!(yield* eligibleJob(recovery))) return
+          if (!eligibleJob(recovery)) return
           const text =
             result.status === "completed"
               ? (result.output ?? "Subagent completed without a text response.")
@@ -225,18 +226,6 @@ export const layer = (options?: Options) =>
       })
 
       return Service.of({
-        recoverable: Effect.gen(function* () {
-          return Array.from(
-            new Set([
-              ...(yield* store.listClaimed()),
-              ...(yield* jobs.pendingBackground).flatMap((background) =>
-                background.recovery.kind === "shell"
-                  ? [background.recovery.sessionID]
-                  : [background.recovery.childSessionID, background.recovery.parentSessionID],
-              ),
-            ]),
-          )
-        }),
         resumeSuspendedSessions: Effect.gen(function* () {
           const active = yield* execution.active
           // Early notices wait for root recovery's accounting, including roots that exhaust their budget.
@@ -255,7 +244,7 @@ export const layer = (options?: Options) =>
             Effect.fnUntraced(function* (background) {
               if ((yield* jobs.get(background.id))?.status === "running") return
               const recovery = background.recovery
-              if (!(yield* eligibleJob(recovery))) return
+              if (!eligibleJob(recovery)) return
               yield* recovery.kind === "shell"
                 ? recoverShell(background, recovery)
                 : recoverSubagent(background, recovery, suspended)
