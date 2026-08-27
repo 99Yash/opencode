@@ -8,7 +8,8 @@ import { resolve, type Package } from "resolve.exports"
 let conditions: readonly string[] = []
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
-    conditions = context.conditions
+    // Concurrent startup requires must not overwrite the import probe's conditions.
+    if (specifier === "node:module" && context.conditions.includes("import")) conditions = context.conditions
     return nextResolve(specifier, context)
   },
 })
@@ -17,9 +18,9 @@ await new Script('import("node:module")', {
 }).runInThisContext()
 hooks.deregister()
 
-export function resolveModule(name: string, directory: string) {
+export function resolveModule(_name: string, directory: string) {
   const pkg = createRequire(import.meta.url)(path.join(directory, "package.json")) as Package
-  const target = resolve(pkg, name, { conditions, unsafe: true })?.[0]
+  const target = resolve(pkg, ".", { conditions, unsafe: true })?.[0]
   if (target) return pathToFileURL(path.resolve(directory, target)).href
   return pathToFileURL(createRequire(path.join(directory, "package.json")).resolve(directory)).href
 }

@@ -5,9 +5,15 @@ import path from "node:path"
 import { test } from "node:test"
 import { pathToFileURL } from "node:url"
 import { resolveModule } from "#npm-resolve"
+import "./fixture/npm-require.node.ts"
 
 const cases = [
   { title: "string exports", manifest: { exports: "./entry.mjs" }, file: "entry.mjs" },
+  {
+    title: "npm alias with a different manifest name",
+    manifest: { name: "@fixture/original", exports: "./entry.mjs" },
+    file: "entry.mjs",
+  },
   {
     title: "nested import conditions",
     manifest: { exports: { ".": { node: { import: "./entry.mjs", require: "./wrong.cjs" } } } },
