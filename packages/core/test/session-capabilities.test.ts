@@ -32,6 +32,7 @@ import { Skill } from "../src/skill"
 import { Permissions } from "../src/permissions"
 import { Permission } from "../src/permission"
 import { SessionMessage } from "../src/session/message"
+import { PluginHooks } from "../src/plugin/hooks"
 
 const scripted = TestLLM.layer()
 const application = AppNodeBuilder.build(
@@ -44,6 +45,7 @@ const application = AppNodeBuilder.build(
     Bus.node,
     KV.node,
     InstructionEntry.node,
+    PluginHooks.node,
   ]),
   [
     [Bus.node, Bus.configured({ persist: true })],
@@ -70,6 +72,38 @@ const echo = (execute: (text: string) => Effect.Effect<string>, name = "echo"): 
 })
 
 describe("Session capabilities", () => {
+  it.live("fresh local defaults do not inherit plugin state from the host's root composition", () =>
+    Effect.gen(function* () {
+      const oc = yield* OpenCode.make
+      const hooks = yield* PluginHooks.Service
+      const llm = yield* TestLLM.Service
+      const executed: string[] = []
+      yield* hooks.register(
+        "tool",
+        "execute.before",
+        () => new Tool.Error({ message: "Root plugin rejected execution" }),
+      )
+      const session = yield* oc.session({
+        model,
+        tools: [
+          echo((text) =>
+            Effect.sync(() => {
+              executed.push(text)
+              return text
+            }),
+          ),
+        ],
+      })
+      yield* llm.push(
+        TestLLM.tool("root_isolation", "execute", { code: 'return await tools.echo({ text: "local" })' }),
+        TestLLM.text("finished", "root_isolation_reply"),
+      )
+      yield* session.prompt({ text: "Execute with local defaults." })
+      expect(executed).toEqual(["local"])
+      expect(JSON.stringify(llm.requests)).not.toContain("Root plugin rejected execution")
+    }),
+  )
+
   isolated.live("reconstructs over durable storage with zero model calls until reopen and explicit drive", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(

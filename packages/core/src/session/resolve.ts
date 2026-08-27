@@ -138,7 +138,7 @@ export const layer = Layer.effect(
           Layer.provide(Layer.succeedContext(globals)),
         )
         // Each open builds fresh local state over the SAME captured durable/global services.
-        const services = yield* Layer.buildWithScope(runner, scope).pipe(
+        const services = yield* Layer.buildWithScope(Layer.fresh(runner), scope).pipe(
           Effect.onError(() => Scope.close(scope, Exit.void)),
         )
         const value: Opened = {
