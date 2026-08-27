@@ -7,6 +7,7 @@ import { PluginHooks } from "../src/plugin/hooks"
 import { SessionSchema } from "../src/session/schema"
 import { SessionMessage } from "../src/session/message"
 import { Tool } from "../src/tool"
+import { echo } from "./fixture/capabilities"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(LayerNode.compile(LayerNode.group([PluginHooks.node, Image.node])))
@@ -19,17 +20,10 @@ const call = (name: string, input: unknown): Parameters<Tool.Snapshot["execute"]
   ...identity,
   call: { type: "tool-call", id: `call_${name}`, name, input },
 })
-const echo: Tool.Info = {
-  name: "echo",
-  description: "Echo a value",
-  input: Schema.Struct({ value: Schema.String }),
-  output: Schema.String,
-  execute: ({ value }) => Effect.succeed({ output: value }),
-}
 
 it.effect("value snapshots preserve definitions and executors after sampling and replacement", () =>
   Effect.gen(function* () {
-    const tool = { ...echo, options: { namespace: "demo", codemode: false } }
+    const tool = { ...echo(Effect.succeed), options: { namespace: "demo", codemode: false } }
     const values: Tool.Info[] = [tool]
     const first = yield* Tool.snapshot(values)
     tool.execute = () => Effect.succeed({ output: "changed executor" })
@@ -44,36 +38,36 @@ it.effect("value snapshots preserve definitions and executors after sampling and
     values.length = 0
     expect((yield* Tool.snapshot(values)).definitions.map((tool) => tool.name)).toEqual(["execute"])
 
-    expect(first.definitions[0]?.description).toBe("Echo a value")
-    expect(first.definitions[0]?.inputSchema.properties).toEqual({ value: { type: "string" } })
+    expect(first.definitions[0]?.description).toBe("Echo text with echo")
+    expect(first.definitions[0]?.inputSchema.properties).toEqual({ text: { type: "string" } })
     expect(second.definitions[0]?.description).toBe("Changed description")
     expect(second.definitions[0]?.inputSchema.properties).toEqual({ count: { type: "number" } })
-    expect(yield* first.execute(call("demo_echo", { value: "original" }))).toEqual({
+    expect(yield* first.execute(call("demo_echo", { text: "original" }))).toEqual({
       output: "original",
       content: [{ type: "text", text: "original" }],
     })
     expect((yield* second.execute(call("demo_echo", { count: 2 }))).output).toBe(3)
     expect(yield* first.execute(call("demo_echo", { count: 2 })).pipe(Effect.flip)).toBeInstanceOf(Tool.Error)
-    expect(yield* second.execute(call("demo_echo", { value: "original" })).pipe(Effect.flip)).toBeInstanceOf(Tool.Error)
+    expect(yield* second.execute(call("demo_echo", { text: "original" })).pipe(Effect.flip)).toBeInstanceOf(Tool.Error)
   }),
 )
 
 it.effect("value snapshots reuse name normalization, validation, and last-valid precedence", () =>
   Effect.gen(function* () {
-    const tool = { ...echo, name: "echo.text", options: { namespace: "demo.tools", codemode: false } }
+    const tool = { ...echo(Effect.succeed, "echo.text"), options: { namespace: "demo.tools", codemode: false } }
     const snapshot = yield* Tool.snapshot([
       tool,
       { ...tool, name: "echo_text", execute: () => Effect.succeed({ output: "latest" }) },
       { ...tool, options: { namespace: "invalid namespace", codemode: false } },
-      { ...echo, name: "execute", options: { codemode: false } },
+      { ...echo(Effect.succeed, "execute"), options: { codemode: false } },
     ])
     expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["demo_tools_echo_text", "execute"])
-    expect((yield* snapshot.execute(call("demo_tools_echo_text", { value: "input" }))).output).toBe("latest")
+    expect((yield* snapshot.execute(call("demo_tools_echo_text", { text: "input" }))).output).toBe("latest")
 
     const invalidOutput = yield* Tool.snapshot([
-      { ...echo, options: { codemode: false }, execute: () => Effect.succeed({ output: 1 }) },
+      { ...echo(Effect.succeed), options: { codemode: false }, execute: () => Effect.succeed({ output: 1 }) },
     ])
-    expect((yield* invalidOutput.execute(call("echo", { value: "input" })).pipe(Effect.flip)).message).toContain(
+    expect((yield* invalidOutput.execute(call("echo", { text: "input" })).pipe(Effect.flip)).message).toContain(
       "Tool returned an invalid value for its output schema",
     )
   }),
@@ -81,29 +75,29 @@ it.effect("value snapshots reuse name normalization, validation, and last-valid 
 
 it.live("value snapshots default tools into CodeMode and retain executable catalog entries", () =>
   Effect.gen(function* () {
-    const snapshot = yield* Tool.snapshot([{ ...echo, options: { namespace: "demo.tools" } }])
+    const snapshot = yield* Tool.snapshot([{ ...echo(Effect.succeed), options: { namespace: "demo.tools" } }])
     expect(snapshot.definitions.map((tool) => tool.name)).toEqual(["execute"])
     expect(snapshot.codeModeCatalog?.map((tool) => tool.path)).toEqual(["demo.tools.echo"])
-    expect(yield* snapshot.execute(call("demo_tools_echo", { value: "input" })).pipe(Effect.flip)).toEqual(
+    expect(yield* snapshot.execute(call("demo_tools_echo", { text: "input" })).pipe(Effect.flip)).toEqual(
       new Tool.Error({ message: "Unknown tool: demo_tools_echo" }),
     )
     expect(
-      yield* snapshot.execute(call("execute", { code: 'return await tools.demo.tools.echo({ value: "input" })' })),
+      yield* snapshot.execute(call("execute", { code: 'return await tools.demo.tools.echo({ text: "input" })' })),
     ).toMatchObject({
       content: [{ type: "text", text: "input" }],
-      metadata: { toolCalls: [{ tool: "demo.tools.echo", status: "completed", input: { value: "input" } }] },
+      metadata: { toolCalls: [{ tool: "demo.tools.echo", status: "completed", input: { text: "input" } }] },
     })
   }),
 )
 
 it.effect("value snapshot permissions filter visibility without authorizing execution", () =>
   Effect.gen(function* () {
-    const tools = [{ ...echo, options: { permission: "read", codemode: false } }]
+    const tools = [{ ...echo(Effect.succeed), options: { permission: "read", codemode: false } }]
     const visible = yield* Tool.snapshot(tools, [{ action: "read", resource: "private/*", effect: "deny" }])
-    expect((yield* visible.execute(call("echo", { value: "private/file.ts" }))).output).toBe("private/file.ts")
+    expect((yield* visible.execute(call("echo", { text: "private/file.ts" }))).output).toBe("private/file.ts")
     const hidden = yield* Tool.snapshot(tools, [{ action: "read", resource: "*", effect: "deny" }])
     expect(hidden.definitions.map((tool) => tool.name)).toEqual(["execute"])
-    expect(yield* hidden.execute(call("echo", { value: "input" })).pipe(Effect.flip)).toBeInstanceOf(Tool.Error)
+    expect(yield* hidden.execute(call("echo", { text: "input" })).pipe(Effect.flip)).toBeInstanceOf(Tool.Error)
     const directOnly = yield* Tool.snapshot(tools, [{ action: "execute", resource: "*", effect: "deny" }])
     expect(directOnly.definitions.map((tool) => tool.name)).toEqual(["echo"])
     expect(directOnly.codeModeCatalog).toBeUndefined()
@@ -119,7 +113,7 @@ it.live("value snapshots use externally scoped hooks and image normalization", (
     yield* hooks.register("tool", "execute.before", (event) =>
       Effect.sync(() => {
         seen.push(`before:${event.tool}`)
-        event.input = { value: "reviewed" }
+        event.input = { text: "reviewed" }
       }),
     )
     yield* hooks.register("tool", "execute.after", (event) =>
@@ -139,9 +133,9 @@ it.live("value snapshots use externally scoped hooks and image normalization", (
         }
       }),
     )
-    const snapshot = yield* Tool.snapshot([{ ...echo, options: { codemode: false } }])
+    const snapshot = yield* Tool.snapshot([{ ...echo(Effect.succeed), options: { codemode: false } }])
     expect(yield* hooks.has("tool", "execute.before")).toBe(true)
-    expect(yield* snapshot.execute(call("echo", { value: "input" }))).toEqual({
+    expect(yield* snapshot.execute(call("echo", { text: "input" }))).toEqual({
       output: "reviewed",
       content: [
         { type: "text", text: "reviewed content" },

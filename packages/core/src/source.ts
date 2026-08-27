@@ -4,6 +4,7 @@ import { Effect, Ref } from "effect"
 import type { SessionSchema } from "./session/schema.js"
 
 export interface Interface<T, E = never> {
+  /** Return replacement values when changing state; consumers may reuse derived results by reference identity. */
   readonly get: (session: SessionSchema.Info) => Effect.Effect<T, E>
 }
 

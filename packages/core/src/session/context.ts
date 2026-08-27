@@ -38,6 +38,7 @@ export interface Selection {
   readonly agent: Agent.Selection & { readonly info: Agent.Info }
   readonly instructions: Instructions.List
   readonly tools: Tool.Snapshot
+  /** `baseTranscript` uses its default prefix for undefined; "" omits it when system text lives in the instruction epoch. */
   readonly system?: string
 }
 
@@ -48,7 +49,7 @@ export interface Loaded {
   readonly initial: string
   readonly messages: ReadonlyArray<SessionMessage.Info>
   readonly tools: Tool.Snapshot
-  readonly system?: string
+  readonly system?: Selection["system"]
 }
 
 /**
@@ -193,19 +194,39 @@ export const values = (input: SessionCapabilities.OpenInput) =>
       const permissions = input.permissions ?? Permissions.allowAll
       const model = Source.from(input.model)
       const resolveModel: Interface["resolveModel"] = (session) => model.get(session)
+      let cached:
+        | {
+            readonly tools: ReadonlyArray<Tool.Info>
+            readonly rules: Permission.Ruleset
+            readonly snapshot: Tool.Snapshot
+          }
+        | undefined
       const select: Interface["select"] = Effect.fn("SessionContext.selectValues")(function* (sessionID) {
         const session = yield* store.get(sessionID)
         if (!session) return yield* Effect.die(new Error(`Session not found: ${sessionID}`))
-        const rules = yield* permissions.visibility.get(session)
-        const selected = yield* Effect.all({ tools: tools.get(session), limits: limits.get(session) })
-        const snapshot = yield* Tool.snapshot(selected.tools, rules).pipe(
-          Effect.provideService(PluginHooks.Service, hooks),
-          Effect.provideService(Image.Service, image),
+        const selected = yield* Effect.all(
+          {
+            tools: tools.get(session),
+            rules: permissions.visibility.get(session),
+            limits: limits.get(session),
+            entries: entries.load(sessionID),
+          },
+          { concurrency: "unbounded" },
         )
+        if (cached?.tools !== selected.tools || cached.rules !== selected.rules)
+          cached = {
+            tools: selected.tools,
+            rules: selected.rules,
+            snapshot: yield* Tool.snapshot(selected.tools, selected.rules).pipe(
+              Effect.provideService(PluginHooks.Service, hooks),
+              Effect.provideService(Image.Service, image),
+            ),
+          }
+        const snapshot = cached.snapshot
         const id = session.agent ?? Agent.defaultID
         return {
           session,
-          agent: { id, info: { ...Agent.Info.default(id), permissions: rules, steps: selected.limits.steps } },
+          agent: { id, info: { ...Agent.Info.default(id), permissions: selected.rules, steps: selected.limits.steps } },
           // System text participates in the epoch instead of changing the privileged prefix.
           system: "",
           tools: snapshot,
@@ -247,14 +268,14 @@ export const values = (input: SessionCapabilities.OpenInput) =>
             Instructions.make({
               key: Instructions.Key.make("session/permissions"),
               codec: Schema.toCodecJson(Permission.Ruleset),
-              read: Effect.succeed(rules.length > 0 ? rules : Instructions.removed),
+              read: Effect.succeed(selected.rules.length > 0 ? selected.rules : Instructions.removed),
               render: {
                 initial: (value) => `Permission rules:\n${JSON.stringify(value)}`,
                 changed: (_previous, value) => `Permission rules changed:\n${JSON.stringify(value)}`,
                 removed: () => "The previous permission rules no longer apply.",
               },
             }),
-            yield* entries.load(sessionID),
+            selected.entries,
           ]),
         }
       })
