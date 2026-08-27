@@ -86,6 +86,7 @@
     "@opencode-ai/theme": "workspace:*",
     "@opencode-ai/ui": "workspace:*",
     "@opencode-ai/util": "workspace:*",
+    "@opencode-ai/vega-lite": "workspace:*",
     "@opentui/core": "catalog:",
     "@opentui/keymap": "catalog:",
     "@opentui/solid": "catalog:",

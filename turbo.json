@@ -57,6 +57,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@opencode-ai/vega-lite#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "@opencode-ai/app#test": {
       "dependsOn": ["^build"],
       "outputs": []

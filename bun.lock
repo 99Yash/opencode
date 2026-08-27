@@ -901,6 +901,7 @@
         "@opencode-ai/theme": "workspace:*",
         "@opencode-ai/ui": "workspace:*",
         "@opencode-ai/util": "workspace:*",
+        "@opencode-ai/vega-lite": "workspace:*",
         "@opentui/core": "catalog:",
         "@opentui/keymap": "catalog:",
         "@opentui/solid": "catalog:",
@@ -1012,6 +1013,20 @@
         "@types/node": "catalog:",
         "@types/npm-package-arg": "6.1.4",
         "@types/npmcli__arborist": "6.3.3",
+        "@typescript/native-preview": "catalog:",
+      },
+    },
+    "packages/vega-lite": {
+      "name": "@opencode-ai/vega-lite",
+      "version": "0.0.0",
+      "dependencies": {
+        "@opencode-ai/plugin": "workspace:*",
+        "@opentui/core": "catalog:",
+        "string-width": "catalog:",
+      },
+      "devDependencies": {
+        "@tsconfig/bun": "catalog:",
+        "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
       },
     },
@@ -2218,6 +2233,8 @@
     "@opencode-ai/updates": ["@opencode-ai/updates@workspace:packages/updates"],
 
     "@opencode-ai/util": ["@opencode-ai/util@workspace:packages/util"],
+
+    "@opencode-ai/vega-lite": ["@opencode-ai/vega-lite@workspace:packages/vega-lite"],
 
     "@opencode-ai/web": ["@opencode-ai/web@workspace:packages/web"],
 

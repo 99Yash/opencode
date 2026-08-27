@@ -9,6 +9,7 @@ import Plugins from "../feature-plugins/system/plugins"
 import Storybook from "../feature-plugins/system/storybook"
 import Latex from "@opencode-ai/latex/plugin"
 import Merman from "@opencode-ai/merman/plugin"
+import VegaLite from "@opencode-ai/vega-lite/plugin"
 
 export const builtins = [
   HomeFooter,
@@ -20,6 +21,7 @@ export const builtins = [
   Plugins,
   Merman,
   Latex,
+  VegaLite,
   // The storybook is a development tool; keep its route and palette commands out of
   // normal launches and register it only for OPENCODE_STORY runs.
   ...(process.env.OPENCODE_STORY ? [Storybook] : []),
