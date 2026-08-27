@@ -91,7 +91,9 @@ export type Info<
   readonly name: string
   readonly input: Input
   readonly description: string
-  readonly execute: (input: InputValue<Input>, context: Context) => Effect.Effect<Result<Output>, Error>
+  // Heterogeneous implementations may fail with domain errors. Core normalizes foreign
+  // failures to Tool.Error; Permission.DeclinedError identity enters the decline tunnel.
+  readonly execute: (input: InputValue<Input>, context: Context) => Effect.Effect<Result<Output>, unknown>
   readonly output?: Output
   readonly options?: Options
 }

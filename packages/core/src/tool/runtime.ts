@@ -3,6 +3,7 @@ import { Tool } from "@opencode-ai/schema/tool"
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from "@standard-schema/spec"
 import { Cache, Effect, JsonSchema, Schema, SchemaIssue, SchemaRepresentation } from "effect"
 import { $ZodType, toJSONSchema } from "zod/v4/core"
+import { Permission } from "../permission.js"
 
 const formatEffectIssues = SchemaIssue.makeFormatterStandardSchemaV1()
 
@@ -27,12 +28,15 @@ export const definition = (tool: Tool.Info<any, any>): ToolDefinition => ({
 export const execute = (tool: Tool.Info<any, any>, input: unknown, context: Tool.Context) =>
   Effect.gen(function* () {
     const decoded = yield* decodeInput(tool, input)
-    // Tool implementations declare `Tool.Error` but plugins can fail with anything at
-    // runtime. A foreign typed failure would slip past every `catchTag("Tool.Error")`
+    // Tool implementations may fail with domain errors. A foreign typed failure
+    // would slip past every `catchTag("Tool.Error")`
     // downstream and leave its call permanently unsettled, so the declared contract is
     // enforced here at the untrusted boundary. Declines tunnel through as defects and
     // interrupts are not errors; neither is touched.
     const result = yield* tool.execute(decoded, context).pipe(
+      // Host permission implementations can decline through the typed channel;
+      // use the same tunnel as Permission.assert before normalizing foreign errors.
+      Effect.catch((error) => (error instanceof Permission.DeclinedError ? Effect.die(error) : Effect.fail(error))),
       Effect.mapError((error: unknown) =>
         error instanceof Tool.Error
           ? error
