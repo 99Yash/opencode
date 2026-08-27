@@ -43,8 +43,8 @@ export type Draft = {
 
 export interface Interface extends State.Transformable<Draft> {
   /** Internal sources update captured data and report whether ordered transforms need replaying. */
-  readonly onRefresh: (source: (force: boolean) => Effect.Effect<boolean>) => Effect.Effect<void, never, Scope.Scope>
-  readonly refresh: (force?: boolean) => Effect.Effect<void>
+  readonly onRefresh: (source: () => Effect.Effect<boolean>) => Effect.Effect<void, never, Scope.Scope>
+  readonly refresh: () => Effect.Effect<void>
   readonly provider: {
     readonly get: (providerID: Provider.ID) => Effect.Effect<Provider.Info | undefined>
     readonly all: () => Effect.Effect<Provider.Info[]>
@@ -66,8 +66,9 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const integrations = yield* Integration.Service
-    const sources = new Set<(force: boolean) => Effect.Effect<boolean>>()
+    const sources = new Set<() => Effect.Effect<boolean>>()
     const refreshing = Semaphore.makeUnsafe(1)
+    let generation = 0
 
     const available = (provider: Provider.Info, integration: Integration.Info | undefined) => {
       if (provider.activation === "disabled") return false
@@ -143,14 +144,18 @@ const layer = Layer.effect(
         yield* bus.publish(Catalog.Event.Updated, {})
       }),
     })
-    const refresh = Effect.fn("Catalog.refresh")((force = true) =>
-      refreshing.withPermit(
+    const refresh = Effect.fn("Catalog.refresh")(function* () {
+      const observed = generation
+      yield* refreshing.withPermit(
         Effect.gen(function* () {
-          const changed = yield* Effect.forEach(sources, (source) => source(force))
+          // A concurrent caller joins the completed fetch and replay instead of fetching again.
+          if (generation !== observed) return
+          const changed = yield* Effect.forEach(sources, (source) => source())
           if (changed.some(Boolean)) yield* state.reload()
+          generation++
         }),
-      ),
-    )
+      )
+    })
     const result: Interface = {
       transform: state.transform,
       reload: state.reload,
@@ -174,7 +179,6 @@ const layer = Layer.effect(
         }),
 
         available: Effect.fn("Catalog.provider.available")(function* () {
-          yield* refresh(false)
           const active = new Map((yield* integrations.list()).map((integration) => [integration.id, integration]))
           return (yield* result.provider.all()).filter((provider) =>
             available(provider, active.get(provider.integrationID ?? Integration.ID.make(provider.id))),
@@ -217,7 +221,6 @@ const layer = Layer.effect(
         }),
 
         default: Effect.fn("Catalog.model.default")(function* () {
-          yield* refresh(false)
           const defaultModel = state.get().defaultModel
           if (defaultModel) {
             const provider = yield* result.provider.get(defaultModel.providerID)

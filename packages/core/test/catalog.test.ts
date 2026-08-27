@@ -30,11 +30,10 @@ const catalogLayer = AppNodeBuilder.build(
 const it = testEffect(catalogLayer)
 
 describe("Catalog", () => {
-  it.effect("refreshes scoped sources before reads and replays only changed snapshots", () =>
+  it.effect("refreshes scoped sources and replays only changed snapshots", () =>
     Effect.gen(function* () {
       const catalog = yield* Catalog.Service
-      const source = { fresh: false }
-      const calls: boolean[] = []
+      const source = { fresh: false, calls: 0 }
       yield* catalog.transform((draft) => {
         if (!source.fresh) return
         draft.model.update(Provider.ID.make("example"), Model.ID.make("chat"), () => {})
@@ -42,25 +41,26 @@ describe("Catalog", () => {
       })
       yield* Effect.scoped(
         Effect.gen(function* () {
-          yield* catalog.onRefresh((force) =>
+          yield* catalog.onRefresh(() =>
             Effect.sync(() => {
-              calls.push(force)
+              source.calls++
               if (source.fresh) return false
               source.fresh = true
               return true
             }),
           )
-          const read = yield* catalog.model.default().pipe(Effect.forkScoped)
+          expect(yield* catalog.model.default()).toBeUndefined()
+          const refresh = yield* catalog.refresh().pipe(Effect.forkScoped)
           yield* TestClock.adjust("1 second")
-          expect((yield* Fiber.join(read))?.id).toBe(Model.ID.make("chat"))
-          expect(calls.every((force) => !force)).toBe(true)
+          yield* Fiber.join(refresh)
+          expect((yield* catalog.model.default())?.id).toBe(Model.ID.make("chat"))
+          expect(source.calls).toBe(1)
           yield* catalog.refresh()
-          expect(calls.at(-1)).toBe(true)
+          expect(source.calls).toBe(2)
         }),
       )
-      const count = calls.length
       yield* catalog.refresh()
-      expect(calls).toHaveLength(count)
+      expect(source.calls).toBe(2)
     }),
   )
 

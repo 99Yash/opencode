@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Schema, Semaphore, Stream } from "effect"
+import { Duration, Effect, Schema, Stream } from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { define } from "@opencode-ai/plugin/effect/plugin"
@@ -7,7 +7,6 @@ import { Bus } from "../../bus.js"
 import { Catalog } from "../../catalog.js"
 import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
-import { Location } from "../../location.js"
 import { Model } from "../../model.js"
 import { Provider } from "../../provider.js"
 import { ConfigProviderV1 } from "../../v1/config/provider.js"
@@ -86,159 +85,135 @@ function oauth(http: HttpClient.HttpClient) {
   } satisfies IntegrationOAuthMethodRegistration
 }
 
-export function make(interval: Duration.Input = "5 minutes") {
-  return define<HttpClient.HttpClient | Bus.Service | Catalog.Service | Location.Service | Scope.Scope>({
-    id: "opencode.provider.opencode",
-    effect: Effect.fn(function* (ctx) {
-      const bus = yield* Bus.Service
-      const catalog = yield* Catalog.Service
-      const http = yield* HttpClient.HttpClient
-      const location = yield* Location.Service
-      const loading = Semaphore.makeUnsafe(1)
-      let connected = false
-      let providers: typeof ConfigV1.Info.Type.provider | undefined
-      let source: string | undefined
-      let checked = Number.NEGATIVE_INFINITY
+export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catalog.Service | Scope.Scope>({
+  id: "opencode.provider.opencode",
+  effect: Effect.fn(function* (ctx) {
+    const bus = yield* Bus.Service
+    const catalog = yield* Catalog.Service
+    const http = yield* HttpClient.HttpClient
+    let providers: typeof ConfigV1.Info.Type.provider | undefined
+    let source: string | undefined
 
-      const load = Effect.fn("OpencodePlugin.load")((force: boolean) =>
-        loading.withPermit(
-          Effect.gen(function* () {
-            const connection = yield* ctx.integration.connection.active("opencode")
-            const id = connection?.type === "credential" ? connection.id : connection?.name
-            const now = yield* Clock.currentTimeMillis
-            if (!force && id === source && now < checked + Duration.toMillis(interval)) return false
-            const next = connection
-              ? yield* ctx.integration.connection.resolve(connection).pipe(
-                  Effect.flatMap((credential) => (credential ? fetchProviders(http, credential) : Effect.undefined)),
-                  Effect.timeout("5 seconds"),
-                  Effect.catch((cause) =>
-                    // Retain inventory through same-account outages, never across an account switch.
-                    Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
-                      Effect.as(id === source ? providers : undefined),
-                    ),
-                  ),
-                )
-              : undefined
-            const changed = connected !== (connection !== undefined) || !isDeepStrictEqual(providers, next)
-            source = id
-            connected = connection !== undefined
-            providers = next
-            checked = yield* Clock.currentTimeMillis
-            return changed
-          }),
-        ),
-      )
+    const load = Effect.fn("OpencodePlugin.load")(function* () {
+      const connection = yield* ctx.integration.connection.active("opencode")
+      const id = connection?.type === "credential" ? connection.id : connection?.name
+      const next = connection
+        ? yield* ctx.integration.connection.resolve(connection).pipe(
+            Effect.flatMap((credential) => (credential ? fetchProviders(http, credential) : Effect.undefined)),
+            Effect.timeout("5 seconds"),
+            Effect.catch((cause) =>
+              // Retain inventory through same-account outages, never across an account switch.
+              Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
+                Effect.as(id === source ? providers : undefined),
+              ),
+            ),
+          )
+        : undefined
+      const changed = source !== id || !isDeepStrictEqual(providers, next)
+      source = id
+      providers = next
+      return changed
+    })
 
-      yield* ctx.integration.transform((draft) => {
-        draft.update("opencode", (integration) => {
-          integration.name = "OpenCode"
-        })
-        draft.method.update(oauth(http))
-        draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
+    yield* ctx.integration.transform((draft) => {
+      draft.update("opencode", (integration) => {
+        integration.name = "OpenCode"
       })
+      draft.method.update(oauth(http))
+      draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
+    })
 
-      yield* load(true)
-      yield* ctx.catalog.transform((catalog) => {
-        for (const [providerID, item] of Object.entries(providers ?? {})) {
-          catalog.provider.update(providerID, (provider) => {
-            provider.integrationID = Integration.ID.make("opencode")
-            if (item.name !== undefined) provider.name = item.name
-            provider.package = item.npm ? Provider.aisdk(item.npm) : ""
-            provider.settings = {
-              ...provider.settings,
-              ...withoutCredentials(item.options),
-              ...(item.api ? { baseURL: item.api } : {}),
+    yield* load()
+    yield* ctx.catalog.transform((catalog) => {
+      for (const [providerID, item] of Object.entries(providers ?? {})) {
+        catalog.provider.update(providerID, (provider) => {
+          provider.integrationID = Integration.ID.make("opencode")
+          if (item.name !== undefined) provider.name = item.name
+          provider.package = item.npm ? Provider.aisdk(item.npm) : ""
+          provider.settings = {
+            ...provider.settings,
+            ...withoutCredentials(item.options),
+            ...(item.api ? { baseURL: item.api } : {}),
+          }
+          provider.headers = { ...provider.headers, ...item.options?.headers }
+        })
+
+        for (const [modelID, config] of Object.entries(item.models ?? {})) {
+          catalog.model.update(providerID, modelID, (model) => {
+            if (config.family !== undefined) model.family = Model.Family.make(config.family)
+            if (config.name !== undefined) model.name = config.name
+            if (config.id !== undefined) model.modelID = Model.ID.make(config.id)
+            model.compatibility = Model.compatibility(config.interleaved) ?? model.compatibility
+            if (config.provider !== undefined) {
+              model.package = config.provider.npm ? Provider.aisdk(config.provider.npm) : undefined
+              if (config.provider.api) model.settings = { ...model.settings, baseURL: config.provider.api }
             }
-            provider.headers = { ...provider.headers, ...item.options?.headers }
-          })
-
-          for (const [modelID, config] of Object.entries(item.models ?? {})) {
-            catalog.model.update(providerID, modelID, (model) => {
-              if (config.family !== undefined) model.family = Model.Family.make(config.family)
-              if (config.name !== undefined) model.name = config.name
-              if (config.id !== undefined) model.modelID = Model.ID.make(config.id)
-              model.compatibility = Model.compatibility(config.interleaved) ?? model.compatibility
-              if (config.provider !== undefined) {
-                model.package = config.provider.npm ? Provider.aisdk(config.provider.npm) : undefined
-                if (config.provider.api) model.settings = { ...model.settings, baseURL: config.provider.api }
-              }
-              if (config.tool_call !== undefined) model.capabilities.tools = config.tool_call
-              if (config.modalities?.input !== undefined) model.capabilities.input = [...config.modalities.input]
-              if (config.modalities?.output !== undefined) model.capabilities.output = [...config.modalities.output]
-              model.headers = { ...model.headers, ...config.headers }
-              model.settings = {
-                ...model.settings,
-                ...ConfigProviderOptionsV1.model(withoutCredentials(config.options)),
-              }
-              if (config.variants !== undefined) {
-                model.variants ??= []
-                for (const [id, options] of Object.entries(config.variants)) {
-                  const variantID = Model.VariantID.make(id)
-                  let existing = model.variants.find((item) => item.id === variantID)
-                  if (!existing) {
-                    existing = { id: variantID }
-                    model.variants.push(existing)
-                  }
-                  existing.headers = { ...existing.headers, ...options.headers }
-                  existing.settings = {
-                    ...existing.settings,
-                    ...ConfigProviderOptionsV1.model(withoutCredentials(options)),
-                  }
+            if (config.tool_call !== undefined) model.capabilities.tools = config.tool_call
+            if (config.modalities?.input !== undefined) model.capabilities.input = [...config.modalities.input]
+            if (config.modalities?.output !== undefined) model.capabilities.output = [...config.modalities.output]
+            model.headers = { ...model.headers, ...config.headers }
+            model.settings = { ...model.settings, ...ConfigProviderOptionsV1.model(withoutCredentials(config.options)) }
+            if (config.variants !== undefined) {
+              model.variants ??= []
+              for (const [id, options] of Object.entries(config.variants)) {
+                const variantID = Model.VariantID.make(id)
+                let existing = model.variants.find((item) => item.id === variantID)
+                if (!existing) {
+                  existing = { id: variantID }
+                  model.variants.push(existing)
+                }
+                existing.headers = { ...existing.headers, ...options.headers }
+                existing.settings = {
+                  ...existing.settings,
+                  ...ConfigProviderOptionsV1.model(withoutCredentials(options)),
                 }
               }
-              if (config.release_date !== undefined) {
-                const released = Date.parse(config.release_date)
-                model.time.released = Number.isFinite(released) ? released : 0
-              }
-              if (config.cost !== undefined) {
-                model.cost = remoteCost(config.cost)
-              }
-              model.status = config.status ?? "active"
-              model.enabled = config.status !== "deprecated"
-              if (config.limit !== undefined) model.limit = { ...config.limit }
-            })
-          }
-        }
-
-        const item = catalog.provider.get(Provider.ID.opencode)
-        if (!item) return
-        const hasKey = Boolean(process.env.OPENCODE_API_KEY || connected || item.provider.settings?.apiKey)
-        catalog.provider.update(item.provider.id, (provider) => {
-          if (!hasKey) {
-            provider.activation = "enabled"
-            provider.settings = { ...provider.settings, apiKey: "public" }
-          }
-        })
-        if (hasKey) return
-        for (const model of item.models.values()) {
-          if (!model.cost.some((cost) => cost.input > 0)) continue
-          catalog.model.update(item.provider.id, model.id, (draft) => {
-            draft.enabled = false
+            }
+            if (config.release_date !== undefined) {
+              const released = Date.parse(config.release_date)
+              model.time.released = Number.isFinite(released) ? released : 0
+            }
+            if (config.cost !== undefined) {
+              model.cost = remoteCost(config.cost)
+            }
+            model.status = config.status ?? "active"
+            model.enabled = config.status !== "deprecated"
+            if (config.limit !== undefined) model.limit = { ...config.limit }
           })
         }
+      }
+
+      const item = catalog.provider.get(Provider.ID.opencode)
+      if (!item) return
+      const hasKey = Boolean(process.env.OPENCODE_API_KEY || source !== undefined || item.provider.settings?.apiKey)
+      catalog.provider.update(item.provider.id, (provider) => {
+        if (!hasKey) {
+          provider.activation = "enabled"
+          provider.settings = { ...provider.settings, apiKey: "public" }
+        }
       })
+      if (hasKey) return
+      for (const model of item.models.values()) {
+        if (!model.cost.some((cost) => cost.input > 0)) continue
+        catalog.model.update(item.provider.id, model.id, (draft) => {
+          draft.enabled = false
+        })
+      }
+    })
 
-      yield* catalog.onRefresh(load)
-      yield* bus.subscribe([Credential.Event.Switched, SessionEvent.Moved]).pipe(
-        Stream.filter((event) =>
-          event.type === "credential.switched"
-            ? event.data.integrationID === Integration.ID.make("opencode")
-            : event.data.location.directory === location.directory &&
-              event.data.location.workspaceID === location.workspaceID,
-        ),
-        Stream.runForEach(() => catalog.refresh()),
-        Effect.forkScoped({ startImmediately: true }),
-      )
-      yield* Effect.sleep(interval).pipe(
-        Effect.andThen(catalog.refresh(false)),
-        Effect.forever,
-        Effect.forkScoped({ startImmediately: true }),
-      )
-    }),
-  })
-}
-
-export const OpencodePlugin = make()
+    yield* catalog.onRefresh(load)
+    yield* bus.subscribe([Credential.Event.Switched, SessionEvent.Moved]).pipe(
+      Stream.filter((event) =>
+        event.type === "credential.switched"
+          ? event.data.integrationID === Integration.ID.make("opencode")
+          : event.data.location.directory === ctx.location.directory &&
+            event.data.location.workspaceID === ctx.location.workspaceID,
+      ),
+      Stream.runForEach(() => catalog.refresh()),
+      Effect.forkScoped({ startImmediately: true }),
+    )
+  }),
+})
 
 function fetchProviders(http: HttpClient.HttpClient, value: Credential.Value) {
   const metadata = value.metadata

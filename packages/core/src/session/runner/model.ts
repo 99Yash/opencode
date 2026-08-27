@@ -87,9 +87,8 @@ const layer = Layer.effect(
               models.find((model) => model.providerID === session.model?.providerID && model.id === session.model.id),
             ),
           )
-        const current = yield* select
         // A cached Location may predate a newly advertised model. Reapply its policy after one refresh.
-        const selected = current ?? (yield* catalog.refresh().pipe(Effect.andThen(select)))
+        const selected = (yield* select) ?? (yield* catalog.refresh().pipe(Effect.andThen(select)))
         if (!selected)
           return yield* new ModelUnavailableError({
             providerID: session.model.providerID,
