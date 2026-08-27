@@ -2,7 +2,7 @@ name: "Setup Bun"
 description: "Setup Bun with caching and install dependencies"
 inputs:
   bun-version:
-    description: "Bun version to install instead of the root packageManager version"
+    description: "Bun runtime version to restore instead of the root packageManager version"
     required: false
     default: ""
   install-flags:
@@ -30,25 +30,22 @@ runs:
           case "$RUNNER_OS" in
             macOS)   OS=darwin ;;
             Linux)   OS=linux ;;
-            Windows)
-              OS=windows
-              echo "install-url=https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-windows-x64-baseline.zip" >> "$GITHUB_OUTPUT"
-              ;;
+            Windows) OS=windows ;;
           esac
           echo "url=https://github.com/oven-sh/bun/releases/download/${TAG}/bun-${OS}-x64-baseline.zip" >> "$GITHUB_OUTPUT"
+          echo "install-url=https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-${OS}-x64-baseline.zip" >> "$GITHUB_OUTPUT"
         fi
 
-    # Bun 1.4 fixes patched peer-variant installs on Windows, avoiding the slow
-    # hoisted linker workaround. Restore the requested runtime after installing.
+    # Use Bun 1.4 as the package manager without upgrading the requested runtime.
+    # It also fixes patched peer-variant installs, avoiding hoisting on Windows.
     - name: Setup Bun for dependency installation
       id: bun-install
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
-        bun-version: ${{ runner.os == 'Windows' && '1.4.0' || inputs.bun-version }}
-        bun-version-file: ${{ runner.os != 'Windows' && !inputs.bun-version && 'package.json' || '' }}
-        bun-download-url: ${{ steps.bun-url.outputs.install-url || steps.bun-url.outputs.url }}
+        bun-version: "1.4.0"
+        bun-download-url: ${{ steps.bun-url.outputs.install-url }}
         # The post action would otherwise cache the restored runtime as 1.4.0.
-        no-cache: ${{ runner.os == 'Windows' }}
+        no-cache: true
 
     - name: Get cache directory
       id: cache
@@ -73,7 +70,7 @@ runs:
       shell: bash
 
     - name: Restore Bun runtime
-      if: ${{ !cancelled() && runner.os == 'Windows' && steps.bun-install.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.bun-install.outcome == 'success' }}
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
         bun-version: ${{ !steps.bun-url.outputs.url && inputs.bun-version || '' }}
