@@ -29,7 +29,7 @@ export function rules(source: Source.Value<Permission.Ruleset>): Interface {
       )
         return
       return yield* new Permission.BlockedError({
-        rules,
+        rules: Permission.relevant(request, rules),
         permission: request.action,
         resources: request.resources,
       })

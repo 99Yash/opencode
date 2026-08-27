@@ -100,6 +100,10 @@ export function merge(...rulesets: Permission.Ruleset[]): Permission.Ruleset {
   return rulesets.flat()
 }
 
+export function relevant(input: Pick<Request, "action">, rules: Permission.Ruleset) {
+  return rules.filter((rule) => Wildcard.match(input.action, rule.action))
+}
+
 export interface Interface {
   readonly ask: (input: AssertInput) => Effect.Effect<AskResult, SessionErrors.NotFoundError>
   readonly assert: (input: AssertInput) => Effect.Effect<void, Error | SessionErrors.NotFoundError>
@@ -159,10 +163,6 @@ const layer = Layer.effect(
 
     function denied(input: Pick<Request, "action" | "resources">, rules: Permission.Ruleset) {
       return input.resources.some((resource) => evaluate(input.action, resource, rules).effect === "deny")
-    }
-
-    function relevant(input: AssertInput, rules: Permission.Ruleset) {
-      return rules.filter((rule) => Wildcard.match(input.action, rule.action))
     }
 
     const evaluateInput = Effect.fnUntraced(function* (input: AssertInput) {

@@ -1,19 +1,11 @@
 import { expect } from "bun:test"
-import { Effect, Schema } from "effect"
+import { Effect } from "effect"
 import { Permission } from "../src/permission"
 import { Permissions } from "../src/permissions"
 import { SessionSchema } from "../src/session/schema"
 import { Source } from "../src/source"
+import { session } from "./fixture/capabilities"
 import { it } from "./lib/effect"
-
-const session = Schema.decodeUnknownSync(SessionSchema.Info)({
-  id: "ses_permissions",
-  projectID: "global",
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: 0, updated: 0 },
-  location: { directory: "/project" },
-})
 
 it.effect("allowAll permits requests and exposes an allow-all visibility rule", () =>
   Effect.gen(function* () {
@@ -62,6 +54,27 @@ it.effect("rules use wildcard precedence and require every resource to be allowe
     expect(
       yield* permissions.ask(session, { action: "write", resources: ["src/file.ts"] }).pipe(Effect.flip),
     ).toBeInstanceOf(Permission.BlockedError)
+  }),
+)
+
+it.effect("blocked requests report action-relevant rules without inventing a reason", () =>
+  Effect.gen(function* () {
+    const rules: Permission.Ruleset = [
+      { action: "*", resource: "*", effect: "deny" },
+      { action: "write", resource: "*", effect: "allow" },
+      { action: "re*", resource: "other/*", effect: "allow" },
+      { action: "read", resource: "src/*", effect: "deny" },
+    ]
+    const request = { action: "read", resources: ["src/file.ts"] }
+    const relevant = [rules[0], rules[2], rules[3]]
+    expect(Permission.relevant(request, rules)).toEqual(relevant)
+    const error = yield* Permissions.rules(rules).ask(session, request).pipe(Effect.flip)
+    expect(error).toEqual(
+      new Permission.BlockedError({ rules: relevant, permission: request.action, resources: request.resources }),
+    )
+    if (error._tag !== "Permission.BlockedError") return yield* Effect.die("Expected blocked permission")
+    expect(error.reason).toBeUndefined()
+    expect(error.message).toBe("Permission denied: read")
   }),
 )
 

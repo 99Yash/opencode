@@ -46,6 +46,15 @@ export interface Resolved {
   readonly vcsBackend?: string
 }
 
+export function markerless(directory: AbsolutePath): Resolved {
+  return {
+    id: ID.make(Hash.fast(`directory:${directory}`)),
+    directory,
+    canonical: directory,
+    vcs: undefined,
+  }
+}
+
 // Keep this filesystem-only; permission checks use it and should not execute VCS commands.
 export const root = Effect.fn("Project.root")(function* (
   fs: FSUtil.Interface,
@@ -361,12 +370,7 @@ const layer = Layer.effect(
         })
       }
 
-      return yield* persist({
-        id: ID.make(Hash.fast(`directory:${directory}`)),
-        directory,
-        canonical: directory,
-        vcs: undefined,
-      })
+      return yield* persist(markerless(directory))
     })
 
     return Service.of({ list, update, resolve })

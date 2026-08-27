@@ -1,17 +1,8 @@
 import { expect } from "bun:test"
-import { Effect, Schema } from "effect"
-import { SessionSchema } from "../src/session/schema"
+import { Effect } from "effect"
 import { Source } from "../src/source"
+import { session } from "./fixture/capabilities"
 import { it } from "./lib/effect"
-
-const session = Schema.decodeUnknownSync(SessionSchema.Info)({
-  id: "ses_source",
-  projectID: "global",
-  cost: 0,
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-  time: { created: 0, updated: 0 },
-  location: { directory: "/project" },
-})
 
 it.effect("mutable sources sample current values and defer writes until execution", () =>
   Effect.gen(function* () {
