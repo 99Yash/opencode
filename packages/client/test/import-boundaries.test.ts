@@ -34,6 +34,12 @@ describe("public import boundaries", () => {
     expect(within(rpc, core)).toEqual([])
     expect(within(rpc, server)).toEqual([])
 
+    const promiseRpc = await bundleInputs("@opencode-ai/client/promise/rpc", "browser")
+    expect(within(promiseRpc, effect).length).toBeGreaterThan(0)
+    expect(within(promiseRpc, protocol).length).toBeGreaterThan(0)
+    expect(within(promiseRpc, core)).toEqual([])
+    expect(within(promiseRpc, server)).toEqual([])
+
     const promiseService = await bundleInputs("@opencode-ai/client/service", "bun")
 
     expect(within(promiseService, effect)).toEqual([])

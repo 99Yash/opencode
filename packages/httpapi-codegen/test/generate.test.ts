@@ -814,6 +814,75 @@ describe("HttpApiCodegen.generate", () => {
     ).toThrow("Unsupported Promise stream: session.events")
   })
 
+  test("passes operation descriptors and merged options directly to a Promise transport", async () => {
+    const output = emitPromise(
+      compileContract(
+        HttpApi.make("test").add(
+          HttpApiGroup.make("session").add(
+            HttpApiEndpoint.post("update", "/session/:sessionID", {
+              params: { sessionID: Schema.String },
+              query: { limit: Schema.NumberFromString },
+              headers: { "x-ticket": Schema.String },
+              payload: Schema.Struct({ title: Schema.String }),
+              success: Schema.Struct({ data: Schema.String }),
+            }),
+            HttpApiEndpoint.get("events", "/events", { success: HttpApiSchema.StreamSse({ data: Schema.String }) }),
+          ),
+        ),
+      ),
+    )
+    const directory = await mkdtemp(join(tmpdir(), "opencode-httpapi-codegen-"))
+    try {
+      await Promise.all(output.files.map((file) => Bun.write(join(directory, file.path), file.content)))
+      const generated = await import(`${join(directory, "index.ts")}?t=${crypto.randomUUID()}`)
+      const signal = new AbortController().signal
+      const iterable = {
+        async *[Symbol.asyncIterator]() {
+          yield "event"
+        },
+      }
+      const client = generated.OpenCode.make({
+        baseUrl: "https://example.com",
+        headers: { "x-default": "default", "x-ticket": "default" },
+        fetch: () => {
+          throw new Error("transport must not fetch")
+        },
+        transport: {
+          request: async (descriptor: unknown, options: { headers: Headers; signal: AbortSignal }) => {
+            expect(descriptor).toMatchObject({
+              operation: "update",
+              params: { sessionID: "a/b" },
+              query: { limit: 2 },
+              body: { title: "title" },
+            })
+            expect(options.signal).toBe(signal)
+            expect(options.headers.get("x-default")).toBe("default")
+            expect(options.headers.get("x-ticket")).toBe("override")
+            return { data: "updated" }
+          },
+          stream: (descriptor: { operation: string }, options: { headers: Headers; signal: AbortSignal }) => {
+            expect(descriptor.operation).toBe("events")
+            expect(options.signal).toBe(signal)
+            expect(options.headers.get("x-default")).toBe("default")
+            return iterable
+          },
+        },
+      })
+      expect(
+        await client.session.update(
+          { sessionID: "a/b", limit: 2, "x-ticket": "endpoint", title: "title" },
+          {
+            signal,
+            headers: { "x-ticket": "override" },
+          },
+        ),
+      ).toBe("updated")
+      expect(client.session.events({ signal })).toBe(iterable)
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   test("executes an emitted Promise GET through fetch", async () => {
     const output = emitPromise(
       compileContract(

@@ -2,7 +2,7 @@ import type { OpenCodeEvent } from "@opencode-ai/client/promise"
 import { createClientConnection, createPtyClient, type ClientConnectionStatus } from "@opencode-ai/client/solid"
 import { createGlobalEmitter } from "@solid-primitives/event-bus"
 import { type Accessor, onCleanup } from "solid-js"
-import { createApiForServer, type ServerApi } from "@/runtime/server/api"
+import { createApiForServer, type ServerApi, type ServerApiConnection } from "@/runtime/server/api"
 import { usePlatform } from "@/runtime/platform/platform"
 import { ServerConnection } from "./registry"
 import { createRefCountMap } from "@/runtime/server/refcount"
@@ -72,12 +72,20 @@ type ServerSDKBase = {
 
 function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerScope): ServerSDKBase {
   const platform = usePlatform()
-  const transport = createServerTransport({ http: server.http, fetch: platform.fetch })
+  const transport = createServerTransport({
+    http: server.http,
+    fetch: platform.fetch,
+    createApi: platform.createServerApi,
+  })
+  onCleanup(() => void transport.dispose())
   const events = createOpenCodeEventSource()
   const reconnect = server.type === "sidecar" && server.variant === "base" ? server.reconnect : undefined
 
   const connection = createClientConnection(transport.api, {
-    reconnect: reconnect ? async (signal) => transport.update(await reconnect(signal)) : undefined,
+    reconnect:
+      reconnect || platform.createServerApi
+        ? async (signal) => transport.update(reconnect ? await reconnect(signal) : transport.http, signal)
+        : undefined,
     flushInterval: 16,
     pageLifecycle: true,
     onEvent(event) {
@@ -108,21 +116,43 @@ function createServerSdkContextBase(server: ServerConnection.Any, scope: ServerS
   }
 }
 
-export function createServerTransport(input: { http: ServerConnection.HttpBase; fetch?: typeof globalThis.fetch }): {
-  update(http: ServerConnection.HttpBase): ServerApi
+export function createServerTransport(input: {
+  http: ServerConnection.HttpBase
+  fetch?: typeof globalThis.fetch
+  createApi?: (http: ServerConnection.HttpBase) => ServerApiConnection
+}): {
+  update(http: ServerConnection.HttpBase, signal?: AbortSignal): Promise<ServerApi>
+  dispose(): Promise<void>
+  readonly http: ServerConnection.HttpBase
   readonly url: string
   readonly api: ServerApi
   readonly pty: ReturnType<typeof createPtyClient>
 } {
   const build = (http: ServerConnection.HttpBase) => {
-    const api = createApiForServer({ server: http, fetch: input.fetch })
-    return { http, api, pty: createPtyClient(api, { url: http.url }) }
+    const connection = input.createApi?.(http) ?? {
+      api: createApiForServer({ server: http, fetch: input.fetch }),
+      dispose: () => Promise.resolve(),
+    }
+    return { http, ...connection, pty: createPtyClient(connection.api, { url: http.url }) }
   }
-  const state = { current: build(input.http) }
+  const state = { current: build(input.http), disposed: false }
   return {
-    update(http: ServerConnection.HttpBase) {
+    async update(http: ServerConnection.HttpBase, signal?: AbortSignal) {
+      signal?.throwIfAborted()
+      if (state.disposed) throw new DOMException(undefined, "AbortError")
+      await state.current.dispose()
+      signal?.throwIfAborted()
+      if (state.disposed) throw new DOMException(undefined, "AbortError")
       state.current = build(http)
       return state.current.api
+    },
+    dispose() {
+      if (state.disposed) return Promise.resolve()
+      state.disposed = true
+      return state.current.dispose()
+    },
+    get http() {
+      return state.current.http
     },
     get url() {
       return state.current.http.url

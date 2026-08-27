@@ -36,3 +36,8 @@ export function createApiForServer(input: {
 }
 
 export type ServerApi = OpenCodeClient
+
+export type ServerApiConnection = {
+  readonly api: ServerApi
+  readonly dispose: () => Promise<void>
+}

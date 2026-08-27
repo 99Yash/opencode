@@ -1,4 +1,6 @@
-import { OpenCode, type MigrationV1StatusOutput } from "@opencode-ai/client/promise"
+import type { MigrationV1StatusOutput } from "@opencode-ai/client/promise"
+import { createDesktopServerApi } from "./platform/server-client"
+import { sidecarHttp } from "./startup/initialization"
 import { useLanguage } from "@opencode-ai/app/desktop"
 import { Loader } from "@opencode-ai/ui/loader"
 import { showToast, toaster, Toast } from "@opencode-ai/ui/toast"
@@ -11,6 +13,7 @@ export function MigrationStatus(props: { server: ServerReadyData }) {
   const language = useLanguage()
   const [progress, setProgress] = createSignal<Progress>()
   const abort = new AbortController()
+  const client = createDesktopServerApi(sidecarHttp(props.server))
   let toastID: number | undefined
   let disposeToast: (() => void) | undefined
 
@@ -49,16 +52,9 @@ export function MigrationStatus(props: { server: ServerReadyData }) {
     await wait(1_000, abort.signal)
     if (abort.signal.aborted) return
 
-    const client = OpenCode.make({
-      baseUrl: props.server.url,
-      headers: props.server.password
-        ? { Authorization: `Basic ${btoa(`${props.server.username ?? "opencode"}:${props.server.password}`)}` }
-        : undefined,
-    })
-
     void (async () => {
       while (true) {
-        const status = await client.migration.v1.status({ signal: abort.signal })
+        const status = await client.api.migration.v1.status({ signal: abort.signal })
         setProgress(status.status === "running" ? status.progress : undefined)
         if (status.status === "running") show()
         else hide()
@@ -66,20 +62,23 @@ export function MigrationStatus(props: { server: ServerReadyData }) {
         if (status.status === "error") throw new Error(status.error)
         await wait(1_000, abort.signal)
       }
-    })().catch((error) => {
-      if (abort.signal.aborted) return
-      hide()
-      showToast({
-        variant: "error",
-        title: language.t("toast.migration.failed.title"),
-        description: error instanceof Error ? error.message : String(error),
-        duration: 10_000,
+    })()
+      .catch((error) => {
+        if (abort.signal.aborted) return
+        hide()
+        showToast({
+          variant: "error",
+          title: language.t("toast.migration.failed.title"),
+          description: error instanceof Error ? error.message : String(error),
+          duration: 10_000,
+        })
       })
-    })
+      .finally(() => client.dispose())
   })
 
   onCleanup(() => {
     abort.abort()
+    void client.dispose()
     hide()
   })
 

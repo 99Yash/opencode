@@ -6,6 +6,7 @@ import { ServerConnection } from "@/runtime/server/registry"
 import type { WslServersPlatform } from "@/servers/wsl/types"
 import type { UpdaterPlatform } from "@/shell/updates/types"
 import type { DraftStore } from "@/runtime/persistence/drafts"
+import type { ServerApiConnection } from "@/runtime/server/api"
 
 type PickerPaths = string | string[] | null
 type OpenDirectoryPickerOptions = { title?: string; multiple?: boolean }
@@ -73,6 +74,9 @@ type PlatformBase = {
 
   /** Fetch override */
   fetch?: typeof fetch
+
+  /** Optional owned server transport; browser web defaults to HTTP. */
+  createServerApi?(server: ServerConnection.HttpBase): ServerApiConnection
 
   /** Get the configured default server URL (platform-specific) */
   getDefaultServer?(): Promise<ServerConnection.Key | null>

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { OpenCodeEvent } from "@opencode-ai/client/promise"
+import { OpenCode, type OpenCodeEvent } from "@opencode-ai/client/promise"
 import { createRoot } from "solid-js"
 import { createOpenCodeEventSource, createServerTransport } from "./client"
 
@@ -99,7 +99,7 @@ test("rotates HTTP and PTY clients together", async () => {
   const initialPty = transport.pty
 
   await transport.api.health.get()
-  const replacement = transport.update({
+  const replacement = await transport.update({
     url: "http://127.0.0.1:4200",
     username: "opencode",
     password: "second",
@@ -119,4 +119,69 @@ test("rotates HTTP and PTY clients together", async () => {
       authorization: `Basic ${btoa("opencode:second")}`,
     },
   ])
+})
+
+test("uses the platform transport and disposes it before rotating credentials", async () => {
+  const lifecycle: string[] = []
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:4100", password: "first" },
+    fetch: (async (_input: string | URL | Request, _init?: RequestInit): Promise<Response> => {
+      throw new Error("The injected transport must not fall back to HTTP")
+    }) as typeof fetch,
+    createApi: (http) => {
+      lifecycle.push(`create:${http.password}`)
+      return {
+        api: OpenCode.make({ baseUrl: http.url }),
+        dispose: async () => {
+          lifecycle.push(`dispose:${http.password}`)
+        },
+      }
+    },
+  })
+  const first = transport.api
+  const pty = transport.pty
+  await transport.update({ url: "http://127.0.0.1:4200", password: "second" })
+  expect(transport.api).not.toBe(first)
+  expect(transport.pty).not.toBe(pty)
+  expect(transport.http.password).toBe("second")
+  await transport.dispose()
+  await transport.dispose()
+  expect(lifecycle).toEqual(["create:first", "dispose:first", "create:second", "dispose:second"])
+})
+
+test("cannot reopen a disposed owner while reconnection is resolving", async () => {
+  const released = Promise.withResolvers<void>()
+  const clients: string[] = []
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:4100" },
+    createApi: (http) => {
+      clients.push(http.url)
+      return { api: OpenCode.make({ baseUrl: http.url }), dispose: () => released.promise }
+    },
+  })
+  const update = transport.update({ url: "http://127.0.0.1:4200" })
+  const result = update.catch((error) => error)
+  const disposal = transport.dispose()
+  released.resolve()
+  await disposal
+  expect(await result).toMatchObject({ name: "AbortError" })
+  expect(clients).toEqual(["http://127.0.0.1:4100"])
+})
+
+test("an aborted reconnect does not create another client", async () => {
+  const abort = new AbortController()
+  const clients: string[] = []
+  const transport = createServerTransport({
+    http: { url: "http://127.0.0.1:4100" },
+    createApi: (http) => {
+      clients.push(http.url)
+      return { api: OpenCode.make({ baseUrl: http.url }), dispose: () => Promise.resolve() }
+    },
+  })
+  abort.abort()
+  await expect(transport.update({ url: "http://127.0.0.1:4200" }, abort.signal)).rejects.toMatchObject({
+    name: "AbortError",
+  })
+  expect(clients).toEqual(["http://127.0.0.1:4100"])
+  await transport.dispose()
 })

@@ -88,7 +88,7 @@ export const rpcRoutes = HttpRouter.use((router) =>
             const rpc = group.requests.get(entry.endpoint.identifier)
             if (!rpc) return []
             const streaming = RpcSchema.isStreamSchema(rpc.successSchema)
-            const invoke = (input: Input) => {
+            const invoke = (input: Input, options: { readonly headers: Headers.Headers }) => {
               const url = new URL(request.url, "http://localhost")
               url.pathname = entry.endpoint.path
               const location = input.location ?? input.query?.location
@@ -97,7 +97,12 @@ export const rpcRoutes = HttpRouter.use((router) =>
                 if (location.workspace) url.searchParams.set("location[workspace]", location.workspace)
                 else url.searchParams.delete("location[workspace]")
               }
-              const headers = Headers.merge(Headers.fromInput(input.headers), request.headers)
+              // RPC metadata carries contextual headers (global forms and PTY tickets);
+              // the authenticated upgrade remains authoritative for its own headers.
+              const headers = Headers.merge(
+                Headers.merge(Headers.fromInput(input.headers), options.headers),
+                request.headers,
+              )
               const current = request.modify({
                 url: `${url.pathname}${url.search}`,
                 headers: location ? Headers.remove(headers, "x-opencode-workspace") : headers,

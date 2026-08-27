@@ -930,13 +930,17 @@ function renderPromiseClient(groups: ReadonlyArray<Group>) {
             ? access(inputs[0].name)
             : `{ ${inputs.map((field) => `${JSON.stringify(field.name)}: ${access(field.name)}`).join(", ")} }`
       }
+      const params = promiseInput(endpoint).filter((field) => field.source === "params" || field.source === "wildcard")
       const parts = [
+        params.length === 0 && endpoint.params === undefined
+          ? undefined
+          : `params: { ${params.map((field) => `${JSON.stringify(field.name)}: ${access(field.name)}`).join(", ")} }`,
         endpoint.query === undefined ? undefined : `query: ${part("query")}`,
         endpoint.headers === undefined ? undefined : `headers: ${part("headers")}`,
         endpoint.payloads.length === 0 ? undefined : `body: ${part("payload")}`,
       ].filter((value): value is string => value !== undefined)
       const declaredStatuses = [...new Set(endpoint.errors.map((error) => error.status))]
-      const descriptor = `{ method: ${JSON.stringify(endpoint.endpoint.method)}, path: ${path}${parts.length === 0 ? "" : `, ${parts.join(", ")}`}, successStatus: ${resolveHttpApiStatus(endpoint.successes[0].ast) ?? 200}, declaredStatuses: [${declaredStatuses.join(", ")}], empty: ${endpoint.operation.success === "void"}${isBinarySchema(endpoint.successes[0]) ? ", binary: true" : ""} }`
+      const descriptor = `{ operation: ${JSON.stringify(endpoint.endpoint.identifier)}, method: ${JSON.stringify(endpoint.endpoint.method)}, path: ${path}${parts.length === 0 ? "" : `, ${parts.join(", ")}`}, successStatus: ${resolveHttpApiStatus(endpoint.successes[0].ast) ?? 200}, declaredStatuses: [${declaredStatuses.join(", ")}], empty: ${endpoint.operation.success === "void"}${isBinarySchema(endpoint.successes[0]) ? ", binary: true" : ""} }`
       if (endpoint.operation.success === "stream") {
         const success = endpoint.successes[0]
         if (!isStreamSchema(success) || success._tag !== "StreamSse" || success.sseMode !== "data") {
@@ -1224,7 +1228,54 @@ function normalizePromiseClientContent(content: string, groups: ReadonlyArray<Gr
   const usesBinary = endpoints.some((endpoint) => isBinarySchema(endpoint.successes[0]))
   const usesWildcard = endpoints.some((endpoint) => promiseWildcardInput(endpoint) !== undefined)
 
-  const sseReady = replaceOne(content, "let next: ReadableStreamReadResult<Uint8Array>", "let next")
+  const transportReady = [
+    [
+      "readonly fetch?: typeof globalThis.fetch",
+      "readonly fetch?: typeof globalThis.fetch\n  readonly transport?: ClientTransport",
+    ],
+    [
+      "interface RequestDescriptor {",
+      `export interface ClientTransport {
+  readonly request: (descriptor: RequestDescriptor, options: RequestOptions) => Promise<unknown>
+  readonly stream: (descriptor: RequestDescriptor, options: RequestOptions) => AsyncIterable<unknown>
+}
+
+export interface RequestDescriptor {
+  readonly operation: string
+  readonly params?: Record<string, unknown>`,
+    ],
+    [
+      "  const prepare = (descriptor: RequestDescriptor, requestOptions?: RequestOptions) => {\n    const url = new URL(descriptor.path, options.baseUrl)\n    for (const [key, value] of Object.entries(descriptor.query ?? {})) appendQuery(url.searchParams, key, value)\n",
+      "  const prepareHeaders = (descriptor: RequestDescriptor, requestOptions?: RequestOptions) => {\n",
+    ],
+    [
+      '    if (descriptor.body !== undefined && !headers.has("content-type"))',
+      `    return headers
+  }
+
+  const prepare = (descriptor: RequestDescriptor, requestOptions?: RequestOptions) => {
+    const url = new URL(descriptor.path, options.baseUrl)
+    for (const [key, value] of Object.entries(descriptor.query ?? {})) appendQuery(url.searchParams, key, value)
+    const headers = prepareHeaders(descriptor, requestOptions)
+    if (descriptor.body !== undefined && !headers.has("content-type"))`,
+    ],
+    [
+      "    const response = await execute(descriptor, requestOptions)",
+      `    if (options.transport) return await options.transport.request(descriptor, {
+      ...requestOptions, headers: prepareHeaders(descriptor, requestOptions),
+    }) as A
+    const response = await execute(descriptor, requestOptions)`,
+    ],
+    [
+      "const sse = <A>(descriptor: RequestDescriptor, requestOptions?: RequestOptions): AsyncIterable<A> => ({",
+      `const sse = <A>(descriptor: RequestDescriptor, requestOptions?: RequestOptions): AsyncIterable<A> => options.transport
+    ? options.transport.stream(descriptor, {
+        ...requestOptions, headers: prepareHeaders(descriptor, requestOptions),
+      }) as AsyncIterable<A>
+    : ({`,
+    ],
+  ].reduce((source, [search, replacement]) => replaceOne(source, search!, replacement!), content)
+  const sseReady = replaceOne(transportReady, "let next: ReadableStreamReadResult<Uint8Array>", "let next")
   const binaryReady = usesBinary
     ? replaceOne(
         replaceOne(sseReady, "readonly empty: boolean\n}", "readonly empty: boolean\n  readonly binary?: true\n}"),

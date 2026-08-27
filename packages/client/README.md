@@ -5,6 +5,7 @@ Private generation target for clients derived directly from OpenCode's authorita
 ## Entrypoints
 
 - `@opencode-ai/client`: zero-Effect Promise client using `fetch`.
+- `@opencode-ai/client/promise/rpc`: the same Promise DTO surface over a lazy, shared WebSocket (imports Effect).
 - `@opencode-ai/client/effect`: rich Effect network client using an environment-provided `HttpClient`.
 - `@opencode-ai/client/effect/rpc`: native Effect RPC over a single scoped WebSocket.
 
@@ -28,6 +29,28 @@ yield * client.sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Hello" 
 ```
 
 ## WebSocket RPC
+
+Promise consumers can keep their existing method calls and wire DTOs:
+
+```ts
+import { OpenCodeRpc } from "@opencode-ai/client/promise/rpc"
+
+const client = OpenCodeRpc.make({
+  baseUrl: "https://opencode.example",
+  headers: { authorization: `Basic ${token}` },
+})
+try {
+  const session = await client.session.create()
+  // Numeric timestamps, not Effect DateTime values.
+  console.log(session.time.created)
+} finally {
+  await client.dispose()
+}
+```
+
+`make` returns synchronously without opening a socket. The first call or stream iteration opens one shared connection. Basic authorization is used only for the upgrade's `auth_token`; other default and per-call headers travel as RPC frame metadata. Per-call headers override endpoint headers, which override facade defaults. Binary `file.read` results remain `Uint8Array`, and declared errors remain plain wire objects accepted by the Promise error guards.
+
+Breaking or returning from an async iterator cancels its subscription. `RequestOptions.signal` cancels one call or stream without closing unrelated work. `dispose()` is idempotent, closes the connection, and rejects subsequent calls. A failed connection is never retried and in-flight requests are never replayed: dispose the failed facade and create a new one to reconnect. The Promise root stays zero-Effect; only the explicit `/promise/rpc` entrypoint imports the native RPC runtime.
 
 The additive `/api/rpc` transport derives its operation contracts from Protocol's HTTP schemas; existing HTTP clients are unchanged. Use operation identifiers directly, with decoded `params`, `query`, and `payload` fields where declared. Numeric queries are numbers, not HTTP strings. Optional `location: { directory, workspace? }` selects per-call location context; session-specific operations retain their existing session location rules.
 
@@ -58,4 +81,4 @@ Keep the scope open while consuming streams. Scope closure closes the socket and
 
 Streaming operations return native Effect Streams of the original typed items, not SSE text. No-content operations return `void`. `fs.read` takes `params: { path: "relative/file" }` plus `query: {}` and returns `{ content: Uint8Array, mime: string }`, with bytes encoded as base64 on the wire. Raw `pty.connect` and `persistentPty.connect` remain on their existing WebSocket routes.
 
-From `packages/server`, run `bun run script/benchmark-rpc.ts` for an isolated loopback comparison of HTTP and RPC session-list calls. It uses an in-memory database, temporary configuration, and schema-decoding clients at concurrency 1 and 16. This measures transport overhead, not end-to-end desktop/web speed; the apps still use HTTP until explicitly switched.
+From `packages/server`, run `bun run script/benchmark-rpc.ts` for an isolated loopback comparison of HTTP and RPC session-list calls. It uses an in-memory database, temporary configuration, and schema-decoding clients at concurrency 1 and 16. This measures transport overhead, not end-to-end desktop/web speed. Desktop injects the Promise RPC transport; browser web retains HTTP. Desktop service discovery/readiness checks and raw terminal attachments keep their existing transports.

@@ -11,6 +11,7 @@ import { createDesktopFiles } from "./files"
 import { createDesktopMenuAction } from "./menu"
 import { createDesktopNotify } from "./notifications"
 import { createDesktopStorage } from "./storage"
+import { createDesktopServerApi } from "./server-client"
 
 export type DesktopWindowState = {
   id: string
@@ -40,6 +41,7 @@ export function createDesktopPlatform(
       if (input instanceof Request) return fetch(input)
       return fetch(input, init)
     },
+    createServerApi: createDesktopServerApi,
     getDefaultServer: async () => {
       const url = await api.getDefaultServerUrl().catch(() => null)
       if (!url) return null
