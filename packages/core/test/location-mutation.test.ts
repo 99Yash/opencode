@@ -210,6 +210,16 @@ describe("LocationMutation", () => {
     )
   })
 
+  test("folds Unicode spaces in paths to ASCII spaces", () => {
+    expect(LocationMutation.resolvePath("/project", "file\u00A0name.txt")).toBe(path.resolve("/project", "file name.txt"))
+    expect(LocationMutation.resolvePath("/project", "Screenshot at 10.00.00\u202FAM.png")).toBe(
+      path.resolve("/project", "Screenshot at 10.00.00 AM.png"),
+    )
+    expect(LocationMutation.resolvePath("/project", "docs\u3000readme.md")).toBe(
+      path.resolve("/project", "docs readme.md"),
+    )
+  })
+
   it.live("resolves a tilde path as an external home target", () =>
     withTmp((directory) =>
       Effect.gen(function* () {

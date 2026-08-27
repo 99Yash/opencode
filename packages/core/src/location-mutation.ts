@@ -58,16 +58,21 @@ export interface Interface {
   readonly resolve: (input: ResolveInput) => Effect.Effect<Target, FSUtil.Error>
 }
 
-/** Lexical absolute path, expanding a leading `~` before resolving against `directory`. */
-export const resolvePath = (directory: string, input: string, home = Global.Path.home) =>
-  path.resolve(
+/** Unicode space separators that copy/paste as ordinary spaces in paths. */
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g
+
+/** Lexical absolute path, folding Unicode spaces and expanding a leading `~`. */
+export const resolvePath = (directory: string, input: string, home = Global.Path.home) => {
+  const normalized = input.replace(UNICODE_SPACES, " ")
+  return path.resolve(
     directory,
-    input === "~"
+    normalized === "~"
       ? home
-      : input.startsWith("~/") || (process.platform === "win32" && input.startsWith("~\\"))
-        ? path.join(home, input.slice(2))
-        : input,
+      : normalized.startsWith("~/") || (process.platform === "win32" && normalized.startsWith("~\\"))
+        ? path.join(home, normalized.slice(2))
+        : normalized,
   )
+}
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/LocationMutation") {}
 
