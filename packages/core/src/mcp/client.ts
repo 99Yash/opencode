@@ -2,31 +2,23 @@ export * as McpClient from "./client.js"
 
 import path from "node:path"
 import { pathToFileURL } from "node:url"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport, StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js"
-import { UnauthorizedError, type OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js"
 import {
-  CallToolResultSchema,
-  ElicitationCompleteNotificationSchema,
-  ElicitRequestSchema,
-  GetPromptResultSchema,
+  Client,
+  SdkHttpError,
+  StreamableHTTPClientTransport,
+  UnauthorizedError,
+  type OAuthClientProvider,
+  type Transport,
+  type Tool,
   type Implementation,
   type ElicitRequestFormParams,
   type ElicitRequestParams,
   type ElicitRequestURLParams,
   type ElicitResult,
-  ListPromptsResultSchema,
-  ListRootsRequestSchema,
-  ListToolsResultSchema,
-  PromptListChangedNotificationSchema,
-  PromptSchema,
-  ResourceListChangedNotificationSchema,
   type LoggingMessageNotification,
-  LoggingMessageNotificationSchema,
-  ToolListChangedNotificationSchema,
-  ToolSchema,
-} from "@modelcontextprotocol/sdk/types.js"
+} from "@modelcontextprotocol/client"
+import { DefaultJsonSchemaValidator } from "@modelcontextprotocol/client/_shims"
+import { ListToolsResultSchema, ToolSchema } from "@modelcontextprotocol/core"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
 import { McpStdio } from "./stdio.js"
@@ -40,9 +32,6 @@ const toError = (error: unknown) => (error instanceof Error ? error : new Error(
 // only that field so a single bad schema doesn't blank out the whole tool list.
 const TolerantListToolsResult = ListToolsResultSchema.extend({
   tools: ToolSchema.omit({ outputSchema: true }).array(),
-})
-const TolerantListPromptsResult = ListPromptsResultSchema.extend({
-  prompts: PromptSchema.array(),
 })
 
 export class NeedsAuthError extends Schema.TaggedError<NeedsAuthError>()("MCP.NeedsAuthError", {
@@ -191,22 +180,22 @@ export const connect = Effect.fnUntraced(function* (
   elicitation?: ElicitationHandler,
   clientInfo: Implementation = { name: "opencode", version: "unknown" },
 ) {
+  const validator = new DefaultJsonSchemaValidator()
   const initialize = Effect.fnUntraced(function* (transport: Transport) {
     const client = new Client(clientInfo, {
+      jsonSchemaValidator: validator,
       capabilities: {
         ...(elicitation ? { elicitation: { form: { applyDefaults: true }, url: {} } } : {}),
         // https://github.com/anomalyco/opencode/issues/2308
         roots: {},
       },
     })
-    client.setRequestHandler(ListRootsRequestSchema, () =>
-      Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }),
-    )
+    client.setRequestHandler("roots/list", () => Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }))
     if (elicitation) {
-      client.setRequestHandler(ElicitRequestSchema, (request, extra) =>
-        Effect.runPromise(elicitation.create({ server, params: request.params, signal: extra.signal })),
+      client.setRequestHandler("elicitation/create", (request, ctx) =>
+        Effect.runPromise(elicitation.create({ server, params: request.params, signal: ctx.mcpReq.signal })),
       )
-      client.setNotificationHandler(ElicitationCompleteNotificationSchema, (notification) =>
+      client.setNotificationHandler("notifications/elicitation/complete", (notification) =>
         Effect.runPromise(elicitation.complete({ server, elicitationID: notification.params.elicitationId })),
       )
     }
@@ -250,7 +239,7 @@ export const connect = Effect.fnUntraced(function* (
 
     return yield* open(url).pipe(
       Effect.catch((error) => {
-        if (!addedCodemode || !(error instanceof StreamableHTTPError) || error.code !== 404) return Effect.fail(error)
+        if (!addedCodemode || !(error instanceof SdkHttpError) || error.status !== 404) return Effect.fail(error)
         // Some servers reject unknown query params. Retry once with the user's original URL.
         return open(new URL(config.url))
       }),
@@ -263,52 +252,62 @@ export const connect = Effect.fnUntraced(function* (
     yield* Effect.addFinalizer(() => Effect.promise(() => client.close()).pipe(Effect.ignore))
     const catalogTimeout = config.timeout?.catalog ?? DEFAULT_CATALOG_TIMEOUT
     const executionTimeout = config.timeout?.execution ?? DEFAULT_EXECUTION_TIMEOUT
+    const definitions = new Map<string, Tool>()
     return {
       instructions: client.getInstructions()?.trim() || undefined,
       tools: () =>
         Effect.gen(function* () {
           if (!client.getServerCapabilities()?.tools) return []
           const tools = yield* Effect.tryPromise({
-            try: () =>
-              paginate(
-                async (cursor) => {
-                  const params = cursor === undefined ? undefined : { cursor }
-                  try {
-                    return await client.listTools(params, { timeout: catalogTimeout })
-                  } catch (error) {
-                    if (!(error instanceof Error) || !isOutputSchemaError(error)) throw error
-                    return client.request({ method: "tools/list", params }, TolerantListToolsResult, {
-                      timeout: catalogTimeout,
-                    })
-                  }
-                },
-                (result) => result.tools,
-              ),
+            try: async (signal) => {
+              try {
+                return (await client.listTools(undefined, { signal, timeout: catalogTimeout })).tools
+              } catch (error) {
+                if (!(error instanceof Error) || !isOutputSchemaError(error)) throw error
+                return paginate(
+                  (cursor) =>
+                    client.request(
+                      { method: "tools/list", params: cursor === undefined ? undefined : { cursor } },
+                      TolerantListToolsResult,
+                      {
+                        signal,
+                        timeout: catalogTimeout,
+                      },
+                    ),
+                  (result) => result.tools,
+                )
+              }
+            },
             catch: toError,
           }).pipe(
             Effect.tapError((error) => Effect.logWarning("failed to list MCP tools", { server, error: error.message })),
           )
-          return tools.map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-            outputSchema: "outputSchema" in tool ? tool.outputSchema : undefined,
-          }))
+          definitions.clear()
+          return tools.map((tool) => {
+            const definition: Tool = { ...tool }
+            // V2 compiles output validators at call time. Check them here so malformed schemas
+            // remain usable without catching and potentially replaying a failed tool invocation.
+            if (definition.outputSchema !== undefined) {
+              try {
+                validator.getValidator(definition.outputSchema)
+              } catch {
+                delete definition.outputSchema
+              }
+            }
+            definitions.set(tool.name, definition)
+            return {
+              name: definition.name,
+              description: definition.description,
+              inputSchema: definition.inputSchema,
+              outputSchema: definition.outputSchema,
+            }
+          })
         }),
       prompts: () =>
         Effect.gen(function* () {
           if (!client.getServerCapabilities()?.prompts) return []
           const prompts = yield* Effect.tryPromise({
-            try: () =>
-              paginate(
-                async (cursor) => {
-                  const params = cursor === undefined ? undefined : { cursor }
-                  return client.request({ method: "prompts/list", params }, TolerantListPromptsResult, {
-                    timeout: catalogTimeout,
-                  })
-                },
-                (result) => result.prompts,
-              ),
+            try: async (signal) => (await client.listPrompts(undefined, { signal, timeout: catalogTimeout })).prompts,
             catch: toError,
           }).pipe(
             Effect.tapError((error) =>
@@ -329,12 +328,8 @@ export const connect = Effect.fnUntraced(function* (
         Effect.gen(function* () {
           if (!client.getServerCapabilities()?.resources) return []
           const resources = yield* Effect.tryPromise({
-            try: () =>
-              paginate(
-                (cursor) =>
-                  client.listResources(cursor === undefined ? undefined : { cursor }, { timeout: catalogTimeout }),
-                (result) => result.resources,
-              ),
+            try: async (signal) =>
+              (await client.listResources(undefined, { signal, timeout: catalogTimeout })).resources,
             catch: toError,
           }).pipe(
             Effect.tapError((error) =>
@@ -352,14 +347,8 @@ export const connect = Effect.fnUntraced(function* (
         Effect.gen(function* () {
           if (!client.getServerCapabilities()?.resources) return []
           const templates = yield* Effect.tryPromise({
-            try: () =>
-              paginate(
-                (cursor) =>
-                  client.listResourceTemplates(cursor === undefined ? undefined : { cursor }, {
-                    timeout: catalogTimeout,
-                  }),
-                (result) => result.resourceTemplates,
-              ),
+            try: async (signal) =>
+              (await client.listResourceTemplates(undefined, { signal, timeout: catalogTimeout })).resourceTemplates,
             catch: toError,
           }).pipe(
             Effect.tapError((error) =>
@@ -396,11 +385,7 @@ export const connect = Effect.fnUntraced(function* (
       prompt: (input) =>
         Effect.tryPromise({
           try: (signal) =>
-            client.request(
-              { method: "prompts/get", params: { name: input.name, arguments: input.args ?? {} } },
-              GetPromptResultSchema,
-              { signal, timeout: executionTimeout },
-            ),
+            client.getPrompt({ name: input.name, arguments: input.args ?? {} }, { signal, timeout: executionTimeout }),
           catch: toError,
         }).pipe(
           Effect.map((result) => ({
@@ -412,9 +397,8 @@ export const connect = Effect.fnUntraced(function* (
           try: (signal) =>
             client.callTool(
               { name: input.name, arguments: input.args ?? {} },
-              CallToolResultSchema,
               // Keep progress tokens available while enforcing a hard wall-clock execution timeout.
-              { signal, timeout: executionTimeout, onprogress: () => {} },
+              { signal, timeout: executionTimeout, onprogress: () => {}, toolDefinition: definitions.get(input.name) },
             ),
           catch: toError,
         }).pipe(
@@ -442,19 +426,19 @@ export const connect = Effect.fnUntraced(function* (
         client.onclose = callback
       },
       onLog: (callback) => {
-        client.setNotificationHandler(LoggingMessageNotificationSchema, (notification) => callback(notification.params))
+        client.setNotificationHandler("notifications/message", (notification) => callback(notification.params))
       },
       onToolsChanged: (callback) => {
         if (!client.getServerCapabilities()?.tools?.listChanged) return
-        client.setNotificationHandler(ToolListChangedNotificationSchema, async () => callback())
+        client.setNotificationHandler("notifications/tools/list_changed", async () => callback())
       },
       onPromptsChanged: (callback) => {
         if (!client.getServerCapabilities()?.prompts?.listChanged) return
-        client.setNotificationHandler(PromptListChangedNotificationSchema, async () => callback())
+        client.setNotificationHandler("notifications/prompts/list_changed", async () => callback())
       },
       onResourcesChanged: (callback) => {
         if (!client.getServerCapabilities()?.resources?.listChanged) return
-        client.setNotificationHandler(ResourceListChangedNotificationSchema, async () => callback())
+        client.setNotificationHandler("notifications/resources/list_changed", async () => callback())
       },
     } satisfies Connection
   }

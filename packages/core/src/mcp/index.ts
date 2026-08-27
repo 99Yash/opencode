@@ -320,7 +320,15 @@ export const layer = (options?: Options) =>
               const oauth = await readOAuthCredential()
               return oauth ? McpOAuth.clientFromCredential(oauth) : undefined
             },
-            saveClientInformation: async () => {},
+            saveClientInformation: async (client) => {
+              const oauth = await readOAuthCredential()
+              if (!oauth) return
+              await Effect.runPromise(
+                credentials.update(credentialID, {
+                  value: Credential.OAuth.make({ ...oauth, metadata: { ...oauth.metadata, client } }),
+                }),
+              )
+            },
             codeVerifier: async () => undefined,
             saveCodeVerifier: async () => {},
           },

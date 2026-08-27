@@ -1,17 +1,8 @@
 import path from "node:path"
 import { describe, expect, test } from "bun:test"
-import { Client } from "@modelcontextprotocol/sdk/client/index.js"
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js"
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js"
-import { Server } from "@modelcontextprotocol/sdk/server/index.js"
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
-import {
-  CallToolRequestSchema,
-  ListResourcesRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js"
+import { Client, InMemoryTransport, ProtocolError, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
+import { JSONRPCMessageSchema } from "@modelcontextprotocol/core"
+import { Server, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server"
 import { Document, Event, Info } from "@opencode-ai/schema/config"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
@@ -66,7 +57,7 @@ function resourceServer(
     listChanged?: boolean
     emptyElicitation?: boolean
     urlElicitation?: boolean
-    respond?: (request: Request) => Response | undefined
+    respond?: (request: Request) => Response | undefined | Promise<Response | undefined>
   } = {},
 ) {
   return Effect.acquireRelease(
@@ -81,6 +72,7 @@ function resourceServer(
           { uri: "docs://logo", blob: "aGVsbG8=", mimeType: "image/png" },
         ] as Array<{ uri: string; text: string; mimeType?: string } | { uri: string; blob: string; mimeType?: string }>,
         resourceLists: 0,
+        resourceReads: 0,
         templateLists: 0,
         toolLists: 0,
         initializations: 0,
@@ -95,7 +87,7 @@ function resourceServer(
           },
         },
       )
-      protocol.setRequestHandler(ListToolsRequestSchema, () => {
+      protocol.setRequestHandler("tools/list", () => {
         state.toolLists += 1
         return Promise.resolve({
           tools: input.emptyElicitation
@@ -106,8 +98,8 @@ function resourceServer(
         })
       })
       if (input.emptyElicitation) {
-        protocol.setRequestHandler(CallToolRequestSchema, async () => {
-          const result = await protocol.elicitInput({
+        protocol.setRequestHandler("tools/call", async (_request, ctx) => {
+          const result = await ctx.mcpReq.elicitInput({
             mode: "form",
             message: "Confirm",
             requestedSchema: { type: "object", properties: {} },
@@ -119,8 +111,8 @@ function resourceServer(
         })
       }
       if (input.urlElicitation) {
-        protocol.setRequestHandler(CallToolRequestSchema, async () => {
-          const result = await protocol.elicitInput({
+        protocol.setRequestHandler("tools/call", async (_request, ctx) => {
+          const result = await ctx.mcpReq.elicitInput({
             mode: "url",
             message: "Authorize access",
             url: "https://example.com/authorize",
@@ -133,17 +125,20 @@ function resourceServer(
         })
       }
       if (input.resources !== false) {
-        protocol.setRequestHandler(ListResourcesRequestSchema, (request) => {
+        protocol.setRequestHandler("resources/list", (request) => {
           state.resourceLists += 1
           const page = state.resourcePages?.[request.params?.cursor ?? "initial"]
           return Promise.resolve({ resources: page?.items ?? state.resources, nextCursor: page?.nextCursor })
         })
-        protocol.setRequestHandler(ListResourceTemplatesRequestSchema, (request) => {
+        protocol.setRequestHandler("resources/templates/list", (request) => {
           state.templateLists += 1
           const page = state.templatePages?.[request.params?.cursor ?? "initial"]
           return Promise.resolve({ resourceTemplates: page?.items ?? state.templates, nextCursor: page?.nextCursor })
         })
-        protocol.setRequestHandler(ReadResourceRequestSchema, () => Promise.resolve({ contents: state.contents }))
+        protocol.setRequestHandler("resources/read", () => {
+          state.resourceReads += 1
+          return Promise.resolve({ contents: state.contents })
+        })
       }
       const transport = new WebStandardStreamableHTTPServerTransport({
         sessionIdGenerator: () => crypto.randomUUID(),
@@ -158,7 +153,7 @@ function resourceServer(
           if (typeof body === "object" && body !== null && "method" in body && body.method === "initialize") {
             state.initializations += 1
           }
-          return input.respond?.(request) ?? transport.handleRequest(request)
+          return (await input.respond?.(request)) ?? transport.handleRequest(request)
         },
       })
       return {
@@ -382,9 +377,11 @@ test("MCP tool names match V1 sanitization", () => {
 })
 
 test("preserves output schema validation across paginated tool discovery", async () => {
+  const cursors: Array<string | undefined> = []
   const server = new Server({ name: "pagination", version: "1.0.0" }, { capabilities: { tools: {} } })
-  server.setRequestHandler(ListToolsRequestSchema, ({ params }) =>
-    Promise.resolve(
+  server.setRequestHandler("tools/list", ({ params }) => {
+    cursors.push(params?.cursor)
+    return Promise.resolve(
       params?.cursor === "page-2"
         ? {
             tools: [
@@ -413,12 +410,12 @@ test("preserves output schema validation across paginated tool discovery", async
             ],
             nextCursor: "page-2",
           },
-    ),
-  )
-  server.setRequestHandler(CallToolRequestSchema, ({ params }) =>
+    )
+  })
+  server.setRequestHandler("tools/call", ({ params }) =>
     Promise.resolve({
       content: [],
-      structuredContent: { value: params.name === "first" ? 42 : 1 },
+      structuredContent: { value: params.name === "first" ? 42 : "invalid" },
     }),
   )
 
@@ -427,10 +424,13 @@ test("preserves output schema validation across paginated tool discovery", async
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)])
 
   try {
-    const first = await client.listTools()
-    const second = await client.listTools({ cursor: first.nextCursor })
-    expect([...first.tools, ...second.tools].map((tool) => tool.name)).toEqual(["first", "second"])
+    const result = await client.listTools()
+    expect(cursors).toEqual([undefined, "page-2"])
+    expect(result.tools.map((tool) => tool.name)).toEqual(["first", "second"])
     await expect(client.callTool({ name: "first", arguments: {} })).rejects.toThrow(
+      "Structured content does not match the tool's output schema",
+    )
+    await expect(client.callTool({ name: "second", arguments: {} })).rejects.toThrow(
       "Structured content does not match the tool's output schema",
     )
   } finally {
@@ -474,6 +474,129 @@ test("retains output schemas across paginated MCP discovery", async () => {
     },
   ])
 })
+
+testEffect(Layer.empty).live("isolates unresolved output schemas without replaying tools on a 2025-11-25 server", () =>
+  Effect.gen(function* () {
+    const executed: string[] = []
+    const cursors: unknown[] = []
+    const versions: Array<string | null> = []
+    // Speak the older wire protocol directly so both ends cannot silently upgrade together.
+    const server = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        Bun.serve({
+          port: 0,
+          fetch: async (request) => {
+            if (request.method !== "POST") return new Response(null, { status: 405 })
+            const message = JSONRPCMessageSchema.parse(await request.json())
+            if (!("id" in message) || !("method" in message)) return new Response(null, { status: 202 })
+            if (message.method === "initialize") {
+              return Response.json(
+                {
+                  jsonrpc: "2.0",
+                  id: message.id,
+                  result: {
+                    protocolVersion: "2025-11-25",
+                    capabilities: { tools: {} },
+                    serverInfo: { name: "legacy-output-schema", version: "1.0.0" },
+                  },
+                },
+                { headers: { "mcp-session-id": "legacy" } },
+              )
+            }
+            versions.push(request.headers.get("mcp-protocol-version"))
+            if (message.method === "tools/list") {
+              cursors.push(message.params?.cursor)
+              return Response.json({
+                jsonrpc: "2.0",
+                id: message.id,
+                result:
+                  message.params?.cursor === "page-2"
+                    ? {
+                        tools: [
+                          {
+                            name: "unresolved",
+                            inputSchema: { type: "object" },
+                            outputSchema: { type: "object", properties: { value: { $ref: "#/$defs/Missing" } } },
+                          },
+                          { name: "server-error", inputSchema: { type: "object" } },
+                          {
+                            name: "dependent",
+                            inputSchema: { type: "object" },
+                            outputSchema: { type: "object", $ref: "https://example.com/mcp-output" },
+                          },
+                        ],
+                      }
+                    : {
+                        tools: [
+                          {
+                            name: "valid",
+                            inputSchema: { type: "object" },
+                            outputSchema: {
+                              $id: "https://example.com/mcp-output",
+                              type: "object",
+                              properties: { value: { type: "string" } },
+                              required: ["value"],
+                            },
+                          },
+                        ],
+                        nextCursor: "page-2",
+                      },
+              })
+            }
+            if (message.method === "tools/call" && typeof message.params?.name === "string") {
+              executed.push(message.params.name)
+              return Response.json({
+                jsonrpc: "2.0",
+                id: message.id,
+                ...(message.params.name === "server-error"
+                  ? {
+                      error: {
+                        code: -32602,
+                        message: "Invalid outputSchema for tool server-error: can't resolve reference",
+                      },
+                    }
+                  : {
+                      result: {
+                        content: [],
+                        structuredContent: { value: message.params.name === "dependent" ? "ok" : 42 },
+                      },
+                    }),
+              })
+            }
+            return new Response(null, { status: 400 })
+          },
+        }),
+      ),
+      (server) => Effect.promise(() => server.stop(true)),
+    )
+    const connection = yield* connect(
+      "legacy-output-schema",
+      new ConfigMCP.Remote({ type: "remote", url: server.url.toString(), oauth: false }),
+      import.meta.dir,
+    )
+    const tools = yield* connection.tools()
+    expect(tools.map((tool) => tool.name)).toEqual(["valid", "unresolved", "server-error", "dependent"])
+    expect(cursors).toEqual([undefined, "page-2"])
+    expect(tools[0]?.outputSchema).toEqual({
+      $id: "https://example.com/mcp-output",
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    })
+    expect(tools[1]?.outputSchema).toBeUndefined()
+    expect(tools[3]?.outputSchema).toEqual({ type: "object", $ref: "https://example.com/mcp-output" })
+    expect(yield* connection.callTool({ name: "dependent" })).toMatchObject({ structured: { value: "ok" } })
+    expect(yield* connection.callTool({ name: "unresolved" })).toMatchObject({ structured: { value: 42 } })
+    expect((yield* connection.callTool({ name: "valid" }).pipe(Effect.flip)).message).toContain(
+      "Structured content does not match the tool's output schema",
+    )
+    const error = yield* connection.callTool({ name: "server-error" }).pipe(Effect.flip)
+    expect(error).toBeInstanceOf(ProtocolError)
+    expect(error.message).toContain("Invalid outputSchema for tool server-error: can't resolve reference")
+    expect(executed).toEqual(["dependent", "unresolved", "valid", "server-error"])
+    expect(new Set(versions)).toEqual(new Set(["2025-11-25"]))
+  }),
+)
 
 test("spawns local MCP servers through the location environment", async () => {
   const spawns: Array<ChildProcess.Command> = []
@@ -843,6 +966,86 @@ testEffect(Layer.empty).live("does not strip codemode for an MCP 404 after initi
   }),
 )
 
+for (const cancellation of [undefined, "execution", "catalog"] as const) {
+  testEffect(Layer.empty).live(
+    cancellation
+      ? `does not replay cancelled MCP ${cancellation} requests after session recovery`
+      : "coalesces expired MCP session recovery and replays concurrent requests",
+    () =>
+      Effect.gen(function* () {
+        const recovering = Promise.withResolvers<void>()
+        const release = Promise.withResolvers<void>()
+        const rejected = Promise.withResolvers<void>()
+        yield* Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            release.resolve()
+            rejected.resolve()
+          }),
+        )
+        const replacement = yield* resourceServer()
+        replacement.state.contents = [{ uri: "docs://recovered", text: "recovered" }]
+        let expired = false
+        let expiredRequests = 0
+        let session: string | null = null
+        const server = yield* resourceServer({
+          respond: async (request) => {
+            expect(request.headers.get("x-mcp-test")).toBe("preserved")
+            if (!expired) {
+              session = request.headers.get("mcp-session-id") ?? session
+              return
+            }
+            if (request.headers.get("mcp-session-id") === session) {
+              if (request.method === "POST") {
+                expiredRequests += 1
+                // Both requests must use the expired session before either triggers recovery.
+                if (expiredRequests === 2) rejected.resolve()
+                await rejected.promise
+              }
+              return new Response(null, { status: 404 })
+            }
+            if (request.method === "POST" && !request.headers.has("mcp-session-id")) {
+              recovering.resolve()
+              await release.promise
+            }
+            return fetch(new Request(replacement.url, request))
+          },
+        })
+        const connection = yield* connect(
+          "recovery",
+          new ConfigMCP.Remote({
+            type: "remote",
+            url: server.url,
+            oauth: false,
+            headers: { "x-mcp-test": "preserved" },
+          }),
+          import.meta.dir,
+        )
+        expect(session).not.toBeNull()
+        expired = true
+        const request: Effect.Effect<unknown, Error> =
+          cancellation === "catalog" ? connection.resources() : connection.readResource({ uri: "docs://recovered" })
+        const pending = yield* request.pipe(Effect.forkScoped)
+        const templates = yield* connection.resourceTemplates().pipe(Effect.forkScoped)
+        yield* Effect.promise(() => recovering.promise)
+        if (cancellation) yield* Fiber.interrupt(pending)
+        release.resolve()
+        expect(yield* Fiber.join(templates)).toEqual([])
+        if (!cancellation) {
+          expect(yield* Fiber.join(pending)).toEqual({
+            contents: [{ type: "text", uri: "docs://recovered", text: "recovered", mimeType: undefined }],
+          })
+        }
+        expect(server.state.initializations).toBe(2)
+        expect(expiredRequests).toBe(2)
+        expect(replacement.state.initializations).toBe(1)
+        expect(replacement.state.resourceReads).toBe(cancellation ? 0 : 1)
+        expect(replacement.state.resourceLists).toBe(0)
+        expect(replacement.state.templateLists).toBe(1)
+        expect(new Set(server.state.urls)).toEqual(new Set([server.url + "?codemode=false"]))
+      }),
+  )
+}
+
 test("lists, reads, and reports MCP resource changes", async () => {
   await Effect.runPromise(
     Effect.scoped(
@@ -876,6 +1079,8 @@ test("lists, reads, and reports MCP resource changes", async () => {
           { name: "File", uriTemplate: "docs://{path}", description: undefined, mimeType: undefined },
           { name: "Issue", uriTemplate: "issue://{id}", description: "Issue", mimeType: undefined },
         ])
+        expect(server.state.resourceLists).toBe(2)
+        expect(server.state.templateLists).toBe(2)
         expect(yield* connection.readResource({ uri: "docs://readme" })).toEqual({
           contents: [
             { type: "text", uri: "docs://readme", text: "hello", mimeType: "text/plain" },

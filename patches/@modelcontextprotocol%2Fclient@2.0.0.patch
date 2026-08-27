@@ -1,0 +1,240 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..65816771736ba97868ff55e4b7f10f6184626920 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -1250,8 +1250,12 @@ async function exchangeAuthorization(authorizationServerUrl, { metadata, clientI
+ * @returns Promise resolving to OAuth tokens (preserves original `refresh_token` if not replaced)
+ * @throws {Error} When token refresh fails or authentication is invalid
+ */
++const refreshes = new Map();
+ async function refreshAuthorization(authorizationServerUrl, { metadata, clientInformation, refreshToken, resource, addClientAuthentication, fetchFn }) {
+-	return {
++	const key = `${authorizationServerUrl}\0${clientInformation.client_id}\0${refreshToken}`;
++	const current = refreshes.get(key);
++	if (current) return current;
++	const refresh = (async () => ({
+ 		refresh_token: refreshToken,
+ 		...await executeTokenRequest(authorizationServerUrl, {
+ 			metadata,
+@@ -1264,7 +1268,13 @@ async function refreshAuthorization(authorizationServerUrl, { metadata, clientIn
+ 			resource,
+ 			fetchFn
+ 		})
+-	};
++	}))();
++	refreshes.set(key, refresh);
++	try {
++		return await refresh;
++	} finally {
++		if (refreshes.get(key) === refresh) refreshes.delete(key);
++	}
+ }
+ /**
+ * Unified token fetching that works with any grant type via {@linkcode OAuthClientProvider.prepareTokenRequest | prepareTokenRequest()}.
+@@ -3200,6 +3210,7 @@ var Client = class extends require_src.Protocol {
+ 	* ```
+ 	*/
+ 	async connect(transport, options) {
++		transport.onsessionexpired = () => this._legacyHandshake(transport);
+ 		if (options?.prior != null) return this._connectFromPrior(transport, validatePrior(options.prior), options);
+ 		const negotiation = resolveVersionNegotiation(this._versionNegotiation, this._supportedProtocolVersionsOption);
+ 		if (negotiation.kind !== "legacy") return this._connectNegotiated(transport, negotiation, options);
+@@ -5296,8 +5307,26 @@ var StreamableHTTPClientTransport = class {
+ 	async send(message, options) {
+ 		return this._send(message, options, false);
+ 	}
+-	async _send(message, options, isAuthRetry, stepUpRetries = 0) {
++	async _recoverSession(expiredSessionId) {
++		if (this._sessionRecovery) return this._sessionRecovery;
++		if (this._sessionId !== expiredSessionId) return;
++		this._sessionId = void 0;
++		this._sessionRecovery = Promise.resolve().then(() => this.onsessionexpired?.());
+ 		try {
++			await this._sessionRecovery;
++		} catch (error) {
++			this._sessionId = void 0;
++			await this.close();
++			throw error;
++		} finally {
++			this._sessionRecovery = void 0;
++		}
++	}
++	async _send(message, options, isAuthRetry, stepUpRetries = 0, isSessionRetry = false) {
++		try {
++			if (this._sessionRecovery && !require_src.isInitializeRequest(message) && !require_src.isInitializedNotification(message)) await this._sessionRecovery;
++			options?.requestSignal?.throwIfAborted();
++			if (options?.isRequestActive?.() === false) throw new Error("Request is no longer active");
+ 			const { resumptionToken, onresumptiontoken } = options || {};
+ 			if (resumptionToken) {
+ 				this._startOrAuthSse({
+@@ -5311,6 +5340,7 @@ var StreamableHTTPClientTransport = class {
+ 			this._applyBodyDerivedHeaders(headers, message);
+ 			const isHandshake = Array.isArray(message) ? message.some((m) => require_src.isInitializeRequest(m)) : require_src.isInitializeRequest(message);
+ 			if (isHandshake) headers.delete("mcp-session-id");
++			const requestSessionId = headers.get("mcp-session-id") ?? void 0;
+ 			if (options?.headers !== void 0) for (const [name, value] of Object.entries(options.headers)) {
+ 				if (RESERVED_REQUEST_HEADER_NAMES.has(name.toLowerCase())) continue;
+ 				headers.set(name, value);
+@@ -5351,7 +5381,7 @@ var StreamableHTTPClientTransport = class {
+ 							throw markAuthSeamEscape(error);
+ 						}
+ 						await response.text?.().catch(() => {});
+-						return this._send(message, options, true, stepUpRetries);
++						return this._send(message, options, true, stepUpRetries, isSessionRetry);
+ 					}
+ 					await response.text?.().catch(() => {});
+ 					if (isAuthRetry) throw markAuthSeamEscape(new require_src.SdkHttpError(require_src.SdkErrorCode.ClientHttpAuthentication, "Server returned 401 after re-authentication", {
+@@ -5361,6 +5391,10 @@ var StreamableHTTPClientTransport = class {
+ 					throw markAuthSeamEscape(new UnauthorizedError());
+ 				}
+ 				const text = await response.text?.().catch(() => null);
++				if (response.status === 404 && requestSessionId && !isSessionRetry && !require_src.isInitializedNotification(message)) {
++					await this._recoverSession(requestSessionId);
++					return this._send(message, options, isAuthRetry, stepUpRetries, true);
++				}
+ 				if (response.status === 403) {
+ 					const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
+ 					if (error === "insufficient_scope") {
+@@ -5371,7 +5405,7 @@ var StreamableHTTPClientTransport = class {
+ 							statusText: response.statusText,
+ 							text
+ 						}, stepUpRetries) !== "AUTHORIZED") throw markAuthSeamEscape(new UnauthorizedError());
+-						return this._send(message, options, isAuthRetry, stepUpRetries + 1);
++						return this._send(message, options, isAuthRetry, stepUpRetries + 1, isSessionRetry);
+ 					}
+ 				}
+ 				if (response.status === 400 && typeof text === "string" && this._isModernEnvelopedRequest(message)) try {
+diff --git a/dist/index.mjs b/dist/index.mjs
+index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..a55aa84acbcb99bab3366a4e1bc4725e68c7ea48 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1247,8 +1247,12 @@ async function exchangeAuthorization(authorizationServerUrl, { metadata, clientI
+ * @returns Promise resolving to OAuth tokens (preserves original `refresh_token` if not replaced)
+ * @throws {Error} When token refresh fails or authentication is invalid
+ */
++const refreshes = new Map();
+ async function refreshAuthorization(authorizationServerUrl, { metadata, clientInformation, refreshToken, resource, addClientAuthentication, fetchFn }) {
+-	return {
++	const key = `${authorizationServerUrl}\0${clientInformation.client_id}\0${refreshToken}`;
++	const current = refreshes.get(key);
++	if (current) return current;
++	const refresh = (async () => ({
+ 		refresh_token: refreshToken,
+ 		...await executeTokenRequest(authorizationServerUrl, {
+ 			metadata,
+@@ -1261,7 +1265,13 @@ async function refreshAuthorization(authorizationServerUrl, { metadata, clientIn
+ 			resource,
+ 			fetchFn
+ 		})
+-	};
++	}))();
++	refreshes.set(key, refresh);
++	try {
++		return await refresh;
++	} finally {
++		if (refreshes.get(key) === refresh) refreshes.delete(key);
++	}
+ }
+ /**
+ * Unified token fetching that works with any grant type via {@linkcode OAuthClientProvider.prepareTokenRequest | prepareTokenRequest()}.
+@@ -3197,6 +3207,7 @@ var Client = class extends Protocol {
+ 	* ```
+ 	*/
+ 	async connect(transport, options) {
++		transport.onsessionexpired = () => this._legacyHandshake(transport);
+ 		if (options?.prior != null) return this._connectFromPrior(transport, validatePrior(options.prior), options);
+ 		const negotiation = resolveVersionNegotiation(this._versionNegotiation, this._supportedProtocolVersionsOption);
+ 		if (negotiation.kind !== "legacy") return this._connectNegotiated(transport, negotiation, options);
+@@ -5293,8 +5304,26 @@ var StreamableHTTPClientTransport = class {
+ 	async send(message, options) {
+ 		return this._send(message, options, false);
+ 	}
+-	async _send(message, options, isAuthRetry, stepUpRetries = 0) {
++	async _recoverSession(expiredSessionId) {
++		if (this._sessionRecovery) return this._sessionRecovery;
++		if (this._sessionId !== expiredSessionId) return;
++		this._sessionId = void 0;
++		this._sessionRecovery = Promise.resolve().then(() => this.onsessionexpired?.());
+ 		try {
++			await this._sessionRecovery;
++		} catch (error) {
++			this._sessionId = void 0;
++			await this.close();
++			throw error;
++		} finally {
++			this._sessionRecovery = void 0;
++		}
++	}
++	async _send(message, options, isAuthRetry, stepUpRetries = 0, isSessionRetry = false) {
++		try {
++			if (this._sessionRecovery && !isInitializeRequest(message) && !isInitializedNotification(message)) await this._sessionRecovery;
++			options?.requestSignal?.throwIfAborted();
++			if (options?.isRequestActive?.() === false) throw new Error("Request is no longer active");
+ 			const { resumptionToken, onresumptiontoken } = options || {};
+ 			if (resumptionToken) {
+ 				this._startOrAuthSse({
+@@ -5308,6 +5337,7 @@ var StreamableHTTPClientTransport = class {
+ 			this._applyBodyDerivedHeaders(headers, message);
+ 			const isHandshake = Array.isArray(message) ? message.some((m) => isInitializeRequest(m)) : isInitializeRequest(message);
+ 			if (isHandshake) headers.delete("mcp-session-id");
++			const requestSessionId = headers.get("mcp-session-id") ?? void 0;
+ 			if (options?.headers !== void 0) for (const [name, value] of Object.entries(options.headers)) {
+ 				if (RESERVED_REQUEST_HEADER_NAMES.has(name.toLowerCase())) continue;
+ 				headers.set(name, value);
+@@ -5348,7 +5378,7 @@ var StreamableHTTPClientTransport = class {
+ 							throw markAuthSeamEscape(error);
+ 						}
+ 						await response.text?.().catch(() => {});
+-						return this._send(message, options, true, stepUpRetries);
++						return this._send(message, options, true, stepUpRetries, isSessionRetry);
+ 					}
+ 					await response.text?.().catch(() => {});
+ 					if (isAuthRetry) throw markAuthSeamEscape(new SdkHttpError(SdkErrorCode.ClientHttpAuthentication, "Server returned 401 after re-authentication", {
+@@ -5358,6 +5388,10 @@ var StreamableHTTPClientTransport = class {
+ 					throw markAuthSeamEscape(new UnauthorizedError());
+ 				}
+ 				const text = await response.text?.().catch(() => null);
++				if (response.status === 404 && requestSessionId && !isSessionRetry && !isInitializedNotification(message)) {
++					await this._recoverSession(requestSessionId);
++					return this._send(message, options, isAuthRetry, stepUpRetries, true);
++				}
+ 				if (response.status === 403) {
+ 					const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
+ 					if (error === "insufficient_scope") {
+@@ -5368,7 +5402,7 @@ var StreamableHTTPClientTransport = class {
+ 							statusText: response.statusText,
+ 							text
+ 						}, stepUpRetries) !== "AUTHORIZED") throw markAuthSeamEscape(new UnauthorizedError());
+-						return this._send(message, options, isAuthRetry, stepUpRetries + 1);
++						return this._send(message, options, isAuthRetry, stepUpRetries + 1, isSessionRetry);
+ 					}
+ 				}
+ 				if (response.status === 400 && typeof text === "string" && this._isModernEnvelopedRequest(message)) try {
+diff --git a/dist/src-D_zzAWoS.mjs b/dist/src-D_zzAWoS.mjs
+index 6ac3d5377996c0060cbbae0310646286e1eb0da9..8e37932fa27f4fa31db0462e33341609cd9c2af5 100644
+--- a/dist/src-D_zzAWoS.mjs
++++ b/dist/src-D_zzAWoS.mjs
+@@ -6153,7 +6153,8 @@ var Protocol = class {
+ 				resumptionToken,
+ 				onresumptiontoken,
+ 				headers,
+-				requestSignal: requestAbort?.signal
++				requestSignal: requestAbort?.signal,
++				isRequestActive: () => this._responseHandlers.has(messageId)
+ 			}).catch((error) => {
+ 				this._progressHandlers.delete(messageId);
+ 				reject(error);
+diff --git a/dist/src-NAgB4Mp8.cjs b/dist/src-NAgB4Mp8.cjs
+index e8f2499248448c27ad645236543b19c322425467..b4353007407bd12569bc6c2e2ae0b781c1b893e4 100644
+--- a/dist/src-NAgB4Mp8.cjs
++++ b/dist/src-NAgB4Mp8.cjs
+@@ -6154,7 +6154,8 @@ var Protocol = class {
+ 				resumptionToken,
+ 				onresumptiontoken,
+ 				headers,
+-				requestSignal: requestAbort?.signal
++				requestSignal: requestAbort?.signal,
++				isRequestActive: () => this._responseHandlers.has(messageId)
+ 			}).catch((error) => {
+ 				this._progressHandlers.delete(messageId);
+ 				reject(error);
