@@ -7,6 +7,7 @@ import { Job } from "../../job.js"
 import { Session } from "../../session.js"
 import { SessionEvent } from "../event.js"
 import { SessionExecution } from "../execution.js"
+import { SessionResolve } from "../resolve.js"
 import { SessionSchema } from "../schema.js"
 import { SessionStore } from "../store.js"
 
@@ -31,12 +32,16 @@ export interface Options {
 const DEFAULT_MAX_ATTEMPTS = 10
 
 export interface Interface {
+  /** All claimed Sessions and pending Job targets/parents, regardless of capability ownership. */
+  readonly recoverable: Effect.Effect<ReadonlyArray<SessionSchema.ID>>
   /**
    * Resumes Sessions whose execution claim was never released — turns orphaned
    * by a process that died without teardown, or interrupted by a graceful
    * shutdown (which preserves the claim on purpose). The claim is never
    * cleared here: only a terminal event releases it, so a death anywhere in
    * the resume path leaves the same orphaned claim for the next boot.
+   * Capability-owned Sessions stay pending even when reopened; they require
+   * an explicit prompt or resume instead of automatic recovery.
    */
   readonly resumeSuspendedSessions: Effect.Effect<void>
 }
@@ -66,6 +71,7 @@ export const layer = (options?: Options) =>
     Effect.gen(function* () {
       const store = yield* SessionStore.Service
       const execution = yield* SessionExecution.Service
+      const resolve = yield* SessionResolve.Service
       const bus = yield* Bus.Service
       const jobs = yield* Job.Service
       const sessions = yield* Session.Service
@@ -73,6 +79,8 @@ export const layer = (options?: Options) =>
       const maxAttempts = options?.maxAttempts ?? DEFAULT_MAX_ATTEMPTS
 
       const prepareResume = Effect.fnUntraced(function* (sessionID: SessionSchema.ID) {
+        // Reopening capabilities does not opt a Session into automatic recovery.
+        if (yield* resolve.owned(sessionID)) return undefined
         // Durable before the resume runs, so a crash inside the resumed turn is
         // counted by the next sweep and the budget cannot be dodged.
         const attempts = yield* store.countResume(sessionID)
@@ -93,6 +101,11 @@ export const layer = (options?: Options) =>
           description: "Continuing after restart",
         })
         return true
+      })
+
+      const eligibleJob = Effect.fnUntraced(function* (recovery: Job.Recovery) {
+        if (recovery.kind === "shell") return !(yield* resolve.owned(recovery.sessionID))
+        return !(yield* resolve.owned(recovery.parentSessionID)) && !(yield* resolve.owned(recovery.childSessionID))
       })
 
       const recoverShell = Effect.fnUntraced(function* (
@@ -143,6 +156,7 @@ export const layer = (options?: Options) =>
 
         const notify = Effect.fnUntraced(function* (result: Pick<Job.Background, "status" | "output" | "error">) {
           if (result.status === "running") return
+          if (!(yield* eligibleJob(recovery))) return
           const text =
             result.status === "completed"
               ? (result.output ?? "Subagent completed without a text response.")
@@ -172,7 +186,9 @@ export const layer = (options?: Options) =>
           return
         }
         if ((yield* execution.active).has(recovery.childSessionID)) return
-        if (!(yield* prepareResume(recovery.childSessionID))) {
+        const prepared = yield* prepareResume(recovery.childSessionID)
+        if (prepared === undefined) return
+        if (!prepared) {
           yield* notify({ status: "error", error: RESUME_EXHAUSTED.message })
           return
         }
@@ -209,23 +225,37 @@ export const layer = (options?: Options) =>
       })
 
       return Service.of({
+        recoverable: Effect.gen(function* () {
+          return Array.from(
+            new Set([
+              ...(yield* store.listClaimed()),
+              ...(yield* jobs.pendingBackground).flatMap((background) =>
+                background.recovery.kind === "shell"
+                  ? [background.recovery.sessionID]
+                  : [background.recovery.childSessionID, background.recovery.parentSessionID],
+              ),
+            ]),
+          )
+        }),
         resumeSuspendedSessions: Effect.gen(function* () {
           const active = yield* execution.active
           // Early notices wait for root recovery's accounting, including roots that exhaust their budget.
           const suspended = new Set((yield* store.listSuspended()).filter((sessionID) => !active.has(sessionID)))
           const pending = yield* jobs.pendingBackground
-          yield* store.releaseChildClaims(
-            pending.flatMap((background) =>
+          yield* store.releaseChildClaims([
+            ...(yield* resolve.ownedIDs),
+            ...pending.flatMap((background) =>
               background.status === "running" && background.recovery.kind === "subagent"
                 ? [background.recovery.childSessionID]
                 : [],
             ),
-          )
+          ])
           yield* Effect.forEach(
             pending,
             Effect.fnUntraced(function* (background) {
               if ((yield* jobs.get(background.id))?.status === "running") return
               const recovery = background.recovery
+              if (!(yield* eligibleJob(recovery))) return
               yield* recovery.kind === "shell"
                 ? recoverShell(background, recovery)
                 : recoverSubagent(background, recovery, suspended)
@@ -237,10 +267,10 @@ export const layer = (options?: Options) =>
           const resumed = yield* execution.active
           yield* Effect.forEach(
             (yield* store.listSuspended()).filter((sessionID) => !resumed.has(sessionID)),
-            (sessionID) =>
-              execution
-                .resume(sessionID)
-                .pipe(Effect.ignore, Effect.forkIn(scope), Effect.when(prepareResume(sessionID))),
+            Effect.fnUntraced(function* (sessionID) {
+              if (!(yield* prepareResume(sessionID))) return
+              yield* execution.resume(sessionID).pipe(Effect.ignore, Effect.forkIn(scope))
+            }),
             { concurrency: "unbounded", discard: true },
           )
           // Async observers consult this set at delivery; later completions wake parents normally.
@@ -253,5 +283,5 @@ export const layer = (options?: Options) =>
 export const node = makeGlobalNode({
   service: Service,
   layer: layer(),
-  deps: [SessionStore.node, SessionExecution.node, Bus.node, Job.node, Session.node],
+  deps: [SessionStore.node, SessionExecution.node, SessionResolve.node, Bus.node, Job.node, Session.node],
 })

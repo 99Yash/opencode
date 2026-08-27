@@ -18,6 +18,7 @@ import { UserInterruptedError } from "@opencode-ai/core/session/error"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { SessionMessage } from "@opencode-ai/core/session/message"
+import { SessionResolve } from "@opencode-ai/core/session/resolve"
 import { SessionRunner } from "@opencode-ai/core/session/runner/index"
 import { SessionInboxTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
@@ -26,7 +27,9 @@ import { eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SessionStore.node, Job.node, KV.node, Session.node])),
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, Bus.node, SessionStore.node, Job.node, KV.node, Session.node, SessionResolve.node]),
+  ),
 )
 
 describe("SessionExecution lifecycle", () => {
@@ -1135,6 +1138,7 @@ function buildExecution(
     const store = yield* SessionStore.Service
     const jobs = overrideJobs ?? (yield* Job.Service)
     const sessions = yield* Session.Service
+    const resolve = yield* SessionResolve.Service
     const sessionLayer = Layer.effect(
       Session.Service,
       Effect.gen(function* () {
@@ -1170,6 +1174,7 @@ function buildExecution(
         Layer.provide(Layer.succeed(Database.Service, database)),
         Layer.provide(Layer.succeed(Bus.Service, bus)),
         Layer.provide(Layer.succeed(SessionStore.Service, store)),
+        Layer.provide(Layer.succeed(SessionResolve.Service, resolve)),
         Layer.provide(Layer.succeed(Job.Service, jobs)),
         Layer.provide(locations),
       ),
