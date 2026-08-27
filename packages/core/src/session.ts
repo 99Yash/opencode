@@ -700,13 +700,11 @@ const layer = Layer.effect(
                       const plugins = yield* PluginSupervisor.Service
                       yield* plugins.flush
                       const hooks = yield* PluginHooks.Service
-                      const image = yield* Image.Service
-                      const skills = yield* Skill.Service
                       return yield* preparePrompt(
                         input,
                         messageID,
-                        Effect.succeed(image),
-                        Effect.succeed(skills),
+                        Effect.service(Image.Service),
+                        Effect.service(Skill.Service),
                         hooks,
                       )
                     }).pipe(Effect.provide(locations.get(session.location)))
@@ -1073,11 +1071,11 @@ function synthesizeTerminalShellInfo(started: ShellSchema.Info): ShellSchema.Inf
   }
 }
 
-const preparePrompt = Effect.fn("Session.preparePrompt")(function* (
+const preparePrompt = Effect.fn("Session.preparePrompt")(function* <RImage, RSkills>(
   request: Parameters<Interface["prompt"]>[0],
   messageID: SessionMessage.ID,
-  image: Effect.Effect<Image.Interface>,
-  skills: Effect.Effect<Skill.Interface | undefined>,
+  image: Effect.Effect<Image.Interface, never, RImage>,
+  skills: Effect.Effect<Skill.Interface | undefined, never, RSkills>,
   hooks?: PluginHooks.Interface,
 ) {
   const initial: PluginHooks.Domains["session"]["prompt"] = {
@@ -1138,10 +1136,10 @@ const preparePrompt = Effect.fn("Session.preparePrompt")(function* (
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 
-const materializeAttachment = Effect.fn("Session.materializeAttachment")(function* (
+const materializeAttachment = Effect.fn("Session.materializeAttachment")(function* <R>(
   fs: FSUtil.Interface,
   input: PromptInput.FileAttachment,
-  image: Effect.Effect<Image.Interface>,
+  image: Effect.Effect<Image.Interface, never, R>,
 ) {
   const resolved = input.uri.startsWith("data:")
     ? {
@@ -1181,11 +1179,11 @@ const materializeAttachment = Effect.fn("Session.materializeAttachment")(functio
   })
 })
 
-const normalizeImageAttachment = Effect.fn("Session.normalizeImageAttachment")(function* (
+const normalizeImageAttachment = Effect.fn("Session.normalizeImageAttachment")(function* <R>(
   input: PromptInput.FileAttachment,
   data: string,
   mime: string,
-  image: Effect.Effect<Image.Interface>,
+  image: Effect.Effect<Image.Interface, never, R>,
 ) {
   if (!mime.startsWith("image/")) return { data: Base64.make(data), mime }
   const service = yield* image

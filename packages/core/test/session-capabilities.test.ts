@@ -290,6 +290,11 @@ describe("Session capabilities", () => {
         "execute.before",
         () => new Tool.Error({ message: "Root plugin rejected execution" }),
       )
+      yield* hooks.register("session", "prompt", (event) =>
+        Effect.sync(() => {
+          event.prompt.text = "Root prompt interceptor must not reach supplied capabilities"
+        }),
+      )
       const session = yield* sessions.open({
         model,
         tools: [
@@ -308,6 +313,7 @@ describe("Session capabilities", () => {
       yield* session.prompt({ text: "Execute with local defaults." })
       expect(executed).toEqual(["local"])
       expect(JSON.stringify(llm.requests)).not.toContain("Root plugin rejected execution")
+      expect(JSON.stringify(llm.requests)).not.toContain("Root prompt interceptor")
     }),
   )
 
