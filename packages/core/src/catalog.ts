@@ -68,7 +68,6 @@ const layer = Layer.effect(
     const integrations = yield* Integration.Service
     const sources = new Set<() => Effect.Effect<boolean>>()
     const refreshing = Semaphore.makeUnsafe(1)
-    let generation = 0
 
     const available = (provider: Provider.Info, integration: Integration.Info | undefined) => {
       if (provider.activation === "disabled") return false
@@ -144,18 +143,15 @@ const layer = Layer.effect(
         yield* bus.publish(Catalog.Event.Updated, {})
       }),
     })
-    const refresh = Effect.fn("Catalog.refresh")(function* () {
-      const observed = generation
-      yield* refreshing.withPermit(
+    const refresh = Effect.fn("Catalog.refresh")(() =>
+      refreshing.withPermit(
         Effect.gen(function* () {
-          // A concurrent caller joins the completed fetch and replay instead of fetching again.
-          if (generation !== observed) return
           const changed = yield* Effect.forEach(sources, (source) => source())
-          if (changed.some(Boolean)) yield* state.reload()
-          generation++
+          // Keep the permit until captured changes are visible, even if the caller is interrupted.
+          if (changed.some(Boolean)) yield* state.reload().pipe(Effect.uninterruptible)
         }),
-      )
-    })
+      ),
+    )
     const result: Interface = {
       transform: state.transform,
       reload: state.reload,

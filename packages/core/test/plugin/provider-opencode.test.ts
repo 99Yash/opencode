@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Money } from "@opencode-ai/schema/money"
-import { Effect, Stream } from "effect"
+import { Effect, Fiber, Stream } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Bus } from "@opencode-ai/core/bus"
@@ -358,6 +358,65 @@ describe("OpencodePlugin", () => {
         }),
       ({ server }) => Effect.promise(() => server.stop(true)),
     ),
+  )
+
+  it.live("loads the new account after a switch during an in-flight refresh", () =>
+    Effect.gen(function* () {
+      const catalog = yield* Catalog.Service
+      const credentials = yield* Credential.Service
+      const requested = Promise.withResolvers<void>()
+      const release = Promise.withResolvers<void>()
+      const started = Promise.withResolvers<void>()
+      const completed = Promise.withResolvers<void>()
+      const requests: string[] = []
+      yield* Effect.addFinalizer(() => Effect.sync(() => release.resolve()))
+      const server = yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          Bun.serve({
+            port: 0,
+            fetch: async (request) => {
+              const account = request.headers.get("authorization") === "Bearer account-a" ? "account-a" : "account-b"
+              requests.push(account)
+              if (requests.length === 2) {
+                requested.resolve()
+                await release.promise
+              }
+              return Response.json({
+                config: { provider: { example: { models: { [account]: { name: account } } } } },
+              })
+            },
+          }),
+        ),
+        (server) => Effect.promise(() => server.stop(true)),
+      )
+      const create = (key: string) =>
+        credentials.create({
+          integrationID: Integration.ID.make("opencode"),
+          value: Credential.Key.make({ type: "key", key, metadata: { server: server.url.origin } }),
+        })
+      yield* create("account-a")
+      // Observe the event caller entering and leaving the real refresh boundary.
+      yield* addPlugin().pipe(
+        Effect.provideService(Catalog.Service, {
+          ...catalog,
+          refresh: () =>
+            Effect.gen(function* () {
+              started.resolve()
+              yield* catalog.refresh()
+              completed.resolve()
+            }),
+        }),
+      )
+      const refresh = yield* catalog.refresh().pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Effect.promise(() => requested.promise)
+      yield* create("account-b")
+      yield* Effect.promise(() => started.promise)
+      release.resolve()
+      yield* Fiber.join(refresh)
+      yield* Effect.promise(() => completed.promise)
+      expect(requests).toEqual(["account-a", "account-a", "account-b"])
+      expect((yield* catalog.model.available()).map((model) => model.id)).toEqual([Model.ID.make("account-b")])
+    }),
   )
 
   it.live("retains same-account inventory on failure but clears it after a failed account switch", () =>
