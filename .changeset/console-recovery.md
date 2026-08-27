@@ -2,4 +2,4 @@
 "@opencode-ai/core": patch
 ---
 
-Recover Console model inventories after transient startup failures without restarting the service. Retry failed source loads, refresh missing selections and moved sessions, and retain the last successful inventory only for the same account.
+Keep Console model inventories available across restarts using a stored-connection cache, and recover transient fetch failures with scoped retries. Refresh and caching stay inside the Console plugin, preserve existing catalog policy, and do not persist resolved credentials.

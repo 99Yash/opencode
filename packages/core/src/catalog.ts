@@ -1,7 +1,7 @@
 export * as Catalog from "./catalog.js"
 
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
-import { Array, Context, Effect, Layer, Order, pipe, Scope, Semaphore } from "effect"
+import { Array, Context, Effect, Layer, Order, pipe } from "effect"
 import { Catalog } from "@opencode-ai/schema/catalog"
 import { Model } from "./model.js"
 import { Provider } from "./provider.js"
@@ -42,9 +42,6 @@ export type Draft = {
 }
 
 export interface Interface extends State.Transformable<Draft> {
-  /** Internal sources update captured data and report whether ordered transforms need replaying. */
-  readonly onRefresh: (source: () => Effect.Effect<boolean>) => Effect.Effect<void, never, Scope.Scope>
-  readonly refresh: () => Effect.Effect<void>
   readonly provider: {
     readonly get: (providerID: Provider.ID) => Effect.Effect<Provider.Info | undefined>
     readonly all: () => Effect.Effect<Provider.Info[]>
@@ -66,8 +63,6 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const integrations = yield* Integration.Service
-    const sources = new Set<() => Effect.Effect<boolean>>()
-    const refreshing = Semaphore.makeUnsafe(1)
 
     const available = (provider: Provider.Info, integration: Integration.Info | undefined) => {
       if (provider.activation === "disabled") return false
@@ -143,27 +138,9 @@ const layer = Layer.effect(
         yield* bus.publish(Catalog.Event.Updated, {})
       }),
     })
-    const refresh = Effect.fn("Catalog.refresh")(() =>
-      refreshing.withPermit(
-        Effect.gen(function* () {
-          const changed = yield* Effect.forEach(sources, (source) => source())
-          // Keep the permit until captured changes are visible, even if the caller is interrupted.
-          if (changed.some(Boolean)) yield* state.reload().pipe(Effect.uninterruptible)
-        }),
-      ),
-    )
     const result: Interface = {
       transform: state.transform,
       reload: state.reload,
-      onRefresh: (source) =>
-        Effect.acquireRelease(
-          Effect.sync(() => sources.add(source)),
-          () =>
-            Effect.sync(() => {
-              sources.delete(source)
-            }),
-        ).pipe(Effect.asVoid),
-      refresh,
 
       provider: {
         get: Effect.fn("Catalog.provider.get")(function* (providerID) {

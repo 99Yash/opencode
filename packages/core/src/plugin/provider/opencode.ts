@@ -1,10 +1,21 @@
-import { Cause, Duration, Effect, Schedule, Schema, Stream } from "effect"
+import {
+  Cause,
+  Duration,
+  Effect,
+  Exit,
+  FiberHandle,
+  Latch,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+  SynchronizedRef,
+} from "effect"
 import type { Scope } from "effect"
 import type { IntegrationOAuthMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { define } from "@opencode-ai/plugin/effect/plugin"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Bus } from "../../bus.js"
-import { Catalog } from "../../catalog.js"
 import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
 import { Model } from "../../model.js"
@@ -13,13 +24,31 @@ import { ConfigProviderV1 } from "../../v1/config/provider.js"
 import { Money } from "@opencode-ai/schema/money"
 import { ConfigProviderOptionsV1 } from "../../v1/config/provider-options.js"
 import { ConfigV1 } from "../../v1/config/config.js"
-import { SessionEvent } from "../../session/event.js"
 import { isDeepStrictEqual } from "node:util"
 
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
 const RemoteResponse = Schema.Struct({ config: ConfigV1.Info })
+const CachedInventory = Schema.fromJsonString(
+  Schema.Record(Schema.String, ConfigProviderV1.Info).check(
+    Schema.makeFilter((providers) =>
+      Object.values(providers).every(
+        (provider) =>
+          cacheableURL(provider.api) &&
+          cacheable(provider.options) &&
+          Object.values(provider.models ?? {}).every(
+            (model) =>
+              cacheableURL(model.provider?.api) &&
+              cacheable(model.options) &&
+              cacheable({ headers: model.headers }) &&
+              Object.values(model.variants ?? {}).every(cacheable),
+          ),
+      ),
+    ),
+  ),
+)
+const placeholder = /^(?:Bearer )?\{env:[a-z_][a-z_0-9]*\}$/i
 const Device = Schema.Struct({
   device_code: Schema.String,
   user_code: Schema.String,
@@ -85,45 +114,11 @@ function oauth(http: HttpClient.HttpClient) {
   } satisfies IntegrationOAuthMethodRegistration
 }
 
-export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catalog.Service | Scope.Scope>({
+export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope.Scope>({
   id: "opencode.provider.opencode",
   effect: Effect.fn(function* (ctx) {
     const bus = yield* Bus.Service
-    const catalog = yield* Catalog.Service
     const http = yield* HttpClient.HttpClient
-    let providers: typeof ConfigV1.Info.Type.provider | undefined
-    let source: string | undefined
-    let retrying = false
-
-    const load = Effect.fn("OpencodePlugin.load")(function* () {
-      const connection = yield* ctx.integration.connection.active("opencode")
-      const id = connection?.type === "credential" ? connection.id : connection?.name
-      const next = connection
-        ? yield* ctx.integration.connection.resolve(connection).pipe(
-            Effect.flatMap((credential) => (credential ? fetchProviders(http, credential) : Effect.undefined)),
-            Effect.retry({ while: retryable, times: 2, schedule: Schedule.exponential(200) }),
-            Effect.timeout("5 seconds"),
-            Effect.tap(() =>
-              Effect.sync(() => {
-                retrying = false
-              }),
-            ),
-            Effect.catch((cause) => {
-              retrying = retryable(cause)
-              // Retain inventory through same-account outages, never across an account switch.
-              return Effect.logWarning("failed to load OpenCode provider config", { cause }).pipe(
-                Effect.as(id === source ? providers : undefined),
-              )
-            }),
-          )
-        : undefined
-      if (!connection) retrying = false
-      const changed = source !== id || !isDeepStrictEqual(providers, next)
-      source = id
-      providers = next
-      return changed
-    })
-
     yield* ctx.integration.transform((draft) => {
       draft.update("opencode", (integration) => {
         integration.name = "OpenCode"
@@ -132,9 +127,71 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catal
       draft.method.update({ integrationID: "opencode", method: { type: "key", label: "API key (service account)" } })
     })
 
-    yield* load()
+    // Activation batches transforms; stored OAuth credentials need the refresh implementation before resolution.
+    if ((yield* ctx.integration.connection.active("opencode"))?.type === "credential") {
+      const registered = yield* ctx.integration
+        .get({ integrationID: Integration.ID.make("opencode") })
+        .pipe(Effect.orElseSucceed(() => undefined))
+      if (!registered?.data?.methods.some((method) => method.type === "oauth" && method.id === methodID))
+        yield* ctx.integration.reload()
+    }
+
+    const read = Effect.fn("OpencodePlugin.readCache")(function* () {
+      const connection = yield* ctx.integration.connection.active("opencode")
+      // Stored connection IDs survive token refresh and separate accounts, servers, and organizations.
+      const cached =
+        connection?.type === "credential"
+          ? yield* ctx.storage.get(`inventory:${connection.id}`).pipe(
+              Effect.catchCauseIf(
+                (cause) => !Cause.hasInterruptsOnly(cause),
+                (cause) =>
+                  Effect.logWarning("failed to read Console inventory cache", { cause }).pipe(Effect.as(undefined)),
+              ),
+            )
+          : undefined
+      return { connection, providers: Option.getOrUndefined(Schema.decodeUnknownOption(CachedInventory)(cached)) }
+    })
+    const inventory = yield* read().pipe(Effect.flatMap(SynchronizedRef.make))
+    const ready = yield* Latch.make()
+    const worker = yield* FiberHandle.make<void>()
+
+    const refresh = Effect.fn("OpencodePlugin.refresh")(function* () {
+      const result = yield* SynchronizedRef.modifyEffect(inventory, (current) =>
+        Effect.gen(function* () {
+          const providers = current.connection
+            ? yield* ctx.integration.connection.resolve(current.connection).pipe(
+                Effect.flatMap((credential) =>
+                  credential
+                    ? fetchProviders(http, credential).pipe(Effect.map((providers) => providers ?? {}))
+                    : Effect.undefined,
+                ),
+                Effect.retry({ while: retryable, times: 2, schedule: Schedule.exponential(200) }),
+                Effect.timeout("5 seconds"),
+              )
+            : undefined
+          const next = { connection: current.connection, providers }
+          return [{ changed: !isDeepStrictEqual(current.providers ?? {}, providers ?? {}), next }, next] as const
+        }),
+      )
+      if (result.changed) yield* ctx.catalog.reload()
+      if (result.next.connection?.type !== "credential" || result.next.providers === undefined) return
+      const cached = Schema.encodeOption(CachedInventory)(result.next.providers)
+      yield* (
+        Option.isSome(cached)
+          ? ctx.storage.set(`inventory:${result.next.connection.id}`, cached.value)
+          : ctx.storage.remove(`inventory:${result.next.connection.id}`)
+      ).pipe(
+        Effect.catchCauseIf(
+          (cause) => !Cause.hasInterruptsOnly(cause),
+          (cause) => Effect.logWarning("failed to persist Console inventory cache", { cause }),
+        ),
+      )
+    })
+
     yield* ctx.catalog.transform((catalog) => {
-      for (const [providerID, item] of Object.entries(providers ?? {})) {
+      const current = SynchronizedRef.getUnsafe(inventory)
+      // Later transforms may mutate nested settings; keep the source inventory independent of catalog policy.
+      for (const [providerID, item] of Object.entries(structuredClone(current.providers ?? {}))) {
         catalog.provider.update(providerID, (provider) => {
           provider.integrationID = Integration.ID.make("opencode")
           if (item.name !== undefined) provider.name = item.name
@@ -194,7 +251,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catal
 
       const item = catalog.provider.get(Provider.ID.opencode)
       if (!item) return
-      const hasKey = Boolean(process.env.OPENCODE_API_KEY || source !== undefined || item.provider.settings?.apiKey)
+      const hasKey = Boolean(process.env.OPENCODE_API_KEY || current.connection || item.provider.settings?.apiKey)
       catalog.provider.update(item.provider.id, (provider) => {
         if (!hasKey) {
           provider.activation = "enabled"
@@ -210,26 +267,80 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Catal
       }
     })
 
-    yield* catalog.onRefresh(load)
-    yield* bus.subscribe([Credential.Event.Switched, SessionEvent.Moved]).pipe(
-      Stream.filter((event) =>
-        event.type === "credential.switched"
-          ? event.data.integrationID === Integration.ID.make("opencode")
-          : event.data.location.directory === ctx.location.directory &&
-            event.data.location.workspaceID === ctx.location.workspaceID,
+    const start = Effect.fn("OpencodePlugin.startRefresh")(function* () {
+      if (SynchronizedRef.getUnsafe(inventory).providers !== undefined) yield* ready.open
+      yield* FiberHandle.run(
+        worker,
+        refresh().pipe(
+          Effect.tapError((cause) => Effect.logWarning("failed to load OpenCode provider config", { cause })),
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause) ? Effect.void : ready.open,
+          ),
+          Effect.retry({
+            while: retryable,
+            schedule: Schedule.min([Schedule.exponential("5 seconds"), Schedule.spaced("30 seconds")]),
+          }),
+          Effect.catch(() => Effect.void),
+        ),
+      )
+    })
+    yield* bus.subscribe(Credential.Event.Switched).pipe(
+      Stream.filter((event) => event.data.integrationID === Integration.ID.make("opencode")),
+      Stream.runForEach(() =>
+        Effect.gen(function* () {
+          yield* FiberHandle.clear(worker)
+          yield* read().pipe(Effect.flatMap((next) => SynchronizedRef.set(inventory, next)))
+          yield* ctx.catalog.reload()
+          yield* start()
+        }),
       ),
-      Stream.runForEach(() => catalog.refresh()),
       Effect.forkScoped({ startImmediately: true }),
     )
-    // A failed startup must recover even when no session or account action triggers another lookup.
-    let delay = 5_000
-    yield* Effect.gen(function* () {
-      yield* Effect.sleep(delay)
-      if (retrying) yield* catalog.refresh()
-      delay = retrying ? Math.min(delay * 2, 30_000) : 5_000
-    }).pipe(Effect.forever, Effect.forkScoped)
+    yield* start()
+    yield* ready.await
   }),
 })
+
+function cacheable(value: unknown): boolean {
+  if (Array.isArray(value)) return value.every(cacheable)
+  if (value === null || typeof value !== "object") return true
+  return Object.entries(value).every(([key, item]) => {
+    const name = key.replace(/[-_]/g, "").toLowerCase()
+    if (name === "headers") {
+      if (item === undefined) return true
+      if (item === null || typeof item !== "object" || Array.isArray(item)) return false
+      return Object.entries(item).every(
+        ([header, content]) =>
+          typeof content === "string" &&
+          (placeholder.test(content) ||
+            [
+              "x-org-id",
+              "anthropic-version",
+              "anthropic-beta",
+              "content-type",
+              "accept",
+              "openai-organization",
+              "openai-project",
+            ].includes(header.toLowerCase())),
+      )
+    }
+    if (
+      /^(?:apiKey|xApiKey|xGoogApiKey|authorization|accessToken|authToken|refreshToken|password|secret|credentials|cookie|setCookie)$/i.test(
+        name,
+      )
+    )
+      return typeof item === "string" && placeholder.test(item)
+    if (name === "baseurl" || name === "enterpriseurl") return typeof item === "string" && cacheableURL(item)
+    return cacheable(item)
+  })
+}
+
+function cacheableURL(value: string | undefined) {
+  if (value === undefined) return true
+  if (!URL.canParse(value)) return false
+  const url = new URL(value)
+  return !url.username && !url.password && !url.search && !url.hash
+}
 
 function retryable(cause: unknown): boolean {
   if (cause instanceof Integration.AuthorizationError) return retryable(cause.cause)
