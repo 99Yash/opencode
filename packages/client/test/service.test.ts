@@ -1,7 +1,7 @@
 import { NodeFileSystem } from "@effect/platform-node"
 import { afterEach, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Service, type EnsureReason } from "../src/effect/service"
@@ -113,6 +113,43 @@ test("replaces an incompatible registered service", async () => {
   expect(starts).toEqual(["version-mismatch"])
   process.kill(replacement.pid, "SIGTERM")
   await waitForExit(replacement.pid)
+})
+
+test("shares a prepared handoff when another client's contender wins replacement", async () => {
+  const promise = await import("../src/promise/service")
+  const directory = await temp()
+  const registration = join(directory, "service.json")
+  const existing = spawn(registration, "handoff")
+  await waitForFile(registration)
+  const first = run(
+    ensure({
+      file: registration,
+      version: "test",
+      command: [process.execPath, fixture, registration, "handoff-loser"],
+    }),
+  )
+  await waitForFile(registration + ".loser")
+  if (process.platform !== "win32") expect((await stat(registration + ".pty-handoff")).mode & 0o777).toBe(0o600)
+  const second = accelerate(promise.ensure)({
+    file: registration,
+    version: "test",
+    command: [process.execPath, fixture, registration, "handoff-winner"],
+  })
+  const endpoints = await Promise.all([first, second])
+  const replacement = await Bun.file(registration).json()
+  try {
+    expect(await existing.exited).toBe(0)
+    expect(endpoints[0]).toEqual(endpoints[1])
+    const handoff = await Bun.file(registration + ".prepared").json()
+    expect((await Bun.file(registration + ".handoff-at-stop").json()).handoff).toEqual(handoff)
+    const contenders = (await Bun.file(registration + ".handoffs").text()).trim().split("\n")
+    expect(contenders.length).toBeGreaterThanOrEqual(2)
+    contenders.forEach((line) => expect(JSON.parse(JSON.parse(line).handoff)).toEqual(handoff))
+    expect(await Bun.file(registration + ".pty-handoff").exists()).toBe(false)
+  } finally {
+    process.kill(replacement.pid, "SIGTERM")
+    await waitForExit(replacement.pid)
+  }
 })
 
 test("waits for a registered service to finish starting", async () => {

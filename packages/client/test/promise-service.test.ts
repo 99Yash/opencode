@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Service, type EnsureReason } from "../src/promise/service"
+import { ServiceHandoff } from "../src/service-handoff"
 import { accelerate, waitForExit } from "./fixture/service-timing"
 
 const fixture = join(import.meta.dir, "fixture/service.ts")
@@ -79,6 +80,38 @@ test("adds configured environment variables with native promises", async () => {
   }
 })
 
+test.each(["handoff", "handoff-null", "old"])("replaces %s with the acknowledged terminal policy", async (mode) => {
+  const registration = await setup(mode)
+  await ensure({
+    file: registration,
+    version: "test",
+    command: [process.execPath, fixture, registration, "environment"],
+    env: { OPENCODE_PTY_HANDOFF: "must-not-inherit" },
+  })
+  const replacement = await Bun.file(registration).json()
+  try {
+    const captured = JSON.parse((await Bun.file(registration + ".handoffs").text()).trim()).handoff
+    expect(captured === null ? null : JSON.parse(captured)).toEqual(
+      mode === "old" ? null : await Bun.file(registration + ".prepared").json(),
+    )
+    expect(await Bun.file(registration + ".pty-requests").text()).toBe(
+      mode === "old" ? "prepare\nshutdown\n" : "prepare\n",
+    )
+    expect(await Bun.file(registration + ".pty-handoff").exists()).toBe(false)
+  } finally {
+    process.kill(replacement.pid, "SIGTERM")
+    await waitForExit(replacement.pid)
+  }
+})
+
+test("does not terminate a healthy server when handoff preparation fails", async () => {
+  const registration = await setup("handoff-failed")
+  await expect(ensure({ file: registration, version: "test", command: [] })).rejects.toThrow(
+    "Failed to prepare persistent terminals for service replacement: HTTP 500",
+  )
+  expect(await Bun.file(registration + ".signal").exists()).toBe(false)
+})
+
 test("waits for a live contender when another native contender fails", async () => {
   const directory = await temp()
   const registration = join(directory, "service.json")
@@ -148,11 +181,25 @@ test("evicts an unresponsive registered service before starting its replacement"
 
 test("signals the registered service process", async () => {
   const registration = await setup("graceful")
+  const source = await Bun.file(registration).json()
+  const handoff = { directory: "unused", instanceID: "daemon", ticket: "ticket", expiresAt: Date.now() + 30_000 }
+  await writeFile(registration + ".pty-handoff", JSON.stringify({ source, handoff, expiresAt: 0 }))
+  expect((await ServiceHandoff.environment(registration)).OPENCODE_PTY_HANDOFF).toBeUndefined()
+  await writeFile(
+    registration + ".pty-handoff",
+    JSON.stringify({
+      source: { ...source, id: "another-server" },
+      handoff,
+      expiresAt: handoff.expiresAt,
+    }),
+  )
+  expect((await ServiceHandoff.environment(registration)).OPENCODE_PTY_HANDOFF).toBeUndefined()
 
   await Service.stop({ file: registration })
 
   expect(await Bun.file(registration + ".signal").text()).toBe("SIGTERM")
   expect(await Bun.file(registration).exists()).toBe(false)
+  expect(await Bun.file(registration + ".pty-handoff").exists()).toBe(false)
 })
 
 async function setup(mode: string) {
