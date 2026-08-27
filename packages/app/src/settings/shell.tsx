@@ -13,6 +13,7 @@ import { SettingsServers } from "./servers/servers"
 import { SettingsWorkspaces } from "./workspaces/workspaces"
 import { SettingsProjects } from "./workspaces/projects"
 import { SettingsExtensions } from "./providers/extensions"
+import { SettingsAbout } from "./about/about"
 import { SettingsServerScope } from "./server-scope"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useLayout } from "@/shell/state/layout"
@@ -161,6 +162,21 @@ export const SettingsScreen: Component<{
                   {language.t("settings.tab.extensions")}
                 </Tabs.Trigger>
               </div>
+
+              {/* Group 4: About */}
+              <div class="flex flex-col gap-1 w-full">
+                <Tabs.Trigger value="about">
+                  <svg data-slot="icon-svg" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <g transform="translate(2 2)">
+                      <path
+                        d="M12 12H0V0H12V12ZM1 1V11H11V1H1ZM6.5791 4.81641V9.37207H5.5791V5.81641H4.46777V4.81641H6.5791ZM6.85645 2.62891V3.62891H5.30078V2.62891H6.85645Z"
+                        fill="currentColor"
+                      />
+                    </g>
+                  </svg>
+                  {language.t("settings.tab.about")}
+                </Tabs.Trigger>
+              </div>
             </div>
           </div>
           <div class="settings-nav-footer">
@@ -203,6 +219,9 @@ export const SettingsScreen: Component<{
             <SettingsExtensions />
           </Tabs.Content>
         </SettingsServerScope>
+        <Tabs.Content value="about" class="settings-panel settings-about">
+          <SettingsAbout active={tab() === "about"} />
+        </Tabs.Content>
       </Tabs>
     </div>
   )
