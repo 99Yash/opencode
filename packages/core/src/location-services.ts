@@ -38,6 +38,7 @@ import { SessionRunnerLLM } from "./session/runner/llm.js"
 import { SessionRunnerModel } from "./session/runner/model.js"
 import { SessionModelTransport } from "./session/model-transport.js"
 import { SessionCompaction } from "./session/compaction.js"
+import { SessionContext } from "./session/context.js"
 import { SessionTitle } from "./session/title.js"
 import { Skill } from "./skill.js"
 import { SkillInstructions } from "./skill/instructions.js"
@@ -96,6 +97,7 @@ const locationServiceNodes = [
   ReadToolFileSystem.node,
   McpTool.node,
   SessionInstructions.node,
+  SessionContext.node,
   SessionRunnerModel.node,
   SessionModelTransport.node,
   SessionCompaction.node,

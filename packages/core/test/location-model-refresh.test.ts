@@ -12,6 +12,7 @@ import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { Provider } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
+import { SessionContext } from "@opencode-ai/core/session/context"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { Global } from "@opencode-ai/util/global"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
@@ -99,8 +100,8 @@ it.live(
         return yield* Effect.gen(function* () {
           const plugins = yield* PluginSupervisor.Service
           yield* plugins.flush
-          const models = yield* SessionRunnerModel.Service
-          return yield* models.resolve(current)
+          const context = yield* SessionContext.Service
+          return yield* context.resolveModel(current)
         }).pipe(Effect.provide(locations.get(current.location)))
       })
       expect((yield* resolve).ref).toEqual(model)

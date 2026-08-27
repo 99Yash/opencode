@@ -3,7 +3,6 @@ export * as SessionRunnerModel from "./model.js"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { LanguageModel } from "@opencode-ai/ai"
 import { Context, Effect, Layer, Schema } from "effect"
-import { Catalog } from "../../catalog.js"
 import { ModelResolver } from "../../model-resolver.js"
 import { Capabilities, ID, Info, Ref, VariantID } from "../../model.js"
 import { Provider } from "../../provider.js"
@@ -41,7 +40,11 @@ export type Error = ModelNotSelectedError | ModelUnavailableError | ModelResolve
 export type Resolved = ModelResolver.Resolved
 
 export interface Interface {
-  readonly resolve: (session: SessionSchema.Info) => Effect.Effect<Resolved, Error>
+  /** Availability is sampled lazily for each explicitly selected model resolution. */
+  readonly resolve: (
+    session: SessionSchema.Info,
+    available: () => Effect.Effect<ReadonlyArray<Info>>,
+  ) => Effect.Effect<Resolved, Error>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunnerModel") {}
@@ -70,25 +73,18 @@ export const resolved = (
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const catalog = yield* Catalog.Service
     const resolver = yield* ModelResolver.Service
     return Service.of({
-      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session) {
+      resolve: Effect.fn("SessionRunnerModel.resolve")(function* (session, available) {
         // Location plugins populate and filter the catalog asynchronously during layer startup.
         if (!session.model) {
           const resolved = yield* resolver.resolve()
           if (resolved) return resolved
           return yield* new ModelNotSelectedError({ sessionID: session.id })
         }
-        const select = catalog.model
-          .available()
-          .pipe(
-            Effect.map((models) =>
-              models.find((model) => model.providerID === session.model?.providerID && model.id === session.model.id),
-            ),
-          )
-        // A cached Location may predate a newly advertised model. Reapply its policy after one refresh.
-        const selected = (yield* select) ?? (yield* catalog.refresh().pipe(Effect.andThen(select)))
+        const selected = (yield* available()).find(
+          (model) => model.providerID === session.model?.providerID && model.id === session.model.id,
+        )
         if (!selected)
           return yield* new ModelUnavailableError({
             providerID: session.model.providerID,
@@ -100,4 +96,4 @@ const layer = Layer.effect(
   }),
 )
 
-export const node = makeLocationNode({ service: Service, layer, deps: [Catalog.node, ModelResolver.node] })
+export const node = makeLocationNode({ service: Service, layer, deps: [ModelResolver.node] })
