@@ -1,7 +1,10 @@
 export * as ToolInputRepairPlugin from "./tool-input-repair.js"
 
 import { define } from "@opencode-ai/plugin/effect/plugin"
+import type { ToolDraft } from "@opencode-ai/plugin/effect/tool"
+import { CodeMode } from "@opencode-ai/codemode"
 import { Effect, JsonSchema, Option, Predicate, Schema } from "effect"
+import { definition } from "../tool/runtime.js"
 
 // Repairs apply only when the input schema unambiguously supports them:
 // - Stringified root or nested object: '{"limit":"20"}' -> { limit: 20 }
@@ -16,16 +19,26 @@ import { Effect, JsonSchema, Option, Predicate, Schema } from "effect"
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
 const maxDepth = 6
+const executeSchema = Schema.toJsonSchemaDocument(CodeMode.Input).schema
 
 export const Plugin = define({
   id: "opencode.tool.input.repair",
-  effect: (ctx) =>
-    ctx.tool.hook("execute.before", (event) =>
+  effect: Effect.fn(function* (ctx) {
+    let get: ToolDraft["get"] = () => undefined
+    yield* ctx.tool.transform((draft) => {
+      // The draft sees later tool transforms too; reload replaces this lookup.
+      get = draft.get
+    })
+    yield* ctx.tool.hook("execute.before", (event) =>
       Effect.sync(() => {
-        if (event.inputSchema.type !== "object") return
-        event.input = repair(event.input, event.inputSchema, event.inputSchema, 0)
+        const tool = get(event.tool)
+        // The outer Code Mode tool is synthesized by snapshots, not registered in the draft.
+        const schema = tool ? definition(tool).inputSchema : event.tool === "execute" ? executeSchema : undefined
+        if (schema?.type !== "object") return
+        event.input = repair(event.input, schema, schema, 0)
       }),
-    ),
+    )
+  }),
 })
 
 function repair(value: unknown, schema: JsonSchema.JsonSchema, root: JsonSchema.JsonSchema, depth: number): unknown {

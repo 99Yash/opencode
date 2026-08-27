@@ -5,15 +5,14 @@ import { Session } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import type { ToolHooks } from "@opencode-ai/plugin/effect/tool"
 import { Tool } from "@opencode-ai/schema/tool"
-import { Effect } from "effect"
+import { Effect, type JsonSchema } from "effect"
 import { it } from "../lib/effect"
 import { host } from "./host"
 
-function run(input: unknown, inputSchema: ToolHooks["execute.before"]["inputSchema"]) {
+function run(input: unknown, inputSchema: JsonSchema.JsonSchema) {
   const event: ToolHooks["execute.before"] = {
     tool: "test",
     input,
-    inputSchema,
     sessionID: Session.ID.make("ses_repair"),
     agent: Agent.ID.make("build"),
     messageID: SessionMessage.ID.make("msg_repair"),
@@ -28,6 +27,24 @@ function run(input: unknown, inputSchema: ToolHooks["execute.before"]["inputSche
     host({
       tool: {
         ...base.tool,
+        transform: (callback) =>
+          Effect.sync(() => {
+            const tool = {
+              id: "test",
+              name: "test",
+              description: "Test repair",
+              input: inputSchema,
+              execute: () => Effect.succeed({ content: "unused" }),
+            }
+            callback({
+              list: () => [tool],
+              get: (id) => (id === tool.id ? tool : undefined),
+              add: () => {},
+              update: () => {},
+              remove: () => {},
+            })
+            return { dispose: Effect.void }
+          }),
         hook: (name, callback) => callback(events[name]).pipe(Effect.orDie, Effect.as({ dispose: Effect.void })),
       },
     }),
