@@ -2,7 +2,7 @@ import { describe, expect } from "bun:test"
 import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import path from "path"
 import { Money } from "@opencode-ai/schema/money"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { Application } from "@opencode-ai/core/application"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Global } from "@opencode-ai/util/global"
 import { makeGlobalNode, makeLocationNode } from "@opencode-ai/util/effect/app-node"
@@ -111,15 +111,14 @@ const nodes = LayerNode.group([
   Job.node,
   Session.node,
   SessionExecution.node,
-  PluginRuntime.providerNode,
   LocationServiceMap.node,
 ])
 const replacements = [
   [SessionExecution.node, executionNode],
   [Global.node, tempGlobalLayer],
 ] satisfies LayerNode.Replacements
-const productionIt = testEffect(AppNodeBuilder.build(nodes, replacements))
-const it = testEffect(AppNodeBuilder.build(nodes, [...replacements, [PluginSupervisor.node, subagentPluginSupervisor]]))
+const productionIt = testEffect(Application.build(nodes, replacements))
+const it = testEffect(Application.build(nodes, [...replacements, [PluginSupervisor.node, subagentPluginSupervisor]]))
 
 const withSubagent = (location: Location.Ref) =>
   Effect.gen(function* () {

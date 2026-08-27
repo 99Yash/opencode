@@ -1,35 +1,11 @@
 import { Database } from "@opencode-ai/core/database/database"
 import { V1Migration } from "@opencode-ai/core/database/v1-migration"
 import { App } from "@opencode-ai/core/app"
-import { LayerNode } from "@opencode-ai/util/effect/layer-node"
-import { httpClient } from "@opencode-ai/util/effect/app-node-platform"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import { Bus } from "@opencode-ai/core/bus"
-import { EventLogger } from "@opencode-ai/core/event-logger"
-import { FileSystemSearch } from "@opencode-ai/core/filesystem/search"
-import { Credential } from "@opencode-ai/core/credential"
-import { Config } from "@opencode-ai/core/config"
+import { Application } from "@opencode-ai/core/application"
+import type { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
-import { PtyTicket } from "@opencode-ai/core/pty/ticket"
-import { PersistentPty } from "@opencode-ai/core/persistent-pty"
 import { Project } from "@opencode-ai/core/project"
-import { Session } from "@opencode-ai/core/session"
-import { SessionTransfer } from "@opencode-ai/core/session/transfer"
-import { ShellSelect } from "@opencode-ai/core/shell/select"
-import { Job } from "@opencode-ai/core/job"
-import { MCP } from "@opencode-ai/core/mcp/index"
-import { Global } from "@opencode-ai/util/global"
-import { InstructionDiscovery } from "@opencode-ai/core/instruction-discovery"
-import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
-import { LocationActivity } from "@opencode-ai/core/location-activity"
-import { ModelsDev } from "@opencode-ai/core/models-dev"
-import { SessionRestart } from "@opencode-ai/core/session/execution/restart"
-import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
-import { SdkPlugins } from "@opencode-ai/core/plugin/sdk"
 import { WellKnown } from "@opencode-ai/core/wellknown"
-import { Workspace } from "@opencode-ai/core/workspace"
-import { Worktree } from "@opencode-ai/core/worktree"
-import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { HttpRouter } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Context, Effect, Layer, Option } from "effect"
@@ -44,32 +20,6 @@ import { formLocationLayer } from "./middleware/form-location"
 import { sessionLocationLayer } from "./middleware/session-location"
 import { ServerInfo } from "./server-info"
 import type { ServerOptions } from "./options"
-
-const applicationServiceNodes = [
-  Global.node,
-  Database.node,
-  Bus.node,
-  EventLogger.node,
-  httpClient,
-  Job.node,
-  Project.node,
-  Worktree.node,
-  Session.node,
-  SessionTransfer.node,
-  PluginRuntime.providerNode,
-  SdkPlugins.node,
-  PermissionSaved.node,
-  PtyTicket.node,
-  PersistentPty.node,
-  Credential.node,
-  WellKnown.node,
-  PtyEnvironment.node,
-  LocationServiceMap.node,
-  LocationActivity.node,
-  SessionRestart.node,
-  Workspace.node,
-] as const
-const applicationServices = LayerNode.group(applicationServiceNodes)
 
 export function createRoutes(
   options: ServerOptions = {},
@@ -97,47 +47,15 @@ function makeRoutes<AuthError, AuthServices>(
   // Runtime-profile replacements (e.g. workerd) applied after the standard set, so later entries win.
   overrides: LayerNode.Replacements,
 ) {
-  const pluginRuntimeCell = PluginRuntime.makeCell()
-  const standard: LayerNode.Replacements = [
-    [Database.node, Database.configured(options.database)],
-    [Bus.node, Bus.configured({ persist: options.events?.persist })],
-    [App.node, App.configured(options.app)],
-    [ModelsDev.node, ModelsDev.configured(options.models)],
-    [Watcher.node, Watcher.configured({ enabled: options.fs?.filewatcher })],
-    [FileSystemSearch.node, FileSystemSearch.configured({ fff: options.fs?.fff })],
-    [Global.node, Global.layerWith(options.config?.directory ? { config: options.config.directory } : {})],
-    [
-      Config.node,
-      Config.configured({
-        project: options.config?.project,
-        file: options.config?.file,
-        content: options.config?.content,
-      }),
-    ],
-    [InstructionDiscovery.node, InstructionDiscovery.configured({ project: options.config?.project })],
-    [ShellSelect.node, ShellSelect.configured({ gitbash: options.windows?.gitbash })],
-    [
-      MCP.node,
-      MCP.configured({
-        clientInfo: {
-          name: options.app?.name ?? "opencode",
-          version: options.app?.version ?? "unknown",
-        },
-      }),
-    ],
-    [PluginRuntime.node, PluginRuntime.layerWithCell(pluginRuntimeCell)],
-    [PluginRuntime.providerNode, PluginRuntime.providerNodeWithCell(pluginRuntimeCell)],
-  ]
-  const replacements: LayerNode.Replacements = [...standard, ...overrides]
   const serviceLayer = options.simulation
     ? Layer.unwrap(
         Effect.gen(function* () {
           const { simulationReplacements } = yield* Effect.promise(() => import("@opencode-ai/simulation/backend"))
           const simulation = yield* simulationReplacements({ version: App.make(options.app).version })
-          return AppNodeBuilder.build(applicationServices, [...replacements, ...simulation])
+          return Application.layer(options, [...overrides, ...simulation], PtyEnvironment.node)
         }),
       )
-    : AppNodeBuilder.build(applicationServices, replacements)
+    : Application.layer(options, overrides, PtyEnvironment.node)
   return serviceLayer.pipe(
     Layer.flatMap((context) => {
       const services = Layer.succeedContext(context)
