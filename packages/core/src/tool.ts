@@ -1,6 +1,6 @@
 export * as Tool from "./tool.js"
 export { CallID, Content, Error, FileContent, TextContent } from "@opencode-ai/schema/tool"
-export type { Context, Metadata, Options, Result } from "@opencode-ai/schema/tool"
+export type { Context, Info, Metadata, Options, Result } from "@opencode-ai/schema/tool"
 
 import { ToolDefinition, type ToolCall } from "@opencode-ai/ai"
 import { Tool } from "@opencode-ai/schema/tool"
@@ -56,205 +56,212 @@ export interface Snapshot {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Tool") {}
 
-const layer = Layer.effect(
-  Service,
-  Effect.gen(function* () {
-    const hooks = yield* PluginHooks.Service
-    const image = yield* Image.Service
+const make = Effect.gen(function* () {
+  const hooks = yield* PluginHooks.Service
+  const image = yield* Image.Service
 
-    type NormalizedItem = Tool.Content | "decode" | "size"
-    const normalizeImages = Effect.fnUntraced(function* (content: ReadonlyArray<Tool.Content>) {
-      const normalized = yield* Effect.forEach(content, (item): Effect.Effect<NormalizedItem> => {
-        if (item.type !== "file" || !item.mime.startsWith("image/")) return Effect.succeed(item)
-        const base64 = /^data:[^,]*;base64,(.*)$/s.exec(item.uri)?.[1]
-        if (base64 === undefined) return Effect.succeed(item)
-        const resource = item.name ?? `${item.mime} tool output`
-        return image.normalize(resource, { uri: resource, content: base64, encoding: "base64", mime: item.mime }).pipe(
-          Effect.map((result) => ({
-            ...item,
-            uri: `data:${result.mime};base64,${result.content}`,
-            mime: result.mime,
-          })),
-          Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(item)),
-          Effect.catchTag("Image.DecodeError", () => Effect.succeed("decode" as const)),
-          Effect.catchTag("Image.SizeError", () => Effect.succeed("size" as const)),
-        )
-      })
-      const note = (reason: "decode" | "size", text: string) => {
-        const count = normalized.filter((item) => item === reason).length
-        if (count === 0) return []
-        return [{ type: "text" as const, text: `[${count} image${count === 1 ? "" : "s"} omitted: ${text}]` }]
-      }
-      return [
-        ...normalized.filter((item) => typeof item !== "string"),
-        ...note("decode", "could not be decoded."),
-        ...note("size", "could not be resized below the image size limit."),
-      ]
+  type NormalizedItem = Tool.Content | "decode" | "size"
+  const normalizeImages = Effect.fnUntraced(function* (content: ReadonlyArray<Tool.Content>) {
+    const normalized = yield* Effect.forEach(content, (item): Effect.Effect<NormalizedItem> => {
+      if (item.type !== "file" || !item.mime.startsWith("image/")) return Effect.succeed(item)
+      const base64 = /^data:[^,]*;base64,(.*)$/s.exec(item.uri)?.[1]
+      if (base64 === undefined) return Effect.succeed(item)
+      const resource = item.name ?? `${item.mime} tool output`
+      return image.normalize(resource, { uri: resource, content: base64, encoding: "base64", mime: item.mime }).pipe(
+        Effect.map((result) => ({
+          ...item,
+          uri: `data:${result.mime};base64,${result.content}`,
+          mime: result.mime,
+        })),
+        Effect.catchTag("Image.ResizerUnavailableError", () => Effect.succeed(item)),
+        Effect.catchTag("Image.DecodeError", () => Effect.succeed("decode" as const)),
+        Effect.catchTag("Image.SizeError", () => Effect.succeed("size" as const)),
+      )
+    })
+    const note = (reason: "decode" | "size", text: string) => {
+      const count = normalized.filter((item) => item === reason).length
+      if (count === 0) return []
+      return [{ type: "text" as const, text: `[${count} image${count === 1 ? "" : "s"} omitted: ${text}]` }]
+    }
+    return [
+      ...normalized.filter((item) => typeof item !== "string"),
+      ...note("decode", "could not be decoded."),
+      ...note("size", "could not be resized below the image size limit."),
+    ]
+  })
+
+  const beforeExecute = (name: string, input: unknown, context: Tool.Context) =>
+    hooks.trigger("tool", "execute.before", {
+      tool: name,
+      sessionID: context.sessionID,
+      agent: context.agent,
+      messageID: context.messageID,
+      id: context.id,
+      input,
     })
 
-    const beforeExecute = (name: string, input: unknown, context: Tool.Context) =>
-      hooks.trigger("tool", "execute.before", {
-        tool: name,
-        sessionID: context.sessionID,
-        agent: context.agent,
-        messageID: context.messageID,
-        id: context.id,
-        input,
-      })
-
-    const executeTool = Effect.fn("Tool.execute")(function* (
-      tool: Tool.Info,
-      name: string,
-      input: unknown,
-      context: Tool.Context,
-    ) {
-      const execution = yield* execute(tool, input, context).pipe(
-        Effect.map((value) => ({ value })),
-        Effect.catchTag("Tool.Error", (failure) => Effect.succeed({ failure })),
-      )
-      const base = {
-        tool: name,
-        sessionID: context.sessionID,
-        agent: context.agent,
-        messageID: context.messageID,
-        id: context.id,
-        input,
-      }
-      if ("failure" in execution) {
-        const afterEvent: PluginHooks.Domains["tool"]["execute.after"] = {
-          ...base,
-          status: "error",
-          error: execution.failure,
-        }
-        yield* hooks.trigger("tool", "execute.after", afterEvent)
-        return yield* afterEvent.error
-      }
+  const executeTool = Effect.fn("Tool.execute")(function* (
+    tool: Tool.Info,
+    name: string,
+    input: unknown,
+    context: Tool.Context,
+  ) {
+    const execution = yield* execute(tool, input, context).pipe(
+      Effect.map((value) => ({ value })),
+      Effect.catchTag("Tool.Error", (failure) => Effect.succeed({ failure })),
+    )
+    const base = {
+      tool: name,
+      sessionID: context.sessionID,
+      agent: context.agent,
+      messageID: context.messageID,
+      id: context.id,
+      input,
+    }
+    if ("failure" in execution) {
       const afterEvent: PluginHooks.Domains["tool"]["execute.after"] = {
         ...base,
-        status: "completed",
-        result: {
-          ...(execution.value.output === undefined ? {} : { output: execution.value.output }),
-          content: execution.value.content,
-          ...(execution.value.metadata === undefined ? {} : { metadata: execution.value.metadata }),
-        },
+        status: "error",
+        error: execution.failure,
       }
       yield* hooks.trigger("tool", "execute.after", afterEvent)
-      const afterContent = yield* normalizeImages(normalizeContent(afterEvent.result.content, afterEvent.result.output))
-      return {
-        ...(afterEvent.result.output === undefined ? {} : { output: afterEvent.result.output }),
-        content: afterContent,
-        ...(afterEvent.result.metadata === undefined ? {} : { metadata: afterEvent.result.metadata }),
-      }
-    })
+      return yield* afterEvent.error
+    }
+    const afterEvent: PluginHooks.Domains["tool"]["execute.after"] = {
+      ...base,
+      status: "completed",
+      result: {
+        ...(execution.value.output === undefined ? {} : { output: execution.value.output }),
+        content: execution.value.content,
+        ...(execution.value.metadata === undefined ? {} : { metadata: execution.value.metadata }),
+      },
+    }
+    yield* hooks.trigger("tool", "execute.after", afterEvent)
+    const afterContent = yield* normalizeImages(normalizeContent(afterEvent.result.content, afterEvent.result.output))
+    return {
+      ...(afterEvent.result.output === undefined ? {} : { output: afterEvent.result.output }),
+      content: afterContent,
+      ...(afterEvent.result.metadata === undefined ? {} : { metadata: afterEvent.result.metadata }),
+    }
+  })
 
-    const state: State.Interface<Data, Draft> = State.create<Data, Draft>({
-      name: "tool",
-      initial: () => ({
-        tools: new Map(),
-        errors: [],
-      }),
-      draft: (draft) => ({
-        list: () => Array.from(draft.tools.values()),
-        get: (id) => draft.tools.get(id),
-        add: (tool) => {
-          const error = registrationError(tool)
-          if (error) {
-            draft.errors.push({ tool, error })
-            return
-          }
-          const id = effectiveName(tool)
-          draft.tools.set(id, { ...tool, id, options: tool.options && { ...tool.options } })
-        },
-        update: (id, update) => {
-          const current = draft.tools.get(id)
-          if (!current) return
-          const tool = { ...current, options: current.options && { ...current.options } }
-          update(tool)
-          tool.name = current.name
-          tool.id = id
-          if (tool.options?.namespace !== current.options?.namespace)
-            tool.options = { ...tool.options, namespace: current.options?.namespace }
-          const error = registrationError(tool)
-          if (error) {
-            draft.errors.push({ tool, error })
-            return
-          }
-          draft.tools.set(id, tool)
-        },
-        remove: (id) => {
-          draft.tools.delete(id)
-        },
-      }),
-      finalize: () =>
-        Effect.forEach(
-          state.get().errors,
-          ({ tool, error }) =>
-            Effect.logError("Skipping invalid tool registration", {
-              name: tool.name,
-              namespace: tool.options?.namespace,
-              error: error.message,
-            }),
-          { discard: true },
-        ),
-    })
-
-    return Service.of({
-      transform: state.transform,
-      reload: state.reload,
-      snapshot: Effect.fn("Tool.snapshot")((permissions) =>
-        Effect.sync(() => {
-          const active = new Map<string, Tool.Info>()
-          const rules = permissions ?? []
-          for (const [name, tool] of state.get().tools) {
-            if (whollyDisabled(tool.options?.permission ?? name, rules)) continue
-            active.set(name, tool)
-          }
-          const direct = new Map(Array.from(active).filter(([, tool]) => tool.options?.codemode === false))
-          const codemode = new Map(Array.from(active).filter(([, tool]) => tool.options?.codemode !== false))
-          const executeRule = rules.findLast((rule) => Wildcard.match("execute", rule.action))
-          const codemodeEnabled = executeRule?.resource !== "*" || executeRule.effect !== "deny"
-          const codemodeTool = codemodeEnabled
-            ? CodeModeTool.create(codemode, (name, tool, input, context) =>
-                beforeExecute(name, input, context).pipe(
-                  Effect.flatMap((event) => executeTool(tool, name, event.input, context)),
-                ),
-              )
-            : undefined
-          const codeModeCatalog = codemodeEnabled ? CodeModeTool.catalog(codemode) : undefined
-          return {
-            ...(codeModeCatalog === undefined ? {} : { codeModeCatalog }),
-            definitions: [
-              ...Array.from(direct)
-                .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-                .map(([, tool]) => definition(tool)),
-              ...(codemodeTool ? [definition(codemodeTool)] : []),
-            ],
-            execute: Effect.fnUntraced(function* (input: Parameters<Snapshot["execute"]>[0]) {
-              const context: Tool.Context = {
-                sessionID: input.sessionID,
-                agent: input.agent,
-                messageID: input.messageID,
-                id: Tool.CallID.make(input.call.id),
-                progress: input.progress ?? (() => Effect.void),
-              }
-              const event = yield* beforeExecute(input.call.name, input.call.input, context)
-              const requested = input.definitions?.get(event.tool)
-              // Preserve session context removal and alias resolution, now after the repair hook.
-              if (!requested && input.definitions && (direct.has(event.tool) || codemodeTool?.name === event.tool))
-                return yield* new Tool.Error({ message: `Tool is not available for this request: ${event.tool}` })
-              const name = requested?.name ?? event.tool
-              if (name === "execute" && codemodeTool)
-                return yield* executeTool(codemodeTool, name, event.input, context)
-              const tool = direct.get(name)
-              if (tool) return yield* executeTool(tool, name, event.input, context)
-              return yield* new Tool.Error({ message: `Unknown tool: ${name}` })
-            }),
-          }
-        }),
+  const state: State.Interface<Data, Draft> = State.create<Data, Draft>({
+    name: "tool",
+    initial: () => ({
+      tools: new Map(),
+      errors: [],
+    }),
+    draft: (draft) => ({
+      list: () => Array.from(draft.tools.values()),
+      get: (id) => draft.tools.get(id),
+      add: (tool) => {
+        const error = registrationError(tool)
+        if (error) {
+          draft.errors.push({ tool, error })
+          return
+        }
+        const id = effectiveName(tool)
+        draft.tools.set(id, { ...tool, id, options: tool.options && { ...tool.options } })
+      },
+      update: (id, update) => {
+        const current = draft.tools.get(id)
+        if (!current) return
+        const tool = { ...current, options: current.options && { ...current.options } }
+        update(tool)
+        tool.name = current.name
+        tool.id = id
+        if (tool.options?.namespace !== current.options?.namespace)
+          tool.options = { ...tool.options, namespace: current.options?.namespace }
+        const error = registrationError(tool)
+        if (error) {
+          draft.errors.push({ tool, error })
+          return
+        }
+        draft.tools.set(id, tool)
+      },
+      remove: (id) => {
+        draft.tools.delete(id)
+      },
+    }),
+    finalize: () =>
+      Effect.forEach(
+        state.get().errors,
+        ({ tool, error }) =>
+          Effect.logError("Skipping invalid tool registration", {
+            name: tool.name,
+            namespace: tool.options?.namespace,
+            error: error.message,
+          }),
+        { discard: true },
       ),
-    })
-  }),
-)
+  })
+
+  return Service.of({
+    transform: state.transform,
+    reload: state.reload,
+    snapshot: Effect.fn("Tool.snapshot")((permissions) =>
+      Effect.sync(() => {
+        const active = new Map<string, Tool.Info>()
+        const rules = permissions ?? []
+        for (const [name, tool] of state.get().tools) {
+          if (whollyDisabled(tool.options?.permission ?? name, rules)) continue
+          active.set(name, tool)
+        }
+        const direct = new Map(Array.from(active).filter(([, tool]) => tool.options?.codemode === false))
+        const codemode = new Map(Array.from(active).filter(([, tool]) => tool.options?.codemode !== false))
+        const executeRule = rules.findLast((rule) => Wildcard.match("execute", rule.action))
+        const codemodeEnabled = executeRule?.resource !== "*" || executeRule.effect !== "deny"
+        const codemodeTool = codemodeEnabled
+          ? CodeModeTool.create(codemode, (name, tool, input, context) =>
+              beforeExecute(name, input, context).pipe(
+                Effect.flatMap((event) => executeTool(tool, name, event.input, context)),
+              ),
+            )
+          : undefined
+        const codeModeCatalog = codemodeEnabled ? CodeModeTool.catalog(codemode) : undefined
+        return {
+          ...(codeModeCatalog === undefined ? {} : { codeModeCatalog }),
+          definitions: [
+            ...Array.from(direct)
+              .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+              .map(([, tool]) => definition(tool)),
+            ...(codemodeTool ? [definition(codemodeTool)] : []),
+          ],
+          execute: Effect.fnUntraced(function* (input: Parameters<Snapshot["execute"]>[0]) {
+            const context: Tool.Context = {
+              sessionID: input.sessionID,
+              agent: input.agent,
+              messageID: input.messageID,
+              id: Tool.CallID.make(input.call.id),
+              progress: input.progress ?? (() => Effect.void),
+            }
+            const event = yield* beforeExecute(input.call.name, input.call.input, context)
+            const requested = input.definitions?.get(event.tool)
+            // Preserve session context removal and alias resolution, now after the repair hook.
+            if (!requested && input.definitions && (direct.has(event.tool) || codemodeTool?.name === event.tool))
+              return yield* new Tool.Error({ message: `Tool is not available for this request: ${event.tool}` })
+            const name = requested?.name ?? event.tool
+            if (name === "execute" && codemodeTool) return yield* executeTool(codemodeTool, name, event.input, context)
+            const tool = direct.get(name)
+            if (tool) return yield* executeTool(tool, name, event.input, context)
+            return yield* new Tool.Error({ message: `Unknown tool: ${name}` })
+          }),
+        }
+      }),
+    ),
+  })
+})
+
+export const layer = Layer.effect(Service, make)
+
+export const snapshot = Effect.fn("Tool.snapshotValues")(function* (
+  values: readonly Tool.Info[],
+  permissions?: Permission.Ruleset,
+) {
+  const tools = yield* make
+  yield* tools.transform((draft) => values.forEach((tool) => draft.add(tool)))
+  return yield* tools.snapshot(permissions)
+}, Effect.scoped)
 
 const whollyDisabled = (action: string, rules: Permission.Ruleset) => {
   const rule = rules.findLast((rule) => Wildcard.match(action, rule.action))
