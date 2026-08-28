@@ -1,6 +1,7 @@
 import type { Instance } from "@opencode-ai/core/instance"
 import { Location } from "@opencode-ai/core/location"
-import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { InstanceMap } from "@opencode-ai/core/instance-map"
+import { Entry, fromMap } from "@opencode-ai/core/instance-map/internal"
 import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -15,10 +16,10 @@ export function stubLocations<A, R>(services: Layer.Layer<A, Instance.Error, R>)
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   const layer = services as unknown as Layer.Layer<LocationServices, Instance.Error, R>
   return Layer.effect(
-    LocationServiceMap.Service,
+    InstanceMap.Service,
     Effect.map(
-      LayerMap.make((_: Instance.Key) => Layer.fresh(layer)),
-      LocationServiceMap.fromKeyed,
+      LayerMap.make((_: Entry) => Layer.fresh(layer)),
+      fromMap,
     ),
   )
 }

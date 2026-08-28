@@ -1,7 +1,7 @@
 export * as Session from "./session.js"
 export * from "./session/schema.js"
 
-import { Cause, Effect, Layer, Schema, Context, RcMap, Stream, Scope } from "effect"
+import { Cause, Effect, Layer, Schema, Context, Stream, Scope } from "effect"
 import { ListAnchor } from "@opencode-ai/schema/session"
 import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { Project } from "./project.js"
@@ -30,7 +30,7 @@ import { SessionExecution } from "./session/execution.js"
 import { SessionModelTransport } from "./session/model-transport.js"
 import { ForkEmptyError, MessageDecodeError, NotFoundError } from "./session/error.js"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
-import { LocationServiceMap } from "./location-service-map.js"
+import { InstanceMap } from "./instance-map.js"
 import { SessionEvent } from "./session/event.js"
 import { SessionInbox } from "./session/inbox.js"
 import { InstructionState } from "./session/instruction-state.js"
@@ -342,7 +342,7 @@ const layer = Layer.effect(
     const global = yield* Global.Service
     const execution = yield* SessionExecution.Service
     const store = yield* SessionStore.Service
-    const locations = yield* LocationServiceMap.Service
+    const locations = yield* InstanceMap.Service
     const fs = yield* FSUtil.Service
     const jobs = yield* Job.Service
     const environments = yield* SessionEnvironment.Service
@@ -350,7 +350,7 @@ const layer = Layer.effect(
     const activeShells = new Set<SessionSchema.ID>()
     const shellLocks = KeyedMutex.makeUnsafe<SessionSchema.ID>()
     const closeTransport = Effect.fn("Session.closeTransport")(function* (session: SessionSchema.Info) {
-      if (!(yield* RcMap.has(locations.rcMap, Location.instanceKey(session.location)))) return
+      if (!(yield* locations.has(session.location))) return
       yield* SessionModelTransport.Service.use((transport) => transport.close(session.id)).pipe(
         Effect.provide(locations.forSession(session)),
       )
@@ -1218,7 +1218,7 @@ export const node = makeGlobalNode({
     Project.node,
     SessionExecution.node,
     SessionStore.node,
-    LocationServiceMap.node,
+    InstanceMap.node,
     SessionProjector.node,
     FSUtil.node,
     Global.node,

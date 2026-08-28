@@ -1,10 +1,10 @@
 export * as LocationActivity from "./location-activity.js"
 
-import { Clock, Context, Duration, Effect, Layer, RcMap, Schema } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Schema } from "effect"
 import { Bus } from "./bus.js"
 import type { Instance } from "./instance.js"
 import { Location } from "./location.js"
-import { LocationServiceMap } from "./location-service-map.js"
+import { InstanceMap } from "./instance-map.js"
 import { SessionEvent } from "./session/event.js"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
 
@@ -18,7 +18,7 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
     Effect.gen(function* () {
       const clock = yield* Clock.Clock
       const bus = yield* Bus.Service
-      const locations = yield* LocationServiceMap.Service
+      const locations = yield* InstanceMap.Service
       const timeToLive = Duration.toMillis(options.timeToLive ?? "60 minutes")
       const entries = new Map<Instance.Key, number>()
       const touch = (key: Instance.Key) =>
@@ -31,23 +31,22 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
         const location = event.location
         if (!location) return Effect.void
         const key = Location.instanceKey(location)
-        return RcMap.has(locations.rcMap, key).pipe(Effect.flatMap((active) => (active ? touch(key) : Effect.void)))
+        return locations.has(location).pipe(Effect.flatMap((active) => (active ? touch(key) : Effect.void)))
       })
       yield* Effect.addFinalizer(() => unsubscribe)
       yield* Effect.gen(function* () {
         yield* Effect.sleep(options.sweepInterval ?? "1 minute")
-        const cached = new Set(yield* RcMap.keys(locations.rcMap))
-        yield* Effect.forEach(cached, (key) => (entries.has(key) ? Effect.void : touch(key)), { discard: true })
+        const cached = new Map((yield* locations.entries).map((entry) => [entry.key, entry.location]))
+        yield* Effect.forEach(cached.keys(), (key) => (entries.has(key) ? Effect.void : touch(key)), { discard: true })
         for (const id of entries.keys()) {
           if (!cached.has(id)) entries.delete(id)
         }
         const now = clock.currentTimeMillisUnsafe()
-        const expired = Array.from(entries).filter(([, expiresAt]) => expiresAt <= now)
+        const expired = Array.from(cached).filter(([key]) => (entries.get(key) ?? Infinity) <= now)
         yield* Effect.forEach(
           expired,
-          ([key]) => {
+          ([key, ref]) => {
             entries.delete(key)
-            const ref = Location.parseInstanceKey(key)
             return Effect.logInfo("location services evicted", {
               directory: ref.directory,
               workspaceID: ref.workspaceID,
@@ -65,5 +64,5 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
 export const node = makeGlobalNode({
   service: Service,
   layer: layer(),
-  deps: [Bus.node, LocationServiceMap.node],
+  deps: [Bus.node, InstanceMap.node],
 })

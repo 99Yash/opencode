@@ -24,7 +24,7 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { InstanceMap } from "@opencode-ai/core/instance-map"
 import { stubLocations } from "./fixture/location"
 import { Image } from "@opencode-ai/core/image"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
@@ -89,7 +89,7 @@ const it = testEffect(
     [
       [Bus.node, Bus.configured({ persist: true })],
       [SessionExecution.node, execution],
-      [LocationServiceMap.node, locations],
+      [InstanceMap.node, locations],
     ],
   ),
 )

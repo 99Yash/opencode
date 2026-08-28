@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import path from "path"
 import { Context, Effect, Layer, Ref } from "effect"
-import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { InstanceMap } from "@opencode-ai/core/instance-map"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor-service"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { stubLocations } from "./fixture/location"
@@ -28,7 +28,7 @@ it.effect("isolates mutable services across locations and reuses them within one
       }),
     )
     yield* Effect.gen(function* () {
-      const locations = yield* LocationServiceMap.Service
+      const locations = yield* InstanceMap.Service
       const first = yield* locations.contextEffect({ directory: AbsolutePath.make(path.resolve("a")) })
       const second = yield* locations.contextEffect({ directory: AbsolutePath.make(path.resolve("b")) })
       expect(yield* locations.contextEffect({ directory: AbsolutePath.make(path.resolve("a")) })).toBe(first)
@@ -50,9 +50,9 @@ it.effect("isolates mutable services across locations and reuses them within one
 
 test("stub types preserve requirements and reject undeclared errors", () => {
   const dependent = stubLocations(Layer.effectDiscard(InitialCount))
-  const required: Layer.Layer<LocationServiceMap.Service, never, InitialCount> = dependent
+  const required: Layer.Layer<InstanceMap.Service, never, InitialCount> = dependent
   // @ts-expect-error Required dependencies cannot be erased by the stub.
-  const closed: Layer.Layer<LocationServiceMap.Service> = dependent
+  const closed: Layer.Layer<InstanceMap.Service> = dependent
   // @ts-expect-error Intentional fixture failures must use the map's error contract or defects.
   stubLocations(Layer.effectDiscard(Effect.fail(new Error("fixture failure"))))
   void required

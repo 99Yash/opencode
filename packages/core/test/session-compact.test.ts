@@ -7,7 +7,7 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Bus } from "@opencode-ai/core/bus"
 import { Location } from "@opencode-ai/core/location"
-import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
+import { InstanceMap } from "@opencode-ai/core/instance-map"
 import { stubLocations } from "./fixture/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -56,7 +56,7 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
     [
-      [LocationServiceMap.node, locations],
+      [InstanceMap.node, locations],
       [Project.node, globalProjectLayer],
       [SessionExecution.node, SessionExecution.noopLayer],
     ],
