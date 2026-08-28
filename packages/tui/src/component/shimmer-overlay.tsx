@@ -26,7 +26,7 @@ export type ShimmerParams = {
 }
 
 export const SHIMMER_DEFAULTS: ShimmerParams = {
-  enabled: 1,
+  enabled: 0,
   strength: 0.8,
   keep: 0.25,
   threshold: 0.55,
@@ -199,6 +199,7 @@ export function ShimmerTuner(props: { open: boolean; selected: number; params: S
           )}
         </For>
         <text fg={RGBA.fromInts(110, 120, 145)} content="↑↓ select  ←→ adjust  shift ×5  esc close" />
+        <text fg={RGBA.fromInts(110, 120, 145)} content="ctrl+r effect  ctrl+alt+r panel" />
       </box>
     </Show>
   )

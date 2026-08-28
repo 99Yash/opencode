@@ -581,8 +581,9 @@ function App(props: { pair?: DialogPairCredentials }) {
     offSelectionKeys()
   })
 
-  // Shimmer tuner: Ctrl+R toggles the panel; while it is open, ↑/↓ select a control and
-  // ←/→ adjust it (shift = ×5 steps), esc closes. All other keys pass through untouched.
+  // Shimmer keys: Ctrl+R toggles the effect itself; Ctrl+Alt+R toggles the tuner panel.
+  // While the panel is open, ↑/↓ select a control and ←/→ adjust it (shift = ×5 steps),
+  // esc closes. All other keys pass through untouched.
   const offRippleKey = keymap.intercept(
     "key",
     ({ event }) => {
@@ -591,7 +592,14 @@ function App(props: { pair?: DialogPairCredentials }) {
         event.stopPropagation()
       }
       if (event.ctrl && (event.name === "r" || event.name === "R")) {
-        setShimmerPanel((open) => !open)
+        if (event.option || event.meta) {
+          setShimmerPanel((open) => !open)
+          consume()
+          return true
+        }
+        const next = { ...shimmerParams(), enabled: shimmerParams().enabled >= 0.5 ? 0 : 1 }
+        setShimmerParams(next)
+        shimmerOverlay?.setParams(next)
         consume()
         return true
       }
