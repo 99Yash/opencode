@@ -321,6 +321,43 @@ describe("State", () => {
     }),
   )
 
+  it.effect("keeps coalesced reload callers independent of cancellation and shares their notification failure", () =>
+    Effect.gen(function* () {
+      let fail = false
+      let notifications = 0
+      const failure = new Error("notification failed")
+      const state = State.create({
+        initial: () => ({}),
+        draft: (draft) => draft,
+        notify: () =>
+          Effect.sync(() => {
+            notifications++
+            if (fail) throw failure
+          }),
+      })
+      yield* state.transform(() => {})
+      notifications = 0
+      fail = true
+
+      const cancelled = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      const first = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      const second = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Fiber.interrupt(cancelled)
+      yield* TestClock.adjust("500 millis")
+      const exits = yield* Effect.all([Fiber.await(first), Fiber.await(second)])
+      fail = false
+
+      expect(Exit.hasInterrupts(yield* Fiber.await(cancelled))).toBe(true)
+      expect(exits.map((exit) => Exit.isFailure(exit) && Cause.squash(exit.cause))).toEqual([failure, failure])
+      expect(notifications).toBe(1)
+
+      const recovered = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("500 millis")
+      yield* Fiber.join(recovered)
+      expect(notifications).toBe(2)
+    }),
+  )
+
   it.effect("continues publishing when a reload caller is cancelled while scheduling its worker", () =>
     Effect.gen(function* () {
       let value = "first"

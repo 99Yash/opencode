@@ -1471,74 +1471,84 @@ testEffect(Layer.empty).live("serializes MCP config restoration behind an in-fli
     )
   }),
 )
-
-testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
-    [
+;["active", "queued"].forEach((phase) =>
+  testEffect(
+    AppNodeBuilder.build(
+      LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
       [
-        Location.node,
-        Layer.succeed(
-          Location.Service,
-          Location.Service.of(location({ directory: AbsolutePath.make(import.meta.dir) })),
-        ),
+        [
+          Location.node,
+          Layer.succeed(
+            Location.Service,
+            Location.Service.of(location({ directory: AbsolutePath.make(import.meta.dir) })),
+          ),
+        ],
+        [Environment.node, hostEnvironmentLayer],
       ],
-      [Environment.node, hostEnvironmentLayer],
-    ],
+    ),
+  ).effect(`discards ${phase} MCP notifications after its layer closes`, () =>
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const root = yield* Scope.make()
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(release, undefined).pipe(
+          Effect.andThen(State.batch(Scope.close(root, Exit.void), { flush: false })),
+          Effect.andThen(TestClock.adjust("500 millis")),
+        ),
+      )
+      const context = yield* Layer.build(Mcp.layer()).pipe(Scope.provide(root))
+      const service = Context.get(context, Mcp.Service)
+      const observed: string[] = []
+      let block = false
+      const unsubscribe = yield* bus.listen((event) =>
+        Effect.gen(function* () {
+          if (event.type !== McpEvent.StatusChanged.type) return
+          observed.push(Schema.decodeUnknownSync(McpEvent.StatusChanged.data)(event.data).server)
+          if (!block) return
+          block = false
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const source = { url: "https://example.com/initial", added: false }
+      yield* service
+        .transform((draft) => {
+          draft.set("fixture", { type: "remote", url: source.url, oauth: false, disabled: true })
+          if (source.added) draft.set("queued", { type: "local", command: ["unused"], disabled: true })
+        })
+        .pipe(Scope.provide(root))
+
+      block = true
+      source.url = "https://example.com/first"
+      source.added = phase === "active"
+      const first = yield* service.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("500 millis")
+      yield* Deferred.await(entered)
+      source.url = "https://example.com/second"
+      source.added = true
+      const second = yield* service.reload().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("500 millis")
+
+      const shutdown = yield* State.batch(Scope.close(root, Exit.void), { flush: false }).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      )
+      yield* TestClock.adjust("1 millis")
+      expect(shutdown.pollUnsafe()).toBeDefined()
+      expect(first.pollUnsafe()).toBeDefined()
+      expect(second.pollUnsafe()).toBeDefined()
+      expect(yield* Deferred.isDone(release)).toBe(false)
+      yield* Fiber.join(shutdown)
+      observed.length = 0
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
+      expect(observed).toEqual([])
+      expect((yield* service.servers()).map((server) => server.name)).toEqual([Mcp.ServerName.make("fixture")])
+    }),
   ),
-).effect("discards queued MCP notifications after its layer closes", () =>
-  Effect.gen(function* () {
-    const bus = yield* Bus.Service
-    const entered = yield* Deferred.make<void>()
-    const release = yield* Deferred.make<void>()
-    const root = yield* Scope.make()
-    yield* Effect.addFinalizer(() =>
-      Deferred.succeed(release, undefined).pipe(
-        Effect.andThen(State.batch(Scope.close(root, Exit.void), { flush: false })),
-        Effect.andThen(TestClock.adjust("500 millis")),
-      ),
-    )
-    const context = yield* Layer.build(Mcp.layer()).pipe(Scope.provide(root))
-    const service = Context.get(context, Mcp.Service)
-    const observed: string[] = []
-    let block = false
-    const unsubscribe = yield* bus.listen((event) =>
-      Effect.gen(function* () {
-        if (event.type !== McpEvent.StatusChanged.type) return
-        observed.push(Schema.decodeUnknownSync(McpEvent.StatusChanged.data)(event.data).server)
-        if (!block) return
-        block = false
-        yield* Deferred.succeed(entered, undefined)
-        yield* Deferred.await(release)
-      }),
-    )
-    yield* Effect.addFinalizer(() => unsubscribe)
-    const source = { url: "https://example.com/initial", added: false }
-    yield* service
-      .transform((draft) => {
-        draft.set("fixture", { type: "remote", url: source.url, oauth: false, disabled: true })
-        if (source.added) draft.set("queued", { type: "local", command: ["unused"], disabled: true })
-      })
-      .pipe(Scope.provide(root))
-
-    block = true
-    source.url = "https://example.com/first"
-    const first = yield* service.reload().pipe(Effect.forkChild({ startImmediately: true }))
-    yield* TestClock.adjust("500 millis")
-    yield* Deferred.await(entered)
-    source.url = "https://example.com/second"
-    source.added = true
-    const second = yield* service.reload().pipe(Effect.forkChild({ startImmediately: true }))
-    yield* TestClock.adjust("500 millis")
-
-    yield* State.batch(Scope.close(root, Exit.void), { flush: false })
-    observed.length = 0
-    yield* Deferred.succeed(release, undefined)
-    yield* Fiber.join(first)
-    yield* Fiber.join(second)
-    expect(observed).toEqual([])
-    expect((yield* service.servers()).map((server) => server.name)).toEqual([Mcp.ServerName.make("fixture")])
-  }),
 )
 
 test("serializes concurrent MCP lifecycle operations", async () => {

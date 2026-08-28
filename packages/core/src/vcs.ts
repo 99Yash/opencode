@@ -1,7 +1,7 @@
 export * as Vcs from "./vcs.js"
 
 import path from "path"
-import { Cause, Context, Effect, Layer, Schema, Semaphore, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Fiber, FiberSet, Layer, Schema, Semaphore, Stream } from "effect"
 import type { VcsDefinition, VcsDraft } from "@opencode-ai/plugin/effect/vcs"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { FileSystem } from "@opencode-ai/schema/filesystem"
@@ -47,6 +47,8 @@ const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const location = yield* Location.Service
     const bus = yield* Bus.Service
+    const root = yield* Effect.scope
+    const fork = yield* FiberSet.makeRuntime<never, void, never>()
     const vcs = location.vcs
     const current: { info: Info } = { info: { branch: {} } }
     const refreshLock = Semaphore.makeUnsafe(1)
@@ -70,7 +72,12 @@ const layer = Layer.effect(
           set: (selection) => (draft.selection = selection),
         },
       }),
-      notify: () => refresh(),
+      notify: () =>
+        Effect.gen(function* () {
+          const exit = yield* Fiber.await(fork(refresh()))
+          if (Exit.isFailure(exit) && root.state._tag === "Closed" && Cause.hasInterruptsOnly(exit.cause)) return
+          yield* exit
+        }),
     })
     const selected = () => {
       const value = state.get()
@@ -116,7 +123,13 @@ const layer = Layer.effect(
       yield* bus.subscribe(FileSystem.Event.Changed).pipe(
         Stream.filter((event) => isBranchMetadata(event.data.file)),
         Stream.runForEach((event) =>
-          refresh().pipe(Effect.withSpan("Vcs.refreshBranch", { attributes: { file: event.data.file } })),
+          refresh().pipe(
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterrupts(cause),
+              (cause) => Effect.logWarning("vcs refresh failed", { file: event.data.file, cause }),
+            ),
+            Effect.withSpan("Vcs.refreshBranch", { attributes: { file: event.data.file } }),
+          ),
         ),
         Effect.forkScoped({ startImmediately: true }),
       )

@@ -3,7 +3,7 @@ export * as State from "./state.js"
 import { Clock, Context, Deferred, Effect, Exit, Scope } from "effect"
 
 /**
- * A replayable transform applied to a draft during reload.
+ * A replayable transform applied to a draft while deriving state.
  *
  * Domain drafts expose readable and writable state while preserving concise
  * plugin/config code. Transforms synchronously rebuild derived state.
@@ -23,7 +23,7 @@ export type Transform<DraftApi> = (
   transform: TransformCallback<DraftApi>,
 ) => Effect.Effect<Registration, never, Scope.Scope>
 
-/** Invalidates captured inputs immediately and coalesces change notifications. */
+/** Invalidates the snapshot after captured inputs change and coalesces notifications. */
 export type Reload = () => Effect.Effect<void>
 
 export interface Transformable<DraftApi> {
@@ -78,7 +78,7 @@ export interface Options<State, DraftApi> {
   /**
    * Observes accepted changes outside the read path. Batched writes notify at
    * batch completion; reloads debounce notifications. Reads never run this hook.
-   * Resource reconciliation owns any coordination it requires.
+   * Resource reconciliation owns its execution scope and coordination.
    */
   readonly notify?: () => Effect.Effect<void>
 }
@@ -93,9 +93,8 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
   const transforms = new Set<{ run: TransformCallback<DraftApi> }>()
   let dirty = false
   let requestedAt = 0
-  let running = false
   let closed = false
-  let waiters: Deferred.Deferred<void>[] = []
+  let pending: Deferred.Deferred<void> | undefined
 
   const get = () => {
     if (!dirty || closed) return state
@@ -114,23 +113,17 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
     if (options.notify) yield* options.notify()
   })
 
-  const publish = (): Effect.Effect<void> =>
+  const publish = (done: Deferred.Deferred<void>): Effect.Effect<void> =>
     Effect.gen(function* () {
       const clock = yield* Clock.Clock
       const remaining = requestedAt + reloadDebounce - clock.currentTimeMillisUnsafe()
       if (remaining > 0) yield* Effect.sleep(remaining)
-      if (clock.currentTimeMillisUnsafe() < requestedAt + reloadDebounce) return yield* publish()
+      if (clock.currentTimeMillisUnsafe() < requestedAt + reloadDebounce) return yield* publish(done)
 
       // Release scheduling ownership before observers run: an observer may
       // request and await another reload without joining this notification.
-      const completed = waiters
-      waiters = []
-      running = false
-      const exit = yield* notify().pipe(Effect.exit)
-      yield* Effect.forEach(completed, (done) => Deferred.done(done, exit), {
-        concurrency: "unbounded",
-        discard: true,
-      })
+      pending = undefined
+      yield* notify().pipe(Deferred.into(done))
     })
 
   const changed = (debounce: boolean) =>
@@ -149,13 +142,13 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
         }
         if (!debounce) return yield* restore(notify())
 
-        const done = Deferred.makeUnsafe<void>()
         const clock = yield* Clock.Clock
         requestedAt = clock.currentTimeMillisUnsafe()
-        waiters.push(done)
-        if (!running) {
-          running = true
-          yield* publish().pipe(Effect.forkDetach)
+        // No yields between choosing the burst's completion and claiming it.
+        const done = pending ?? Deferred.makeUnsafe<void>()
+        if (!pending) {
+          pending = done
+          yield* publish(done).pipe(Effect.forkDetach)
         }
         yield* restore(Deferred.await(done))
       }),
