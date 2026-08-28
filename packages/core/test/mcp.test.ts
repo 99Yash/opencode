@@ -43,6 +43,7 @@ import { Image } from "@opencode-ai/core/image"
 import { testEffect } from "./lib/effect"
 import { imagePassthrough } from "./lib/image"
 import { location } from "./fixture/location"
+import { sessionServer } from "./fixture/mcp-session"
 import { hostEnvironmentLayer, recordingEnvironmentLayer } from "./fixture/environment"
 import { executeTool, toolDefinitions, toolIdentity, waitForTool } from "./lib/tool"
 
@@ -379,6 +380,103 @@ test("MCP tool names match V1 sanitization", () => {
   expect(McpTool.namespace("context 7")).toBe("context_7")
   expect(McpTool.name("context 7", "resolve.library/id")).toBe("context_7_resolve_library_id")
 })
+
+for (const transport of ["stdio", "http"]) {
+  for (const codemode of [false, true]) {
+    test(`passes session metadata over ${transport} with codemode=${codemode}`, async () => {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const config = yield* Effect.gen(function* () {
+              if (transport === "stdio")
+                return new ConfigMCP.Local({
+                  type: "local",
+                  command: [process.execPath, path.join(import.meta.dir, "fixture/mcp-session.ts")],
+                  codemode,
+                })
+              const server = yield* Effect.acquireRelease(
+                Effect.promise(async () => {
+                  const protocol = sessionServer()
+                  const transport = new WebStandardStreamableHTTPServerTransport({
+                    sessionIdGenerator: () => crypto.randomUUID(),
+                    enableJsonResponse: true,
+                  })
+                  await protocol.connect(transport)
+                  const http = Bun.serve({
+                    port: 0,
+                    // This request/response fixture does not need a standalone SSE stream.
+                    fetch: (request) =>
+                      request.method === "GET" ? new Response(null, { status: 405 }) : transport.handleRequest(request),
+                  })
+                  return {
+                    url: http.url.toString(),
+                    close: async () => {
+                      await protocol.close()
+                      await http.stop(true)
+                    },
+                  }
+                }),
+                (server) => Effect.promise(server.close),
+              )
+              return new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false, codemode })
+            })
+            yield* Effect.gen(function* () {
+              const registry = yield* Tool.Service
+              const registration = yield* McpTool.Service
+              const mcp = yield* Mcp.Service
+              yield* registration.flush
+              const snapshot = yield* registry.snapshot()
+              const catalog = yield* mcp.tools()
+              expect(catalog[0]?.inputSchema).toEqual({ type: "object", properties: { text: { type: "string" } } })
+
+              yield* Effect.forEach(
+                ["ses_mcp_first", "ses_mcp_second"],
+                (id) =>
+                  Effect.gen(function* () {
+                    const result = yield* snapshot.execute({
+                      sessionID: Session.ID.make(id),
+                      ...toolIdentity,
+                      call: {
+                        type: "tool-call",
+                        id: `call_${id}`,
+                        name: codemode ? "execute" : "resources_echo",
+                        input: codemode
+                          ? { code: 'return await tools.resources.echo({ text: "hello" })' }
+                          : { text: "hello" },
+                      },
+                    })
+                    const expected = {
+                      name: "echo",
+                      arguments: { text: "hello" },
+                      _meta: { sessionID: id, progressToken: expect.any(Number) },
+                    }
+                    expect(codemode ? JSON.parse(result.output.output) : result.output).toEqual(expected)
+                  }),
+                { concurrency: "unbounded" },
+              )
+
+              const result = yield* mcp.callTool({ server: "resources", name: "echo" })
+              expect(result.structured).toEqual({
+                name: "echo",
+                arguments: {},
+                _meta: { progressToken: expect.any(Number) },
+              })
+            }).pipe(
+              Effect.provide(
+                AppNodeBuilder.build(LayerNode.group([Tool.node, McpTool.node, Mcp.node]), [
+                  [Mcp.node, resourceMcpLayer(config)],
+                  [Permission.node, Layer.mock(Permission.Service, { assert: () => Effect.void })],
+                  [Bus.node, events],
+                  [Image.node, imagePassthrough],
+                ]),
+              ),
+            )
+          }),
+        ),
+      )
+    })
+  }
+}
 
 test("preserves output schema validation across paginated tool discovery", async () => {
   const server = new Server({ name: "pagination", version: "1.0.0" }, { capabilities: { tools: {} } })
