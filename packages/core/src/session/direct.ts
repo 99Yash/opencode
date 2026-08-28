@@ -70,13 +70,10 @@ export const create = Effect.fn("DirectSession.create")(function* <
     })
     const bound = <A, E>(effect: Effect.Effect<A, E>) => binding.check.pipe(Effect.orDie, Effect.andThen(effect))
     const at = <A, E>(ref: Location.Ref, effect: Effect.Effect<A, E>) =>
-      binding.check.pipe(
-        Effect.orDie,
-        Effect.andThen(
-          ref.directory === location.directory && ref.workspaceID === location.workspaceID
-            ? effect
-            : Effect.die(new Error("Direct instances can only inspect their bound Location")),
-        ),
+      bound(
+        ref.directory === location.directory && ref.workspaceID === location.workspaceID
+          ? effect
+          : Effect.die(new Error("Direct instances can only inspect their bound Location")),
       )
     cell.runtime = {
       session: {
@@ -144,14 +141,15 @@ export const create = Effect.fn("DirectSession.create")(function* <
           binding.check.pipe(
             Effect.andThen(
               Effect.gen(function* () {
+                const caller = yield* Scope.Scope
                 const observer = yield* Scope.fork(observations)
-                yield* Effect.addFinalizer(() => Scope.close(observer, Exit.void))
                 const events = yield* bus.observe(session.id).pipe(Scope.provide(observer))
                 return yield* events.pipe(
                   Stream.runForEach(callback),
                   Scope.provide(observer),
                   Effect.onExit((exit) => Scope.close(observer, exit)),
                   Effect.forkIn(observer),
+                  Effect.map(Fiber.runIn(caller)),
                 )
               }),
             ),

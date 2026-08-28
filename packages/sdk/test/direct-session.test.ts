@@ -488,6 +488,26 @@ describe("direct Session", () => {
     15_000,
   )
 
+  it.live("does not retain caller finalizers after observation fibers finish", () =>
+    withShared((fixture) =>
+      Effect.gen(function* () {
+        const caller = yield* Scope.Scope
+        const handle = yield* Session.create({ location: fixture.location, title: "Observer cleanup" })
+        if (caller.state._tag !== "Open") throw new Error("Expected the caller's handle cleanup")
+        const finalizers = caller.state.finalizers
+        if (!finalizers) throw new Error("Expected registered caller finalizers")
+        const before = finalizers.size
+        yield* Effect.forEach(Array.from({ length: 5 }), () =>
+          Effect.gen(function* () {
+            const observer = yield* handle.events.subscribe(() => Effect.void)
+            yield* Fiber.interrupt(observer)
+            expect(finalizers.size).toBe(before)
+          }),
+        )
+      }),
+    ),
+  )
+
   it.live(
     "creates and resumes a native subagent with its parent's private capabilities",
     () =>

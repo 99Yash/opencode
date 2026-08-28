@@ -20,7 +20,7 @@ import { Project } from "../src/project"
 import { AbsolutePath } from "../src/schema"
 import { Watcher } from "../src/filesystem/watcher"
 import { tempGlobalLayer } from "./fixture/global"
-import { tmpdir } from "./fixture/tmpdir"
+import { tmpdirScoped } from "./fixture/tmpdir"
 import { it } from "./lib/effect"
 
 class Extra extends Context.Service<Extra, string>()("test/InstanceExtraGlobal") {}
@@ -28,10 +28,7 @@ class Extra extends Context.Service<Extra, string>()("test/InstanceExtraGlobal")
 describe("Instance.compose", () => {
   it.live("reuses configured globals across fresh, separately bound local graphs", () =>
     Effect.gen(function* () {
-      const directory = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
+      const directory = yield* tmpdirScoped()
       const acquired = { global: 0, app: 0, project: 0, runtime: 0 }
       const released = { global: 0 }
       const profile = [

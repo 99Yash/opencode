@@ -170,13 +170,10 @@ const globalNodes = [
   Project.node,
 ] as const satisfies readonly Node.GlobalNode<unknown, unknown>[]
 
-const globalJobs = new Set(["shell-output-cleanup", "tool-output-cleanup"])
+const globalJobs = new Map([Shell.cleanupNode, ToolOutput.cleanupNode].map((node) => [node.name, node] as const))
 
 /** Build and configure this graph once in the host scope, before composing instances. */
-export const globalsGraph = LayerNode.group([
-  ...globalNodes,
-  LayerNode.discard(LayerNode.hoist(graph, Node.tags.values.global).hoisted, (node) => globalJobs.has(node.name)),
-])
+export const globalsGraph = LayerNode.group([...globalNodes, ...globalJobs.values()])
 
 export type Globals = LayerNode.Output<typeof globalsGraph>
 export type GlobalsError = LayerNode.Error<typeof globalsGraph>

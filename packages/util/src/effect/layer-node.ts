@@ -111,27 +111,6 @@ export function group<const Items extends readonly AnyNode[]>(
   return { kind: "group", name: "group", dependencies }
 }
 
-// Select root jobs without exposing their outputs; keep their dependency graphs
-// intact so caller replacements still reach infrastructure used by those jobs.
-export function discard<A, E, T extends Tag | undefined>(
-  root: Node<A, E, T>,
-  select: (node: Node<unknown, unknown, Tag | undefined>) => boolean = () => true,
-): Node<never, E, T> {
-  return {
-    kind: "group",
-    name: "group",
-    tag: root.tag,
-    dependencies: flatten(root)
-      .filter(select)
-      .map((node) => ({
-        ...node,
-        implementation: Layer.isLayer(node.implementation)
-          ? Layer.flatMap(node.implementation, () => Layer.empty)
-          : undefined,
-      })),
-  }
-}
-
 export type Replacement = readonly [source: AnyNode, replacement: AnyNode | Layer.Any]
 export type Replacements = readonly Replacement[]
 export type ReplacementError<Items extends Replacements> = Items[number][1] extends infer Item

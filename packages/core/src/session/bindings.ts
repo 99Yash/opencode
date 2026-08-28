@@ -95,7 +95,7 @@ export const layer = Layer.effect(
           }),
         ),
       instances: {
-        get: (session) => Layer.unwrap(selected(session).pipe(Effect.map(Layer.succeedContext))),
+        get: (session) => Layer.effectContext(selected(session)),
         check: (sessionID) =>
           store.get(sessionID).pipe(
             Effect.flatMap((session) =>

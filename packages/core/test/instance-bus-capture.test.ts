@@ -16,16 +16,13 @@ import { AbsolutePath } from "@opencode-ai/schema/schema"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Global } from "@opencode-ai/util/global"
 import { tempGlobalLayer } from "./fixture/global"
-import { tmpdir } from "./fixture/tmpdir"
+import { tmpdirScoped } from "./fixture/tmpdir"
 import { it } from "./lib/effect"
 
 describe("Instance Bus capture", () => {
   it.live("isolates real plugin and MCP notifications across same-directory instances", () =>
     Effect.gen(function* () {
-      const directory = yield* Effect.acquireRelease(
-        Effect.promise(() => tmpdir()),
-        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
-      )
+      const directory = yield* tmpdirScoped()
       const globals = yield* Layer.build(
         LayerNode.compile(Instance.globalsGraph, [
           [Global.node, tempGlobalLayer],

@@ -56,13 +56,11 @@ export const makeCell = (ready?: Effect.Effect<void>): Cell => ({ ready })
 
 const require = <A, E, R>(cell: Cell, f: (runtime: Interface) => Effect.Effect<A, E, R>) =>
   (cell.ready ?? Effect.void).pipe(
-    Effect.andThen(
-      Effect.suspend(() => {
-        const runtime = cell.runtime
-        if (runtime === undefined) return Effect.die(new Error("Plugin runtime is unavailable"))
-        return f(runtime)
-      }),
-    ),
+    Effect.andThen(() => {
+      const runtime = cell.runtime
+      if (runtime === undefined) return Effect.die(new Error("Plugin runtime is unavailable"))
+      return f(runtime)
+    }),
   )
 
 const defaultCell = makeCell()
