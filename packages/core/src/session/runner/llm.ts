@@ -22,6 +22,7 @@ import { llmClient } from "../../effect/app-node-platform.js"
 import { StepFailedError } from "../error.js"
 import { SessionRunnerRetry } from "./retry.js"
 import { SessionStep } from "./step.js"
+import { SessionStepMachine } from "./step-machine.js"
 import { ToolOutput } from "../../tool-output.js"
 import { PluginSupervisor } from "../../plugin/supervisor.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
@@ -167,91 +168,83 @@ const layer = Layer.effect(
       return selected
     })
 
-    /** Owns logical Step policy; each attempt owns its streaming, tools, and durable settlement. */
+    /** Owns logical Step policy; each attempt owns provider observation, tools, and durable settlement. */
     const runStep = Effect.fn("SessionRunner.runStep")(function* (first: SessionContext.Loaded, step: number) {
       const sessionID = first.session.id
-      let assistantMessageID = SessionMessage.ID.create()
       const retry = yield* Schedule.toStepWithSleep(SessionRunnerRetry.schedule(bus, sessionID))
       let initial: SessionContext.Loaded | undefined = first
-      let recoverOverflow = true
-      let recoverContinuation = true
-      while (true) {
-        // Reuse boundary preparation once; retries refresh context without delivering more input.
-        const loaded = initial ?? (yield* prepareContext(sessionID).pipe(Effect.flatMap(context.load)))
-        initial = undefined
-        const compactionInput = {
-          session: loaded.session,
-          messages: loaded.messages,
-          resolved: loaded.model,
-          prepare: context.prepare,
-        }
-        if (compaction.required(compactionInput)) {
-          const compacted = yield* compaction.compact(compactionInput)
-          if (compacted.status !== "completed") return yield* new StepFailedError({ error: compacted.error })
-          assistantMessageID = SessionMessage.ID.create()
-          continue
-        }
-        const stepLimitReached = loaded.agent.info.steps !== undefined && step >= loaded.agent.info.steps
-        const transcript = SessionModelRequest.baseTranscript({
-          agent: loaded.agent.info,
-          model: loaded.model,
-          tools: loaded.tools,
-          initial: loaded.initial,
-          messages: loaded.messages,
-        })
-        const prepared = yield* context.prepare({
-          scope: { session: loaded.session, agentID: loaded.agent.id, model: loaded.model, tools: loaded.tools },
-          transcript: {
-            system: transcript.system,
-            messages: stepLimitReached
-              ? [...transcript.messages, Message.assistant(MAX_STEPS_PROMPT)]
-              : transcript.messages,
-          },
-          // Keep tool definitions on the final Step to preserve the provider's cached prefix.
-          toolChoice: stepLimitReached ? "none" : undefined,
-          webSocket: "session",
-        })
-        const outcome = yield* steps.attempt({
-          sessionID,
-          assistantMessageID,
-          agent: loaded.agent.id,
-          model: loaded.model,
-          prepared,
-          recoverContinuation,
-          recoverOverflow: Effect.suspend(() =>
-            recoverOverflow && compaction.enabled()
-              ? compaction.compact(compactionInput).pipe(Effect.map((result) => result.status === "completed"))
-              : Effect.succeed(false),
-          ),
-        })
-        const completed = yield* SessionStep.Outcome.$match(outcome, {
-          Completed: (outcome) => Effect.succeed(outcome.needsContinuation),
-          Retry: (outcome) =>
-            retry({ cause: outcome.cause, error: outcome.error, assistantMessageID }).pipe(
-              Pull.catchDone(() =>
-                bus
-                  .publish(SessionEvent.Step.Failed, { sessionID, assistantMessageID, error: outcome.error })
-                  .pipe(Effect.andThen(outcome.cause)),
+      return yield* SessionStepMachine.run(SessionMessage.ID.create(), {
+        prepare: Effect.fnUntraced(function* (state) {
+          // Reuse boundary preparation once; retries refresh context without delivering more input.
+          const loaded = initial ?? (yield* prepareContext(sessionID).pipe(Effect.flatMap(context.load)))
+          initial = undefined
+          const compactionInput = {
+            session: loaded.session,
+            messages: loaded.messages,
+            resolved: loaded.model,
+            prepare: context.prepare,
+          }
+          if (compaction.required(compactionInput)) {
+            const compacted = yield* compaction.compact(compactionInput)
+            if (compacted.status !== "completed") return yield* new StepFailedError({ error: compacted.error })
+            return SessionStepMachine.Preparation.Rebuilt()
+          }
+          const stepLimitReached = loaded.agent.info.steps !== undefined && step >= loaded.agent.info.steps
+          const transcript = SessionModelRequest.baseTranscript({
+            agent: loaded.agent.info,
+            model: loaded.model,
+            tools: loaded.tools,
+            initial: loaded.initial,
+            messages: loaded.messages,
+          })
+          const prepared = yield* context.prepare({
+            scope: { session: loaded.session, agentID: loaded.agent.id, model: loaded.model, tools: loaded.tools },
+            transcript: {
+              system: transcript.system,
+              messages: stepLimitReached
+                ? [...transcript.messages, Message.assistant(MAX_STEPS_PROMPT)]
+                : transcript.messages,
+            },
+            // Keep tool definitions on the final Step to preserve the provider's cached prefix.
+            toolChoice: stepLimitReached ? "none" : undefined,
+            webSocket: "session",
+          })
+          return SessionStepMachine.Preparation.Ready({
+            attempt: yield* steps.open({
+              sessionID,
+              assistantMessageID: state.assistantMessageID,
+              agent: loaded.agent.id,
+              model: loaded.model,
+              prepared,
+              recoverContinuation: state.recoverContinuation,
+              recoverOverflow: Effect.suspend(() =>
+                compaction.enabled()
+                  ? compaction.compact(compactionInput).pipe(Effect.map((result) => result.status === "completed"))
+                  : Effect.succeed(false),
               ),
-              Effect.asVoid,
+            }),
+          })
+        }),
+        retry: (state, outcome) =>
+          retry({ cause: outcome.cause, error: outcome.error, assistantMessageID: state.assistantMessageID }).pipe(
+            Pull.catchDone(() =>
+              outcome._tag === "Retry"
+                ? bus
+                    .publish(SessionEvent.Step.Failed, {
+                      sessionID,
+                      assistantMessageID: state.assistantMessageID,
+                      error: outcome.error,
+                    })
+                    .pipe(Effect.andThen(outcome.cause))
+                : outcome.cause,
             ),
-          Continue: Effect.fnUntraced(function* (outcome) {
-            yield* retry({ cause: outcome.cause, error: outcome.error, assistantMessageID }).pipe(
-              Pull.catchDone(() => outcome.cause),
-            )
-            yield* bus.publish(SessionEvent.Synthetic, { sessionID, text: CONTINUE_AFTER_INCOMPLETE_STREAM })
-            assistantMessageID = SessionMessage.ID.create()
-          }),
-          Compacted: Effect.fnUntraced(function* () {
-            recoverOverflow = false
-            assistantMessageID = SessionMessage.ID.create()
-          }),
-          RecoverFull: Effect.fnUntraced(function* () {
-            recoverContinuation = false
-          }),
-        })
-        if (completed !== undefined) return completed
-      }
+            Effect.asVoid,
+          ),
+        publishSynthetic: bus.publish(SessionEvent.Synthetic, {
+          sessionID,
+          text: CONTINUE_AFTER_INCOMPLETE_STREAM,
+        }),
+      })
     })
 
     const settleStaleToolCalls = Effect.fn("SessionRunner.settleStaleToolCalls")(function* (
