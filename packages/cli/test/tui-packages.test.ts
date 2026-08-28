@@ -57,7 +57,7 @@ async function registryFixture(directory: string) {
         await Bun.write(path.join(root, "package", name === "plugin" ? "tui.js" : "index.js"), source)
         if (name === "plugin")
           await Bun.write(path.join(root, "package", "late.js"), "export { value, file } from '@fixture/late'")
-        await Bun.$`tar -czf ${path.join(root, "package.tgz")} -C ${root} package`.quiet()
+        await Bun.$`tar -czf package.tgz package`.cwd(root).quiet()
         return { name, manifest, tarball: await Bun.file(path.join(root, "package.tgz")).bytes() }
       }),
     ),

@@ -436,6 +436,7 @@ test.each([40, 100])(
     app.mockInput.pressEnter()
     const busy = await app.waitForFrame((frame) => frame.includes("Updating & applying..."))
     expect(busy.split("\n").length).toBeLessThanOrEqual(25)
+    await app.waitFor(() => updates.length === 1)
     app.mockInput.pressEnter()
     expect(updates).toEqual([updateTarget])
     expect(selected.entrypoint).toBe(versions.a)
