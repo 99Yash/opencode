@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Effect, Fiber, Schema, Stream } from "effect"
+import { Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Bus } from "@opencode-ai/core/bus"
 import { Config } from "@opencode-ai/core/config"
-import { Directory, Document, Info } from "@opencode-ai/schema/config"
+import { Directory, Document, Event, Info } from "@opencode-ai/schema/config"
 import { ConfigAgentPlugin } from "@opencode-ai/core/config/plugin/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Global } from "@opencode-ai/util/global"
@@ -16,11 +17,18 @@ import { AgentPlugin } from "@opencode-ai/core/plugin/agent"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { ConfigMigrateV1 } from "@opencode-ai/core/v1/config/migrate"
 import { advance, drain } from "../lib/clock"
-import { tmpdir } from "../fixture/tmpdir"
+import { tmpdir, tmpdirScoped } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 import { agentHost, host } from "../plugin/host"
 
-const it = testEffect(AppNodeBuilder.build(LayerNode.group([Agent.node, Bus.node, FSUtil.node, Global.node])))
+const it = testEffect(
+  Layer.mergeAll(
+    AppNodeBuilder.build(LayerNode.group([Agent.node, Bus.node, FSUtil.node, Global.node, Watcher.node]), [
+      [Watcher.node, Watcher.testLayer],
+    ]),
+    Watcher.testLayer,
+  ),
+)
 const decode = Schema.decodeUnknownSync(Info)
 const defaultPermissions = (global: Global.Interface): Permission.Ruleset => [
   ...Agent.Info.default(Agent.ID.make("test")).permissions,
@@ -419,7 +427,7 @@ Use native v2 fields.`,
 
             const agents = yield* Agent.Service
             const bus = yield* Bus.Service
-            const configTest = yield* Config.Test
+            const watcher = yield* Watcher.Test
             yield* ConfigAgentPlugin.Plugin.effect(host({ agent: agentHost(agents) }))
 
             // Verify inside the subscription so the update event is a read barrier:
@@ -435,7 +443,7 @@ Use native v2 fields.`,
             yield* Effect.yieldNow
 
             const updates = yield* testCase.mutate(directory)
-            yield* Effect.forEach(updates, (update) => configTest.emitChange(update), { discard: true })
+            yield* Effect.forEach(updates, (update) => watcher.emit(update), { discard: true })
             yield* advance(() => received === 1)
             yield* Fiber.join(changed)
           }).pipe(Effect.provide(Config.testLayer([directoryEntry(tmp.path)]))),
@@ -455,7 +463,7 @@ Use native v2 fields.`,
           yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
 
           const agents = yield* Agent.Service
-          const configTest = yield* Config.Test
+          const watcher = yield* Watcher.Test
           let reloads = 0
           yield* ConfigAgentPlugin.Plugin.effect(
             host({
@@ -468,14 +476,14 @@ Use native v2 fields.`,
           yield* Effect.yieldNow
 
           yield* Effect.promise(() => fs.writeFile(path.join(directory, "reviewer.md"), "Review once"))
-          yield* configTest.emitChange({ type: "create", path: path.join(directory, "reviewer.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "reviewer.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "reviewer.md") })
+          yield* watcher.emit({ type: "create", path: path.join(directory, "reviewer.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "reviewer.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "reviewer.md") })
           yield* advance(() => reloads >= 1)
           expect(reloads).toBe(1)
 
           yield* Effect.promise(() => fs.writeFile(path.join(directory, "reviewer.md"), "Review twice"))
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "reviewer.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "reviewer.md") })
           yield* advance(() => reloads >= 2)
           expect(reloads).toBe(2)
           expect(yield* agents.get(Agent.ID.make("reviewer"))).toMatchObject({ system: "Review twice" })
@@ -495,7 +503,7 @@ Use native v2 fields.`,
           yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
 
           const agents = yield* Agent.Service
-          const configTest = yield* Config.Test
+          const watcher = yield* Watcher.Test
           let reloads = 0
           yield* ConfigAgentPlugin.Plugin.effect(
             host({
@@ -506,19 +514,118 @@ Use native v2 fields.`,
             }),
           )
 
-          yield* configTest.emitChange({ type: "create", path: path.join(tmp.path, "commands", "review.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(tmp.path, "opencode.json") })
+          yield* watcher.emit({ type: "create", path: path.join(tmp.path, "commands", "review.md") })
+          yield* watcher.emit({ type: "update", path: path.join(tmp.path, "opencode.json") })
           yield* drain
           expect(reloads).toBe(0)
 
           // The feed stays live after unrelated updates.
           yield* Effect.promise(() => fs.writeFile(path.join(directory, "reviewer.md"), "Review related"))
-          yield* configTest.emitChange({ type: "create", path: path.join(directory, "reviewer.md") })
+          yield* watcher.emit({ type: "create", path: path.join(directory, "reviewer.md") })
           yield* advance(() => reloads >= 1)
           expect(yield* agents.get(Agent.ID.make("reviewer"))).toMatchObject({ system: "Review related" })
         }).pipe(Effect.provide(Config.testLayer([directoryEntry(tmp.path)]))),
       ),
     ),
+  )
+
+  it.effect("loads a source directory created after startup without consuming Config.changes", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const agents = yield* Agent.Service
+      const watcher = yield* Watcher.Test
+      let changesCalls = 0
+      let reloads = 0
+      yield* ConfigAgentPlugin.Plugin.effect(
+        host({
+          agent: {
+            ...agentHost(agents),
+            reload: () => agents.reload().pipe(Effect.tap(() => Effect.sync(() => reloads++))),
+          },
+        }),
+      ).pipe(
+        Effect.provideService(Config.Service, {
+          entries: () => Effect.succeed([directoryEntry(tmp.path)]),
+          changes: () => {
+            changesCalls++
+            return Stream.die("unused Config.changes")
+          },
+        }),
+      )
+      expect((yield* watcher.subscriptions()).map((input) => input.path)).toEqual([tmp.path])
+      expect(yield* agents.get(Agent.ID.make("team/helper"))).toBeUndefined()
+
+      yield* Effect.promise(async () => {
+        await fs.mkdir(path.join(tmp.path, "agents", "team"), { recursive: true })
+        await fs.writeFile(path.join(tmp.path, "agents", "team", "helper.md"), "Help after startup")
+      })
+      yield* watcher.emit({ type: "create", path: path.join(tmp.path, "agents") })
+      yield* advance(() => reloads >= 1)
+      expect(yield* agents.get(Agent.ID.make("team/helper"))).toMatchObject({ system: "Help after startup" })
+      expect(changesCalls).toBe(0)
+    }),
+  )
+
+  it.effect("reconciles supplied roots and inline agents on config.updated without reacquiring unchanged roots", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const previous = path.join(tmp.path, "previous")
+      const next = path.join(tmp.path, "next")
+      yield* Effect.promise(async () => {
+        await fs.mkdir(path.join(previous, "agents"), { recursive: true })
+        await fs.mkdir(path.join(next, "agents"), { recursive: true })
+        await fs.writeFile(path.join(previous, "agents", "reviewer.md"), "Review previous root")
+        await fs.writeFile(path.join(next, "agents", "release.md"), "Review next root")
+      })
+      yield* Effect.gen(function* () {
+        const agents = yield* Agent.Service
+        const bus = yield* Bus.Service
+        const config = yield* Config.Test
+        const watcher = yield* Watcher.Test
+        let reloads = 0
+        yield* ConfigAgentPlugin.Plugin.effect(
+          host({
+            agent: {
+              ...agentHost(agents),
+              reload: () => agents.reload().pipe(Effect.tap(() => Effect.sync(() => reloads++))),
+            },
+            event: { subscribe: () => bus.subscribe(Event.Updated) },
+          }),
+        )
+        expect(yield* agents.get(Agent.ID.make("reviewer"))).toMatchObject({ system: "Review previous root" })
+        const initialSubscriptions = yield* watcher.subscriptions()
+        expect(initialSubscriptions.map((input) => input.path)).toEqual([previous])
+
+        yield* config.setEntries([
+          directoryEntry(previous),
+          new Document({ type: "document", info: decode({ agents: { inline: { system: "Inline refreshed" } } }) }),
+        ])
+        yield* bus.publish(Event.Updated, {})
+        yield* advance(() => reloads >= 1)
+        expect(yield* agents.get(Agent.ID.make("inline"))).toMatchObject({ system: "Inline refreshed" })
+        expect(yield* watcher.subscriptions()).toEqual(initialSubscriptions)
+
+        yield* config.setEntries([
+          directoryEntry(next),
+          new Document({ type: "document", info: decode({ agents: { inline: { system: "Inline destination" } } }) }),
+        ])
+        yield* bus.publish(Event.Updated, {})
+        yield* advance(() => reloads >= 2)
+        expect(yield* agents.get(Agent.ID.make("reviewer"))).toBeUndefined()
+        expect(yield* agents.get(Agent.ID.make("release"))).toMatchObject({ system: "Review next root" })
+        expect(yield* agents.get(Agent.ID.make("inline"))).toMatchObject({ system: "Inline destination" })
+        expect((yield* watcher.subscriptions()).map((input) => input.path)).toEqual([previous, next])
+
+        yield* watcher.emit({ type: "update", path: path.join(previous, "agents", "reviewer.md") })
+        yield* drain
+        expect(reloads).toBe(2)
+
+        yield* Effect.promise(() => fs.writeFile(path.join(next, "agents", "release.md"), "Review destination update"))
+        yield* watcher.emit({ type: "update", path: path.join(next, "agents", "release.md") })
+        yield* advance(() => reloads >= 3)
+        expect(yield* agents.get(Agent.ID.make("release"))).toMatchObject({ system: "Review destination update" })
+      }).pipe(Effect.provide(Config.testLayer([directoryEntry(previous)])))
+    }),
   )
 })
 

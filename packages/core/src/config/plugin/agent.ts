@@ -8,6 +8,7 @@ import { Effect, Option, Schema, Stream } from "effect"
 import { Agent } from "../../agent.js"
 import { Config } from "../../config.js"
 import { ConfigMarkdown } from "../markdown.js"
+import { ConfigSourceWatch } from "../source-watch.js"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { ConfigAgentV1 } from "../../v1/config/agent.js"
 import { ConfigMigrateV1 } from "../../v1/config/migrate.js"
@@ -52,6 +53,7 @@ export const Plugin = define({
     const config = yield* Config.Service
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
+    const sources = yield* ConfigSourceWatch.make(sourceDirectories)
     const loadEntry = Effect.fnUntraced(function* (entry: Entry) {
       if (entry.type === "document") return [entry]
       if (entry.type !== "directory") return []
@@ -64,7 +66,9 @@ export const Plugin = define({
       ).pipe(Effect.map((documents) => documents.filter((document): document is Document => document !== undefined)))
     })
     const load = Effect.fn("ConfigAgentPlugin.load")(function* () {
-      return yield* Effect.forEach(yield* config.entries(), loadEntry).pipe(Effect.map((documents) => documents.flat()))
+      const entries = yield* config.entries()
+      yield* sources.reconcile(entries)
+      return yield* Effect.forEach(entries, loadEntry).pipe(Effect.map((documents) => documents.flat()))
     })
     const loaded = { documents: [] as Document[] }
     const reload = load().pipe(
@@ -74,13 +78,8 @@ export const Plugin = define({
     // One merged trigger stream serializes reloads and shares one debounce
     // window; subscribing before the initial scan means updates racing the
     // scan still trigger a rebuild.
-    const sourceChanges = config
-      .changes()
-      .pipe(
-        Stream.filterEffect((update) => Effect.map(config.entries(), (entries) => isAgentSource(entries, update.path))),
-      )
     const configUpdates = ctx.event.subscribe().pipe(Stream.filter((event) => event.type === "config.updated"))
-    yield* Stream.merge(sourceChanges, configUpdates).pipe(
+    yield* Stream.merge(sources.changes, configUpdates).pipe(
       Stream.debounce("100 millis"),
       Stream.runForEach(() => reload),
       Effect.forkScoped({ startImmediately: true }),
@@ -133,16 +132,6 @@ export const Plugin = define({
     })
   }),
 })
-
-// Matches anything at or under <root>/{agent,agents,mode,modes}. No file-suffix
-// check: directory-level events such as renames carry no per-file paths.
-function isAgentSource(entries: Entry[], file: string) {
-  return entries.some(
-    (entry) =>
-      entry.type === "directory" &&
-      sourceDirectories.some((name) => FSUtil.contains(path.join(entry.path, name), file)),
-  )
-}
 
 function expandPermissions(rules: Permission.Ruleset, home: string): Permission.Ruleset {
   // Expand only resources tools resolve as filesystem paths. Bash resources are raw shell text:

@@ -15,6 +15,7 @@ import { Location } from "../../location.js"
 import { ShellSelect } from "../../shell/select.js"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { ConfigMarkdown } from "../markdown.js"
+import { ConfigSourceWatch } from "../source-watch.js"
 
 const decodeCommand = Schema.decodeUnknownOption(ConfigCommand.Info)
 
@@ -23,6 +24,7 @@ export const Plugin = define({
   effect: Effect.fn(function* (ctx) {
     const config = yield* Config.Service
     const fs = yield* FSUtil.Service
+    const sources = yield* ConfigSourceWatch.make(sourceDirectories)
     const loadEntry = Effect.fnUntraced(function* (entry: Entry) {
       if (entry.type === "document") return [{ commands: entry.info.commands }]
       if (entry.type !== "directory") return []
@@ -33,7 +35,9 @@ export const Plugin = define({
     const processes = yield* AppProcess.Service
     const shell = yield* ShellSelect.Service
     const load = Effect.fn("ConfigCommandPlugin.load")(function* () {
-      return yield* Effect.forEach(yield* config.entries(), loadEntry).pipe(Effect.map((documents) => documents.flat()))
+      const entries = yield* config.entries()
+      yield* sources.reconcile(entries)
+      return yield* Effect.forEach(entries, loadEntry).pipe(Effect.map((documents) => documents.flat()))
     })
     const loaded = { documents: [] as { commands: Info["commands"] }[] }
     const reload = load().pipe(
@@ -43,15 +47,8 @@ export const Plugin = define({
     // One merged trigger stream serializes reloads and shares one debounce
     // window; subscribing before the initial scan means updates racing the
     // scan still trigger a rebuild.
-    const sourceChanges = config
-      .changes()
-      .pipe(
-        Stream.filterEffect((update) =>
-          Effect.map(config.entries(), (entries) => isCommandSource(entries, update.path)),
-        ),
-      )
     const configUpdates = ctx.event.subscribe().pipe(Stream.filter((event) => event.type === "config.updated"))
-    yield* Stream.merge(sourceChanges, configUpdates).pipe(
+    yield* Stream.merge(sources.changes, configUpdates).pipe(
       Stream.debounce("100 millis"),
       Stream.runForEach(() => reload),
       Effect.forkScoped({ startImmediately: true }),
@@ -104,16 +101,6 @@ export const Plugin = define({
 
 // Keep in sync with the loadDirectory scan pattern and the name-strip regex in decode.
 const sourceDirectories = ["command", "commands"] as const
-
-// Matches anything at or under <root>/{command,commands}. No file-suffix check:
-// directory-level events such as renames carry no per-file paths.
-function isCommandSource(entries: Entry[], file: string) {
-  return entries.some(
-    (entry) =>
-      entry.type === "directory" &&
-      sourceDirectories.some((name) => FSUtil.contains(path.join(entry.path, name), file)),
-  )
-}
 
 function loadDirectory(fs: FSUtil.Interface, directory: string) {
   return Effect.gen(function* () {
@@ -191,8 +178,8 @@ function evaluateTemplate(
           )
           .pipe(
             Effect.map((result) => (result.output ?? Buffer.concat([result.stdout, result.stderr])).toString("utf8")),
-            Effect.mapError((error) =>
-              new Error(`Shell interpolation failed for ${JSON.stringify(source)}: ${error.message}`),
+            Effect.mapError(
+              (error) => new Error(`Shell interpolation failed for ${JSON.stringify(source)}: ${error.message}`),
             ),
           )
       },

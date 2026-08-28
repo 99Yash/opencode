@@ -14,18 +14,13 @@ import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Bus } from "@opencode-ai/core/bus"
-import { Credential } from "@opencode-ai/core/credential"
-import { WellKnown } from "@opencode-ai/core/wellknown"
-import { Global } from "@opencode-ai/util/global"
 import { AppProcess } from "@opencode-ai/util/process"
 import { Location } from "@opencode-ai/core/location"
 import { Mcp } from "@opencode-ai/core/mcp/index"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { ShellSelect } from "@opencode-ai/core/shell/select"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
-import { emptyCredentialNode, emptyWellknownNode } from "../fixture/config-nodes"
 import { emptyConfigLayer, emptyMcpLayer, testLocationLayer } from "../fixture/mcp"
-import { location } from "../fixture/location"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 import { host } from "../plugin/host"
@@ -41,14 +36,23 @@ const shellLayer = Layer.succeed(
 
 const it = testEffect(
   AppNodeBuilder.build(
-    LayerNode.group([Command.node, Bus.node, FSUtil.node, AppProcess.node, Location.node, ShellSelect.node]),
+    LayerNode.group([
+      Command.node,
+      Bus.node,
+      FSUtil.node,
+      AppProcess.node,
+      Location.node,
+      ShellSelect.node,
+      Watcher.node,
+    ]),
     [
       [Mcp.node, emptyMcpLayer],
       [Config.node, emptyConfigLayer],
       [Location.node, testLocationLayer],
       [ShellSelect.node, shellLayer],
+      [Watcher.node, Watcher.testLayer],
     ],
-  ),
+  ).pipe(Layer.merge(Watcher.testLayer)),
 )
 const decode = Schema.decodeUnknownSync(Info)
 
@@ -178,7 +182,7 @@ Review files`,
 
             const command = yield* Command.Service
             const bus = yield* Bus.Service
-            const configTest = yield* Config.Test
+            const watcher = yield* Watcher.Test
             yield* ConfigCommandPlugin.Plugin.effect(
               host({
                 command: {
@@ -202,7 +206,7 @@ Review files`,
             yield* Effect.yieldNow
 
             const updates = yield* testCase.mutate(directory)
-            yield* Effect.forEach(updates, (update) => configTest.emitChange(update), { discard: true })
+            yield* Effect.forEach(updates, (update) => watcher.emit(update), { discard: true })
             yield* advance(() => received === 1)
             yield* Fiber.join(changed)
           }).pipe(Effect.provide(Config.testLayer([directoryEntry(tmp.path)]))),
@@ -222,7 +226,7 @@ Review files`,
           yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
 
           const command = yield* Command.Service
-          const configTest = yield* Config.Test
+          const watcher = yield* Watcher.Test
           let reloads = 0
           yield* ConfigCommandPlugin.Plugin.effect(
             host({
@@ -235,16 +239,16 @@ Review files`,
           )
           yield* Effect.yieldNow
           yield* Effect.promise(() => fs.writeFile(path.join(directory, "review.md"), "Review once"))
-          yield* configTest.emitChange({ type: "create", path: path.join(directory, "review.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "review.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "review.md") })
+          yield* watcher.emit({ type: "create", path: path.join(directory, "review.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "review.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "review.md") })
           yield* advance(() => reloads >= 1)
           expect(reloads).toBe(1)
 
           yield* Effect.promise(() =>
             fs.writeFile(path.join(directory, "review.md"), markdown("Review twice", "Review twice")),
           )
-          yield* configTest.emitChange({ type: "update", path: path.join(directory, "review.md") })
+          yield* watcher.emit({ type: "update", path: path.join(directory, "review.md") })
           yield* advance(() => reloads >= 2)
           expect(reloads).toBe(2)
           expect((yield* command.get("review"))?.description).toBe("Review twice")
@@ -264,7 +268,7 @@ Review files`,
           yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
 
           const command = yield* Command.Service
-          const configTest = yield* Config.Test
+          const watcher = yield* Watcher.Test
           let reloads = 0
           yield* ConfigCommandPlugin.Plugin.effect(
             host({
@@ -276,8 +280,8 @@ Review files`,
             }),
           )
 
-          yield* configTest.emitChange({ type: "create", path: path.join(tmp.path, "notes", "todo.md") })
-          yield* configTest.emitChange({ type: "update", path: path.join(tmp.path, "opencode.json") })
+          yield* watcher.emit({ type: "create", path: path.join(tmp.path, "notes", "todo.md") })
+          yield* watcher.emit({ type: "update", path: path.join(tmp.path, "opencode.json") })
           yield* drain
           expect(reloads).toBe(0)
 
@@ -285,10 +289,81 @@ Review files`,
           yield* Effect.promise(() =>
             fs.writeFile(path.join(directory, "review.md"), markdown("Review related", "Review related")),
           )
-          yield* configTest.emitChange({ type: "create", path: path.join(directory, "review.md") })
+          yield* watcher.emit({ type: "create", path: path.join(directory, "review.md") })
           yield* advance(() => reloads >= 1)
           expect((yield* command.get("review"))?.description).toBe("Review related")
         }).pipe(Effect.provide(Config.testLayer([directoryEntry(tmp.path)]))),
+      ),
+    ),
+  )
+
+  it.effect("reconciles supplied roots and inline commands on config updates", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((tmp) =>
+        Effect.gen(function* () {
+          const previous = path.join(tmp.path, "previous")
+          const next = path.join(tmp.path, "next")
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(previous, "commands"), { recursive: true })
+            await fs.writeFile(path.join(previous, "commands", "old.md"), "Old command")
+            await fs.mkdir(next)
+          })
+
+          const command = yield* Command.Service
+          const bus = yield* Bus.Service
+          const config = yield* Config.Test
+          const watcher = yield* Watcher.Test
+          const inline = new Document({
+            type: "document",
+            info: decode({ commands: { inline: { template: "Inline command", description: "Inline command" } } }),
+          })
+          yield* config.setEntries([directoryEntry(previous)])
+          let reloads = 0
+          yield* ConfigCommandPlugin.Plugin.effect(
+            host({
+              command: {
+                list: () => Effect.die("unused command.list"),
+                transform: command.transform,
+                reload: () => command.reload().pipe(Effect.tap(() => Effect.sync(() => reloads++))),
+              },
+              event: { subscribe: () => bus.subscribe(Event.Updated) },
+            }),
+          )
+          expect(yield* command.get("old")).toBeDefined()
+          const subscriptions = yield* watcher.subscriptions()
+          expect(subscriptions.map((input) => input.path)).toEqual([previous])
+
+          yield* config.setEntries([directoryEntry(previous), inline])
+          yield* bus.publish(Event.Updated, {})
+          yield* advance(() => reloads === 1)
+          expect((yield* command.get("inline"))?.description).toBe("Inline command")
+          expect(yield* watcher.subscriptions()).toEqual(subscriptions)
+
+          yield* config.setEntries([directoryEntry(next), inline])
+          yield* bus.publish(Event.Updated, {})
+          yield* advance(() => reloads === 2)
+          expect(yield* command.get("old")).toBeUndefined()
+          expect((yield* command.get("inline"))?.description).toBe("Inline command")
+          expect((yield* watcher.subscriptions()).map((input) => input.path)).toEqual([previous, next])
+
+          // Only the root existed when subscribed; a directory event must reload it.
+          yield* Effect.promise(async () => {
+            await fs.mkdir(path.join(next, "commands"))
+            await fs.writeFile(path.join(next, "commands", "new.md"), markdown("New command", "New command"))
+          })
+          yield* watcher.emit({ type: "create", path: path.join(next, "commands") })
+          yield* advance(() => reloads === 3)
+          expect((yield* command.get("new"))?.description).toBe("New command")
+
+          yield* watcher.emit({ type: "update", path: path.join(previous, "commands", "old.md") })
+          yield* drain
+          expect(reloads).toBe(3)
+          expect(yield* command.get("old")).toBeUndefined()
+          expect((yield* watcher.subscriptions()).map((input) => input.path)).toEqual([previous, next])
+        }).pipe(Effect.provide(Config.testLayer())),
       ),
     ),
   )
@@ -297,20 +372,16 @@ Review files`,
 const describeNative = Watcher.hasNativeBinding() && !process.env.CI ? describe : describe.skip
 
 // End-to-end proof for #37429: a real file edit reaches the command registry
-// through the native watcher, Config's watch topology, the source filter, and
-// the debounced reload — no mocked change feed.
+// through the plugin's own root watch, source filter, and debounced reload.
 describeNative("ConfigCommandPlugin native watcher", () => {
   it.live("reloads commands from real file edits", () =>
     Effect.gen(function* () {
       const fs = yield* FSUtil.Service
       // Watcher events report real paths, so resolve the tempdir symlink up front.
       const tmp = yield* fs.makeTempDirectoryScoped({ prefix: "opencode-core-test-" }).pipe(Effect.flatMap(fs.realPath))
-      const global = path.join(tmp, "global")
-      yield* fs.makeDirectory(path.join(global, "commands"), { recursive: true })
-      yield* fs.makeDirectory(path.join(tmp, "project"))
       yield* Effect.gen(function* () {
         const command = yield* Command.Service
-        const config = yield* Config.Service
+        const watcher = yield* Watcher.Service
         const bus = yield* Bus.Service
         yield* ConfigCommandPlugin.Plugin.effect(
           host({
@@ -321,51 +392,32 @@ describeNative("ConfigCommandPlugin native watcher", () => {
             },
           }),
         )
-        yield* watchReady(config, global)
+        yield* watchReady(watcher, tmp)
 
         const created = yield* nextCommandUpdate(bus)
-        yield* fs.writeFileString(
-          path.join(global, "commands", "review.md"),
-          markdown("Review native", "Review native"),
-        )
+        yield* fs.makeDirectory(path.join(tmp, "commands"))
+        yield* fs.writeFileString(path.join(tmp, "commands", "review.md"), markdown("Review native", "Review native"))
         yield* Fiber.join(created).pipe(Effect.timeout("10 seconds"))
         expect((yield* command.get("review"))?.description).toBe("Review native")
 
         const updated = yield* nextCommandUpdate(bus)
         yield* fs.writeFileString(
-          path.join(global, "commands", "review.md"),
+          path.join(tmp, "commands", "review.md"),
           markdown("Review native again", "Review native again"),
         )
         yield* Fiber.join(updated).pipe(Effect.timeout("10 seconds"))
         expect((yield* command.get("review"))?.description).toBe("Review native again")
       }).pipe(
-        Effect.provide(
-          AppNodeBuilder.build(
-            LayerNode.group([
-              Command.node,
-              Config.node,
-              Bus.node,
-              FSUtil.node,
-              AppProcess.node,
-              Global.node,
-              Location.node,
-              ShellSelect.node,
-            ]),
-            [
-              [
-                Location.node,
-                Layer.succeed(
-                  Location.Service,
-                  Location.Service.of(location({ directory: AbsolutePath.make(path.join(tmp, "project")) })),
-                ),
-              ],
-              [Global.node, Global.layerWith({ config: global, home: path.join(global, "home") })],
-              [ShellSelect.node, shellLayer],
-              [Credential.node, emptyCredentialNode],
-              [WellKnown.node, emptyWellknownNode],
-            ],
+        Effect.provide([
+          AppNodeBuilder.build(Watcher.node),
+          Layer.succeed(
+            Config.Service,
+            Config.Service.of({
+              entries: () => Effect.succeed([directoryEntry(tmp)]),
+              changes: () => Stream.die("unused config.changes"),
+            }),
           ),
-        ),
+        ]),
       )
     }),
   )
@@ -378,17 +430,23 @@ function nextCommandUpdate(bus: Bus.Interface) {
 }
 
 // Native directory watches start asynchronously; probe with unrelated files
-// until the change feed delivers so command edits afterwards cannot be missed.
-function watchReady(config: Config.Interface, directory: string) {
+// until the shared root watch delivers so command edits afterwards cannot be missed.
+function watchReady(watcher: Watcher.Interface, directory: string) {
   return Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const seen = yield* Deferred.make<void>()
-    const listener = yield* config.changes().pipe(
+    const probe = path.join(directory, ".watch-probe")
+    const updates = yield* watcher.subscribe({
+      path: directory,
+      type: "directory",
+      ignore: ["node_modules", ".git", "**/{node_modules,.git}/**"],
+    })
+    const listener = yield* updates.pipe(
+      Stream.filter((update) => update.path === probe),
       Stream.runForEach(() => Deferred.succeed(seen, undefined).pipe(Effect.asVoid)),
       Effect.forkScoped({ startImmediately: true }),
     )
     yield* Effect.yieldNow
-    const probe = path.join(directory, ".watch-probe")
     while (true) {
       yield* fs.writeFileString(probe, `ready-${Math.random()}`)
       const result = yield* Deferred.await(seen).pipe(Effect.timeoutOption("250 millis"))
@@ -399,7 +457,7 @@ function watchReady(config: Config.Interface, directory: string) {
   }).pipe(
     Effect.timeoutOrElse({
       duration: "10 seconds",
-      orElse: () => Effect.fail(new Error("timed out waiting for the config watch to become ready")),
+      orElse: () => Effect.fail(new Error("timed out waiting for the command source watch to become ready")),
     }),
   )
 }
