@@ -54,7 +54,10 @@ const factory = () => {
     await server.sendToolListChanged()
     await server.sendPromptListChanged()
     await server.sendResourceListChanged()
-    return { content: [{ type: "text", text: "stdio complete" }], structuredContent: ctx.mcpReq.inputResponses }
+    return {
+      content: [{ type: "text", text: "stdio complete" }],
+      structuredContent: { ...ctx.mcpReq.inputResponses, sessionID: request.params._meta?.sessionID },
+    }
   })
   return server
 }

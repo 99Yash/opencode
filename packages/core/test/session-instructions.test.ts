@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { DateTime, Effect, Layer, Stream } from "effect"
-import { Message } from "@opencode-ai/ai"
+import { DateTime, Effect, Layer } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
@@ -82,7 +81,7 @@ const testLayer = AppNodeBuilder.build(
     [Config.node, config],
     [Image.node, imageLayer],
   ],
-) as unknown as Layer.Layer<unknown>
+)
 
 const it = testEffect(testLayer)
 

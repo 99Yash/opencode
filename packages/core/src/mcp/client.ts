@@ -22,6 +22,7 @@ import { DefaultJsonSchemaValidator } from "@modelcontextprotocol/client/_shims"
 import { ListToolsResultSchema, ToolSchema } from "@modelcontextprotocol/core"
 import { Cause, Effect, Exit, Schedule, Schema } from "effect"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
+import type { Session } from "@opencode-ai/schema/session"
 import { McpStdio } from "./stdio.js"
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000
@@ -163,6 +164,7 @@ export interface Connection {
   readonly callTool: (input: {
     readonly name: string
     readonly args?: Record<string, unknown>
+    readonly sessionID?: Session.ID
   }) => Effect.Effect<CallToolResult, Error>
   readonly onClose: (callback: () => void) => void
   /** Registers a callback fired when the server emits an MCP logging notification. */
@@ -484,7 +486,11 @@ export const connect = Effect.fnUntraced(function* (
         Effect.tryPromise({
           try: (signal) =>
             client.callTool(
-              { name: input.name, arguments: input.args ?? {}, _meta: meta },
+              {
+                name: input.name,
+                arguments: input.args ?? {},
+                _meta: input.sessionID === undefined ? meta : { ...meta, sessionID: input.sessionID },
+              },
               // Keep progress tokens available while enforcing a hard wall-clock execution timeout.
               { signal, timeout: executionTimeout, onprogress: () => {}, toolDefinition: definitions.get(input.name) },
             ),

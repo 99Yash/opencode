@@ -67,6 +67,17 @@ const liveIt = testEffect(
     ],
   ),
 )
+const projectIt = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([Database.node, Bus.node, Project.node, SessionProjector.node, SessionStore.node, Session.node]),
+    [
+      [Bus.node, Bus.configured({ persist: true })],
+      // Project adoption needs plain-prompt admission, not live plugin/provider startup.
+      [LocationServiceMap.node, promptLocationLayer],
+      [SessionExecution.node, SessionExecution.noopLayer],
+    ],
+  ),
+)
 const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
 const id = Session.ID.create()
 
@@ -119,7 +130,7 @@ describe("Session.create", () => {
     ),
   )
 
-  liveIt.live("follows the directory's project identity established after creation", () =>
+  projectIt.live("follows the directory's project identity established after creation", () =>
     withTmp((directory) =>
       Effect.gen(function* () {
         const session = yield* Session.Service
@@ -340,6 +351,40 @@ describe("Session.create", () => {
           model,
         }),
       ).toMatchObject({ location: { directory: location.directory, workspaceID }, agent: "build", model })
+    }),
+  )
+
+  it.effect("stores creation metadata and inherits it through children and forks", () =>
+    Effect.gen(function* () {
+      const session = yield* Session.Service
+      const bus = yield* Bus.Service
+      const { db } = yield* Database.Service
+      const metadata = { thread: "C123/1699999999.123", labels: ["support", 2] }
+
+      const created = yield* session.create({ location, metadata })
+      expect(created.metadata).toEqual(metadata)
+      // The annotations are a durable creation fact, not just projected state.
+      expect(
+        yield* db
+          .select({ data: EventTable.data })
+          .from(EventTable)
+          .where(eq(EventTable.aggregate_id, created.id))
+          .get()
+          .pipe(Effect.orDie),
+      ).toMatchObject({ data: { metadata } })
+
+      const inherited = yield* session.create({ parentID: created.id })
+      expect(inherited.metadata).toEqual(metadata)
+      const overridden = yield* session.create({ parentID: created.id, metadata: { thread: "other" } })
+      expect(overridden.metadata).toEqual({ thread: "other" })
+
+      yield* session.prompt({ sessionID: created.id, text: "Fork context", resume: false })
+      yield* SessionInbox.promote(db, bus, created.id, "steer")
+      const forked = yield* session.fork({ sessionID: created.id, boundary: { type: "through" } })
+      expect(forked.metadata).toEqual(metadata)
+
+      // Absent stays absent: no empty-object normalization.
+      expect((yield* session.create({ location })).metadata).toBeUndefined()
     }),
   )
 
@@ -1280,7 +1325,7 @@ describe("SessionTransfer", () => {
       const transfer = yield* SessionTransfer.Service
       const bus = yield* Bus.Service
       const { db } = yield* Database.Service
-      const template = yield* session.create({ location, title: "Exported" })
+      const template = yield* session.create({ location, title: "Exported", metadata: { channel: "C123" } })
       const sessionID = Session.ID.create()
       const sourceMessageID = SessionMessage.ID.create()
       const errorMessageID = SessionMessage.ID.create()
@@ -1324,7 +1369,7 @@ describe("SessionTransfer", () => {
       })
       const messages = yield* session.messages({ sessionID, order: "asc" })
 
-      expect(imported).toMatchObject({ id: sessionID, title: "Exported", location })
+      expect(imported).toMatchObject({ id: sessionID, title: "Exported", location, metadata: { channel: "C123" } })
       expect(imported.time).toMatchObject({ idle: DateTime.makeUnsafe(200), viewed: DateTime.makeUnsafe(150) })
       expect(messages).toMatchObject([
         { id: sourceMessageID, ...Expected.user("Imported message") },
@@ -1336,6 +1381,7 @@ describe("SessionTransfer", () => {
       expect(exported.messages).toEqual(messages)
       const sanitized = yield* transfer.export({ sessionID, sanitize: true })
       expect(sanitized.info.time).toMatchObject({ idle: DateTime.makeUnsafe(200), viewed: DateTime.makeUnsafe(150) })
+      expect(sanitized.info.metadata).toEqual({ redacted: `session-metadata:${sessionID}` })
       expect(sanitized.messages).toMatchObject([
         {
           id: sourceMessageID,

@@ -3,6 +3,7 @@ import { isJSONRPCRequest, type JSONRPCRequest } from "@modelcontextprotocol/cli
 import { JSONRPCMessageSchema } from "@modelcontextprotocol/core"
 import { createMcpHandler, Server } from "@modelcontextprotocol/server"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
+import { Session } from "@opencode-ai/schema/session"
 import { McpClient } from "@opencode-ai/core/mcp/client"
 import { Effect, Fiber } from "effect"
 import { testEffect } from "./lib/effect"
@@ -271,7 +272,13 @@ it.live("modern HTTP executes MRTR, mirrors headers, validates outputs, and rene
     expect(yield* connection.resourceTemplates()).toHaveLength(1)
     expect((yield* connection.prompt({ name: "hello" })).messages).toHaveLength(1)
     expect((yield* connection.readResource({ uri: "docs://hello" }))?.contents).toHaveLength(1)
-    expect((yield* connection.callTool({ name: "echo", args: { value: " padded " } })).structured).toEqual({
+    expect(
+      (yield* connection.callTool({
+        name: "echo",
+        args: { value: " padded " },
+        sessionID: Session.ID.make("ses_mcp_modern"),
+      })).structured,
+    ).toEqual({
       value: " padded ",
     })
     expect(inputCalls).toBe(2)
@@ -289,11 +296,18 @@ it.live("modern HTTP executes MRTR, mirrors headers, validates outputs, and rene
       },
     })
     for (const entry of calls) {
+      expect(entry.message?.params?._meta).toMatchObject({
+        sessionID: "ses_mcp_modern",
+        "io.modelcontextprotocol/logLevel": "debug",
+      })
       expect(entry.headers.get("mcp-name")).toBe("echo")
       expect(entry.headers.get("mcp-param-value")).toBe("=?base64?IHBhZGRlZCA=?=")
     }
     yield* connection.callTool({ name: "echo", args: { value: 123 } }).pipe(Effect.flip)
     expect(inputCalls).toBe(4)
+    for (const entry of server.requests.filter((entry) => entry.method === "tools/call").slice(2)) {
+      expect(entry.message?.params?._meta).not.toHaveProperty("sessionID")
+    }
     yield* Effect.promise(() => subscribed.promise)
     controllers[0]?.enqueue(
       new TextEncoder().encode(

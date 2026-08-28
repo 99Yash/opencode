@@ -25,7 +25,7 @@ export function buildLocationServiceMap(
   return Layer.effect(
     LocationServiceMap.Service,
     Effect.map(
-      LayerMap.make((ref: Location.Ref) => Instance.layer(ref, replacements), {
+      LayerMap.make((ref: Location.Ref) => Instance.layer(ref, { replacements }), {
         // Workspace-placed directories exist only inside the workspace, so a
         // local stat consults the wrong filesystem. Workspace liveness is
         // owned by placement; do not probe the sandbox here, which would
@@ -37,6 +37,7 @@ export function buildLocationServiceMap(
         ...inner,
         get: (ref: Location.Ref) => inner.get(canonical(ref)),
         contextEffect: (ref: Location.Ref) => inner.contextEffect(canonical(ref)),
+        contextEffectOption: (ref: Location.Ref) => inner.contextEffectOption(canonical(ref)),
         invalidate: (ref: Location.Ref) => inner.invalidate(canonical(ref)),
       }),
     ),

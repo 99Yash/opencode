@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { expect } from "bun:test"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
+import { Session } from "@opencode-ai/schema/session"
 import { McpClient } from "@opencode-ai/core/mcp/client"
 import { Effect, Fiber, Schedule, Schema } from "effect"
 import { testEffect } from "./lib/effect"
@@ -49,9 +50,10 @@ for (const mode of ["modern", "dual", "legacy-exit", "legacy-error", "legacy-sil
           connection.onPromptsChanged(promptsChanged.resolve)
           connection.onResourcesChanged(resourcesChanged.resolve)
           expect((yield* connection.tools()).map((tool) => tool.name)).toEqual(["echo"])
-          const result = yield* connection.callTool({ name: "echo" })
+          const result = yield* connection.callTool({ name: "echo", sessionID: Session.ID.make("ses_mcp_stdio") })
           expect(result.content).toEqual([{ type: "text", text: "stdio complete" }])
           expect(result.structured).toMatchObject({ roots: { roots: [{ uri: expect.stringContaining("file://") }] } })
+          expect(result.structured).toHaveProperty("sessionID", "ses_mcp_stdio")
           yield* Effect.promise(() =>
             Promise.all([toolsChanged.promise, promptsChanged.promise, resourcesChanged.promise]),
           ).pipe(Effect.timeout("1 second"))

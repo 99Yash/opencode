@@ -62,7 +62,7 @@ export const root = Effect.fn("Project.root")(function* (
 export interface Interface {
   readonly list: () => Effect.Effect<ReadonlyArray<Info>>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
-  readonly resolve: (input: AbsolutePath) => Effect.Effect<Resolved>
+  readonly resolve: (input: AbsolutePath, options?: { readonly discovery?: boolean }) => Effect.Effect<Resolved>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Project") {}
@@ -137,11 +137,10 @@ const layer = Layer.effect(
           strategy: project.vcs.type === "git" ? "git" : undefined,
         })
       // A missing directory row means this directory's resolution is a new durable
-      // fact (copy.ts registers copy directories directly; those never strand
-      // sessions and never announce). The row insert commits atomically with the
-      // event, so a crash between checks retries on the next resolve instead of
-      // stranding the announcement. The in-flight set keeps concurrent resolves
-      // from publishing the same fact twice.
+      // fact. The row insert commits atomically with the event, so a crash between
+      // checks retries on the next resolve instead of stranding the announcement.
+      // The in-flight set keeps concurrent resolves from publishing the same fact
+      // twice.
       for (const item of directories) {
         const key = item.projectID + "\u0000" + item.directory
         if (announcing.has(key)) continue
@@ -256,15 +255,14 @@ const layer = Layer.effect(
       const value = input.trim()
       if (!value) return undefined
 
-      try {
-        const parsed = new URL(value)
+      const parsed = URL.parse(value)
+      if (parsed) {
         if (parsed.protocol === "file:") return undefined
         return parts(parsed.hostname, parsed.pathname)
-      } catch {
-        const scp = value.match(/^([^@/:]+@)?([^/:]+):(.+)$/)
-        if (scp) return parts(scp[2], scp[3])
-        return undefined
       }
+      const scp = value.match(/^([^@/:]+@)?([^/:]+):(.+)$/)
+      if (scp) return parts(scp[2], scp[3])
+      return undefined
     }
 
     function parts(host: string, name: string) {
@@ -317,9 +315,12 @@ const layer = Layer.effect(
       }
     })
 
-    const resolve = Effect.fn("Project.resolve")(function* (input: AbsolutePath) {
+    const resolve = Effect.fn("Project.resolve")(function* (
+      input: AbsolutePath,
+      options?: { readonly discovery?: boolean },
+    ) {
       const directory = AbsolutePath.make(yield* fs.resolve(input))
-      const marker = yield* markers.discover(directory)
+      const marker = yield* markers.discover(directory, options)
       const native = yield* fs.up({ targets: [".git", ".hg"], start: directory, mode: "first" }).pipe(
         Effect.map((matches) => matches[0]),
         Effect.orElseSucceed(() => undefined),
