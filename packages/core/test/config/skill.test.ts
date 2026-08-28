@@ -9,6 +9,7 @@ import {
   Directory as ConfigDirectory,
   Document,
   type Entry,
+  Event,
   Info,
 } from "@opencode-ai/schema/config"
 import { ConfigSkillPlugin } from "@opencode-ai/core/config/plugin/skill"
@@ -179,6 +180,58 @@ metadata:
 })
 
 describe("ConfigSkillPlugin.Plugin", () => {
+  it.live("reinterprets config entries before refreshing and publishing skills", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireDisposable(Effect.promise(() => tmpdir()))
+      const first = path.join(tmp.path, "first")
+      const second = path.join(tmp.path, "second")
+      yield* Effect.promise(async () => {
+        await fs.mkdir(path.join(first, "review"), { recursive: true })
+        await fs.mkdir(path.join(second, "deploy"), { recursive: true })
+        await write(first, "review", "First")
+        await write(second, "deploy", "Second")
+      })
+      yield* Effect.gen(function* () {
+        const config = yield* Config.Test
+        const skill = yield* Skill.Service
+        const bus = yield* Bus.Service
+        const watcher = yield* Watcher.Test
+        yield* ConfigSkillPlugin.Plugin.effect(
+          host({
+            skill: {
+              list: () => Effect.die("unused skill.list"),
+              transform: skill.transform,
+              reload: skill.reload,
+            },
+            event: { subscribe: () => bus.subscribe(Event.Updated) },
+          }),
+        ).pipe(
+          Effect.provideService(Global.Service, Global.Service.of({ ...Global.make(), home: tmp.path })),
+          Effect.provideService(
+            Location.Service,
+            Location.Service.of(location({ directory: AbsolutePath.make(tmp.path) })),
+          ),
+        )
+        expect((yield* skill.list()).map((item) => item.id)).toEqual([Skill.ID.make("review")])
+
+        const updated = yield* Deferred.make<Skill.Info[]>()
+        yield* bus.subscribe(Skill.Event.Updated).pipe(
+          Stream.runForEach(() => skill.list().pipe(Effect.flatMap((skills) => Deferred.succeed(updated, skills)))),
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        yield* config.setEntries([new Document({ type: "document", info: decode({ skills: [second] }) })])
+        yield* bus.publish(Event.Updated, {})
+        expect(yield* Deferred.await(updated).pipe(Effect.timeout("2 seconds"))).toMatchObject([
+          { id: "deploy", description: "Second" },
+        ])
+        expect(yield* watcher.subscriptions()).toEqual([
+          { path: first, type: "directory" },
+          { path: second, type: "directory" },
+        ])
+      }).pipe(Effect.provide(Config.testLayer([new Document({ type: "document", info: decode({ skills: [first] }) })])))
+    }),
+  )
+
   it.live("maps config entry types to skill directories", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
