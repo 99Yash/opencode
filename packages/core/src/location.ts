@@ -20,8 +20,12 @@ export function canonical(ref: Ref): Ref {
 
 /** The default assignment shares one instance per canonical location. No inverse is required. */
 export function instanceKey(ref: Ref): InstanceKey.Key {
-  const location = canonical(ref)
-  return InstanceKey.Key(JSON.stringify([location.directory, location.workspaceID ?? null]))
+  return InstanceKey.Key(
+    JSON.stringify([
+      process.platform === "win32" ? path.normalize(ref.directory) : ref.directory,
+      ref.workspaceID ?? null,
+    ]),
+  )
 }
 
 export interface Interface extends Info {
