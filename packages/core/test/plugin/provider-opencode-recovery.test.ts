@@ -8,6 +8,7 @@ import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { OpencodePlugin } from "@opencode-ai/core/plugin/provider/opencode"
 import { Provider } from "@opencode-ai/core/provider"
+import { State } from "@opencode-ai/core/state"
 import { Effect, Fiber, Option, Stream } from "effect"
 import { testEffect } from "../lib/effect"
 import { PluginTestLayer } from "./fixture"
@@ -19,8 +20,8 @@ const hiddenID = Model.ID.make("hidden")
 
 const addPlugin = Effect.fn(function* () {
   const plugin = yield* Plugin.Service
-  const host = yield* PluginHost.make(plugin)
-  yield* OpencodePlugin.effect(host)
+  const host = yield* PluginHost.make(plugin, OpencodePlugin.id)
+  yield* State.batch(OpencodePlugin.effect(host))
 })
 
 const connect = Effect.fn(function* (respond: (request: Request, attempt: number) => Response | Promise<Response>) {
