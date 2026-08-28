@@ -333,7 +333,6 @@ export function createData(config: CreateDataInput) {
       : entry.answer
     setFormAnswers(formID, { answer: failed ? undefined : answer, confirmed: true, toolDone: true })
     removeForm(entry.form.sessionID, formID)
-    if (!entry.posting) removeFormAnswer(formID)
   }
 
   function settleForm(input: FormCancelInput, ref: LocationRef | undefined, request: Promise<void>) {
@@ -370,10 +369,6 @@ export function createData(config: CreateDataInput) {
       .finally(() => {
         const entry = formAnswers[input.formID]
         if (entry?.form.sessionID !== input.sessionID) return
-        if (entry.toolDone) {
-          removeFormAnswer(input.formID)
-          return
-        }
         setFormAnswers(input.formID, "posting", false)
       })
   }
@@ -2142,6 +2137,12 @@ export function createData(config: CreateDataInput) {
       finishFormAnswer(id, part.state.metadata?.answers, part.state.status === "error")
     })
   })
+
+  // Pure host memos consume terminal answers before effects retire the bridge, including SSE batches.
+  const retiredForms = createMemo(() =>
+    Object.entries(formAnswers).flatMap(([id, entry]) => (entry?.toolDone && !entry.posting ? [id] : [])),
+  )
+  createEffect(() => retiredForms().forEach(removeFormAnswer))
 
   onCleanup(
     config.event.listen(({ details }) => {

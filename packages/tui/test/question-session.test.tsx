@@ -3,7 +3,14 @@ import { CliRenderEvents } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
 import { Global } from "@opencode-ai/util/global"
-import type { FormAnswer, FormInfo, FormState, SessionInfo, SessionMessageAssistant } from "@opencode-ai/client"
+import type {
+  FormAnswer,
+  FormCreated,
+  FormInfo,
+  FormState,
+  SessionInfo,
+  SessionMessageAssistant,
+} from "@opencode-ai/client"
 import { createEventStream, createFetch, directory, json } from "./fixture/tui-client"
 import { tmpdir } from "./fixture/fixture"
 
@@ -186,6 +193,99 @@ async function mountQuestionSession(state: string, width: number, child: boolean
         },
       })
     },
+    failed() {
+      events.emit({
+        id: "evt_session_tool_failed",
+        created: 3,
+        type: "session.tool.failed",
+        durable: { aggregateID: owner, seq: 0, version: 2 },
+        data: {
+          sessionID: owner,
+          assistantMessageID: message.id,
+          id: "tool_session_question",
+          executed: true,
+          error: { type: "cancelled", message: "Demo question cancelled" },
+        },
+      })
+    },
+    hydrated(answers: string[][], sibling = false) {
+      if (sibling) {
+        const other: FormCreated["data"]["form"] = {
+          ...form,
+          fields: [
+            { key: "q0", type: "string", options: [{ value: "Staging", label: "Staging" }] },
+            { key: "q1", type: "multiselect", options: [{ value: "Focused", label: "Focused" }] },
+          ],
+          id: "frm_sibling_question",
+          metadata: { kind: "question", tool: { messageID: "msg_sibling_question", id: "tool_sibling_question" } },
+        }
+        events.emit({
+          id: "evt_sibling_form",
+          created: 3,
+          type: "form.created",
+          location: { directory },
+          data: { form: other },
+        })
+        events.emit({
+          id: "evt_sibling_reply",
+          created: 3,
+          type: "form.replied",
+          data: { sessionID: owner, id: other.id, answer: { q0: "Staging", q1: ["Focused"] } },
+        })
+        events.emit({
+          id: "evt_sibling_success",
+          created: 3,
+          type: "session.tool.success",
+          durable: { aggregateID: owner, seq: 0, version: 2 },
+          data: {
+            sessionID: owner,
+            assistantMessageID: "msg_sibling_question",
+            id: "tool_sibling_question",
+            executed: true,
+            metadata: { answers: [["Staging"], ["Focused"]] },
+            content: [{ type: "text", text: "Sibling response" }],
+          },
+        })
+      }
+      events.emit({
+        id: "evt_child_step",
+        created: 3,
+        type: "session.step.started",
+        durable: { aggregateID: owner, seq: 0, version: 1 },
+        data: {
+          sessionID: owner,
+          assistantMessageID: message.id,
+          agent: "build",
+          model: { providerID: "demo", id: "demo-model" },
+        },
+      })
+      events.emit({
+        id: "evt_child_tool_input",
+        created: 3,
+        type: "session.tool.input.started",
+        durable: { aggregateID: owner, seq: 1, version: 1 },
+        data: { sessionID: owner, assistantMessageID: message.id, id: "tool_session_question", name: "question" },
+      })
+      events.emit({
+        id: "evt_child_tool_called",
+        created: 3,
+        type: "session.tool.called",
+        durable: { aggregateID: owner, seq: 2, version: 1 },
+        data: {
+          sessionID: owner,
+          assistantMessageID: message.id,
+          id: "tool_session_question",
+          executed: true,
+          input: {},
+        },
+      })
+      events.emit({
+        id: "evt_child_tool_progress",
+        created: 3,
+        type: "session.tool.progress",
+        data: { sessionID: owner, assistantMessageID: message.id, id: "tool_session_question", metadata: { answers } },
+      })
+    },
     continued() {
       events.emit({
         id: "evt_root_followup",
@@ -330,3 +430,44 @@ test("a production permission prompt keeps keyboard ownership while a descendant
     await fixture.close()
   }
 })
+
+test("production root Session removes a descendant answer panel when tool failure arrives after POST acknowledgement", async () => {
+  await using state = await tmpdir()
+  const fixture = await mountQuestionSession(state.path, 48, true, true)
+  try {
+    await fixture.select()
+    await fixture.setup.waitFor(() => fixture.setup.renderer.currentFocusedEditor !== null)
+    expect(fixture.setup.captureCharFrame()).toContain("Staging")
+    fixture.failed()
+    await fixture.setup.waitForVisualIdle()
+    expect(fixture.setup.captureCharFrame()).not.toContain("# Questions")
+    expect(fixture.setup.captureCharFrame()).not.toContain("Staging")
+    expect(fixture.setup.captureCharFrame()).not.toContain("Focused")
+    expect(fixture.serverState.childMessages).toBe(0)
+  } finally {
+    await fixture.close()
+  }
+})
+
+for (const mode of ["event", "effect", "batched-effect"] as const) {
+  test(`production root Session retains changed canonical answers after POST acknowledgement (${mode})`, async () => {
+    await using state = await tmpdir()
+    const fixture = await mountQuestionSession(state.path, 48, true, true)
+    try {
+      await fixture.select()
+      await fixture.setup.waitFor(() => fixture.setup.renderer.currentFocusedEditor !== null)
+      expect(fixture.setup.captureCharFrame()).toContain("Staging")
+      if (mode !== "event") fixture.hydrated([["Production"], ["Full"]], mode === "batched-effect")
+      if (mode === "event") fixture.completed([["Production"], ["Full"]])
+      await fixture.setup.waitForVisualIdle()
+      expect(fixture.setup.captureCharFrame()).toContain("# Questions")
+      expect(fixture.setup.captureCharFrame()).toContain("Production")
+      expect(fixture.setup.captureCharFrame()).toContain("Full")
+      expect(fixture.setup.captureCharFrame()).not.toContain("Staging")
+      expect(fixture.setup.captureCharFrame()).not.toContain("Focused")
+      expect(fixture.serverState.childMessages).toBe(0)
+    } finally {
+      await fixture.close()
+    }
+  })
+}

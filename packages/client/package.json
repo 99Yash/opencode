@@ -29,7 +29,8 @@
     "build": "bun run script/build-package.ts",
     "generate": "bun run script/build.ts",
     "check:generated": "bun run generate && git diff --exit-code -- src/promise/generated src/effect/generated src/effect/api",
-    "test": "bun test --timeout 5000",
+    "test": "bun test --timeout 5000 && bun run test:browser",
+    "test:browser": "bun test --conditions=browser --timeout 5000 ./test/solid-form.browser.ts",
     "typecheck": "tsgo --noEmit"
   },
   "dependencies": {

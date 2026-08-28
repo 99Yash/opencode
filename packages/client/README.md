@@ -25,3 +25,9 @@ yield *
   })
 yield * client.sessions.prompt({ sessionID, prompt: Prompt.make({ text: "Hello" }) })
 ```
+
+## Testing
+
+Run `bun run test` from this package. The standard API, service-fixture, and import-boundary suites retain Node export conditions. The command then runs `bun run test:browser` for question-form projection tests with `--conditions=browser`.
+
+`createData` from `@opencode-ai/client/solid` expects a reactive Solid owner, as supplied by browser consumers or the TUI preload. Solid's Node exports are the SSR runtime, where effects do not execute; those exports cannot verify batched terminal publication, pure-memo observation, or effect-driven retirement. The reactive test condition is scoped to the projection suite rather than changing native dependency resolution or adding an SSR compatibility branch to runtime code.

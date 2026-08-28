@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createRoot } from "solid-js"
+import { batch, createMemo, createRoot } from "solid-js"
 import { createData, type CreateDataInput } from "../src/solid"
 import { OpenCode, type FormInfo, type FormState, type OpenCodeEvent } from "../src/promise"
 
@@ -38,8 +38,8 @@ function setup() {
       throw new Error(`Unexpected request: ${path}`)
     },
   })
-  const root = createRoot((dispose) => ({
-    data: createData({
+  const root = createRoot((dispose) => {
+    const data = createData({
       api: () => api,
       directory: "/demo",
       event: {
@@ -49,9 +49,13 @@ function setup() {
           return () => listeners.delete(handler)
         },
       },
-    }),
-    dispose,
-  }))
+    })
+    const observed = createMemo(
+      (previous: ReturnType<typeof data.session.form.submission>) =>
+        data.session.form.submission(form.sessionID, form.id) ?? previous,
+    )
+    return { data, observed, dispose }
+  })
   return {
     ...root,
     form,
@@ -61,7 +65,7 @@ function setup() {
     reading,
     reads: () => reads,
     emit(event: OpenCodeEvent) {
-      listeners.forEach((listener) => listener({ name: event.type, details: event }))
+      batch(() => listeners.forEach((listener) => listener({ name: event.type, details: event })))
     },
     [Symbol.dispose]() {
       root.dispose()
@@ -180,6 +184,7 @@ for (const failed of [false, true]) {
       }
       expect(fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)).toBeUndefined()
       expect(fixture.data.session.form.answer(fixture.form.sessionID, "msg_question", "tool_question")).toBeUndefined()
+      expect(fixture.observed()).toEqual({ answer: failed ? undefined : { q0: "Production" }, confirmed: true })
       expect(fixture.reads()).toBe(0)
     })
   }
