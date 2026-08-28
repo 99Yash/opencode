@@ -8,15 +8,67 @@ import { Credential } from "../../credential.js"
 import { Integration } from "../../integration.js"
 import { Model } from "../../model.js"
 import { Provider } from "../../provider.js"
-import { ConfigProviderV1 } from "../../v1/config/provider.js"
 import { Money } from "@opencode-ai/schema/money"
-import { ConfigProviderOptionsV1 } from "../../v1/config/provider-options.js"
-import { ConfigV1 } from "../../v1/config/config.js"
 
 const defaultServer = "https://opencode.ai/console"
 const clientID = "opencode-cli"
 const methodID = Integration.MethodID.make("device")
-const RemoteResponse = Schema.Struct({ config: ConfigV1.Info })
+// Console's wire contract is independent of the local opencode.json format.
+const RemoteApi = Schema.Struct({
+  id: Schema.optional(Model.ID),
+  type: Schema.Literal("aisdk"),
+  package: Schema.String,
+  url: Schema.optional(Schema.String),
+  settings: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
+})
+const RemoteRequest = Schema.Struct({
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  body: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
+})
+const RemoteResponse = Schema.Struct({
+  providers: Schema.Record(
+    Schema.String,
+    Schema.Struct({
+      name: Schema.optional(Schema.String),
+      api: Schema.optional(RemoteApi),
+      request: Schema.optional(RemoteRequest),
+      models: Schema.optional(
+        Schema.Record(
+          Schema.String,
+          Schema.Struct({
+            family: Schema.optional(Model.Family),
+            name: Schema.optional(Schema.String),
+            api: Schema.optional(RemoteApi),
+            capabilities: Schema.optional(Model.Capabilities),
+            request: Schema.optional(RemoteRequest),
+            variants: Schema.optional(Schema.Array(Schema.Struct({ id: Model.VariantID, ...RemoteRequest.fields }))),
+            cost: Schema.optional(
+              Schema.Array(
+                Schema.Struct({
+                  ...Model.Cost.fields,
+                  cache: Schema.optional(
+                    Schema.Struct({
+                      read: Schema.optional(Money.USDPerMillionTokens),
+                      write: Schema.optional(Money.USDPerMillionTokens),
+                    }),
+                  ),
+                }),
+              ),
+            ),
+            disabled: Schema.optional(Schema.Boolean),
+            limit: Schema.optional(
+              Schema.Struct({
+                context: Schema.optional(Schema.Int),
+                input: Schema.optional(Schema.Int),
+                output: Schema.optional(Schema.Int),
+              }),
+            ),
+          }),
+        ),
+      ),
+    }),
+  ),
+})
 const Device = Schema.Struct({
   device_code: Schema.String,
   user_code: Schema.String,
@@ -89,7 +141,7 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
     const http = yield* HttpClient.HttpClient
     const loading = Semaphore.makeUnsafe(1)
     let connected = false
-    let providers: typeof ConfigV1.Info.Type.provider | undefined
+    let providers: typeof RemoteResponse.Type.providers | undefined
 
     const load = Effect.fn("OpencodePlugin.load")(function* () {
       const connection = yield* ctx.integration.connection.active("opencode")
@@ -120,56 +172,62 @@ export const OpencodePlugin = define<HttpClient.HttpClient | Bus.Service | Scope
         catalog.provider.update(providerID, (provider) => {
           provider.integrationID = Integration.ID.make("opencode")
           if (item.name !== undefined) provider.name = item.name
-          provider.package = item.npm ? Provider.aisdk(item.npm) : ""
+          if (item.api !== undefined) provider.package = Provider.aisdk(item.api.package)
           provider.settings = {
             ...provider.settings,
-            ...withoutCredentials(item.options),
-            ...(item.api ? { baseURL: item.api } : {}),
+            ...withoutCredentials(item.api?.settings),
+            ...(item.api?.url !== undefined ? { baseURL: item.api.url } : {}),
           }
-          provider.headers = { ...provider.headers, ...item.options?.headers }
+          if (item.request?.headers !== undefined)
+            provider.headers = Provider.mergeHeaders(provider.headers, item.request.headers)
+          if (item.request?.body !== undefined) provider.body = Provider.mergeOverlay(provider.body, item.request.body)
         })
 
         for (const [modelID, config] of Object.entries(item.models ?? {})) {
           catalog.model.update(providerID, modelID, (model) => {
             if (config.family !== undefined) model.family = Model.Family.make(config.family)
             if (config.name !== undefined) model.name = config.name
-            if (config.id !== undefined) model.modelID = Model.ID.make(config.id)
-            model.compatibility = Model.compatibility(config.interleaved) ?? model.compatibility
-            if (config.provider !== undefined) {
-              model.package = config.provider.npm ? Provider.aisdk(config.provider.npm) : undefined
-              if (config.provider.api) model.settings = { ...model.settings, baseURL: config.provider.api }
-            }
-            if (config.tool_call !== undefined) model.capabilities.tools = config.tool_call
-            if (config.modalities?.input !== undefined) model.capabilities.input = [...config.modalities.input]
-            if (config.modalities?.output !== undefined) model.capabilities.output = [...config.modalities.output]
-            model.headers = { ...model.headers, ...config.headers }
-            model.settings = { ...model.settings, ...ConfigProviderOptionsV1.model(withoutCredentials(config.options)) }
-            if (config.variants !== undefined) {
-              model.variants ??= []
-              for (const [id, options] of Object.entries(config.variants)) {
-                const variantID = Model.VariantID.make(id)
-                let existing = model.variants.find((item) => item.id === variantID)
-                if (!existing) {
-                  existing = { id: variantID }
-                  model.variants.push(existing)
-                }
-                existing.headers = { ...existing.headers, ...options.headers }
-                existing.settings = {
-                  ...existing.settings,
-                  ...ConfigProviderOptionsV1.model(withoutCredentials(options)),
-                }
+            if (config.api !== undefined) {
+              if (config.api.id !== undefined) model.modelID = config.api.id
+              model.package = Provider.aisdk(config.api.package)
+              model.settings = {
+                ...model.settings,
+                ...withoutCredentials(config.api.settings),
+                ...(config.api.url !== undefined ? { baseURL: config.api.url } : {}),
               }
             }
-            if (config.release_date !== undefined) {
-              const released = Date.parse(config.release_date)
-              model.time.released = Number.isFinite(released) ? released : 0
+            if (config.capabilities !== undefined) {
+              model.capabilities.tools = config.capabilities.tools
+              model.capabilities.input = [...config.capabilities.input]
+              model.capabilities.output = [...config.capabilities.output]
+            }
+            if (config.request?.headers !== undefined)
+              model.headers = Provider.mergeHeaders(model.headers, config.request.headers)
+            if (config.request?.body !== undefined) model.body = Provider.mergeOverlay(model.body, config.request.body)
+            if (config.variants !== undefined) {
+              model.variants ??= []
+              for (const variant of config.variants) {
+                let existing = model.variants.find((item) => item.id === variant.id)
+                if (!existing) {
+                  existing = { id: variant.id }
+                  model.variants.push(existing)
+                }
+                if (variant.headers !== undefined)
+                  existing.headers = Provider.mergeHeaders(existing.headers, variant.headers)
+                if (variant.body !== undefined) existing.body = Provider.mergeOverlay(existing.body, variant.body)
+              }
             }
             if (config.cost !== undefined) {
-              model.cost = remoteCost(config.cost)
+              model.cost = config.cost.map((cost) => ({
+                ...cost,
+                cache: {
+                  read: cost.cache?.read ?? Money.USDPerMillionTokens.zero,
+                  write: cost.cache?.write ?? Money.USDPerMillionTokens.zero,
+                },
+              }))
             }
-            model.status = config.status ?? "active"
-            model.enabled = config.status !== "deprecated"
-            if (config.limit !== undefined) model.limit = { ...config.limit }
+            if (config.disabled !== undefined) model.enabled = !config.disabled
+            if (config.limit !== undefined) model.limit = { ...model.limit, ...config.limit }
           })
         }
       }
@@ -208,7 +266,7 @@ function fetchProviders(http: HttpClient.HttpClient, value: Credential.Value) {
   const token = value.type === "oauth" ? value.access : value.key
   return http
     .execute(
-      HttpClientRequest.get(`${server}/api/config`).pipe(
+      HttpClientRequest.get(`${server}/api/v2/config`).pipe(
         HttpClientRequest.acceptJson,
         HttpClientRequest.bearerToken(token),
         HttpClientRequest.setHeaders(orgID ? { "x-org-id": orgID } : {}),
@@ -219,7 +277,7 @@ function fetchProviders(http: HttpClient.HttpClient, value: Credential.Value) {
         if (response.status === 404) return Effect.undefined
         return HttpClientResponse.filterStatusOk(response).pipe(
           Effect.flatMap(HttpClientResponse.schemaBodyJson(RemoteResponse)),
-          Effect.map((remote) => remote.config.provider),
+          Effect.map((remote) => remote.providers),
         )
       }),
     )
@@ -240,30 +298,6 @@ function normalizeServer(input: unknown) {
     catch: (cause) =>
       new Error(`Invalid OpenCode server URL: ${cause instanceof Error ? cause.message : String(cause)}`),
   })
-}
-
-function remoteCost(input: NonNullable<(typeof ConfigProviderV1.Model.Type)["cost"]>) {
-  const base = {
-    input: Money.USDPerMillionTokens.make(input.input),
-    output: Money.USDPerMillionTokens.make(input.output),
-    cache: {
-      read: Money.USDPerMillionTokens.make(input.cache_read ?? 0),
-      write: Money.USDPerMillionTokens.make(input.cache_write ?? 0),
-    },
-  }
-  if (!input.context_over_200k) return [base]
-  return [
-    base,
-    {
-      tier: { type: "context" as const, size: 200_000 },
-      input: Money.USDPerMillionTokens.make(input.context_over_200k.input),
-      output: Money.USDPerMillionTokens.make(input.context_over_200k.output),
-      cache: {
-        read: Money.USDPerMillionTokens.make(input.context_over_200k.cache_read ?? 0),
-        write: Money.USDPerMillionTokens.make(input.context_over_200k.cache_write ?? 0),
-      },
-    },
-  ]
 }
 
 function poll(http: HttpClient.HttpClient, server: string, deviceCode: string, interval: Duration.Duration) {

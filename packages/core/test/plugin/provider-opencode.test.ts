@@ -210,155 +210,265 @@ describe("OpencodePlugin", () => {
     }),
   )
 
-  it.live("loads providers and models from the connected OpenCode server", () =>
-    Effect.acquireUseRelease(
-      Effect.sync(() => {
-        const authorization: Array<string | null> = []
-        return {
-          authorization,
-          server: Bun.serve({
-            port: 0,
-            fetch: (request) => {
-              authorization.push(request.headers.get("authorization"))
-              const origin = new URL(request.url).origin
-              return Response.json({
-                config: {
-                  enterprise: { url: origin },
-                  provider: {
+  for (const type of ["key", "oauth"] as const) {
+    it.live(`loads Console V2 providers and models with ${type} credentials`, () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const authorization: Array<string | null> = []
+          const requests: Array<{ method: string; path: string; org: string | null }> = []
+          return {
+            authorization,
+            requests,
+            server: Bun.serve({
+              port: 0,
+              fetch: (request) => {
+                authorization.push(request.headers.get("authorization"))
+                requests.push({
+                  method: request.method,
+                  path: new URL(request.url).pathname,
+                  org: request.headers.get("x-org-id"),
+                })
+                const origin = new URL(request.url).origin
+                return Response.json({
+                  providers: {
                     remote: {
                       name: "Remote",
-                      npm: "@ai-sdk/openai-compatible",
-                      api: `${origin}/v1`,
+                      api: {
+                        type: "aisdk",
+                        package: "@ai-sdk/openai-compatible",
+                        url: `${origin}/v1`,
+                        settings: {
+                          apiKey: "{env:REMOTE_API_KEY}",
+                          headers: { "x-settings-secret": "provider-secret" },
+                          custom: "value",
+                        },
+                      },
                       env: ["REMOTE_API_KEY"],
-                      options: {
-                        apiKey: "{env:REMOTE_API_KEY}",
-                        headers: { "x-org-id": "org" },
-                        custom: "value",
+                      request: {
+                        headers: { "x-org-id": "org", "x-shared": "provider" },
+                        body: { provider: true, shared: "provider" },
                       },
                       models: {
                         model: {
                           name: "Remote Model",
                           family: "remote",
-                          release_date: "2026-01-02",
-                          tool_call: true,
-                          modalities: { input: ["text", "image"], output: ["text"] },
-                          options: { apiKey: "model-secret", temperature: 0.5 },
-                          variants: { high: { apiKey: "variant-secret", temperature: 0.2 } },
-                          cost: { input: 1, output: 2, cache_read: 0.1 },
+                          api: {
+                            id: "upstream-model",
+                            type: "aisdk",
+                            package: "@ai-sdk/openai-compatible",
+                            settings: {
+                              apiKey: "model-secret",
+                              headers: { "x-settings-secret": "model-secret" },
+                              temperature: 0.5,
+                            },
+                          },
+                          capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+                          request: {
+                            headers: { "x-model": "true", "x-shared": "model" },
+                            body: { model: true, shared: "model" },
+                          },
+                          variants: [
+                            {
+                              id: "high",
+                              headers: { "x-variant": "high", "x-shared": "remote" },
+                              body: { temperature: 0.2, shared: "remote" },
+                            },
+                            { id: "low", body: { temperature: 0.8 } },
+                          ],
+                          cost: [
+                            { input: 1, output: 2, cache: { read: 0.1 } },
+                            { tier: { type: "context", size: 250_000 }, input: 3, output: 4 },
+                          ],
                           limit: { context: 1000, output: 100 },
                         },
                         override: {
                           name: "Override",
-                          provider: { npm: "@ai-sdk/anthropic", api: `${origin}/anthropic` },
+                          api: { type: "aisdk", package: "@ai-sdk/anthropic", url: `${origin}/anthropic` },
+                          limit: { input: 500 },
                         },
-                        disabled: { name: "Disabled", status: "deprecated" },
+                        disabled: { name: "Disabled", disabled: true },
                       },
                     },
                   },
-                },
-              })
-            },
-          }),
-        }
-      }),
-      ({ authorization, server }) =>
-        Effect.gen(function* () {
-          const credentials = yield* Credential.Service
-          const catalog = yield* Catalog.Service
-          yield* catalog.transform((draft) => {
-            draft.provider.update(Provider.ID.make("remote"), () => {})
-            draft.model.update(Provider.ID.make("remote"), Model.ID.make("model"), (model) => {
-              model.variants = [
-                {
-                  id: Model.VariantID.make("custom"),
-                  settings: {},
-                  headers: { "x-custom": "true" },
-                  body: { custom: true },
-                },
-              ]
-            })
-            draft.model.update(Provider.ID.make("remote"), Model.ID.make("stale"), () => {})
-          })
-          const initial = yield* credentials.create({
-            integrationID: Integration.ID.make("opencode"),
-            value: Credential.Key.make({
-              type: "key",
-              key: "secret",
-              metadata: { server: server.url.origin },
+                })
+              },
             }),
-          })
-
-          yield* addPlugin()
-          expect(authorization).toEqual(["Bearer secret"])
-
-          const provider = required(yield* catalog.provider.get(Provider.ID.make("remote")))
-          expect(provider).toMatchObject({
-            name: "Remote",
-            integrationID: "opencode",
-            package: Provider.aisdk("@ai-sdk/openai-compatible"),
-            settings: { baseURL: `${server.url.origin}/v1`, custom: "value" },
-            headers: { "x-org-id": "org" },
-          })
-          expect(yield* (yield* Integration.Service).get(Integration.ID.make("remote"))).toBeUndefined()
-
-          const model = required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("model")))
-          expect(model).toMatchObject({
-            name: "Remote Model",
-            family: "remote",
-            capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
-            cost: [{ input: 1, output: 2, cache: { read: 0.1, write: 0 } }],
-            limit: { context: 1000, output: 100 },
-            package: Provider.aisdk("@ai-sdk/openai-compatible"),
-            settings: { baseURL: `${server.url.origin}/v1`, custom: "value", temperature: 0.5 },
-            headers: { "x-org-id": "org" },
-          })
-          const override = required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("override")))
-          expect(override.package).toBe(Provider.aisdk("@ai-sdk/anthropic"))
-          expect(override.settings?.baseURL).toBe(`${server.url.origin}/anthropic`)
-          expect(model.variants).toEqual([
-            {
-              id: Model.VariantID.make("custom"),
-              settings: {},
-              headers: { "x-custom": "true" },
-              body: { custom: true },
-            },
-            {
-              id: Model.VariantID.make("high"),
-              settings: { temperature: 0.2 },
-              headers: {},
-            },
-          ])
-          expect(
-            required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("disabled"))).enabled,
-          ).toBe(false)
-          expect(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("stale"))).toBeDefined()
-
-          yield* credentials.update(initial.id, { label: "Renamed" })
-          yield* Effect.yieldNow
-          expect(authorization).toEqual(["Bearer secret"])
-
-          const replacement = yield* credentials.create({
-            integrationID: Integration.ID.make("opencode"),
-            value: Credential.Key.make({
-              type: "key",
-              key: "replacement",
-              metadata: { server: server.url.origin },
-            }),
-          })
-          yield* eventually(
-            Effect.sync(() => authorization.length),
-            (count) => count === 2,
-          )
-          expect(authorization).toEqual(["Bearer secret", "Bearer replacement"])
-
-          yield* credentials.remove(initial.id)
-          yield* Effect.yieldNow
-          expect(authorization).toEqual(["Bearer secret", "Bearer replacement"])
-          expect((yield* credentials.list(Integration.ID.make("opencode"))).at(-1)?.id).toBe(replacement.id)
+          }
         }),
-      ({ server }) => Effect.promise(() => server.stop(true)),
-    ),
-  )
+        ({ authorization, requests, server }) =>
+          Effect.gen(function* () {
+            const credentials = yield* Credential.Service
+            const catalog = yield* Catalog.Service
+            yield* catalog.transform((draft) => {
+              draft.provider.update(Provider.ID.make("remote"), () => {})
+              draft.model.update(Provider.ID.make("remote"), Model.ID.make("model"), (model) => {
+                model.variants = [
+                  {
+                    id: Model.VariantID.make("custom"),
+                    settings: {},
+                    headers: { "x-custom": "true" },
+                    body: { custom: true },
+                  },
+                  {
+                    id: Model.VariantID.make("high"),
+                    settings: { local: true },
+                    headers: { "x-local": "true", "x-shared": "local" },
+                    body: { local: true, shared: "local" },
+                  },
+                ]
+              })
+              draft.model.update(Provider.ID.make("remote"), Model.ID.make("stale"), () => {})
+            })
+            const initial = yield* credentials.create({
+              integrationID: Integration.ID.make("opencode"),
+              value:
+                type === "key"
+                  ? Credential.Key.make({
+                      type: "key",
+                      key: "secret",
+                      metadata: { server: `${server.url.origin}/console`, orgID: "org" },
+                    })
+                  : Credential.OAuth.make({
+                      type: "oauth",
+                      methodID: Integration.MethodID.make("device"),
+                      access: "secret",
+                      refresh: "refresh",
+                      expires: Date.now() + 600_000,
+                      metadata: { server: `${server.url.origin}/console`, orgID: "org" },
+                    }),
+            })
+
+            yield* addPlugin()
+            expect(authorization).toEqual(["Bearer secret"])
+            expect(requests).toEqual([{ method: "GET", path: "/console/api/v2/config", org: "org" }])
+
+            const provider = required(yield* catalog.provider.get(Provider.ID.make("remote")))
+            expect(provider).toMatchObject({
+              name: "Remote",
+              integrationID: "opencode",
+              package: Provider.aisdk("@ai-sdk/openai-compatible"),
+              settings: { baseURL: `${server.url.origin}/v1`, custom: "value" },
+              headers: { "x-org-id": "org", "x-shared": "provider" },
+              body: { provider: true, shared: "provider" },
+            })
+            expect(provider.settings).toEqual({ baseURL: `${server.url.origin}/v1`, custom: "value" })
+            expect(yield* (yield* Integration.Service).get(Integration.ID.make("remote"))).toBeUndefined()
+
+            const model = required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("model")))
+            expect(model).toMatchObject({
+              name: "Remote Model",
+              modelID: "upstream-model",
+              family: "remote",
+              capabilities: { tools: true, input: ["text", "image"], output: ["text"] },
+              cost: [
+                { input: 1, output: 2, cache: { read: 0.1, write: 0 } },
+                { tier: { type: "context", size: 250_000 }, input: 3, output: 4, cache: { read: 0, write: 0 } },
+              ],
+              limit: { context: 1000, output: 100 },
+              package: Provider.aisdk("@ai-sdk/openai-compatible"),
+              settings: { baseURL: `${server.url.origin}/v1`, custom: "value", temperature: 0.5 },
+              headers: { "x-org-id": "org", "x-model": "true", "x-shared": "model" },
+              body: { provider: true, model: true, shared: "model" },
+            })
+            expect(model.settings).toEqual({ baseURL: `${server.url.origin}/v1`, custom: "value", temperature: 0.5 })
+            const override = required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("override")))
+            expect(override.package).toBe(Provider.aisdk("@ai-sdk/anthropic"))
+            expect(override.settings?.baseURL).toBe(`${server.url.origin}/anthropic`)
+            expect(override.limit).toEqual({ context: 200_000, input: 500, output: 32_000 })
+            expect(model.variants).toEqual([
+              {
+                id: Model.VariantID.make("custom"),
+                settings: {},
+                headers: { "x-custom": "true" },
+                body: { custom: true },
+              },
+              {
+                id: Model.VariantID.make("high"),
+                settings: { local: true },
+                headers: { "x-local": "true", "x-variant": "high", "x-shared": "remote" },
+                body: { local: true, temperature: 0.2, shared: "remote" },
+              },
+              { id: Model.VariantID.make("low"), body: { temperature: 0.8 } },
+            ])
+            expect(
+              required(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("disabled"))).enabled,
+            ).toBe(false)
+            expect(yield* catalog.model.get(Provider.ID.make("remote"), Model.ID.make("stale"))).toBeDefined()
+
+            yield* credentials.update(initial.id, { label: "Renamed" })
+            yield* Effect.yieldNow
+            expect(authorization).toEqual(["Bearer secret"])
+
+            const replacement = yield* credentials.create({
+              integrationID: Integration.ID.make("opencode"),
+              value: Credential.Key.make({
+                type: "key",
+                key: "replacement",
+                metadata: { server: `${server.url.origin}/console`, orgID: "org" },
+              }),
+            })
+            yield* eventually(
+              Effect.sync(() => authorization.length),
+              (count) => count === 2,
+            )
+            expect(authorization).toEqual(["Bearer secret", "Bearer replacement"])
+            expect(requests).toEqual([
+              { method: "GET", path: "/console/api/v2/config", org: "org" },
+              { method: "GET", path: "/console/api/v2/config", org: "org" },
+            ])
+
+            yield* credentials.remove(initial.id)
+            yield* Effect.yieldNow
+            expect(authorization).toEqual(["Bearer secret", "Bearer replacement"])
+            expect((yield* credentials.list(Integration.ID.make("opencode"))).at(-1)?.id).toBe(replacement.id)
+          }),
+        ({ server }) => Effect.promise(() => server.stop(true)),
+      ),
+    )
+  }
+
+  for (const status of [404, 503]) {
+    it.live(`keeps the catalog when Console V2 config returns ${status}`, () =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const requests: string[] = []
+          return {
+            requests,
+            server: Bun.serve({
+              port: 0,
+              fetch: (request) => {
+                requests.push(`${request.method} ${new URL(request.url).pathname}`)
+                return Response.json({ providers: { remote: { name: "Not loaded" } } }, { status })
+              },
+            }),
+          }
+        }),
+        ({ requests, server }) =>
+          Effect.gen(function* () {
+            const credentials = yield* Credential.Service
+            const catalog = yield* Catalog.Service
+            yield* catalog.transform((draft) => {
+              draft.provider.update(Provider.ID.make("existing"), (provider) => {
+                provider.name = "Existing"
+              })
+            })
+            yield* credentials.create({
+              integrationID: Integration.ID.make("opencode"),
+              value: Credential.Key.make({
+                type: "key",
+                key: "secret",
+                metadata: { server: `${server.url.origin}/console` },
+              }),
+            })
+            yield* addPlugin()
+            expect(requests).toEqual(["GET /console/api/v2/config"])
+            expect(yield* catalog.provider.get(Provider.ID.make("remote"))).toBeUndefined()
+            expect(required(yield* catalog.provider.get(Provider.ID.make("existing"))).name).toBe("Existing")
+          }),
+        ({ server }) => Effect.promise(() => server.stop(true)),
+      ),
+    )
+  }
 
   it.effect("uses a public key and disables paid models without credentials", () =>
     withEnv({ OPENCODE_API_KEY: undefined }, () =>
