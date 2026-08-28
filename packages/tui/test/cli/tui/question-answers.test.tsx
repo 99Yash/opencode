@@ -121,7 +121,11 @@ async function mountQuestion(
       return (
         parseQuestionAnswers(
           part?.type === "tool" && part.state.status !== "streaming" ? part.state.metadata?.answers : undefined,
-        ) ?? formQuestionAnswers(current.session.form.answer(form.sessionID, "tool_question"), questions.length)
+        ) ??
+        formQuestionAnswers(
+          current.session.form.answer(form.sessionID, "msg_question", "tool_question"),
+          questions.length,
+        )
       )
     })
     return (
@@ -171,7 +175,7 @@ async function mountQuestion(
     cancellations,
     server,
     frames,
-    preview: () => data?.session.form.answer(form.sessionID, "tool_question"),
+    preview: (messageID = "msg_question") => data?.session.form.answer(form.sessionID, messageID, "tool_question"),
     accepted(answer: FormAnswer) {
       server.state = { status: "answered", answer }
       events.emit({
@@ -194,6 +198,21 @@ async function mountQuestion(
           executed: true,
           metadata: { answers },
           content: [{ type: "text", text: "Question response" }],
+        },
+      })
+    },
+    failed() {
+      events.emit({
+        id: "evt_tool_failed",
+        created: 1,
+        type: "session.tool.failed",
+        durable: { aggregateID: form.sessionID, seq: 0, version: 2 },
+        data: {
+          sessionID: form.sessionID,
+          assistantMessageID: message.id,
+          id: "tool_question",
+          executed: true,
+          error: { type: "cancelled", message: "Demo question cancelled" },
         },
       })
     },
@@ -393,6 +412,44 @@ test("a competing cancellation drops tentative question output rather than confi
     expect(prompt.preview()).toBeUndefined()
     expect(prompt.server.reads).toBe(1)
     expect(prompt.app.captureCharFrame()).not.toContain("Staging")
+  } finally {
+    prompt.pending.resolve(new Response(null, { status: 204 }))
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("question previews do not leak to another assistant message with a reused tool-call ID", async () => {
+  const prompt = await mountQuestion(48)
+  try {
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("# Questions"))
+    expect(prompt.preview()).toEqual({ q0: "Staging" })
+    expect(prompt.preview("msg_previous_question")).toBeUndefined()
+    prompt.accepted({ q0: "Production" })
+    await prompt.app.waitForFrame((frame) => frame.includes("Composer ready") && frame.includes("Production"))
+    expect(prompt.preview("msg_previous_question")).toBeUndefined()
+    prompt.pending.resolve(new Response(null, { status: 204 }))
+    prompt.completed([["Production"]])
+    await prompt.app.waitFor(() => prompt.preview() === undefined)
+  } finally {
+    prompt.pending.resolve(new Response(null, { status: 204 }))
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("a terminal tool error removes tentative answers without resurrecting a form on late POST failure", async () => {
+  const prompt = await mountQuestion(48)
+  try {
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("# Questions"))
+    prompt.failed()
+    await prompt.app.waitForFrame((frame) => frame.includes("Composer ready") && !frame.includes("# Questions"))
+    expect(prompt.app.captureCharFrame()).not.toContain("Staging")
+    prompt.pending.resolve(json({}, { status: 500 }))
+    await prompt.app.renderOnce()
+    expect(prompt.preview()).toBeUndefined()
+    expect(prompt.server.reads).toBe(0)
+    expect(prompt.app.captureCharFrame()).not.toContain("UnexpectedStatus")
   } finally {
     prompt.pending.resolve(new Response(null, { status: 204 }))
     prompt.app.renderer.destroy()

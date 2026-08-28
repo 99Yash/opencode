@@ -82,8 +82,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       tool &&
       typeof tool === "object" &&
       "id" in tool &&
-      typeof tool.id === "string"
-      ? data.session.form.answer(props.form.sessionID, tool.id)
+      typeof tool.id === "string" &&
+      "messageID" in tool &&
+      typeof tool.messageID === "string"
+      ? data.session.form.answer(props.form.sessionID, tool.messageID, tool.id)
       : undefined
   })
   const fields = createMemo(() => {

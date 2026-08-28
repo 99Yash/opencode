@@ -1703,9 +1703,10 @@ export function createData(config: CreateDataInput) {
         },
       },
       form: {
-        answer(sessionID: string, toolID: string) {
+        answer(sessionID: string, messageID: string, toolID: string) {
           return Object.values(formAnswers).find(
-            (entry) => entry?.form.sessionID === sessionID && entry.tool.id === toolID,
+            (entry) =>
+              entry?.form.sessionID === sessionID && entry.tool.messageID === messageID && entry.tool.id === toolID,
           )?.answer
         },
         list(sessionID: string, ref?: LocationRef) {
@@ -2088,6 +2089,7 @@ export function createData(config: CreateDataInput) {
       if (part.state.status !== "error" && !Array.isArray(part.state.metadata?.answers)) return
       removeForm(entry.form.sessionID, id)
       if (entry.posting) {
+        if (part.state.status === "error") setFormAnswers(id, "answer", undefined)
         setFormAnswers(id, "confirmed", true)
         return
       }

@@ -1818,7 +1818,7 @@ function SessionPartView(props: { partRef: PartRef; message: (messageID: string)
             />
           </Match>
           <Match when={item().type === "tool"}>
-            <ToolPart part={item() as SessionMessageAssistantTool} />
+            <ToolPart part={item() as SessionMessageAssistantTool} messageID={props.partRef.messageID} />
           </Match>
         </Switch>
       )}
@@ -2683,10 +2683,13 @@ function TextPart(props: { last: boolean; part: SessionMessageAssistantText; mes
 
 // Pending messages moved to individual tool pending functions
 
-function ToolPart(props: { part: SessionMessageAssistantTool; images?: boolean }) {
+function ToolPart(props: { part: SessionMessageAssistantTool; messageID?: string; images?: boolean }) {
   const display = createMemo(() => toolDisplay(props.part.name))
 
   const toolprops = {
+    get messageID() {
+      return props.messageID
+    },
     get metadata() {
       return toolDisplayMetadata(props.part.state)
     },
@@ -2836,6 +2839,7 @@ function inlineToolImages(part: SessionMessageAssistantTool) {
 }
 
 type ToolProps = {
+  messageID?: string
   input: Record<string, unknown>
   metadata: Record<string, unknown>
   tool: string
@@ -3766,7 +3770,12 @@ function Question(props: ToolProps) {
   const answers = createMemo(
     () =>
       parseQuestionAnswers(props.metadata.answers) ??
-      formQuestionAnswers(data.session.form.answer(ctx.sessionID, props.part.id), questions().length),
+      (props.messageID
+        ? formQuestionAnswers(
+            data.session.form.answer(ctx.sessionID, props.messageID, props.part.id),
+            questions().length,
+          )
+        : undefined),
   )
   const count = createMemo(() => questions().length)
 
