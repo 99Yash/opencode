@@ -592,7 +592,7 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
 
     if (message.role === "assistant") {
       const content: TextPart[] = []
-      const reasoningItems = new Map<string, OpenResponsesReasoningInput>()
+      const reasoningItems: Record<string, OpenResponsesReasoningInput> = {}
       const hostedToolItems = new Set<string>()
       const flushText = () => {
         if (content.length === 0) return
@@ -630,14 +630,14 @@ const lowerMessages = Effect.fn("OpenResponses.lowerMessages")(function* (reques
           const metadata = part.providerMetadata?.[providerMetadataKey]
           const sourceID =
             ProviderShared.isRecord(metadata) && typeof metadata.itemId === "string" ? metadata.itemId : undefined
-          const existing = sourceID === undefined ? undefined : reasoningItems.get(sourceID)
+          const existing = sourceID === undefined ? undefined : reasoningItems[sourceID]
           if (existing) {
             existing.summary.push(...reasoning.summary)
             if (typeof reasoning.encrypted_content === "string")
               existing.encrypted_content = reasoning.encrypted_content
             continue
           }
-          if (sourceID !== undefined) reasoningItems.set(sourceID, reasoning)
+          if (sourceID !== undefined) reasoningItems[sourceID] = reasoning
           input.push(reasoning)
           continue
         }

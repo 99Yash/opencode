@@ -33,16 +33,6 @@ describe("OpenAI Responses reasoning channels", () => {
           summary_index: 0,
           delta: "Visible summary.",
         },
-        {
-          type: "response.output_item.done",
-          item: {
-            type: "reasoning",
-            id: "rs_1",
-            summary: [{ type: "summary_text", text: "Visible summary." }],
-            content: [{ type: "reasoning_text", text: "Internal detail." }],
-            encrypted_content: "state",
-          },
-        },
         completed,
       )
 
@@ -62,15 +52,6 @@ describe("OpenAI Responses reasoning channels", () => {
         { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
         { type: "response.reasoning_summary_text.delta", item_id: "rs_1", summary_index: 0, delta: "Summary." },
         { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 0, delta: "Internal detail." },
-        {
-          type: "response.output_item.done",
-          item: {
-            type: "reasoning",
-            id: "rs_1",
-            summary: [{ type: "summary_text", text: "Summary." }],
-            content: [{ type: "reasoning_text", text: "Internal detail." }],
-          },
-        },
         completed,
       )
 
