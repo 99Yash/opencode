@@ -72,7 +72,7 @@ export function define<State, Event, Operation, Error, Output>(
   return definition
 }
 
-export function next<State, Operation>(state: State, ...commands: ReadonlyArray<Command<Operation>>) {
+export function next<State, Operation = never>(state: State, ...commands: ReadonlyArray<Command<Operation>>) {
   return { _tag: "Continue", state, commands } as const
 }
 

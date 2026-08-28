@@ -223,7 +223,7 @@ describe("SessionStepMachine", () => {
         observeUntilBoundary: () =>
           Effect.suspend(() => {
             const call = pending.shift()
-            if (call) return Effect.succeed({ _tag: "ToolCall" as const, call })
+            if (call) return Effect.succeed(SessionStep.ProviderObservation.ToolCall({ call }))
             return Deferred.succeed(providerStarted, undefined).pipe(
               Effect.andThen(Effect.never),
               Effect.ensuring(
@@ -297,8 +297,7 @@ describe("SessionStepMachine", () => {
     const cause = Cause.interrupt(123)
     const call = { type: "tool-call", id: "call_pending", name: "lookup", input: {} } as const
     const completed = { ...call, id: "call_completed" }
-    const state: SessionStepMachine.State = {
-      _tag: "FinalizingProvider",
+    const state = SessionStepMachine.State.FinalizingProvider({
       active: {
         context: { assistantMessageID: firstID, recoverOverflow: true, recoverContinuation: true },
         attempt: makeAttempt(SessionStep.Outcome.Completed({ needsContinuation: false })),
@@ -308,16 +307,24 @@ describe("SessionStepMachine", () => {
         ]),
       },
       stream: Exit.succeed(undefined),
-    }
-    const stopping = definition.transition(state, { _tag: "Input", input: { _tag: "CancelRequested" }, cause })
+    })
+    const stopping = definition.transition(state, {
+      _tag: "Input",
+      input: SessionStepMachine.Event.CancelRequested(),
+      cause,
+    })
     if (stopping._tag !== "Continue") throw new Error("Expected cancellation to await owned invocations")
     expect(stopping.state).toEqual({ _tag: "Stopping", from: state, cause })
     expect(stopping.commands).toEqual([
       { _tag: "StopAndJoin", id: "step", ids: ["tool:call_pending"], waitFor: ["provider"] },
     ])
-    expect(definition.transition(stopping.state, { _tag: "Input", input: { _tag: "CancelRequested" }, cause })).toEqual(
-      { _tag: "Continue", state: stopping.state, commands: [] },
-    )
+    expect(
+      definition.transition(stopping.state, {
+        _tag: "Input",
+        input: SessionStepMachine.Event.CancelRequested(),
+        cause,
+      }),
+    ).toEqual({ _tag: "Continue", state: stopping.state, commands: [] })
 
     const settling = definition.transition(stopping.state, {
       _tag: "InvocationsStopped",
@@ -327,15 +334,18 @@ describe("SessionStepMachine", () => {
           _tag: "InvocationExited",
           id: "tool:call_pending",
           generation: 1,
-          operation: { _tag: "RunTool", attempt: state.active.attempt, call },
+          operation: SessionStepMachine.Operation.RunTool({ attempt: state.active.attempt, call }),
           exit: Exit.interrupt(456),
         },
         {
           _tag: "InvocationExited",
           id: "provider",
           generation: 2,
-          operation: { _tag: "FinishProvider", attempt: state.active.attempt, stream: state.stream },
-          exit: Exit.succeed({ _tag: "ProviderFinished", exit: Exit.succeed(undefined) }),
+          operation: SessionStepMachine.Operation.FinishProvider({
+            attempt: state.active.attempt,
+            stream: state.stream,
+          }),
+          exit: Exit.succeed(SessionStepMachine.Event.ProviderFinished({ exit: Exit.succeed(undefined) })),
         },
       ],
     })
@@ -364,33 +374,36 @@ describe("SessionStepMachine", () => {
     { name: "never-started", exit: Exit.interrupt(456), replaced: false },
     {
       name: "queued false",
-      exit: Exit.succeed({ _tag: "OverflowRecovered" as const, exit: Exit.succeed(false) }),
+      exit: Exit.succeed(SessionStepMachine.Event.OverflowRecovered({ exit: Exit.succeed(false) })),
       replaced: false,
     },
     {
       name: "queued failure",
-      exit: Exit.succeed({ _tag: "OverflowRecovered" as const, exit: Exit.die("Recovery failed") }),
+      exit: Exit.succeed(SessionStepMachine.Event.OverflowRecovered({ exit: Exit.die("Recovery failed") })),
       replaced: false,
     },
     {
       name: "queued true",
-      exit: Exit.succeed({ _tag: "OverflowRecovered" as const, exit: Exit.succeed(true) }),
+      exit: Exit.succeed(SessionStepMachine.Event.OverflowRecovered({ exit: Exit.succeed(true) })),
       replaced: true,
     },
   ] as const) {
     test(`cancellation reconciles ${fixture.name} overflow recovery before deciding settlement`, () => {
       const definition = SessionStepMachine.definition<never, never>(firstID)
       const cause = Cause.interrupt(123)
-      const state: SessionStepMachine.State = {
-        _tag: "RecoveringOverflow",
+      const state = SessionStepMachine.State.RecoveringOverflow({
         active: {
           context: { assistantMessageID: firstID, recoverOverflow: true, recoverContinuation: true },
           attempt: makeAttempt(SessionStep.Outcome.Completed({ needsContinuation: true })),
           tools: new Map(),
         },
         stream: Exit.succeed(undefined),
-      }
-      const stopping = definition.transition(state, { _tag: "Input", input: { _tag: "CancelRequested" }, cause })
+      })
+      const stopping = definition.transition(state, {
+        _tag: "Input",
+        input: SessionStepMachine.Event.CancelRequested(),
+        cause,
+      })
       if (stopping._tag !== "Continue") throw new Error("Expected cancellation to await recovery")
       expect(stopping.state).toEqual({ _tag: "Stopping", from: state, cause })
       expect(stopping.commands).toEqual([{ _tag: "StopAndJoin", id: "step", ids: ["compaction"], waitFor: [] }])
@@ -403,11 +416,10 @@ describe("SessionStepMachine", () => {
             _tag: "InvocationExited",
             id: "compaction",
             generation: 1,
-            operation: {
-              _tag: "RecoverOverflow",
+            operation: SessionStepMachine.Operation.RecoverOverflow({
               attempt: state.active.attempt,
               settlement: { stream: state.stream, tools: [] },
-            },
+            }),
             exit: fixture.exit,
           },
         ],
@@ -437,10 +449,11 @@ describe("SessionStepMachine", () => {
           id: command.id,
           generation: 2,
           operation: command.operation,
-          exit: Exit.succeed({
-            _tag: "AttemptSettled",
-            exit: Exit.succeed(SessionStep.Outcome.Completed({ needsContinuation: true })),
-          }),
+          exit: Exit.succeed(
+            SessionStepMachine.Event.AttemptSettled({
+              exit: Exit.succeed(SessionStep.Outcome.Completed({ needsContinuation: true })),
+            }),
+          ),
         }),
       ).toEqual({ _tag: "Done", output: Exit.failCause(cause) })
     })
@@ -501,10 +514,10 @@ function makeAttempt(
       Effect.gen(function* () {
         const event = events.shift()
         yield* log(event ? `read:${event.type}` : "read:end")
-        if (!event) return { _tag: "ProviderEnd" as const }
+        if (!event) return SessionStep.ProviderObservation.ProviderEnd()
         yield* log(`publish:${event.type}`)
-        if (event.type !== "tool-call") return { _tag: "ProviderEnd" as const }
-        return { _tag: "ToolCall" as const, call: event }
+        if (event.type !== "tool-call") return SessionStep.ProviderObservation.ProviderEnd()
+        return SessionStep.ProviderObservation.ToolCall({ call: event })
       }),
     runTool: (call) => log(`tool:${call.id}`),
     finishProvider: () => log("finish-provider"),

@@ -47,9 +47,11 @@ export interface Input {
   readonly recoverOverflow: Effect.Effect<boolean>
 }
 
-export type ProviderObservation =
-  | { readonly _tag: "ToolCall"; readonly call: ToolCall }
-  | { readonly _tag: "ProviderEnd" }
+export type ProviderObservation = Data.TaggedEnum<{
+  ToolCall: { readonly call: ToolCall }
+  ProviderEnd: {}
+}>
+export const ProviderObservation = Data.taggedEnum<ProviderObservation>()
 
 export type ToolExit = Exit.Exit<void, Permission.DeclinedError | QuestionTool.CancelledError>
 
@@ -112,11 +114,12 @@ export const make = Effect.gen(function* () {
           }
           // Keep the publisher's in-memory mark and durable write indivisible under cancellation.
           yield* publisher.publish(event).pipe(Effect.uninterruptible)
-          if (event.type === "tool-call" && !event.providerExecuted) return { _tag: "ToolCall", call: event }
+          if (event.type === "tool-call" && !event.providerExecuted)
+            return ProviderObservation.ToolCall({ call: event })
           continue
         }
         const chunk = yield* pull.pipe(Pull.catchDone(() => Effect.succeed(undefined)))
-        if (!chunk) return { _tag: "ProviderEnd" }
+        if (!chunk) return ProviderObservation.ProviderEnd()
         buffered = chunk
         offset = 0
       }
