@@ -14,7 +14,7 @@ import { Keymap } from "../../context/keymap"
 import { usePathFormatter } from "../../context/path-format"
 import { SimulationSemantics } from "../../simulation/semantics"
 import { PatchDiff } from "../../component/patch-diff"
-import { useToast } from "../../ui/toast"
+import { errorMessage } from "../../util/error"
 
 type PermissionStage = "permission" | "always" | "reject"
 
@@ -111,9 +111,10 @@ function EditBody(props: { file?: string; diff?: string; patch?: string }) {
 
 export function PermissionPrompt(props: { request: PermissionRequest; directory?: string }) {
   const data = useData()
-  const toast = useToast()
   const [store, setStore] = createStore({
     stage: "permission" as PermissionStage,
+    submitting: undefined as PermissionReply | undefined,
+    error: "",
   })
   const pathFormatter = usePathFormatter()
   const session = createMemo(() => data.session.get(props.request.sessionID))
@@ -131,11 +132,23 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
   })
 
   const theme = useTheme()
+  const submitting = createMemo(() => {
+    if (store.submitting === "once") return "Sending approval..."
+    if (store.submitting === "always") return "Sending always-allow approval..."
+    if (store.submitting === "reject") return "Sending rejection..."
+    return undefined
+  })
 
   function reply(value: PermissionReply, message?: string) {
+    if (store.submitting) return
+    setStore("error", "")
+    setStore("submitting", value)
     void data.session.permission
       .reply({ sessionID: props.request.sessionID, requestID: props.request.id, reply: value, message })
-      .catch((error: unknown) => toast.error(error))
+      .catch((error: unknown) => {
+        setStore("error", errorMessage(error))
+        setStore("submitting", undefined)
+      })
   }
 
   return (
@@ -154,9 +167,14 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           }
           options={{ confirm: permissionOptionLabel("confirm"), cancel: permissionOptionLabel("cancel") }}
           escapeKey="cancel"
+          submitting={submitting()}
+          error={store.error}
           onSelect={(option) => {
-            setStore("stage", "permission")
-            if (option === "cancel") return
+            if (store.submitting) return
+            if (option === "cancel") {
+              setStore("stage", "permission")
+              return
+            }
             reply("always")
           }}
         />
@@ -165,10 +183,13 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
         <RejectPrompt
           action={props.request.action}
           instance={props.request.id}
+          submitting={submitting()}
+          error={store.error}
           onConfirm={(message) => {
             reply("reject", message || undefined)
           }}
           onCancel={() => {
+            if (store.submitting) return
             setStore("stage", "permission")
           }}
         />
@@ -252,7 +273,10 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
               escapeKey="reject"
               fullscreen
+              submitting={submitting()}
+              error={store.error}
               onSelect={(option) => {
+                if (store.submitting) return
                 if (option === "always") {
                   setStore("stage", "always")
                   return
@@ -284,6 +308,8 @@ export function permissionSemanticLabel(action: string, title?: string) {
 function RejectPrompt(props: {
   action: string
   instance: string
+  submitting?: string
+  error?: string
   onConfirm: (message: string) => void
   onCancel: () => void
 }) {
@@ -300,6 +326,7 @@ function RejectPrompt(props: {
         title: "Cancel permission rejection",
         group: "Permission",
         run(_input, event) {
+          if (props.submitting) return
           if (event?.ctrl && event.name === "c" && input.plainText) {
             input.setText("")
             return
@@ -307,12 +334,21 @@ function RejectPrompt(props: {
           props.onCancel()
         },
       },
-      { bind: "escape", title: "Cancel permission rejection", group: "Permission", run: () => props.onCancel() },
+      {
+        bind: "escape",
+        title: "Cancel permission rejection",
+        group: "Permission",
+        run: () => {
+          if (!props.submitting) props.onCancel()
+        },
+      },
       {
         bind: "return",
         title: "Confirm permission rejection",
         group: "Permission",
-        run: () => props.onConfirm(input.plainText),
+        run: () => {
+          if (!props.submitting) props.onConfirm(input.plainText)
+        },
       },
     ],
   }))
@@ -360,11 +396,12 @@ function RejectPrompt(props: {
               role: "textbox",
               label: "Rejection reason",
               focused: val.focused,
-              disabled: false,
+              disabled: !!props.submitting,
             }))(val)
             val.traits = { status: "REJECT" }
           }}
-          focused
+          visible={!props.submitting}
+          focused={!props.submitting}
           textColor={theme.text.default}
           focusedTextColor={theme.text.default}
           cursorColor={theme.text.default}
@@ -372,6 +409,7 @@ function RejectPrompt(props: {
         />
         <box
           id="session.permission.reject.actions"
+          visible={!props.submitting}
           ref={SimulationSemantics.bind(() => ({
             instance: props.instance,
             role: "group",
@@ -387,7 +425,7 @@ function RejectPrompt(props: {
               instance: props.instance,
               role: "button",
               label: "Confirm rejection",
-              disabled: false,
+              disabled: !!props.submitting,
             }))}
             onMouseUp={() => props.onConfirm(input.plainText)}
           >
@@ -401,7 +439,7 @@ function RejectPrompt(props: {
               instance: props.instance,
               role: "button",
               label: "Cancel rejection",
-              disabled: false,
+              disabled: !!props.submitting,
             }))}
             onMouseUp={props.onCancel}
           >
@@ -410,7 +448,15 @@ function RejectPrompt(props: {
             </text>
           </box>
         </box>
+        <Show when={props.submitting}>
+          <text fg={theme.text.feedback.info.default}>{props.submitting}</text>
+        </Show>
       </box>
+      <Show when={props.error}>
+        <box paddingLeft={2} paddingRight={3} paddingBottom={1}>
+          <text fg={theme.text.feedback.error.default}>{props.error}</text>
+        </box>
+      </Show>
     </box>
   )
 }
@@ -427,6 +473,8 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
   options: T
   escapeKey?: keyof T
   fullscreen?: boolean
+  submitting?: string
+  error?: string
   onSelect: (option: keyof T) => void
 }) {
   const theme = useTheme("elevated")
@@ -502,7 +550,12 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
         run: () => props.onSelect(store.selected),
       },
       ...(props.escapeKey ? [{ bind: "escape", title: "Reject permission", group: group(), run: dismiss }] : []),
-    ],
+    ].map((command) => ({
+      ...command,
+      run: () => {
+        if (!props.submitting) command.run()
+      },
+    })),
     bindings: [...(props.escapeKey ? ["app.exit"] : []), ...(props.fullscreen ? ["permission.prompt.fullscreen"] : [])],
   }))
 
@@ -547,7 +600,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
             {props.header}
           </box>
         </Show>
-        {props.body}
+        <box visible={!props.submitting}>{props.body}</box>
       </box>
       <box
         flexDirection={narrow() ? "column" : "row"}
@@ -563,6 +616,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
       >
         <box
           id={`${id()}.actions`}
+          visible={!props.submitting}
           ref={SimulationSemantics.bind(() => ({
             instance: props.instance,
             role: "listbox",
@@ -582,7 +636,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
                   label: props.options[option],
                   focused: option === store.selected,
                   selected: option === store.selected,
-                  disabled: false,
+                  disabled: !!props.submitting,
                 }))}
                 paddingLeft={1}
                 paddingRight={1}
@@ -591,8 +645,11 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
                     ? theme.background.action.primary.focused
                     : theme.background.action.primary.default
                 }
-                onMouseOver={() => setStore("selected", option)}
+                onMouseOver={() => {
+                  if (!props.submitting) setStore("selected", option)
+                }}
                 onMouseUp={() => {
+                  if (props.submitting) return
                   setStore("selected", option)
                   props.onSelect(option)
                 }}
@@ -606,7 +663,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
             )}
           </For>
         </box>
-        <box flexDirection="row" gap={2} flexShrink={0}>
+        <box visible={!props.submitting} flexDirection="row" gap={2} flexShrink={0}>
           <Show when={props.fullscreen}>
             <text fg={theme.text.default}>
               {shortcuts.get("permission.prompt.fullscreen")} <span style={{ fg: theme.text.subdued }}>{hint()}</span>
@@ -621,7 +678,15 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
             enter <span style={{ fg: theme.text.subdued }}>confirm</span>
           </text>
         </box>
+        <Show when={props.submitting}>
+          <text fg={theme.text.feedback.info.default}>{props.submitting}</text>
+        </Show>
       </box>
+      <Show when={props.error}>
+        <box paddingLeft={2} paddingRight={3} paddingBottom={1}>
+          <text fg={theme.text.feedback.error.default}>{props.error}</text>
+        </box>
+      </Show>
     </box>
   )
 

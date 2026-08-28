@@ -57,6 +57,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   const [tabHover, setTabHover] = createSignal<number | "confirm" | null>(null)
   const [reviewHeight, setReviewHeight] = createSignal(1)
   const [reviewScrollable, setReviewScrollable] = createSignal(false)
+  const [submitting, setSubmitting] = createSignal<"reply" | "cancel">()
   const [store, setStore] = createStore({
     tab: 0,
     answers: initial.answers,
@@ -219,6 +220,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   onCleanup(
     keymap.intercept("key", ({ event, consume }) => {
       if (keymap.mode.current() !== FORM_MODE) return
+      if (submitting()) {
+        consume()
+        return
+      }
       if (textual() || !other() || (store.editing && renderer.currentFocusedEditor === textarea)) return
       if (event.ctrl || event.meta || event.option || event.super || event.hyper) return
       if ((!store.editing && event.sequence === " ") || !/^[^\p{C}\p{Zl}\p{Zp}]$/u.test(event.sequence)) return
@@ -243,6 +248,9 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   }
 
   function reply(answer: FormAnswer) {
+    if (submitting()) return
+    setStore("error", "")
+    setSubmitting("reply")
     void data.session.form
       .reply({ sessionID: props.form.sessionID, formID: props.form.id, answer }, props.form.location)
       .catch(showError)
@@ -329,6 +337,10 @@ export function FormPrompt(props: { form: FormWithLocation }) {
 
   usePaste((event) => {
     if (keymap.mode.current() !== FORM_MODE) return
+    if (submitting()) {
+      event.preventDefault()
+      return
+    }
     const value = stripAnsiSequences(decodePasteBytes(event.bytes)).replace(/\r\n?/g, "\n")
     if (store.editing && renderer.currentFocusedEditor === textarea) {
       textarea.insertText(value)
@@ -343,6 +355,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     return clipboard
       .read()
       .then((content) => {
+        if (submitting()) return
         if (content?.mime !== "text/plain") return
         const value = stripAnsiSequences(content.data).replace(/\r\n?/g, "\n")
         if (store.editing || textual()) {
@@ -441,13 +454,22 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   }
 
   function cancel() {
+    if (submitting()) return
+    const editor = textarea?.focused ? textarea : undefined
+    editor?.blur()
+    setStore("error", "")
+    setSubmitting("cancel")
     void data.session.form
       .cancel({ sessionID: props.form.sessionID, formID: props.form.id }, props.form.location)
-      .catch(showError)
+      .catch((error: unknown) => {
+        showError(error)
+        if (editor && !editor.isDestroyed) editor.focus()
+      })
   }
 
   function showError(error: unknown) {
     setStore("error", errorMessage(error))
+    setSubmitting(undefined)
   }
 
   function openExternal() {
@@ -747,7 +769,16 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       borderColor={theme.hue.interactive[themeMode() === "light" ? 800 : 200]}
       customBorderChars={SplitBorder.customBorderChars}
     >
-      <box gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
+      <Show when={submitting()}>
+        <box padding={1} paddingLeft={2} gap={1}>
+          <text fg={theme.text.subdued}>{props.form.title}</text>
+          <text fg={theme.text.feedback.info.default}>
+            {submitting() === "reply" ? "Sending answers..." : "Dismissing form..."}
+          </text>
+        </box>
+      </Show>
+      {/* Keep the controls mounted so a failed request retains uncommitted editor text. */}
+      <box visible={!submitting()} gap={1} paddingLeft={1} paddingRight={3} paddingTop={1} paddingBottom={1}>
         <box paddingLeft={1}>
           <text fg={theme.text.subdued}>{props.form.title}</text>
         </box>
@@ -1102,6 +1133,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
         </Show>
       </box>
       <box
+        visible={!submitting()}
         flexDirection="row"
         flexShrink={0}
         gap={1}
@@ -1145,10 +1177,12 @@ export function FormPrompt(props: { form: FormWithLocation }) {
             esc <span style={{ fg: theme.text.subdued }}>{store.editing && !textual() ? "close" : "dismiss"}</span>
           </text>
         </box>
-        <Show when={store.error}>
-          <text fg={theme.text.feedback.error.default}>{store.error}</text>
-        </Show>
       </box>
+      <Show when={store.error}>
+        <box paddingLeft={2} paddingRight={3} paddingBottom={1}>
+          <text fg={theme.text.feedback.error.default}>{store.error}</text>
+        </box>
+      </Show>
     </box>
   )
 }

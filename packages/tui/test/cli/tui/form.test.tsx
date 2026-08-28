@@ -21,7 +21,11 @@ async function mountForm(
   fields?: FormWithLocation["fields"],
   height = 20,
   clipboardText?: string,
-  response?: { reply?: 404 | 409; cancel?: 404 | 409; syncFailure?: boolean },
+  response?: {
+    reply?: 404 | 409 | (() => Promise<Response>)
+    cancel?: 404 | 409 | (() => Promise<Response>)
+    syncFailure?: boolean
+  },
 ) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
@@ -65,12 +69,23 @@ async function mountForm(
     if (url.pathname === "/api/session/ses_test/form/frm_test/reply")
       return request.json().then((answer) => {
         replies.push(answer)
+        if (typeof response?.reply === "function")
+          return response.reply().then((result) => {
+            terminal = result.ok
+            return result
+          })
         return response?.reply ? failure(response.reply) : new Response(null, { status: 204 })
       })
     if (url.pathname === "/api/session/ses_test/form/frm_test/cancel") {
       cancellations.push(true)
+      if (typeof response?.cancel === "function")
+        return response.cancel().then((result) => {
+          terminal = result.ok
+          return result
+        })
       return response?.cancel ? failure(response.cancel) : new Response(null, { status: 204 })
     }
+    return undefined
   }, events)
   const { FormPrompt } = await import("../../../src/routes/session/form")
 
@@ -134,6 +149,146 @@ function mountRecoveringForm(root: string, response: { reply?: 404 | 409; cancel
     response,
   )
 }
+
+for (const width of [48, 120]) {
+  test(`acknowledges a form reply before HTTP completes and retains its answer on failure at ${width} columns`, async () => {
+    await using tmp = await tmpdir()
+    const pending = Promise.withResolvers<Response>()
+    const prompt = await mountForm(
+      tmp.path,
+      width,
+      [{ key: "target", type: "string", options: [{ value: "staging", label: "Staging" }], custom: true }],
+      20,
+      undefined,
+      { reply: () => pending.promise },
+    )
+    try {
+      await prompt.app.mockInput.pasteBracketedText("production west")
+      await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "production west")
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+      expect(prompt.app.captureCharFrame()).not.toContain("Composer ready")
+      expect(prompt.app.captureCharFrame()).not.toContain("enter submit")
+
+      prompt.app.mockInput.pressEnter()
+      prompt.app.mockInput.pressEscape()
+      prompt.app.mockInput.pressKey("c", { ctrl: true })
+      await prompt.app.mockInput.pasteBracketedText("do not replace my answer")
+      await prompt.app.waitFor(() => prompt.replies.length === 1)
+      expect(prompt.cancellations).toEqual([])
+
+      pending.resolve(
+        json({ _tag: "FormInvalidAnswerError", id: "frm_test", message: "Reply failed" }, { status: 400 }),
+      )
+      await prompt.app.waitForFrame((frame) => frame.includes("Reply failed") && frame.includes("production west"))
+      expect(prompt.replies).toEqual([{ answer: { target: "production west" } }])
+      expect(prompt.app.captureCharFrame()).toContain("enter submit")
+
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "production west")
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitFor(() => prompt.replies.length === 2)
+      expect(prompt.replies[1]).toEqual(prompt.replies[0])
+    } finally {
+      pending.resolve(new Response(null, { status: 204 }))
+      prompt.app.renderer.destroy()
+    }
+  })
+}
+
+test("a failed form cancellation restores its uncommitted text and focus", async () => {
+  await using tmp = await tmpdir()
+  const pending = Promise.withResolvers<Response>()
+  const prompt = await mountForm(tmp.path, 80, [{ key: "notes", type: "string" }], 20, undefined, {
+    cancel: () => pending.promise,
+  })
+  try {
+    await prompt.app.mockInput.typeText("  unfinished draft  ")
+    const editor = prompt.app.renderer.currentFocusedEditor
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.waitForFrame((frame) => frame.includes("Dismissing form..."))
+    expect(prompt.app.renderer.currentFocusedEditor).toBeNull()
+    prompt.app.mockInput.pressEscape()
+    prompt.app.mockInput.pressEnter()
+    prompt.app.mockInput.pressKey("c", { ctrl: true })
+    await prompt.app.mockInput.typeText("must not edit")
+    await prompt.app.waitFor(() => prompt.cancellations.length === 1)
+    expect(prompt.replies).toEqual([])
+
+    pending.resolve(json({ message: "Cancel failed" }, { status: 500 }))
+    await prompt.app.waitForFrame((frame) => frame.includes("UnexpectedStatus"))
+    expect(prompt.app.renderer.currentFocusedEditor).toBe(editor)
+    expect(editor?.plainText).toBe("  unfinished draft  ")
+    await prompt.app.mockInput.typeText("!")
+    expect(editor?.plainText).toBe("  unfinished draft  !")
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.waitFor(() => prompt.cancellations.length === 2)
+  } finally {
+    pending.resolve(new Response(null, { status: 204 }))
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("only restores the composer after the submitted form is acknowledged", async () => {
+  await using tmp = await tmpdir()
+  const pending = Promise.withResolvers<Response>()
+  const prompt = await mountForm(tmp.path, 80, [{ key: "target", type: "boolean" }], 20, undefined, {
+    reply: () => pending.promise,
+  })
+  try {
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+    expect(prompt.app.captureCharFrame()).not.toContain("Composer ready")
+    pending.resolve(new Response(null, { status: 204 }))
+    await prompt.app.waitForFrame((frame) => frame.includes("Composer ready"))
+    expect(prompt.replies).toHaveLength(1)
+  } finally {
+    pending.resolve(new Response(null, { status: 204 }))
+    prompt.app.renderer.destroy()
+  }
+})
+
+test("a failed review submission retains every answer and ignores competing mouse actions", async () => {
+  await using tmp = await tmpdir()
+  const pending = Promise.withResolvers<Response>()
+  const prompt = await mountForm(
+    tmp.path,
+    80,
+    [
+      { key: "targets", type: "multiselect", options: [{ value: "staging", label: "Staging" }], default: ["staging"] },
+      { key: "notes", type: "string", default: "Keep the existing config" },
+    ],
+    25,
+    undefined,
+    { reply: () => pending.promise },
+  )
+  try {
+    prompt.app.mockInput.pressArrow("right")
+    prompt.app.mockInput.pressEnter()
+    await prompt.app.waitForFrame((frame) => frame.includes("enter submit"))
+    const lines = prompt.app.captureCharFrame().split("\n")
+    const row = lines.findIndex((line) => line.includes("enter submit"))
+    await prompt.app.mockMouse.click(lines[row].indexOf("enter submit"), row)
+    await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+    await prompt.app.mockMouse.click(lines[row].indexOf("enter submit"), row)
+    await prompt.app.mockMouse.click(lines[row].indexOf("esc dismiss"), row)
+    prompt.app.mockInput.pressEnter()
+    prompt.app.mockInput.pressEscape()
+    await prompt.app.waitFor(() => prompt.replies.length === 1)
+    expect(prompt.cancellations).toEqual([])
+    expect(prompt.replies).toEqual([{ answer: { targets: ["staging"], notes: "Keep the existing config" } }])
+
+    pending.resolve(json({ _tag: "FormInvalidAnswerError", id: "frm_test", message: "Reply failed" }, { status: 400 }))
+    await prompt.app.waitForFrame((frame) => frame.includes("Reply failed"))
+    expect(prompt.app.captureCharFrame()).toContain("targets: Staging")
+    expect(prompt.app.captureCharFrame()).toContain("notes: Keep the existing config")
+    prompt.app.mockInput.pressArrow("left")
+    await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "Keep the existing config")
+  } finally {
+    pending.resolve(new Response(null, { status: 204 }))
+    prompt.app.renderer.destroy()
+  }
+})
 
 test("restores the composer when terminal-form revalidation fails", async () => {
   await using tmp = await tmpdir()
