@@ -119,11 +119,15 @@ export function map(input: MapInput): Mapping | undefined {
           ...mapProviderOptions(input.settings, ["apiKey", "baseURL", "organization", "project", "queryParams"]),
         },
       }
+    case "merge-gateway-ai-sdk-provider":
     case "@ai-sdk/openai-compatible":
-      if (typeof input.settings.baseURL !== "string") return
+      if (input.packageName === "@ai-sdk/openai-compatible" && typeof input.settings.baseURL !== "string") return
       return {
         package: "@opencode-ai/ai/providers/openai-compatible",
         settings: {
+          ...(input.packageName === "merge-gateway-ai-sdk-provider"
+            ? { baseURL: "https://api-gateway.merge.dev/v1/ai-sdk" }
+            : {}),
           ...baseSettings,
           ...mapAPIKey(input.settings),
           provider: input.providerID,
