@@ -357,7 +357,7 @@ export const dict = {
   "dialog.server.add.button": "Add server",
   "dialog.server.add.name": "Server name (optional)",
   "dialog.server.add.namePlaceholder": "Localhost",
-  "dialog.server.add.password": "Password (optional)",
+  "dialog.server.add.password": "Password",
   "dialog.server.add.passwordPlaceholder": "password",
   "dialog.server.edit.title": "Edit server",
   "dialog.server.default.title": "Default server",
