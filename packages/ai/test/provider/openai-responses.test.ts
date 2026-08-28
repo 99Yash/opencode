@@ -2264,7 +2264,7 @@ describe("OpenAI Responses route", () => {
         {
           type: "reasoning",
           text: "Raw",
-          providerMetadata: { openai: { itemId: "", reasoningEncryptedContent: "state" } },
+          providerMetadata: { openai: { itemId: "", reasoningChannel: "raw", reasoningEncryptedContent: "state" } },
         },
       ])
     }),

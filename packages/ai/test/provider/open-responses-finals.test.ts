@@ -138,7 +138,11 @@ describe("Open Responses completed item reasoning", () => {
         expect(response.reasoning).toBe(fixture.text)
         expect(response.events.filter(LLMEvent.is.reasoningEnd)).toHaveLength(1)
         expect(response.message.content.find((part) => part.type === "reasoning")?.providerMetadata).toEqual({
-          "openai-compatible": { itemId: "rs_1", reasoningEncryptedContent: "encrypted" },
+          "openai-compatible": {
+            itemId: "rs_1",
+            ...(fixture.name === "raw text" ? { reasoningChannel: "raw" } : {}),
+            reasoningEncryptedContent: "encrypted",
+          },
         })
       }),
     )

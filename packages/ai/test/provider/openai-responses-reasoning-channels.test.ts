@@ -29,11 +29,24 @@ describe("OpenAI Responses reasoning channels", () => {
           delta: "Internal detail.",
         },
         {
+          type: "response.reasoning_summary_part.added",
+          output_index: 0,
+          item_id: "rs_1",
+          summary_index: 1,
+        },
+        {
+          type: "response.reasoning_summary_text.delta",
+          output_index: 0,
+          item_id: "rs_1",
+          summary_index: 1,
+          delta: "Visible summary.",
+        },
+        {
           type: "response.reasoning_summary_text.delta",
           output_index: 0,
           item_id: "rs_1",
           summary_index: 0,
-          delta: "Visible summary.",
+          delta: "Late summary.",
         },
         {
           type: "response.output_item.done",
@@ -41,7 +54,10 @@ describe("OpenAI Responses reasoning channels", () => {
           item: {
             type: "reasoning",
             id: "rs_1",
-            summary: [{ type: "summary_text", text: "Visible summary." }],
+            summary: [
+              { type: "summary_text", text: "" },
+              { type: "summary_text", text: "Visible summary." },
+            ],
             content: [{ type: "reasoning_text", text: "Internal detail." }],
             encrypted_content: "state",
           },
@@ -86,7 +102,8 @@ describe("OpenAI Responses reasoning channels", () => {
     Effect.gen(function* () {
       const response = yield* generate(
         { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
-        { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 1, delta: "Internal draft." },
+        { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 0, delta: "Internal " },
+        { type: "response.reasoning_text.done", item_id: "rs_1", content_index: 1, text: "draft." },
         {
           type: "response.reasoning_summary_text.done",
           item_id: "rs_1",
@@ -99,7 +116,8 @@ describe("OpenAI Responses reasoning channels", () => {
 
       expect(response.reasoning).toBe("Final summary.")
       expect(response.events.filter(LLMEvent.is.reasoningDelta).map((event) => event.text)).toEqual([
-        "Internal draft.",
+        "Internal ",
+        "draft.",
         "Final summary.",
       ])
     }),
@@ -128,6 +146,105 @@ describe("OpenAI Responses reasoning channels", () => {
         LLM.request({ model, messages: [response.message], providerOptions: { store: false } }),
       )
       expect(prepared.body.input).toEqual([{ type: "reasoning", id: "rs_1", summary: [], encrypted_content: "state" }])
+    }),
+  )
+
+  it.effect("keeps raw reasoning out of summaries when item completion is missing", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        {
+          type: "response.output_item.added",
+          item: { type: "reasoning", id: "rs_1", encrypted_content: null },
+        },
+        { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 0, delta: "Internal detail." },
+        completed,
+      )
+
+      expect(response.reasoning).toBe("Internal detail.")
+      const prepared = yield* compileRequest(
+        LLM.request({ model, messages: [response.message], providerOptions: { store: false } }),
+      )
+      expect(prepared.body.input).toEqual([{ type: "reasoning", id: "rs_1", summary: [], encrypted_content: null }])
+    }),
+  )
+
+  it.effect("separates a summary first supplied by item completion", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+        { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 0, delta: "Internal detail." },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "reasoning",
+            id: "rs_1",
+            summary: [
+              { type: "summary_text", text: "" },
+              { type: "summary_text", text: "First" },
+              { type: "summary_text", text: "Second" },
+            ],
+            content: [{ type: "reasoning_text", text: "Internal detail." }],
+            encrypted_content: "state",
+          },
+        },
+        completed,
+      )
+
+      const ended = response.events.filter(LLMEvent.is.reasoningEnd)
+      expect(ended.map((event) => event.text)).toEqual(["", "First\n\nSecond"])
+      expect(ended[0]?.id).not.toBe(ended[1]?.id)
+      expect(response.reasoning).toBe("First\n\nSecond")
+    }),
+  )
+
+  it.effect("merges raw and summary history for an empty item ID", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        { type: "response.output_item.added", item: { type: "reasoning", id: "", encrypted_content: null } },
+        { type: "response.reasoning_text.delta", item_id: "", delta: "Internal detail." },
+        { type: "response.reasoning_summary_text.delta", item_id: "", delta: "Visible summary." },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "reasoning",
+            id: "",
+            summary: [{ type: "summary_text", text: "Visible summary." }],
+            encrypted_content: "state",
+          },
+        },
+        completed,
+      )
+      const prepared = yield* compileRequest(
+        LLM.request({ model, messages: [response.message], providerOptions: { store: false } }),
+      )
+
+      expect(prepared.body.input).toEqual([
+        {
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: "Visible summary." }],
+          encrypted_content: "state",
+        },
+      ])
+    }),
+  )
+
+  it.effect("ignores empty entries in a completed summary", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "reasoning",
+            id: "rs_1",
+            summary: [
+              { type: "summary_text", text: "" },
+              { type: "summary_text", text: "Visible summary." },
+            ],
+          },
+        },
+        completed,
+      )
+      expect(response.reasoning).toBe("Visible summary.")
     }),
   )
 })

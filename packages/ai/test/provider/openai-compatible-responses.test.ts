@@ -386,7 +386,11 @@ describe("Open Responses-compatible route", () => {
                     type: "reasoning",
                     text: "Preserved",
                     providerMetadata: {
-                      "openai-compatible": { itemId: routing.id, reasoningEncryptedContent: "encrypted-state" },
+                      "openai-compatible": {
+                        itemId: routing.id,
+                        ...(!event.type.includes("summary") ? { reasoningChannel: "raw" } : {}),
+                        reasoningEncryptedContent: "encrypted-state",
+                      },
                     },
                   },
                 ])
