@@ -1,4 +1,5 @@
 import { WebSearch } from "@opencode-ai/core/websearch"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
 import { InvalidRequestError, ServiceUnavailableError } from "@opencode-ai/protocol/errors"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -30,8 +31,9 @@ export const WebSearchHandler = HttpApiBuilder.group(Api, "server.websearch", (h
         Effect.fn("server.websearch.query")(function* (request) {
           yield* awaitPlugins
           const websearch = yield* WebSearch.Service
+          const gate = yield* PluginExecution.Service
           return yield* response(
-            websearch.query(request.payload).pipe(
+            gate.lease({ id: "websearch", admission: true }, websearch.query(request.payload)).pipe(
               Effect.catchTags({
                 "WebSearch.ProviderRequired": () =>
                   new InvalidRequestError({

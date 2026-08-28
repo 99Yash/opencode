@@ -84,12 +84,15 @@ export default Runtime.handler(Commands, (input) =>
         update: (update) => runPromise(config.update(update)),
       },
       packages: {
-        resolve: (spec, install = true) =>
+        resolve: (spec, install = true, revision) =>
           runPromise(
-            (install ? npm.add(spec, { subpaths: ["tui"] }) : npm.resolve(spec, { subpaths: ["tui"] })).pipe(
-              Effect.map((result) => result.entrypoint),
-            ),
+            install
+              ? npm.add(spec, { subpaths: ["tui"], revision })
+              : npm.resolve(spec, { subpaths: ["tui"], revision }),
           ),
+        check: (spec) => runPromise(npm.check(spec)),
+        update: (spec) => runPromise(npm.update(spec, { subpaths: ["tui"] })),
+        reload: (spec, options) => runPromise(npm.reload(spec, { subpaths: ["tui"], ...options })),
       },
       environment: requestedServer === undefined ? Env.session() : undefined,
       terminalHandoff: () => preflight.finish(),

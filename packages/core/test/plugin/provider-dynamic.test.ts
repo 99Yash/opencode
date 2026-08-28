@@ -22,8 +22,12 @@ const itWithAISDK = testEffect(Layer.mergeAll(PluginTestLayer, AppNodeBuilder.bu
 
 function npmEntrypoint(entrypoint?: string) {
   return Npm.Service.of({
-    add: () => Effect.succeed({ directory: "", entrypoint }),
-    resolve: () => Effect.succeed({ directory: "", entrypoint }),
+    add: () => Effect.succeed({ directory: "", entrypoint, generation: "test" }),
+    resolve: () => Effect.succeed({ directory: "", entrypoint, generation: "test" }),
+    inspect: () => Effect.succeed({ mutable: false }),
+    check: () => Effect.succeed({ mutable: false }),
+    update: () => Effect.die("unused npm.update"),
+    reload: () => Effect.die("unused npm.reload"),
     which: () => Effect.undefined,
   })
 }

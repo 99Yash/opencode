@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { ToolFailure } from "@opencode-ai/ai"
-import { Context, Effect, Exit, Fiber, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Fiber, Latch, Schema, Stream } from "effect"
 import { Plugin as EffectPlugin } from "@opencode-ai/plugin/effect"
 import { Config as ConfigSchema } from "@opencode-ai/schema/config"
 import { Agent } from "@opencode-ai/core/agent"
@@ -8,6 +8,8 @@ import { Bus } from "@opencode-ai/core/bus"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
+import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -25,6 +27,178 @@ class Secret extends Context.Service<Secret, string>()("@opencode/test/PluginSec
 const versioned = <R>(plugin: EffectPlugin.Plugin<R>, version = "1") => ({ ...plugin, version })
 
 describe("Plugin", () => {
+  it.effect("closes the entire suffix after cleanup defects without leaving old hooks behind", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const registry = yield* PluginHooks.Service
+      const closed: string[] = []
+      const observed: string[] = []
+      const definition = (id: string, version: string, broken = false) => ({
+        id,
+        version,
+        effect: (ctx: EffectPlugin.Context) =>
+          Effect.gen(function* () {
+            yield* ctx.session.hook("prompt", () =>
+              Effect.sync(() => {
+                observed.push(`${id}${version}`)
+              }),
+            )
+            yield* Effect.addFinalizer(() =>
+              Effect.sync(() => {
+                closed.push(`${id}${version}`)
+                if (broken) throw new Error("cleanup failed")
+              }),
+            )
+          }),
+      })
+      const first = [definition("a", "1"), definition("b", "1"), definition("c", "1", true)]
+      yield* plugins.activate(first)
+      yield* plugins.activate([definition("a", "2"), ...first.slice(1)])
+      expect(closed).toEqual(["c1", "b1", "a1"])
+      expect((yield* plugins.list()).map((plugin) => [plugin.id, plugin.status])).toEqual(
+        ["a", "b", "c"].map((id) => [Plugin.ID.make(id), "active"]),
+      )
+      yield* plugins.activate([definition("a", "2"), definition("b", "2"), definition("c", "2")])
+      yield* registry.trigger("session", "prompt", {
+        sessionID: Session.ID.make("ses_cleanup"),
+        messageID: SessionMessage.ID.make("msg_cleanup"),
+        prompt: { text: "hello" },
+        delivery: "steer",
+        metadata: undefined,
+      })
+      expect(observed).toEqual(["a2", "b2", "c2"])
+      expect(closed).toEqual(["c1", "b1", "a1", "c1", "b1"])
+      yield* plugins.activate([])
+      expect(closed.slice(-3)).toEqual(["c2", "b2", "a2"])
+      expect(yield* plugins.list()).toEqual([])
+    }),
+  )
+  it.effect("does not gate an unchanged generation while a Session lease is held", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const gate = yield* PluginExecution.Service
+      const definitions = [{ id: "unchanged", version: "1", effect: () => Effect.void }]
+      yield* plugins.activate(definitions)
+      yield* gate.lease({ id: "running" }, plugins.activate(definitions))
+      expect((yield* plugins.list())[0]?.status).toBe("active")
+    }),
+  )
+  it.effect("bounds inventory errors and removes URL credentials and query strings", () =>
+    Effect.sync(() => {
+      const error = Plugin.errorMessage(
+        Cause.die(new Error(`https://user:password@example.com/plugin?token=secret ${"x".repeat(3000)}`)),
+      )
+      expect(error.length).toBeLessThanOrEqual(2000)
+      expect(error).toContain("https://example.com/plugin")
+      expect(error).not.toContain("password")
+      expect(error).not.toContain("token=secret")
+    }),
+  )
+  it.effect("keeps the unchanged registration prefix and preserves suffix ordering", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const agents = yield* Agent.Service
+      const loads: string[] = []
+      const closed: string[] = []
+      const definition = (id: string, version: string) => ({
+        id,
+        version,
+        effect: (ctx: EffectPlugin.Context) =>
+          Effect.gen(function* () {
+            loads.push(`${id}:${version}`)
+            yield* Effect.addFinalizer(() => Effect.sync(() => closed.push(id)))
+            yield* ctx.agent.transform((draft) =>
+              draft.update("ordered", (agent) => {
+                agent.description = `${agent.description ?? ""}${id}:${version};`
+              }),
+            )
+          }),
+      })
+      const prefix = definition("prefix", "1")
+      const suffix = definition("suffix", "1")
+      yield* plugins.activate([prefix, definition("target", "1"), suffix])
+      yield* plugins.activate([prefix, definition("target", "2"), suffix])
+      expect(loads).toEqual(["prefix:1", "target:1", "suffix:1", "target:2", "suffix:1"])
+      expect(closed).toEqual(["suffix", "target"])
+      expect((yield* agents.get(Agent.ID.make("ordered")))?.description).toBe("prefix:1;target:2;suffix:1;")
+    }),
+  )
+
+  it.effect("does not close plugin resources while a leased snapshot executes", () =>
+    Effect.gen(function* () {
+      const plugins = yield* Plugin.Service
+      const tools = yield* Tool.Service
+      const gate = yield* PluginExecution.Service
+      const started = yield* Latch.make()
+      const finish = yield* Latch.make()
+      let closed = false
+      yield* plugins.activate([
+        {
+          id: "leased",
+          version: "1",
+          revision: "1.0.0",
+          generation: "first",
+          tui: true,
+          effect: (ctx) =>
+            Effect.gen(function* () {
+              yield* Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  closed = true
+                }),
+              )
+              yield* ctx.tool.transform((draft) =>
+                draft.add({
+                  name: "leased",
+                  description: "Leased tool",
+                  input: Schema.Struct({}),
+                  options: { codemode: false },
+                  execute: () =>
+                    Effect.gen(function* () {
+                      yield* started.open
+                      yield* finish.await
+                      expect(closed).toBe(false)
+                      return { content: "first" }
+                    }),
+                }),
+              )
+            }),
+        },
+      ])
+      const running = yield* gate
+        .lease(
+          { id: "ses_running" },
+          Effect.gen(function* () {
+            const snapshot = yield* tools.snapshot()
+            return yield* snapshot.execute({
+              sessionID: Session.ID.make("ses_running"),
+              agent: Agent.ID.make("build"),
+              messageID: SessionMessage.ID.make("msg_message"),
+              call: { type: "tool-call", id: "call", name: "leased", input: {} },
+            })
+          }),
+        )
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* started.await
+      const replacement = yield* plugins
+        .activate([
+          {
+            id: "leased",
+            version: "2",
+            revision: "2.0.0",
+            generation: "second",
+            effect: () => Effect.void,
+          },
+        ])
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      expect(closed).toBe(false)
+      expect((yield* plugins.list())[0]?.revision).toBe("1.0.0")
+      yield* finish.open
+      yield* Fiber.join(running)
+      yield* Fiber.join(replacement)
+      expect(closed).toBe(true)
+      expect((yield* plugins.list())[0]?.revision).toBe("2.0.0")
+    }),
+  )
   it.effect("exposes the current location to activated plugins", () =>
     Effect.gen(function* () {
       const plugins = yield* Plugin.Service
@@ -370,16 +544,18 @@ describe("Plugin", () => {
           }),
       })
 
-      yield* plugins.activate([versioned(previous)])
-      yield* plugins.activate([versioned(replacement, "2")])
+      yield* plugins.activate([{ ...versioned(previous), revision: "1.0.0", generation: "previous", tui: true }])
+      yield* plugins.activate([{ ...versioned(replacement, "2"), revision: "2.0.0", generation: "replacement" }])
 
       expect(yield* plugins.list()).toEqual([
         {
           id: Plugin.ID.make("managed"),
           source: { type: "builtin" },
-          status: "failed",
+          status: "active",
           error: expect.stringContaining("replacement failed"),
-          tui: false,
+          tui: true,
+          revision: "1.0.0",
+          generation: "previous",
         },
       ])
       expect((yield* agents.get(Agent.ID.make("configured")))?.description).toBe("previous")

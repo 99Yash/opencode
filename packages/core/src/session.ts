@@ -41,6 +41,7 @@ import { Session } from "@opencode-ai/schema/session"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { Image } from "./image.js"
 import { PluginSupervisor } from "./plugin/supervisor-service.js"
+import { PluginExecution } from "./plugin/execution.js"
 import { PluginHooks } from "./plugin/hooks.js"
 import { Mime } from "./mime.js"
 import type { EventLog } from "@opencode-ai/schema/event-log"
@@ -686,30 +687,39 @@ const layer = Layer.effect(
       ),
       generate: Effect.fn("Session.generate")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        const generate = yield* SessionGenerate.Service.pipe(Effect.provide(locations.get(session.location)))
-        return yield* generate.generate(input)
+        return yield* Effect.gen(function* () {
+          const plugins = yield* PluginSupervisor.Service
+          yield* plugins.initialized
+          const gate = yield* PluginExecution.Service
+          const generate = yield* SessionGenerate.Service
+          return yield* gate.lease({ id: session.id, admission: true }, generate.generate(input))
+        }).pipe(Effect.provide(locations.get(session.location)))
       }),
       command: Effect.fn("Session.command")(function* (input) {
         const session = yield* result.get(input.sessionID)
-        const commands = yield* Effect.gen(function* () {
+        yield* Effect.gen(function* () {
           const plugins = yield* PluginSupervisor.Service
-          yield* plugins.flush
-          return yield* Command.Service
+          yield* plugins.initialized
+          const gate = yield* PluginExecution.Service
+          const commands = yield* Command.Service
+          // Commands may await child Sessions, so they retain ownership that lets those children drain.
+          return yield* gate.lease(
+            session,
+            commands.execute({
+              name: input.command,
+              invocation: {
+                sessionID: input.sessionID,
+                prompt: {
+                  text: input.text,
+                  files: input.files,
+                  agents: input.agents,
+                  skills: input.skills,
+                },
+                delivery: input.delivery ?? "steer",
+              },
+            }),
+          )
         }).pipe(Effect.provide(locations.get(session.location)))
-        const delivery = input.delivery ?? "steer"
-        yield* commands.execute({
-          name: input.command,
-          invocation: {
-            sessionID: input.sessionID,
-            prompt: {
-              text: input.text,
-              files: input.files,
-              agents: input.agents,
-              skills: input.skills,
-            },
-            delivery,
-          },
-        })
       }),
       shell: Effect.fn("Session.shell")(function* (input) {
         const session = yield* result.get(input.sessionID)
@@ -719,16 +729,20 @@ const layer = Layer.effect(
             yield* execution.awaitIdle(input.sessionID)
             const started = yield* Effect.gen(function* () {
               const plugins = yield* PluginSupervisor.Service
-              yield* plugins.flush
+              yield* plugins.initialized
+              const gate = yield* PluginExecution.Service
               const shell = yield* Shell.Service
-              return yield* shell
-                .create({
-                  command: input.command,
-                  cwd: session.location.directory,
-                  timeout: 0,
-                  metadata: { sessionID: input.sessionID },
-                })
-                .pipe(Effect.orDie)
+              return yield* gate.lease(
+                { id: input.sessionID, admission: true },
+                shell
+                  .create({
+                    command: input.command,
+                    cwd: session.location.directory,
+                    timeout: 0,
+                    metadata: { sessionID: input.sessionID },
+                  })
+                  .pipe(Effect.orDie),
+              )
             }).pipe(Effect.provide(locations.get(session.location)))
             yield* bus.publish(
               SessionEvent.Shell.Started,
@@ -960,10 +974,14 @@ const layer = Layer.effect(
             return yield* new BusyError({ sessionID: input.sessionID })
           return yield* Effect.gen(function* () {
             const plugins = yield* PluginSupervisor.Service
-            yield* plugins.flush
-            return yield* SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
-              Effect.provideService(Database.Service, database),
-              Effect.provideService(Bus.Service, bus),
+            yield* plugins.initialized
+            const gate = yield* PluginExecution.Service
+            return yield* gate.lease(
+              { id: session.id, admission: true },
+              SessionRevert.stage({ session, messageID: input.messageID, files: input.files }).pipe(
+                Effect.provideService(Database.Service, database),
+                Effect.provideService(Bus.Service, bus),
+              ),
             )
           }).pipe(Effect.provide(locations.get(session.location)))
         }),
@@ -972,8 +990,12 @@ const layer = Layer.effect(
           if ((yield* execution.active).has(sessionID)) return yield* new BusyError({ sessionID })
           const revert = yield* Effect.gen(function* () {
             const plugins = yield* PluginSupervisor.Service
-            yield* plugins.flush
-            return yield* SessionRevert.clear(session).pipe(Effect.provideService(Bus.Service, bus))
+            yield* plugins.initialized
+            const gate = yield* PluginExecution.Service
+            return yield* gate.lease(
+              { id: session.id, admission: true },
+              SessionRevert.clear(session).pipe(Effect.provideService(Bus.Service, bus)),
+            )
           }).pipe(Effect.provide(locations.get(session.location)))
           yield* execution.wake(sessionID)
           return revert
@@ -1015,59 +1037,65 @@ const preparePrompt = Effect.fn("Session.preparePrompt")(function* (
   messageID: SessionMessage.ID,
 ) {
   const plugins = yield* PluginSupervisor.Service
-  yield* plugins.flush
-  const hooks = yield* PluginHooks.Service
-  const event = yield* hooks.trigger("session", "prompt", {
-    sessionID: request.sessionID,
-    messageID,
-    prompt: structuredClone({
-      text: request.text,
-      files: request.files?.slice(),
-      agents: request.agents?.slice(),
-      skills: request.skills?.slice(),
+  yield* plugins.initialized
+  const gate = yield* PluginExecution.Service
+  return yield* gate.lease(
+    { id: request.sessionID, admission: true },
+    Effect.gen(function* () {
+      const hooks = yield* PluginHooks.Service
+      const event = yield* hooks.trigger("session", "prompt", {
+        sessionID: request.sessionID,
+        messageID,
+        prompt: structuredClone({
+          text: request.text,
+          files: request.files?.slice(),
+          agents: request.agents?.slice(),
+          skills: request.skills?.slice(),
+        }),
+        metadata: structuredClone(request.metadata),
+        delivery: request.delivery ?? "steer",
+      })
+      const input = event.prompt
+      const fs = yield* FSUtil.Service
+      const files = input.files
+        ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file), { concurrency: 8 })
+        : undefined
+      const requested = input.skills
+      const selected = yield* Effect.gen(function* () {
+        if (!requested?.length) return undefined
+        const skillService = yield* Skill.Service
+        const prepared = new Map<Skill.ID, Skill.Name>()
+        return yield* Effect.forEach(requested, (attachment) =>
+          Effect.gen(function* () {
+            const name = prepared.get(attachment.id)
+            if (name !== undefined) return { id: attachment.id, name, mention: attachment.mention }
+            const skill = yield* skillService.get(attachment.id)
+            if (!skill) return yield* new SkillNotFoundError({ skill: attachment.id })
+            prepared.set(skill.id, skill.name)
+            return {
+              id: skill.id,
+              name: skill.name,
+              text: (yield* Skill.prepare(fs, skill).pipe(Effect.orDie)).output,
+              mention: attachment.mention,
+            }
+          }),
+        )
+      })
+      return SessionInbox.Item.make({
+        type: "user",
+        payload: {
+          ...Prompt.make({
+            text: input.text,
+            agents: input.agents,
+            files,
+            skills: selected?.length ? selected : undefined,
+          }),
+          metadata: event.metadata,
+        },
+        delivery: event.delivery,
+      })
     }),
-    metadata: structuredClone(request.metadata),
-    delivery: request.delivery ?? "steer",
-  })
-  const input = event.prompt
-  const fs = yield* FSUtil.Service
-  const files = input.files
-    ? yield* Effect.forEach(input.files, (file) => materializeAttachment(fs, file), { concurrency: 8 })
-    : undefined
-  const requested = input.skills
-  const selected = yield* Effect.gen(function* () {
-    if (!requested?.length) return undefined
-    const skillService = yield* Skill.Service
-    const prepared = new Map<Skill.ID, Skill.Name>()
-    return yield* Effect.forEach(requested, (attachment) =>
-      Effect.gen(function* () {
-        const name = prepared.get(attachment.id)
-        if (name !== undefined) return { id: attachment.id, name, mention: attachment.mention }
-        const skill = yield* skillService.get(attachment.id)
-        if (!skill) return yield* new SkillNotFoundError({ skill: attachment.id })
-        prepared.set(skill.id, skill.name)
-        return {
-          id: skill.id,
-          name: skill.name,
-          text: (yield* Skill.prepare(fs, skill).pipe(Effect.orDie)).output,
-          mention: attachment.mention,
-        }
-      }),
-    )
-  })
-  return SessionInbox.Item.make({
-    type: "user",
-    payload: {
-      ...Prompt.make({
-        text: input.text,
-        agents: input.agents,
-        files,
-        skills: selected?.length ? selected : undefined,
-      }),
-      metadata: event.metadata,
-    },
-    delivery: event.delivery,
-  })
+  )
 })
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024

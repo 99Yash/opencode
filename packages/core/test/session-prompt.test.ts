@@ -1,4 +1,6 @@
 import { describe, expect } from "bun:test"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
+import { noopPluginSupervisor } from "./fixture/plugin-supervisor"
 import { DateTime, Effect, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
 import { mkdtemp, rm } from "fs/promises"
 import { tmpdir } from "os"
@@ -68,6 +70,7 @@ const locations = Layer.effect(
         Effect.sync(() => {
           let ready = false
           return Layer.mergeAll(
+            PluginExecution.layer,
             LayerNode.compile(PluginHooks.node),
             Layer.mock(Image.Service, {
               normalize: (_resource, content) =>
@@ -78,13 +81,9 @@ const locations = Layer.effect(
             Layer.mock(Snapshot.Service, {
               capture: () =>
                 ready ? Effect.undefined : Effect.die(new Error("Snapshot used before plugins were ready")),
-              restore: () =>
-                ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready")),
+              restore: () => (ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready"))),
             }),
-            Layer.succeed(
-              PluginSupervisor.Service,
-              PluginSupervisor.Service.of({ flush: Effect.sync(() => (ready = true)) }),
-            ),
+            Layer.succeed(PluginSupervisor.Service, noopPluginSupervisor(Effect.sync(() => (ready = true)))),
           )
         }),
       ) as unknown as Layer.Layer<LocationServices>,

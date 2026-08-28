@@ -11,6 +11,8 @@ import type { LocationServices } from "@opencode-ai/core/location-services"
 import { Project } from "@opencode-ai/core/project"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor-service"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
+import { noopPluginSupervisor } from "./fixture/plugin-supervisor"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
@@ -33,12 +35,13 @@ const info = Skill.Info.make({
   content: "Use Effect",
 })
 const skills = Layer.mergeAll(
+  PluginExecution.layer,
   LayerNode.compile(PluginHooks.node),
   Layer.mock(Skill.Service, {
     get: (id) => Effect.succeed(id === info.id ? info : undefined),
     list: () => Effect.succeed([info]),
   }),
-  Layer.succeed(PluginSupervisor.Service, { flush: Effect.void }),
+  Layer.succeed(PluginSupervisor.Service, noopPluginSupervisor()),
 )
 const locations = Layer.effect(
   LocationServiceMap.Service,

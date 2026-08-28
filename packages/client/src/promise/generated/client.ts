@@ -9,6 +9,12 @@ import type {
   AgentGetOutput,
   PluginListInput,
   PluginListOutput,
+  PluginCheckInput,
+  PluginCheckOutput,
+  PluginUpdateInput,
+  PluginUpdateOutput,
+  PluginReloadInput,
+  PluginReloadOutput,
   SessionListInput,
   SessionListOutput,
   SessionStatsInput,
@@ -456,6 +462,45 @@ export function make(options: ClientOptions) {
             query: { location: input?.["location"] },
             successStatus: 200,
             declaredStatuses: [401, 400],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      check: (input: PluginCheckInput, requestOptions?: RequestOptions) =>
+        request<PluginCheckOutput>(
+          {
+            method: "POST",
+            path: `/api/plugin/check`,
+            query: { location: input["location"] },
+            body: { target: input["target"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      update: (input: PluginUpdateInput, requestOptions?: RequestOptions) =>
+        request<PluginUpdateOutput>(
+          {
+            method: "POST",
+            path: `/api/plugin/update`,
+            query: { location: input["location"] },
+            body: { target: input["target"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
+            empty: false,
+          },
+          requestOptions,
+        ),
+      reload: (input: PluginReloadInput, requestOptions?: RequestOptions) =>
+        request<PluginReloadOutput>(
+          {
+            method: "POST",
+            path: `/api/plugin/reload`,
+            query: { location: input["location"] },
+            body: { target: input["target"] },
+            successStatus: 200,
+            declaredStatuses: [400, 401],
             empty: false,
           },
           requestOptions,

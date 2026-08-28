@@ -32,6 +32,7 @@ import { Permission } from "@opencode-ai/core/permission"
 import { PermissionSaved } from "@opencode-ai/core/permission/saved"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { noopPluginSupervisor } from "./fixture/plugin-supervisor"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellSelect } from "@opencode-ai/core/shell/select"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
@@ -127,7 +128,7 @@ const shellPluginSupervisor = makeLocationNode({
   service: PluginSupervisor.Service,
   layer: Layer.effect(
     PluginSupervisor.Service,
-    registerToolPlugin(ShellTool.Plugin).pipe(Effect.as(PluginSupervisor.Service.of({ flush: Effect.void }))),
+    registerToolPlugin(ShellTool.Plugin).pipe(Effect.as(noopPluginSupervisor())),
   ),
   deps: [
     Config.node,

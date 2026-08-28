@@ -22,6 +22,7 @@ import { location } from "../fixture/location"
 import { tmpdir } from "../fixture/tmpdir"
 import { testEffect } from "../lib/effect"
 import { host } from "../plugin/host"
+import { noopPluginSupervisor } from "../fixture/plugin-supervisor"
 
 type WatcherEvent = { file: string; event: "add" | "change" | "unlink" }
 const describeNative = process.env.CI ? describe.skip : describe
@@ -31,7 +32,7 @@ const it = testEffect(AppNodeBuilder.build(LayerNode.group([FSUtil.node, Bus.nod
 const configLayer = Config.testLayer()
 const pluginNode = makeLocationNode({
   service: PluginSupervisor.Service,
-  layer: Layer.succeed(PluginSupervisor.Service, PluginSupervisor.Service.of({ flush: Effect.void })),
+  layer: Layer.succeed(PluginSupervisor.Service, noopPluginSupervisor()),
   deps: [],
 })
 
@@ -314,7 +315,7 @@ describe("LocationWatcher subscriptions", () => {
         Effect.gen(function* () {
           const policy = yield* LocationWatcherPolicy.Service
           yield* policy.transform((draft) => draft.add([".git"]))
-          return PluginSupervisor.Service.of({ flush: Effect.void })
+          return noopPluginSupervisor()
         }),
       ),
       deps: [LocationWatcherPolicy.node],

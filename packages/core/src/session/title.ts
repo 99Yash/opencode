@@ -17,6 +17,7 @@ import type { SessionRunnerModel } from "./runner/model.js"
 import { SessionSchema } from "./schema.js"
 import { SessionUsage } from "./usage.js"
 import { SessionStore } from "./store.js"
+import { PluginExecution } from "../plugin/execution.js"
 
 const MAX_LENGTH = 100
 const MAX_CONTEXT_LENGTH = 8_000
@@ -165,9 +166,14 @@ export const layer = Layer.effect(
     const context = yield* SessionContext.Service
     const store = yield* SessionStore.Service
     const database = yield* Database.Service
+    const gate = yield* PluginExecution.Service
     const title = make({ bus, llm, context, store })
     return Service.of({
-      generate: (sessionID) => title.generate(database.db, sessionID),
+      generate: Effect.fnUntraced(function* (sessionID) {
+        const session = yield* store.get(sessionID)
+        if (!session) return
+        return yield* gate.lease({ id: session.id, admission: true }, title.generate(database.db, sessionID))
+      }),
     })
   }),
 )
@@ -175,5 +181,5 @@ export const layer = Layer.effect(
 export const node = makeLocationNode({
   service: Service,
   layer,
-  deps: [Bus.node, llmClient, SessionContext.node, SessionStore.node, Database.node],
+  deps: [Bus.node, llmClient, SessionContext.node, SessionStore.node, Database.node, PluginExecution.node],
 })

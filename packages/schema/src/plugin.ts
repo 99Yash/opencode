@@ -21,6 +21,13 @@ export const Info = Schema.Union([
     source: Source,
     status: Schema.Literal("active"),
     tui: Schema.Boolean,
+    revision: optional(Schema.String).annotate({ description: "Loaded root package version or full Git commit." }),
+    generation: optional(Schema.String).annotate({
+      description: "Opaque loaded module graph identity, local to this runtime.",
+    }),
+    error: optional(Schema.String).annotate({
+      description: "The last replacement failed; the reported revision is still active.",
+    }),
   }),
   Schema.Struct({
     id: ID.pipe(optional),
@@ -28,9 +35,24 @@ export const Info = Schema.Union([
     status: Schema.Literal("failed"),
     error: Schema.String,
     tui: Schema.Boolean,
+    revision: optional(Schema.String).annotate({ description: "Registered root package version or full Git commit." }),
+    generation: optional(Schema.String).annotate({
+      description: "Opaque registered module graph identity, local to this runtime.",
+    }),
   }),
 ]).annotate({ identifier: "Plugin.Info" })
 export type Info = typeof Info.Type
+
+export interface PackageStatus extends Schema.Schema.Type<typeof PackageStatus> {}
+export const PackageStatus = Schema.Struct({
+  installed: optional(Schema.String),
+  available: optional(Schema.String),
+  mutable: Schema.Boolean,
+}).annotate({ identifier: "Plugin.PackageStatus" })
+
+export class OperationError extends Schema.TaggedError<OperationError>()("PluginOperationError", {
+  message: Schema.String,
+}) {}
 
 const Added = ephemeral({
   type: "plugin.added",

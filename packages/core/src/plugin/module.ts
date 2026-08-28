@@ -36,15 +36,22 @@ const Definition = Schema.Struct({
 
 export const load = Effect.fn("PluginModule.load")(function* (
   operation: Extract<ConfigPluginSource.Operation, { type: "add" }>,
+  fresh?: Npm.EntryPoint,
 ) {
   const npm = yield* Npm.Service
-  const entrypoint = path.isAbsolute(operation.target)
-    ? pathToFileURL(operation.target).href
-    : (yield* npm.add(operation.target, { subpaths: ["server", ""], refresh: true })).entrypoint
+  const resolved =
+    fresh ??
+    (path.isAbsolute(operation.target)
+      ? { entrypoint: pathToFileURL(operation.target).href, revision: undefined, generation: undefined }
+      : yield* npm.add(operation.target, { subpaths: ["server", ""], refresh: true }))
+  const entrypoint = resolved.entrypoint
   if (!entrypoint) return yield* Effect.fail(new Error(`Plugin entrypoint not found: ${operation.target}`))
   // Bun currently ignores query parameters when caching file:// imports.
-  const target = typeof Bun !== "undefined" ? operation.target.replaceAll("\\", "/") : entrypoint
-  const source = operation.mtime === undefined ? entrypoint : `${target}?mtime=${operation.mtime}`
+  const target =
+    typeof Bun !== "undefined" && path.isAbsolute(operation.target)
+      ? operation.target.replaceAll("\\", "/")
+      : entrypoint
+  const source = fresh || operation.mtime === undefined ? entrypoint : `${target}?mtime=${operation.mtime}`
   yield* Effect.log({ msg: "loading plugin", id: operation.target, entrypoint: source })
   const mod = yield* Effect.promise(() => importModule(source))
   const value = (yield* Schema.decodeUnknownEffect(Definition)(mod)).default
@@ -53,7 +60,9 @@ export const load = Effect.fn("PluginModule.load")(function* (
     id: plugin.id,
     tui: plugin.tui,
     vcs: plugin.vcs,
-    version: JSON.stringify(operation),
+    version: JSON.stringify([operation, resolved.generation]),
+    revision: resolved.revision,
+    generation: resolved.generation,
     source: path.isAbsolute(operation.target)
       ? { type: "local" as const, path: operation.target }
       : { type: "package" as const, package: operation.target },

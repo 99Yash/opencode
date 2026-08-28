@@ -49,8 +49,8 @@ test("plugin readiness stays lazy and resolves the supervisor for every executio
   const readiness = pluginReadiness(
     () => new ServiceUnavailableError({ message: "initialization timed out", service: "test" }),
   )
-  const layer = Layer.succeed(PluginSupervisor.Service, {
-    flush: Effect.sync(() => {
+  const layer = Layer.mock(PluginSupervisor.Service, {
+    initialized: Effect.sync(() => {
       flushes++
     }),
   })
@@ -58,4 +58,12 @@ test("plugin readiness stays lazy and resolves the supervisor for every executio
   expect(flushes).toBe(0)
   await Effect.runPromise(Effect.all([readiness, readiness], { concurrency: 1 }).pipe(Effect.provide(layer)))
   expect(flushes).toBe(2)
+})
+
+test("plugin state reads do not wait for a pending replacement", async () => {
+  const readiness = pluginReadiness(
+    () => new ServiceUnavailableError({ message: "initialization timed out", service: "test" }),
+  )
+  const layer = Layer.mock(PluginSupervisor.Service, { initialized: Effect.void, flush: Effect.never })
+  expect(await Effect.runPromise(readiness.pipe(Effect.as("active"), Effect.provide(layer)))).toBe("active")
 })

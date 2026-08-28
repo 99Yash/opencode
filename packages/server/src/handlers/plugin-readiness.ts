@@ -4,7 +4,8 @@ import { Effect } from "effect"
 
 export function pluginReadiness(error: () => ServiceUnavailableError) {
   return PluginSupervisor.Service.pipe(
-    Effect.flatMap((plugins) => plugins.flush),
+    // Reads may keep observing the coherent active graph while replacement waits for running tools.
+    Effect.flatMap((plugins) => plugins.initialized),
     Effect.timeoutOrElse({
       duration: "5 seconds",
       orElse: () => Effect.fail(error()),

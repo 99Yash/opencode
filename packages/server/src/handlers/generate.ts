@@ -1,4 +1,5 @@
 import { Generate } from "@opencode-ai/core/generate"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
 import { Location } from "@opencode-ai/core/location"
 import { LocationServiceMap } from "@opencode-ai/core/location-services"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -27,8 +28,9 @@ export const GenerateHandler = HttpApiBuilder.group(Api, "server.generate", (han
       Effect.fn("server.generate.text")(function* (request) {
         yield* flushPlugins
         const generate = yield* Generate.Service
-        const text = yield* generate
-          .text(request.payload)
+        const gate = yield* PluginExecution.Service
+        const text = yield* gate
+          .lease({ id: "generate", admission: true }, generate.text(request.payload))
           .pipe(
             Effect.mapError((error) =>
               error._tag === "Generate.ModelSelectionError"

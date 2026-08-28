@@ -6,6 +6,46 @@ Plugins configured in `opencode.json(c)` that expose a TUI component are loaded 
 to build plugins, see [Building plugins](/build/plugins). You do not need to add the same package to `cli.json`. The CLI
 gets the active plugin list from the connected OpenCode server, so this also works when the server is remote.
 
+## Manage Plugins
+
+Run **/plugins** or choose **Plugins** from the command palette. Select a plugin and press **Enter** to see its source,
+scope, loaded revision, and available actions. **Space** still enables or disables a TUI plugin in the current terminal.
+
+- **Check for updates** looks up the revision allowed by the configured package source without replacing installed code.
+  You can also press **Ctrl+R** on a package row. A small upward arrow marks a newer revision after checking. Checks are
+  explicit, not a background polling loop.
+- **Update package** downloads and applies the allowed revision without restarting the service or reopening the terminal.
+  Exact npm versions and full Git commit hashes remain pinned; changing a pin requires editing the configured source.
+- **Reload installed code** reloads the installed package without downloading it. Local file plugins use the same
+  entrypoint reload mechanism as source watching; changes to unwatched local dependencies can still require a restart.
+
+The **loaded** revision is the code actually registered in that runtime. Installed and available revisions come from the
+last check or successful update and may differ from loaded code after a failed replacement. OpenCode retains the previous
+working runtime when an update cannot load, and offers **View error details** rather than reporting a successful update.
+This fallback is in-process, not a persistent rollback: restarting can try the installed revision again. Reloading while
+the previous revision is still registered uses that revision, not a newer failed install.
+
+Server actions apply to the terminal's default Location, shown as **Scope** in details. Activation waits for running
+agent work in that Location to finish. New unrelated agent work waits while activation is pending; dependent child
+sessions can finish with their parent. Prompt admission is not blocked.
+
+A package's server plugin and TUI companion share an update source. Companion windows load the exact revision advertised
+by their server, including when connected to a remote server. Each window applies the replacement independently; one
+window's success does not confirm that every other window has updated. CLI-only packages update on the terminal's machine.
+Disabled TUI plugins stay disabled. Built-in plugins update with OpenCode itself.
+Plugin IDs own registrations and storage; a replacement that changes the exported ID is rejected without removing the
+working plugin. Apply intentional ID changes by restarting or changing the configured source instead.
+
+Reloading runs plugin cleanup and setup again. Plugins should keep drafts or other transient state in `ctx.storage.memory`
+if that state must survive a reload; ordinary component state is recreated.
+
+Package management is an external-client operation. Calling `check`, `update`, or `reload` through an in-process server
+plugin's `ctx.plugin` returns an error directing you to the external client, so setup or an active tool cannot wait on its
+own replacement.
+Standalone SDK consumers that retain tool snapshots must coordinate their own execution lifecycle before updating plugins.
+
+## Configure Plugins
+
 Use `cli.json` for CLI-only plugins. These plugins run locally in the terminal and remain active when the CLI connects
 to a remote server:
 

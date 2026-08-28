@@ -130,7 +130,7 @@ const it = testEffect(
       [Catalog.node, catalog],
       [SessionRunnerModel.node, models],
       [Location.node, Location.boundNode({ directory: AbsolutePath.make("/project") })],
-      [PluginSupervisor.node, Layer.mock(PluginSupervisor.Service, { flush: Effect.void })],
+      [PluginSupervisor.node, Layer.mock(PluginSupervisor.Service, { flush: Effect.void, initialized: Effect.void })],
     ],
   ),
 )

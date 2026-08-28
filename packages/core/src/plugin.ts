@@ -1,5 +1,5 @@
 export * as Plugin from "./plugin.js"
-export { Event, ID, Info, Source } from "@opencode-ai/schema/plugin"
+export { Event, ID, Info, Source, PackageStatus, OperationError } from "@opencode-ai/schema/plugin"
 
 import { Plugin } from "@opencode-ai/schema/plugin"
 import type { Plugin as PluginDefinition } from "@opencode-ai/plugin/effect/plugin"
@@ -26,6 +26,7 @@ import { Vcs } from "./vcs.js"
 import { PluginHooks } from "./plugin/hooks.js"
 import { Generate } from "./generate.js"
 import { Permission } from "./permission.js"
+import { PluginExecution } from "./plugin/execution.js"
 
 export interface Interface {
   readonly activate: (
@@ -38,6 +39,8 @@ export interface Interface {
 export type Versioned = PluginDefinition & {
   readonly version: string
   readonly source?: Plugin.Source
+  readonly revision?: string
+  readonly generation?: string
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") {}
@@ -47,8 +50,12 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const bus = yield* Bus.Service
     const kv = yield* KV.Service
+    const execution = yield* PluginExecution.Service
     const scope = yield* Scope.make()
-    const active = new Map<Plugin.ID, { readonly plugin: Versioned; readonly scope: Scope.Closeable }>()
+    const active = new Map<
+      Plugin.ID,
+      { readonly plugin: Versioned; readonly scope: Scope.Closeable; readonly error?: string }
+    >()
     const lock = Semaphore.makeUnsafe(1)
     let inventory: Plugin.Info[] = []
     let host: Parameters<PluginDefinition["effect"]>[0]
@@ -75,7 +82,7 @@ const layer = Layer.effect(
         "plugin.id": plugin.id,
         cause: loaded.cause,
       })
-      return { error: Cause.pretty(loaded.cause) } as const
+      return { error: errorMessage(loaded.cause) } as const
     })
 
     const activate = Effect.fn("Plugin.activate")(function* (
@@ -103,55 +110,83 @@ const layer = Layer.effect(
               return definition.id === candidate?.id && definition.version === candidate.version
             })
           ) {
-            const nextInventory = [...Array.from(active.values(), (entry) => activeInfo(entry.plugin)), ...failures]
+            const nextInventory = withFailures(
+              Array.from(active.values(), (entry) => activeInfo(entry.plugin, entry.error)),
+              failures,
+            )
             if (JSON.stringify(inventory) === JSON.stringify(nextInventory)) return
             inventory = nextInventory
             yield* bus.publish(Plugin.Event.Updated, {})
             return
           }
 
-          yield* State.batch(
-            Effect.gen(function* () {
-              const nextInventory: Plugin.Info[] = []
-              for (const definition of definitions) {
-                const previous = active.get(definition.id)
-                active.delete(definition.id)
-                if (previous) yield* Scope.close(previous.scope, Exit.void).pipe(Effect.ignore)
+          yield* execution.exclusive(
+            State.batch(
+              Effect.gen(function* () {
+                const nextInventory: Plugin.Info[] = []
+                // Registrations are append-ordered. Preserve the unchanged prefix, then rebuild the suffix.
+                const prefix = definitions.findIndex(
+                  (definition, index) =>
+                    definition.id !== current[index]?.id || definition.version !== current[index]?.version,
+                )
+                const keep = prefix === -1 ? definitions.length : prefix
+                const previousEntries = new Map(active)
+                const closing = Array.from(active.entries()).slice(keep).toReversed()
+                yield* Effect.forEach(
+                  closing,
+                  ([id, entry]) =>
+                    Effect.gen(function* () {
+                      yield* Scope.close(entry.scope, Exit.void).pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.logWarning("failed to clean up plugin", { "plugin.id": id, cause }),
+                        ),
+                      )
+                      active.delete(id)
+                    }),
+                  { discard: true },
+                )
+                for (const [index, definition] of definitions.entries()) {
+                  if (index < keep) {
+                    nextInventory.push(activeInfo(definition, active.get(definition.id)?.error))
+                    continue
+                  }
+                  const previous = previousEntries.get(definition.id)
 
-                const loaded = yield* load(definition)
-                if (loaded.scope !== undefined) {
-                  active.set(definition.id, { plugin: definition, scope: loaded.scope })
-                  nextInventory.push(activeInfo(definition))
-                  continue
+                  const loaded = yield* load(definition)
+                  if (loaded.scope !== undefined) {
+                    active.set(definition.id, { plugin: definition, scope: loaded.scope })
+                    nextInventory.push(activeInfo(definition))
+                    continue
+                  }
+                  const failed: Plugin.Info = {
+                    id: definition.id,
+                    source: definition.source ?? { type: "builtin" },
+                    status: "failed",
+                    error: loaded.error,
+                    tui: definition.tui ?? false,
+                    ...(definition.revision === undefined ? {} : { revision: definition.revision }),
+                    ...(definition.generation === undefined ? {} : { generation: definition.generation }),
+                  }
+
+                  if (!previous) {
+                    nextInventory.push(failed)
+                    continue
+                  }
+                  const restored = yield* load(previous.plugin)
+                  if (restored.scope !== undefined) {
+                    active.set(definition.id, { plugin: previous.plugin, scope: restored.scope, error: loaded.error })
+                    nextInventory.push({ ...activeInfo(previous.plugin), error: loaded.error })
+                    continue
+                  }
+                  yield* Effect.logError("failed to restore plugin; deactivating", {
+                    "plugin.id": definition.id,
+                  })
+                  nextInventory.push(failed)
                 }
-                nextInventory.push({
-                  id: definition.id,
-                  source: definition.source ?? { type: "builtin" },
-                  status: "failed",
-                  error: loaded.error,
-                  tui: definition.tui ?? false,
-                })
 
-                if (!previous) continue
-                const restored = yield* load(previous.plugin)
-                if (restored.scope !== undefined) {
-                  active.set(definition.id, { plugin: previous.plugin, scope: restored.scope })
-                  continue
-                }
-                yield* Effect.logError("failed to restore plugin; deactivating", {
-                  "plugin.id": definition.id,
-                })
-              }
-
-              const removed = Array.from(active.entries())
-                .filter(([id]) => !ids.has(id))
-                .toReversed()
-              removed.forEach(([id]) => active.delete(id))
-              yield* Effect.forEach(removed, ([, entry]) => Scope.close(entry.scope, Exit.void).pipe(Effect.ignore), {
-                discard: true,
-              })
-              inventory = [...nextInventory, ...failures]
-            }),
+                inventory = withFailures(nextInventory, failures)
+              }),
+            ).pipe(Effect.uninterruptible),
           )
           yield* bus.publish(Plugin.Event.Updated, {})
         }),
@@ -176,13 +211,39 @@ const layer = Layer.effect(
   }),
 )
 
-function activeInfo(plugin: Versioned): Plugin.Info {
+function activeInfo(plugin: Versioned, error?: string): Plugin.Info {
   return {
     id: Plugin.ID.make(plugin.id),
     source: plugin.source ?? { type: "builtin" },
     status: "active",
     tui: plugin.tui ?? false,
+    ...(plugin.revision === undefined ? {} : { revision: plugin.revision }),
+    ...(plugin.generation === undefined ? {} : { generation: plugin.generation }),
+    ...(error === undefined ? {} : { error }),
   }
+}
+
+/** Inventory errors must not expose credentials or unbounded import/setup traces. */
+export function errorMessage(cause: Cause.Cause<unknown>) {
+  return Cause.pretty(cause)
+    .replace(/https?:\/\/[^\s"'<>]+/g, (value) => {
+      if (!URL.canParse(value)) return "[URL]"
+      const url = new URL(value)
+      url.username = ""
+      url.password = ""
+      url.search = ""
+      url.hash = ""
+      return url.href
+    })
+    .slice(0, 2000)
+}
+
+function withFailures(active: Plugin.Info[], failures: readonly Extract<Plugin.Info, { readonly status: "failed" }>[]) {
+  return failures.reduce((inventory, failure) => {
+    const index = inventory.findIndex((entry) => JSON.stringify(entry.source) === JSON.stringify(failure.source))
+    if (index === -1) return [...inventory, failure]
+    return inventory.map((entry, current) => (current === index ? { ...entry, error: failure.error } : entry))
+  }, active)
 }
 
 export const node = makeLocationNode({
@@ -208,5 +269,6 @@ export const node = makeLocationNode({
     WebSearch.node,
     Generate.node,
     Permission.node,
+    PluginExecution.node,
   ],
 })

@@ -2,6 +2,7 @@ import { Pty } from "@opencode-ai/core/pty"
 import { PtyProtocol } from "@opencode-ai/core/pty/protocol"
 import { PtyTicket } from "@opencode-ai/core/pty/ticket"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor-service"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
 import { Location } from "@opencode-ai/core/location"
 import { Effect, Queue } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -41,19 +42,25 @@ export const PtyHandler = HttpApiBuilder.group(Api, "server.pty", (handlers) =>
         "pty.create",
         Effect.fn(function* (ctx) {
           const plugins = yield* PluginSupervisor.Service
-          yield* plugins.flush
-          const pty = yield* Pty.Service
-          const location = yield* Location.Service
-          const cwd = ctx.payload.cwd || location.directory
-          return yield* response(
-            pty.create({
-              ...ctx.payload,
-              args: ctx.payload.args ? [...ctx.payload.args] : undefined,
-              cwd,
-              env: {
-                ...ctx.payload.env,
-                ...(yield* environment.get({ directory: location.directory, cwd })),
-              },
+          yield* plugins.initialized
+          const gate = yield* PluginExecution.Service
+          return yield* gate.lease(
+            { id: "pty", admission: true },
+            Effect.gen(function* () {
+              const pty = yield* Pty.Service
+              const location = yield* Location.Service
+              const cwd = ctx.payload.cwd || location.directory
+              return yield* response(
+                pty.create({
+                  ...ctx.payload,
+                  args: ctx.payload.args ? [...ctx.payload.args] : undefined,
+                  cwd,
+                  env: {
+                    ...ctx.payload.env,
+                    ...(yield* environment.get({ directory: location.directory, cwd })),
+                  },
+                }),
+              )
             }),
           )
         }),

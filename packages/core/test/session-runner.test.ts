@@ -48,6 +48,8 @@ import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { PromptCacheDiagnostics } from "@opencode-ai/core/session/prompt-cache-diagnostics"
 import { SessionUsage } from "@opencode-ai/core/session/usage"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
+import { noopPluginSupervisor } from "./fixture/plugin-supervisor"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { SystemPromptPlugin } from "@opencode-ai/core/plugin/system-prompt"
 import { QuestionTool } from "@opencode-ai/core/tool/plugin/question"
@@ -374,12 +376,11 @@ const config = Config.testLayer([
   }),
 ])
 let pluginFlushHook = Effect.void
-const pluginSupervisor = Layer.succeed(
-  PluginSupervisor.Service,
-  PluginSupervisor.Service.of({
-    flush: Effect.suspend(() => pluginFlushHook),
-  }),
-)
+let pluginConfigFlushHook = Effect.void
+const pluginSupervisor = Layer.succeed(PluginSupervisor.Service, {
+  ...noopPluginSupervisor(Effect.suspend(() => pluginFlushHook)),
+  flush: Effect.suspend(() => pluginConfigFlushHook),
+})
 const promptCatalog = Layer.mock(Catalog.Service, {
   provider: {
     get: () => Effect.undefined,
@@ -450,6 +451,7 @@ const it = testEffect(
       Catalog.node,
       Tool.node,
       PluginHooks.node,
+      PluginExecution.node,
       echoNode,
       SessionRunnerModel.node,
       InstructionBuiltIns.node,
@@ -536,6 +538,7 @@ const setup = Effect.gen(function* () {
   systemLoadHook = Effect.void
   modelResolveHook = Effect.void
   pluginFlushHook = Effect.void
+  pluginConfigFlushHook = Effect.void
   currentModel = model
   skillBaselines.clear()
   toolBarrier = undefined
@@ -4755,6 +4758,47 @@ describe("SessionRunnerLLM", () => {
       ])
       yield* replaySessionProjection(sessionID)
       expect((yield* session.context(sessionID)).filter((message) => message.type === "assistant")).toHaveLength(1)
+    }),
+  )
+
+  it.effect("defers plugin activation through retry backoff and blocks a new Session drain", () =>
+    Effect.gen(function* () {
+      const session = yield* setup
+      const gate = yield* PluginExecution.Service
+      const bus = yield* Bus.Service
+      yield* admit(session, "Retry before updating plugins")
+      yield* insertSession(otherSessionID)
+      yield* session.prompt({ sessionID: otherSessionID, text: "Wait for replacement", resume: false })
+      yield* TestLLM.push(
+        Stream.fail(providerUnavailable()),
+        TestLLM.text("Recovered", "text-retry"),
+        TestLLM.text("New generation", "text-new"),
+      )
+      const scheduled = yield* bus
+        .subscribe(SessionEvent.RetryScheduled)
+        .pipe(Stream.runHead, Effect.forkScoped({ startImmediately: true }))
+      const running = yield* session.resume(sessionID).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Fiber.join(scheduled)
+      const reconciled = yield* Deferred.make<void>()
+      pluginConfigFlushHook = Deferred.await(reconciled)
+      let activated = false
+      const activation = yield* gate
+        .exclusive(
+          Effect.sync(() => {
+            activated = true
+          }).pipe(Effect.andThen(Deferred.succeed(reconciled, undefined))),
+        )
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      const waiting = yield* session.resume(otherSessionID).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Effect.yieldNow
+      expect(activated).toBe(false)
+      expect(requests).toHaveLength(1)
+      yield* TestClock.adjust("3 seconds")
+      yield* Fiber.join(running)
+      yield* Fiber.join(activation)
+      yield* Fiber.join(waiting)
+      expect(activated).toBe(true)
+      expect(requests).toHaveLength(3)
     }),
   )
 

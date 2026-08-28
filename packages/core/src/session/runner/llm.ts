@@ -26,6 +26,7 @@ import { ToolOutput } from "../../tool-output.js"
 import { PluginSupervisor } from "../../plugin/supervisor.js"
 import { PromptCacheDiagnostics } from "../prompt-cache-diagnostics.js"
 import { MAX_STEPS_PROMPT } from "./max-steps.js"
+import { PluginExecution } from "../../plugin/execution.js"
 
 const CONTINUE_AFTER_INCOMPLETE_STREAM =
   "The previous response was interrupted. Continue from where you left off without repeating completed content."
@@ -40,6 +41,7 @@ const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const compaction = yield* SessionCompaction.Service
     const plugins = yield* PluginSupervisor.Service
+    const pluginExecution = yield* PluginExecution.Service
     const title = yield* SessionTitle.Service
     const steps = yield* SessionStep.make
     const diagnostics = yield* Config.boolean("OPENCODE_PROMPT_CACHE_DIAGNOSTICS").pipe(
@@ -89,7 +91,6 @@ const layer = Layer.effect(
         const control = pending.type === "compaction" || pending.type === "move"
         if (promotable === "steer" && pending.delivery === "queue" && !control) return DrainResult.Complete()
       }
-      yield* plugins.flush
       yield* settleStaleToolCalls(sessionID)
 
       const advanceToStep = Effect.fn("SessionRunner.advanceToStep")(() =>
@@ -313,7 +314,14 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ drain })
+    return Service.of({
+      drain: Effect.fnUntraced(function* (input) {
+        yield* plugins.initialized
+        const session = yield* store.get(input.sessionID)
+        if (!session) return yield* Effect.die(new Error(`Session not found: ${input.sessionID}`))
+        return yield* pluginExecution.lease(session, drain(input))
+      }),
+    })
   }),
 )
 
@@ -332,5 +340,6 @@ export const node = makeLocationNode({
     Snapshot.node,
     ToolOutput.node,
     Database.node,
+    PluginExecution.node,
   ],
 })

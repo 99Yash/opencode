@@ -19,6 +19,7 @@ import { Mcp } from "@opencode-ai/core/mcp/index"
 import { Npm } from "@opencode-ai/util/npm"
 import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { Permission } from "@opencode-ai/core/permission"
 import { Reference } from "@opencode-ai/core/reference"
@@ -35,8 +36,12 @@ import { emptyMcpLayer } from "../fixture/mcp"
 const npmLayer = Layer.succeed(
   Npm.Service,
   Npm.Service.of({
-    add: () => Effect.succeed({ directory: "", entrypoint: undefined }),
-    resolve: () => Effect.succeed({ directory: "", entrypoint: undefined }),
+    add: () => Effect.succeed({ directory: "", entrypoint: undefined, generation: "test" }),
+    resolve: () => Effect.succeed({ directory: "", entrypoint: undefined, generation: "test" }),
+    inspect: () => Effect.succeed({ mutable: false }),
+    check: () => Effect.succeed({ mutable: false }),
+    update: () => Effect.die("unused npm.update"),
+    reload: () => Effect.die("unused npm.reload"),
     which: () => Effect.undefined,
   }),
 )
@@ -78,6 +83,7 @@ export const PluginTestLayer = LayerNode.compile(
     PluginRuntime.node,
     Permission.node,
     PluginHooks.node,
+    PluginExecution.node,
     Reference.node,
     Skill.node,
     SkillDiscovery.node,

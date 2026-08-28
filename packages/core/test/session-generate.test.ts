@@ -46,9 +46,10 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { SkillInstructions } from "@opencode-ai/core/skill/instructions"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { PluginExecution } from "@opencode-ai/core/plugin/execution"
 import { Tool } from "@opencode-ai/core/tool"
 import { asc, eq } from "drizzle-orm"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Effect, Fiber, Latch, Layer, Schema, Stream } from "effect"
 import { testEffect } from "./lib/effect"
 
 const requests: LLMRequest[] = []
@@ -110,7 +111,7 @@ const discovery = Layer.mock(InstructionDiscovery.Service, {
 const skills = Layer.mock(SkillInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const references = Layer.mock(ReferenceInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
 const mcp = Layer.mock(McpInstructions.Service, { load: () => Effect.succeed(Instructions.empty) })
-const plugins = Layer.mock(PluginSupervisor.Service, { flush: Effect.void })
+const plugins = Layer.mock(PluginSupervisor.Service, { flush: Effect.never, initialized: Effect.void })
 const tools = Layer.mock(Tool.Service, {
   snapshot: () =>
     Effect.succeed({
@@ -138,6 +139,7 @@ const it = testEffect(
       Agent.node,
       InstructionBuiltIns.node,
       PluginHooks.node,
+      PluginExecution.node,
       SessionGenerateNode.node,
     ]),
     [
@@ -223,6 +225,28 @@ const setup = Effect.gen(function* () {
     .pipe(Effect.orDie)
   return { db, bus, instructions: yield* instructionBuiltIns.load(sessionID) }
 })
+
+it.effect("generates under a held Session lease while config reconciliation is pending", () =>
+  Effect.gen(function* () {
+    requests.length = 0
+    instruction = "Initial context"
+    yield* setup
+    const gate = yield* PluginExecution.Service
+    const generate = yield* SessionGenerate.Service
+    const proceed = yield* Latch.make()
+    const running = yield* gate
+      .lease(
+        { id: sessionID },
+        proceed.await.pipe(Effect.andThen(generate.generate({ sessionID, prompt: "Generate with active plugins" }))),
+      )
+      .pipe(Effect.forkScoped({ startImmediately: true }))
+    const writer = yield* gate.exclusive(Effect.void).pipe(Effect.forkScoped({ startImmediately: true }))
+    yield* proceed.open
+    expect(yield* Fiber.join(running)).toBe("Transient answer")
+    yield* Fiber.join(writer)
+    expect(requests).toHaveLength(1)
+  }),
+)
 
 it.effect(
   "generates from fresh settled Session context without durable mutation",

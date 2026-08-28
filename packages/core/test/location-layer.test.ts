@@ -304,7 +304,7 @@ describe("LocationServiceMap", () => {
     ),
   )
 
-  itWithSdk.live("reruns activation for Config updates during startup", () =>
+  itWithSdk.live("reconciles Config updates during startup without restarting unchanged plugins", () =>
     Effect.acquireRelease(
       Effect.promise(() => tmpdir()),
       (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
@@ -316,18 +316,14 @@ describe("LocationServiceMap", () => {
           yield* Effect.promise(() => fs.writeFile(file, "{}"))
           const firstStarted = yield* Deferred.make<void>()
           const releaseFirst = yield* Deferred.make<void>()
-          const secondStarted = yield* Deferred.make<void>()
-          const releaseSecond = yield* Deferred.make<void>()
           const sdk = yield* SdkPlugins.Service
           yield* sdk.register(
             EffectPlugin.define({
               id: "blocked-config-reload",
               effect: () =>
                 Effect.sync(() => ++activations.count).pipe(
-                  Effect.flatMap((activation) =>
-                    activation === 1
-                      ? Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseFirst)))
-                      : Deferred.succeed(secondStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseSecond))),
+                  Effect.andThen(
+                    Deferred.succeed(firstStarted, undefined).pipe(Effect.andThen(Deferred.await(releaseFirst))),
                   ),
                 ),
             }),
@@ -355,12 +351,17 @@ describe("LocationServiceMap", () => {
             Effect.provide(context),
             Effect.forkChild,
           )
+          const initialFiber = yield* PluginSupervisor.Service.use((supervisor) => supervisor.initialized).pipe(
+            Effect.provide(context),
+            Effect.forkChild({ startImmediately: true }),
+          )
+          expect(initialFiber.pollUnsafe()).toBeUndefined()
           yield* Deferred.succeed(releaseFirst, undefined)
-          yield* Deferred.await(secondStarted)
-          expect(flushFiber.pollUnsafe()).toBeUndefined()
-          yield* Deferred.succeed(releaseSecond, undefined)
           yield* Fiber.join(flushFiber)
-          expect(activations.count).toBe(2)
+          yield* Fiber.join(initialFiber)
+          expect(activations.count).toBe(1)
+          const inventory = yield* Plugin.Service.use((plugins) => plugins.list()).pipe(Effect.provide(context))
+          expect(inventory.map((plugin) => plugin.id)).toContain(Plugin.ID.make("config-effect-plugin"))
         }),
       ),
     ),

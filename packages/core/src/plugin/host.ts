@@ -4,6 +4,7 @@ import { Plugin } from "@opencode-ai/plugin/effect"
 import type { IntegrationMethodRegistration } from "@opencode-ai/plugin/effect/integration"
 import { EventManifest } from "@opencode-ai/schema/event-manifest"
 import { ServerConfig } from "@opencode-ai/schema/mcp"
+import { OperationError } from "@opencode-ai/schema/plugin"
 import { App } from "../app.js"
 import { Effect, Schema, Stream } from "effect"
 import { Agent } from "../agent.js"
@@ -327,6 +328,10 @@ export const make = Effect.fn("PluginHost.make")(function* (plugin: Interface, p
     },
     plugin: {
       list: () => response(plugin.list()),
+      // In-process management can wait on its own setup/tool lease. Use an external client instead.
+      check: () => Effect.fail(new OperationError({ message: "Check plugin updates through an external client." })),
+      update: () => Effect.fail(new OperationError({ message: "Update plugins through an external client." })),
+      reload: () => Effect.fail(new OperationError({ message: "Reload plugins through an external client." })),
     },
     reference: {
       list: () => response(reference.list()),

@@ -19,13 +19,15 @@ import { Model } from "@opencode-ai/core/model"
 import { Provider } from "@opencode-ai/core/provider"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Effect, Fiber, Logger, Stream } from "effect"
+import { Npm } from "@opencode-ai/util/npm"
 import { Database } from "../../src/database/database"
 import { tmpdir } from "../fixture/tmpdir"
+import { git } from "../fixture/git"
 import { tempGlobalLayer } from "../fixture/global"
 import { testEffect } from "../lib/effect"
 
 const it = testEffect(
-  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SdkPlugins.node, LocationServiceMap.node]), [
+  AppNodeBuilder.build(LayerNode.group([Database.node, Bus.node, SdkPlugins.node, LocationServiceMap.node, Npm.node]), [
     [Global.node, tempGlobalLayer],
   ]),
 )
@@ -37,6 +39,85 @@ const staticIt = testEffect(
 )
 
 describe("PluginSupervisor config", () => {
+  it.live(
+    "updates a real package graph and retains its active revision after failed import and setup",
+    () =>
+      withLocation(
+        undefined,
+        Effect.gen(function* () {
+          yield* ready()
+          const location = yield* Location.Service
+          const registry = yield* Plugin.Service
+          const supervisor = yield* PluginSupervisor.Service
+          const agents = yield* Agent.Service
+          const npm = yield* Npm.Service
+          const repository = path.join(location.directory, "package")
+          const target = `git+${pathToFileURL(repository).href}#fixture-branch`
+          const initial = (yield* registry.list())[0]
+          expect(initial?.revision).toMatch(/^[0-9a-f]{40}$/)
+          expect((yield* agents.get(Agent.ID.make("package-agent")))?.description).toBe("first")
+          yield* Effect.promise(() => fs.writeFile(path.join(repository, "value.js"), `export const value = "second"`))
+          yield* commitPackage(repository)
+          const check = yield* supervisor.check(target)
+          expect(check.mutable).toBe(true)
+          expect(check.installed).toBe(initial?.revision)
+          expect(check.available).not.toBe(initial?.revision)
+          const updated = (yield* supervisor.update(target))[0]
+          expect(updated?.revision).toBe(check.available)
+          expect(updated?.generation).not.toBe(initial?.generation)
+          expect((yield* agents.get(Agent.ID.make("package-agent")))?.description).toBe("second")
+
+          yield* Effect.promise(() => fs.writeFile(path.join(repository, "index.js"), packagePlugin(true)))
+          yield* commitPackage(repository)
+          const failedSetup = (yield* supervisor.update(target))[0]
+          expect(failedSetup).toEqual({ ...updated, error: expect.stringContaining("package setup failed") })
+          expect((yield* agents.get(Agent.ID.make("package-agent")))?.description).toBe("second")
+          expect((yield* npm.inspect(target)).installed).not.toBe(updated?.revision)
+
+          yield* Effect.promise(() =>
+            fs.writeFile(path.join(repository, "index.js"), `import "./missing.js"; ${packagePlugin()}`),
+          )
+          yield* commitPackage(repository)
+          const failedImport = (yield* supervisor.update(target))[0]
+          expect(failedImport).toEqual({ ...updated, error: expect.stringContaining("missing.js") })
+          expect((yield* agents.get(Agent.ID.make("package-agent")))?.description).toBe("second")
+          const reloaded = (yield* supervisor.reload(target))[0]
+          expect(reloaded?.status).toBe("active")
+          expect(reloaded?.revision).toBe(updated?.revision)
+          expect(reloaded?.error).toBeUndefined()
+          expect(reloaded?.generation).not.toBe(updated?.generation)
+        }),
+        false,
+        async (directory) => {
+          const repository = path.join(directory, "package")
+          await fs.mkdir(repository)
+          await fs.writeFile(
+            path.join(repository, "package.json"),
+            JSON.stringify({
+              name: "fixture-core-plugin",
+              version: "1.0.0",
+              type: "module",
+              exports: "./index.js",
+            }),
+          )
+          await fs.writeFile(path.join(repository, "index.js"), packagePlugin())
+          await fs.writeFile(path.join(repository, "value.js"), `export const value = "first"`)
+          await git(repository, "init", "-q", "-b", "fixture-branch")
+          await Effect.runPromise(commitPackage(repository))
+          await fs.writeFile(
+            path.join(directory, "opencode.json"),
+            JSON.stringify({
+              plugins: [
+                "-*",
+                { package: `git+${pathToFileURL(repository).href}#fixture-branch`, options: { selection: "first" } },
+                { package: `git+${pathToFileURL(repository).href}#fixture-branch`, options: { selection: "last" } },
+              ],
+            }),
+          )
+        },
+      ),
+    30_000,
+  )
   it.live("applies selectors in order", () =>
     withLocation(
       { plugins: ["-opencode.provider.*", "opencode.provider.openai"] },
@@ -504,6 +585,30 @@ export default Plugin.define({
 })
 `
 }
+
+function packagePlugin(fail = false) {
+  return `import { value } from "./value.js"
+export default { id: "package-plugin", tui: true, async setup(ctx) {
+  await ctx.agent.transform((draft) => draft.update("package-agent", (agent) => { agent.description = value }))
+  ${fail ? 'throw new Error("package setup failed")' : ""}
+} }`
+}
+
+const commitPackage = (repository: string) =>
+  Effect.promise(async () => {
+    await git(repository, "add", ".")
+    await git(
+      repository,
+      "-c",
+      "user.name=fixture",
+      "-c",
+      "user.email=fixture@example.com",
+      "commit",
+      "-q",
+      "-m",
+      "fixture",
+    )
+  })
 
 function discoveredPlugin(id: string) {
   return `export default { id: ${JSON.stringify(id)}, setup() {} }`

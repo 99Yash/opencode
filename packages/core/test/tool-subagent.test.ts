@@ -25,6 +25,7 @@ import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
+import { noopPluginSupervisor } from "./fixture/plugin-supervisor"
 import { Permission } from "@opencode-ai/core/permission"
 import { SubagentTool } from "@opencode-ai/core/tool/plugin/subagent"
 import { Tool } from "@opencode-ai/core/tool"
@@ -100,7 +101,7 @@ const subagentPluginSupervisor = makeLocationNode({
   service: PluginSupervisor.Service,
   layer: Layer.effect(
     PluginSupervisor.Service,
-    registerToolPlugin(SubagentTool.Plugin).pipe(Effect.as(PluginSupervisor.Service.of({ flush: Effect.void }))),
+    registerToolPlugin(SubagentTool.Plugin).pipe(Effect.as(noopPluginSupervisor())),
   ),
   deps: [Agent.node, Config.node, Permission.node, PluginRuntime.node, Tool.node],
 })
