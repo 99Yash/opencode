@@ -26,17 +26,23 @@ const agentPlugin = (pluginID: string, agentID: string) =>
     effect: (ctx) => ctx.agent.transform((agents) => agents.update(Agent.ID.make(agentID), () => {})),
   })
 
-// A host-owned assignment in miniature: the map decides per ref which plugins
+// A host-owned assignment in miniature: the map decides per key which plugins
 // an instance is born with, the way an embedder will per Slack thread.
 const instances = Layer.effect(
   LocationServiceMap.Service,
-  LayerMap.make(
-    (ref: Location.Ref) =>
-      Instance.layer(ref, {
-        plugins: path.basename(ref.directory) === "thread-a" ? [agentPlugin("thread-a-plugin", "thread-a-agent")] : [],
-        replacements: [[Global.node, tempGlobalLayer]],
-      }),
-    { idleTimeToLive: Duration.infinity },
+  Effect.map(
+    LayerMap.make(
+      (key: Instance.Key) => {
+        const ref = Location.parseInstanceKey(key)
+        return Instance.layer(ref, {
+          plugins:
+            path.basename(ref.directory) === "thread-a" ? [agentPlugin("thread-a-plugin", "thread-a-agent")] : [],
+          replacements: [[Global.node, tempGlobalLayer]],
+        })
+      },
+      { idleTimeToLive: Duration.infinity },
+    ),
+    LocationServiceMap.fromKeyed,
   ),
 )
 

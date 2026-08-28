@@ -1,6 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Config } from "@opencode-ai/schema/config"
 import { Money } from "@opencode-ai/schema/money"
 import {
@@ -24,6 +24,7 @@ import { Catalog } from "@opencode-ai/core/catalog"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Global } from "@opencode-ai/util/global"
+import { Instance } from "@opencode-ai/core/instance"
 import { LocationServiceMap, type LocationServices } from "@opencode-ai/core/location-services"
 import { LocationActivity } from "@opencode-ai/core/location-activity"
 import { Location } from "@opencode-ai/core/location"
@@ -60,18 +61,23 @@ const itWithSdk = testEffect(
 )
 const activityLocations = Layer.effect(
   LocationServiceMap.Service,
-  LayerMap.make(
-    (ref) =>
-      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-      Layer.succeed(
-        Location.Service,
-        Location.Service.of({
-          directory: ref.directory,
-          workspaceID: ref.workspaceID,
-          project: { id: Project.ID.global, directory: ref.directory, canonical: ref.directory },
-        }),
-      ) as unknown as Layer.Layer<LocationServices>,
-    { idleTimeToLive: Duration.infinity },
+  Effect.map(
+    LayerMap.make(
+      (key: Instance.Key) => {
+        const ref = Location.parseInstanceKey(key)
+        // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+        return Layer.succeed(
+          Location.Service,
+          Location.Service.of({
+            directory: ref.directory,
+            workspaceID: ref.workspaceID,
+            project: { id: Project.ID.global, directory: ref.directory, canonical: ref.directory },
+          }),
+        ) as unknown as Layer.Layer<LocationServices>
+      },
+      { idleTimeToLive: Duration.infinity },
+    ),
+    LocationServiceMap.fromKeyed,
   ),
 )
 const itWithActivity = testEffect(
@@ -122,7 +128,7 @@ describe("LocationServiceMap", () => {
       yield* TestClock.adjust("59 minutes")
       yield* bus.publish(SessionEvent.Execution.Succeeded, { sessionID }, { location: ref })
       yield* TestClock.adjust("1 minute")
-      expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([ref])
+      expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([Location.instanceKey(ref)])
       yield* TestClock.adjust("59 minutes")
       expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([])
     }),
@@ -168,12 +174,12 @@ describe("LocationServiceMap", () => {
           // evicted by a zero idle time-to-live.
           const location = yield* Location.Service.pipe(Effect.provide(locations.get(workspaceRef)), Effect.scoped)
           expect(location.directory).toBe(directory)
-          expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([workspaceRef])
+          expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([Location.instanceKey(workspaceRef)])
 
           // A local ref with the same missing directory keeps the existing
           // behavior: dropped as soon as it goes idle so a retry can rebuild it.
           yield* Location.Service.pipe(Effect.provide(locations.get(localRef)), Effect.scoped, Effect.exit)
-          expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([workspaceRef])
+          expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([Location.instanceKey(workspaceRef)])
         }),
       ),
     ),
@@ -677,7 +683,7 @@ describe("LocationServiceMap", () => {
             const first = yield* locations.contextEffect(absent)
             expect(yield* locations.contextEffect(present)).toBe(first)
             expect(Array.from(yield* RcMap.keys(locations.rcMap))).toEqual([
-              Location.Ref.make({ directory, workspaceID: undefined }),
+              Location.instanceKey(Location.Ref.make({ directory })),
             ])
 
             // Invalidating with the shape opposite to the one that booted must evict.
@@ -1018,4 +1024,32 @@ describe("LocationServiceMap", () => {
       ),
     ),
   )
+})
+
+describe("Location.instanceKey", () => {
+  // The two documented forms are the built-in assignment policy's contract:
+  // workspace IDs are `wrk`-prefixed and colon-free, absolute paths never
+  // start with `wrk`, so the forms cannot collide.
+  test("mints the documented forms and parses them back", () => {
+    const local = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key") })
+    expect(Location.instanceKey(local)).toBe(Instance.Key.make("location:/tmp/instance-key"))
+    expect(Location.parseInstanceKey(Location.instanceKey(local))).toEqual(local)
+
+    const workspace = Location.Ref.make({
+      directory: AbsolutePath.make("/workspace/repo"),
+      workspaceID: Workspace.ID.make("wrk_instance_key"),
+    })
+    expect(Location.instanceKey(workspace)).toBe(Instance.Key.make("location:wrk_instance_key:/workspace/repo"))
+    expect(Location.parseInstanceKey(Location.instanceKey(workspace))).toEqual(workspace)
+  })
+
+  test("optional-key shape does not split instances", () => {
+    const explicit = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key"), workspaceID: undefined })
+    const implicit = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key") })
+    expect(Location.instanceKey(explicit)).toBe(Location.instanceKey(implicit))
+  })
+
+  test("rejects keys not minted by the location policy", () => {
+    expect(() => Location.parseInstanceKey(Instance.Key.make("thread:C123"))).toThrow("Unknown instance key")
+  })
 })

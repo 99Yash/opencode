@@ -53,12 +53,12 @@ export const sessionLocationLayer = Layer.effect(
 
         return yield* effect.pipe(
           Effect.provide(
-            locations.get(
-              Location.Ref.make({
+            locations.forSession({
+              location: Location.Ref.make({
                 directory: AbsolutePath.make(row.directory),
                 workspaceID: row.workspaceID ? Workspace.ID.make(row.workspaceID) : undefined,
               }),
-            ),
+            }),
           ),
         )
       }),

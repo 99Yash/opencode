@@ -53,6 +53,8 @@ import { Vcs } from "./vcs.js"
 
 export * as Instance from "./instance.js"
 
+export { Key } from "@opencode-ai/schema/instance"
+
 const nodes = [
   Location.node,
   Environment.node,

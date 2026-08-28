@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { DateTime, Effect, Fiber, Layer, LayerMap, Schema, Stream } from "effect"
+import { DateTime, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import { mkdtemp, rm } from "fs/promises"
 import { tmpdir } from "os"
 import path from "path"
@@ -25,7 +25,7 @@ import { SessionInbox } from "@opencode-ai/core/session/inbox"
 import { SessionInboxTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
-import type { LocationServices } from "@opencode-ai/core/location-services"
+import { stubLocations } from "./fixture/location"
 import { Image } from "@opencode-ai/core/image"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
@@ -58,36 +58,29 @@ const execution = Layer.succeed(
     awaitIdle: () => Effect.void,
   }),
 )
-const locations = Layer.effect(
-  LocationServiceMap.Service,
-  LayerMap.make(
-    () =>
-      // These operations resolve Location services lazily and must wait for plugin-projected state.
-      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-      Layer.unwrap(
-        Effect.sync(() => {
-          let ready = false
-          return Layer.mergeAll(
-            LayerNode.compile(PluginHooks.node),
-            Layer.mock(Image.Service, {
-              normalize: (_resource, content) =>
-                ready
-                  ? Effect.succeed(content.content.length > 5 * 1024 * 1024 ? { ...content, content: "AA==" } : content)
-                  : Effect.die(new Error("Image service used before plugins were ready")),
-            }),
-            Layer.mock(Snapshot.Service, {
-              capture: () =>
-                ready ? Effect.undefined : Effect.die(new Error("Snapshot used before plugins were ready")),
-              restore: () =>
-                ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready")),
-            }),
-            Layer.succeed(
-              PluginSupervisor.Service,
-              PluginSupervisor.Service.of({ flush: Effect.sync(() => (ready = true)) }),
-            ),
-          )
+// These operations resolve Location services lazily and must wait for plugin-projected state.
+const locations = stubLocations(
+  Layer.unwrap(
+    Effect.sync(() => {
+      let ready = false
+      return Layer.mergeAll(
+        LayerNode.compile(PluginHooks.node),
+        Layer.mock(Image.Service, {
+          normalize: (_resource, content) =>
+            ready
+              ? Effect.succeed(content.content.length > 5 * 1024 * 1024 ? { ...content, content: "AA==" } : content)
+              : Effect.die(new Error("Image service used before plugins were ready")),
         }),
-      ) as unknown as Layer.Layer<LocationServices>,
+        Layer.mock(Snapshot.Service, {
+          capture: () => (ready ? Effect.undefined : Effect.die(new Error("Snapshot used before plugins were ready"))),
+          restore: () => (ready ? Effect.void : Effect.die(new Error("Snapshot used before plugins were ready"))),
+        }),
+        Layer.succeed(
+          PluginSupervisor.Service,
+          PluginSupervisor.Service.of({ flush: Effect.sync(() => (ready = true)) }),
+        ),
+      )
+    }),
   ),
 )
 const it = testEffect(

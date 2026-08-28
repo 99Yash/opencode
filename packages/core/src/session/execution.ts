@@ -88,7 +88,7 @@ export const layer = Layer.effect(
       const result = yield* SessionRunner.Service.use((runner) =>
         runner.drain({ sessionID, force, continuation, promotable }),
       ).pipe(
-        Effect.provide(locations.get(session.location)),
+        Effect.provide(locations.forSession(session)),
         Effect.tapCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.void

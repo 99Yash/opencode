@@ -4,6 +4,7 @@ import { Node } from "@opencode-ai/util/effect/app-node"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Location } from "@opencode-ai/core/location"
+import type { Instance } from "@opencode-ai/core/instance"
 import { LocationServiceMap } from "@opencode-ai/core/location-service-map"
 import type { LocationError, LocationServices } from "@opencode-ai/core/location-services"
 import { Project } from "@opencode-ai/core/project"
@@ -49,19 +50,24 @@ describe("node build", () => {
       LocationServiceMap.Service,
       Effect.gen(function* () {
         const service = yield* CycleB
-        return yield* LayerMap.make(
-          (ref: Location.Ref) =>
-            Layer.succeed(
+        const keyed = yield* LayerMap.make(
+          (key: Instance.Key) => {
+            const ref = Location.parseInstanceKey(key)
+            return Layer.succeed(
               Location.Service,
               Location.Service.of({
                 directory: ref.directory,
                 workspaceID: ref.workspaceID,
                 project: { id: Project.ID.global, directory: service.directory, canonical: service.directory },
               }),
-            ),
+            )
+          },
           { idleTimeToLive: "1 minute" },
         )
-      }) as unknown as Effect.Effect<LayerMap.LayerMap<Location.Ref, LocationServices, LocationError>, never, CycleB>,
+        return LocationServiceMap.fromKeyed(
+          keyed as unknown as LayerMap.LayerMap<Instance.Key, LocationServices, LocationError>,
+        )
+      }) as unknown as Effect.Effect<LocationServiceMap.Interface, never, CycleB>,
     )
     const map = Node.makeGlobalNode({ service: LocationServiceMap.Service, layer: mapLayer, deps: [b] })
     expect(() => AppNodeBuilder.build(LayerNode.group([a]), [[LocationServiceMap.node, map]])).toThrow(
