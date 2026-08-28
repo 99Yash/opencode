@@ -684,6 +684,10 @@ const layer = Layer.effect(
           const credential = yield* credentials.get(connection.id)
           if (!credential) return undefined
           if (credential.value.type === "key") return credential.value
+          // Plugin activation batches registrations: a plugin resolving during its own
+          // setup must see the refresh implementation it just registered, or an expired
+          // credential is silently returned without refreshing.
+          yield* state.flush()
           const implementation = state
             .get()
             .integrations.get(credential.integrationID)

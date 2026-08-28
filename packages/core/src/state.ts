@@ -75,6 +75,12 @@ export interface Options<State, DraftApi> {
 
 export interface Interface<State, DraftApi> extends Transformable<DraftApi> {
   readonly get: () => State
+  /**
+   * Materializes registrations and disposals deferred by an active batch so
+   * subsequent reads observe them. No-op when nothing is pending; never waits
+   * out the reload debounce.
+   */
+  readonly flush: () => Effect.Effect<void>
 }
 
 export function create<State, DraftApi>(options: Options<State, DraftApi>): Interface<State, DraftApi> {
@@ -84,6 +90,7 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
   let requestedAt = 0
   let running = false
   let closed = false
+  let dirty = false
   let waiters: { generation: number; done: Deferred.Deferred<void> }[] = []
   const semaphore = Semaphore.makeUnsafe(1)
 
@@ -93,6 +100,7 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
   })
 
   const materialize = Effect.fnUntraced(function* () {
+    dirty = false
     if (closed) return
     const next = options.initial()
     const api = options.draft(next)
@@ -162,6 +170,7 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
                       closed = true
                       return
                     }
+                    dirty = true
                     batch.reloads.add(materializeReload)
                     return
                   }
@@ -177,12 +186,21 @@ export function create<State, DraftApi>(options: Options<State, DraftApi>): Inte
           )
           yield* Scope.addFinalizer(scope, dispose)
           const batch = yield* CurrentBatch
-          if (batch?.active) batch.reloads.add(materializeReload)
-          else yield* materializeReload()
+          if (batch?.active) {
+            dirty = true
+            batch.reloads.add(materializeReload)
+          } else yield* materializeReload()
           return { dispose }
         }),
       )
     }),
     reload,
+    flush: Effect.fnUntraced(function* () {
+      if (!dirty) return
+      // Flushing from inside the deferring batch replaces its queued rebuild.
+      const batch = yield* CurrentBatch
+      batch?.reloads.delete(materializeReload)
+      yield* materializeReload()
+    }),
   }
 }

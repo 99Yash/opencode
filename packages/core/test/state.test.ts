@@ -133,6 +133,65 @@ describe("State", () => {
     }),
   )
 
+  it.effect("flushes registrations deferred by a batch", () =>
+    Effect.gen(function* () {
+      let finalized = 0
+      const state = State.create({
+        initial: () => ({ values: [] as string[] }),
+        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+        finalize: () => Effect.sync(() => finalized++),
+      })
+
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* state.transform((draft) => {
+            draft.add("first")
+          })
+          expect(state.get().values).toEqual([])
+
+          yield* state.flush()
+          expect(state.get().values).toEqual(["first"])
+          expect(finalized).toBe(1)
+
+          // Nothing pending: flush does not rebuild again.
+          yield* state.flush()
+          expect(finalized).toBe(1)
+
+          yield* state.transform((draft) => {
+            draft.add("second")
+          })
+        }),
+      )
+
+      // Flushing absorbed the queued batch rebuild; only the later registration
+      // rebuilds at batch completion.
+      expect(state.get().values).toEqual(["first", "second"])
+      expect(finalized).toBe(2)
+    }),
+  )
+
+  it.effect("flushes disposals deferred by a batch", () =>
+    Effect.gen(function* () {
+      const state = State.create({
+        initial: () => ({ values: [] as string[] }),
+        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      })
+      const scope = yield* Scope.make()
+      yield* state.transform((draft) => draft.add("value")).pipe(Scope.provide(scope))
+      expect(state.get().values).toEqual(["value"])
+
+      yield* State.batch(
+        Effect.gen(function* () {
+          yield* Scope.close(scope, Exit.void)
+          expect(state.get().values).toEqual(["value"])
+
+          yield* state.flush()
+          expect(state.get().values).toEqual([])
+        }),
+      )
+    }),
+  )
+
   it.effect("discards teardown rebuilds and pending reloads while still running cleanup", () =>
     Effect.gen(function* () {
       let finalized = 0
