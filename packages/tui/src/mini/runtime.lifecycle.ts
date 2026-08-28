@@ -121,13 +121,6 @@ function splashInfo(title: string | undefined, history: RunPrompt[]) {
   }
 }
 
-function directoryLabel(directory: string, home: string) {
-  const resolved = path.resolve(directory)
-  const display =
-    resolved === home ? "~" : resolved.startsWith(`${home}${path.sep}`) ? resolved.replace(home, "~") : resolved
-  return display.replaceAll("\\", "/")
-}
-
 function queueSplash(
   renderer: Pick<CliRenderer, "writeToScrollback" | "requestRender">,
   state: SplashState,
@@ -204,6 +197,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
           theme: theme.splash,
           showSession: splash.showSession,
           detail: directoryLabel(input.getDirectory(), input.host.paths.home),
+          version: input.host.startup.version,
           mono,
         })
       : undefined,
@@ -221,7 +215,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     agents: input.agents,
     references: input.references,
     agent: input.agent,
-    modelLabel: input.model ? formatModelLabel(input.model, input.variant) : "Default model",
+    modelLabel: input.model ? formatModelLabel(input.model, input.variant) : "",
     model: input.model,
     variant: input.variant,
     first: input.first,
@@ -389,6 +383,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
           theme: footer.currentTheme().splash,
           showSession: splash.showSession,
           detail: directoryLabel(input.getDirectory(), input.host.paths.home),
+          version: input.host.startup.version,
           mono,
         }),
       )
@@ -397,4 +392,10 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
     },
     close,
   }
+}
+function directoryLabel(directory: string, home: string) {
+  const resolved = path.resolve(directory)
+  const display =
+    resolved === home ? "~" : resolved.startsWith(`${home}${path.sep}`) ? resolved.replace(home, "~") : resolved
+  return display.replaceAll("\\", "/")
 }

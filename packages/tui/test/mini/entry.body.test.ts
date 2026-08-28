@@ -117,7 +117,7 @@ describe("run entry body", () => {
       ),
     ).toEqual({
       type: "text",
-      content: "› Inspect footer tabs",
+      content: "│ Inspect footer tabs",
     })
     expect(
       entryBody(commit({ kind: "user", text: "Inspect footer tabs", phase: "start", source: "system" }), {

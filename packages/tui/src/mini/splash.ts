@@ -1,8 +1,8 @@
 // Entry and exit splash banners for direct interactive mode scrollback.
 //
-// Renders the full opencode entry logo and a compact [O] exit badge, plus
-// session metadata and the resume command. These are scrollback snapshots, so
-// they become immutable terminal history once committed.
+// Renders a compact entry mark and the full opencode exit badge, plus session
+// metadata and the resume command. These are scrollback snapshots, so they
+// become immutable terminal history once committed.
 //
 // Both variants use a cell-based renderer. cells() classifies each character
 // in the source template as text, full-block, half-block-mix, or
@@ -35,6 +35,7 @@ type SplashWriterInput = SplashInput & {
   theme: RunSplashTheme
   showSession?: boolean
   detail?: string
+  version?: string
 }
 
 export type SplashMeta = {
@@ -183,33 +184,22 @@ function build(input: SplashWriterInput, kind: "entry" | "exit", ctx: Scrollback
   let height = 1
 
   if (kind === "entry") {
-    const mark = input.mono ? ["[O]"] : go.right.slice(1)
     const top = 1
-    const body_left = (mark[0]?.length ?? 0) + 2
-
-    for (let i = 0; i < mark.length; i += 1) {
-      draw(lines, mark[i] ?? "", {
-        left: 0,
-        top: top + i,
-        fg: left,
-        shadow: leftShadow,
-      })
-    }
-
-    push(lines, body_left, top, "OpenCode", right, undefined, TextAttributes.BOLD)
-    if (input.detail) {
-      push(
-        lines,
-        body_left,
-        top + 1,
-        input.mono
-          ? monoTruncateMiddle(input.detail, Math.max(1, width - body_left), true)
-          : Locale.truncateMiddle(input.detail, Math.max(1, width - body_left)),
-        left,
-        undefined,
-      )
-    }
-    height = top + Math.max(mark.length, input.detail ? 2 : 1)
+    const mark = input.mono ? "[O]" : "◼"
+    const body_left = mark.length + 1
+    const label = "oc mini"
+    const version = input.version ? `v${input.version}` : ""
+    const version_left = body_left + label.length + (version ? 1 : 0)
+    const detail_left = version_left + version.length
+    const separator = input.mono ? " - " : " · "
+    const detail = input.mono
+      ? monoTruncateMiddle(input.detail ?? "", Math.max(1, width - detail_left - separator.length), true)
+      : Locale.truncateMiddle(input.detail ?? "", Math.max(1, width - detail_left - separator.length))
+    push(lines, 0, top, mark, right)
+    push(lines, body_left, top, label, right)
+    if (version) push(lines, version_left, top, version, right, undefined, TextAttributes.DIM)
+    push(lines, detail_left, top, `${separator}${detail}`, left, undefined, TextAttributes.DIM)
+    height = top + 1
   }
 
   if (kind === "exit") {

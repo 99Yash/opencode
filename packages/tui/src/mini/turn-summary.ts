@@ -1,11 +1,6 @@
-import type { StreamCommit } from "./types"
+import type { StreamCommit, TurnSummary } from "./types"
 
-export function turnSummaryCommit(input: {
-  agent: string
-  model: string
-  duration: string
-  messageID?: string
-}): StreamCommit {
+export function turnSummaryCommit(input: TurnSummary & { messageID?: string }): StreamCommit {
   return {
     kind: "system",
     text: `${input.agent} · ${input.model} · ${input.duration}`,
@@ -13,6 +8,7 @@ export function turnSummaryCommit(input: {
     source: "system",
     summary: {
       agent: input.agent,
+      agentColor: input.agentColor,
       model: input.model,
       duration: input.duration,
     },

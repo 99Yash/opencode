@@ -11,12 +11,9 @@ import { useLocation } from "../context/location"
 import { FormPrompt } from "./session/form"
 import { Slot } from "../plugin/render"
 import { useTerminalDimensions } from "@opentui/solid"
+import { DEFAULT_PROMPT_PLACEHOLDERS } from "../prompt/placeholders"
 
 let once = false
-const placeholder = {
-  normal: ["Fix a TODO in the codebase", "What is the tech stack of this project?", "Fix broken tests"],
-  shell: ["ls -la", "git status", "pwd"],
-}
 
 export function Home() {
   const route = useRouteData("home")
@@ -86,7 +83,7 @@ export function Home() {
         </box>
         <box height={1} minHeight={0} flexShrink={1} />
         <box width="100%" maxWidth={75} zIndex={1000} paddingTop={1} flexShrink={0}>
-          <Prompt ref={bind} placeholders={placeholder} disabled={forms().length > 0} />
+          <Prompt ref={bind} placeholders={DEFAULT_PROMPT_PLACEHOLDERS} disabled={forms().length > 0} />
         </box>
         <box flexGrow={1} minHeight={0} />
       </box>

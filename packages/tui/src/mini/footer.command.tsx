@@ -1,12 +1,12 @@
 /** @jsxImportSource @opentui/solid */
-import { TextAttributes, type InputRenderable, type KeyEvent } from "@opentui/core"
+import { StyledText, TextAttributes, dim, fg, type InputRenderable, type KeyEvent } from "@opentui/core"
 import { useKeyboard, type JSX } from "@opentui/solid"
 import fuzzysort from "fuzzysort"
 import { createEffect, createMemo, createSignal, type Accessor } from "solid-js"
 import { Keymap } from "../context/keymap"
 import { RunFooterMenu, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import { monoShortcut } from "./mono"
-import type { RunFooterTheme } from "./theme"
+import { transparent, type RunFooterTheme } from "./theme"
 import type {
   FooterQueuedPrompt,
   FooterSubagentTab,
@@ -76,6 +76,7 @@ const panelPad = (mono?: boolean) => (mono ? 1 : PANEL_PAD)
 const PANEL_LIST_ROWS = 10
 const PANEL_FRAME_ROWS = 6
 export const RUN_COMMAND_PANEL_ROWS = PANEL_LIST_ROWS + PANEL_FRAME_ROWS
+export const RUN_COMMAND_PALETTE_ROWS = PANEL_LIST_ROWS + 3
 const SUBAGENT_LIST_ROWS = 12
 export const RUN_SUBAGENT_PANEL_ROWS = SUBAGENT_LIST_ROWS + PANEL_FRAME_ROWS
 const PANEL_PAGE = PANEL_LIST_ROWS - 1
@@ -263,9 +264,60 @@ function PanelShell(props: {
   children: JSX.Element
   hint?: string
   mono?: boolean
+  compact?: boolean
 }) {
-  const background = () => props.theme().shade
-  const content = (
+  const background = () => (props.compact ? transparent : props.theme().shade)
+  const search = () => (
+    <input
+      width="100%"
+      flexGrow={1}
+      flexShrink={1}
+      focusedBackgroundColor={background()}
+      focusedTextColor={props.theme().text}
+      placeholder={
+        (props.compact
+          ? new StyledText([dim(fg(props.theme().muted)(props.placeholder))])
+          : props.placeholder) as unknown as string
+      }
+      placeholderColor={props.theme().muted}
+      cursorColor={props.theme().text}
+      onInput={props.onQuery}
+      ref={(input) => {
+        props.inputRef(input)
+        input.traits = { status: "FILTER" }
+        queueMicrotask(() => {
+          if (input.isDestroyed) return
+          input.focus()
+        })
+      }}
+    />
+  )
+  const list = () => (
+    <box width="100%" flexDirection="column" flexShrink={0} backgroundColor={background()}>
+      {props.children}
+    </box>
+  )
+  const content = props.compact ? (
+    <>
+      <box
+        width="100%"
+        height={1}
+        paddingLeft={panelPad(props.mono)}
+        paddingRight={panelPad(props.mono)}
+        flexDirection="row"
+        gap={1}
+        flexShrink={0}
+        backgroundColor={background()}
+      >
+        {search()}
+        <text fg={props.theme().muted} attributes={TextAttributes.DIM} wrapMode="none" flexShrink={0}>
+          esc
+        </text>
+      </box>
+      <box height={1} flexShrink={0} backgroundColor={background()} />
+      {list()}
+    </>
+  ) : (
     <>
       <box height={1} flexShrink={0} backgroundColor={background()} />
       <box
@@ -300,29 +352,10 @@ function PanelShell(props: {
         flexShrink={0}
         backgroundColor={background()}
       >
-        <input
-          width="100%"
-          focusedBackgroundColor={background()}
-          focusedTextColor={props.theme().text}
-          placeholder={props.placeholder}
-          placeholderColor={props.theme().muted}
-          cursorColor={props.theme().highlight}
-          onInput={props.onQuery}
-          ref={(input) => {
-            props.inputRef(input)
-            input.traits = { status: "FILTER" }
-            queueMicrotask(() => {
-              if (!input.isDestroyed) {
-                input.focus()
-              }
-            })
-          }}
-        />
+        {search()}
       </box>
       <box height={1} flexShrink={0} backgroundColor={background()} />
-      <box width="100%" flexDirection="column" flexShrink={0} backgroundColor={background()}>
-        {props.children}
-      </box>
+      {list()}
     </>
   )
   return (
@@ -331,7 +364,7 @@ function PanelShell(props: {
         {content}
       </box>
       <box width="100%" height={1} border={false} backgroundColor="transparent" flexShrink={0}>
-        {props.mono ? null : (
+        {props.mono || props.compact ? null : (
           <box
             width="100%"
             height={1}
@@ -566,11 +599,12 @@ export function RunCommandMenuBody(props: {
       query={controller.query()}
       count={controller.items().length}
       total={entries().length}
-      placeholder="Search"
+      placeholder="search commands"
       theme={props.theme}
       inputRef={controller.inputRef}
       onQuery={controller.setQuery}
       mono={props.mono}
+      compact
     >
       <RunFooterMenu
         theme={props.theme}
@@ -584,8 +618,8 @@ export function RunCommandMenuBody(props: {
         paddingLeft={panelPad(props.mono)}
         paddingRight={panelPad(props.mono)}
         grouped={!controller.query().trim()}
-        background
         headerColor={props.theme().muted}
+        dimFooters
         mono={props.mono}
       />
     </PanelShell>

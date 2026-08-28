@@ -22,7 +22,7 @@ import type {
   SessionMessageAssistantTool,
 } from "@opencode-ai/client/promise"
 import type { Config } from "../config"
-import type { CliRenderer } from "@opentui/core"
+import type { CliRenderer, ColorInput } from "@opentui/core"
 import type { SessionInbox } from "@opencode-ai/schema/session-inbox"
 
 export type RunFilePart = {
@@ -103,6 +103,7 @@ export type RunAgent = {
   description?: string
   mode: "subagent" | "primary" | "all"
   hidden: boolean
+  color?: string
 }
 
 export type RunReference = ReferenceListOutput["data"][number]
@@ -148,6 +149,7 @@ export type MiniHost = {
     }
   }
   startup: {
+    version: string
     showTiming: boolean
     now(): number
   }
@@ -186,6 +188,7 @@ export type FooterPatch = Partial<FooterState>
 
 export type TurnSummary = {
   agent: string
+  agentColor?: ColorInput
   model: string
   duration: string
 }
@@ -434,6 +437,7 @@ export type StreamCommit = {
   interrupted?: boolean
   toolState?: StreamToolState
   toolError?: string
+  agentColor?: ColorInput
   shell?: {
     command: string
   }

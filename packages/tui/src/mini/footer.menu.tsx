@@ -79,6 +79,7 @@ export function RunFooterMenu(props: {
   background?: boolean
   headerColor?: ColorInput
   mono?: boolean
+  dimFooters?: boolean
 }) {
   const term = useTerminalDimensions()
   const limit = () => props.limit ?? FOOTER_MENU_ROWS
@@ -190,7 +191,7 @@ export function RunFooterMenu(props: {
         >
           {border() ? (
             <text fg={props.theme().border} wrapMode="none">
-              {props.mono ? "|" : "┃"}
+              {props.mono ? "|" : "│"}
             </text>
           ) : undefined}
           <box
@@ -230,13 +231,9 @@ export function RunFooterMenu(props: {
           const attributes = () =>
             active() ? TextAttributes.BOLD | (props.mono ? TextAttributes.INVERSE : 0) : undefined
           const background = () =>
-            active()
-              ? props.background
-                ? props.theme().selected
-                : props.theme().shade
-              : props.background
-                ? props.theme().shade
-                : transparent
+            active() ? props.theme().selected : props.background ? props.theme().shade : transparent
+          const slash = row.item.display.startsWith("/")
+          const autocomplete = slash || row.item.display.startsWith("@")
           return (
             <box paddingRight={0} flexDirection="row" backgroundColor={background()}>
               {border() ? (
@@ -247,7 +244,7 @@ export function RunFooterMenu(props: {
               <box
                 flexGrow={1}
                 flexShrink={1}
-                paddingLeft={props.paddingLeft ?? 1}
+                paddingLeft={(props.paddingLeft ?? 1) + (autocomplete ? 2 : 0)}
                 paddingRight={props.paddingRight ?? 0}
                 backgroundColor={background()}
               >
@@ -266,6 +263,7 @@ export function RunFooterMenu(props: {
                       <>
                         <text
                           fg={active() ? props.theme().selectedText : props.theme().muted}
+                          attributes={slash ? TextAttributes.DIM : undefined}
                           wrapMode="none"
                           flexShrink={0}
                         >
@@ -273,6 +271,7 @@ export function RunFooterMenu(props: {
                         </text>
                         <text
                           fg={active() ? props.theme().selectedText : props.theme().muted}
+                          attributes={slash ? TextAttributes.DIM : undefined}
                           wrapMode="none"
                           truncate
                           flexGrow={1}
@@ -286,7 +285,7 @@ export function RunFooterMenu(props: {
                   {row.item.footer ? (
                     <text
                       fg={active() ? props.theme().selectedText : props.theme().muted}
-                      attributes={attributes()}
+                      attributes={(attributes() ?? 0) | (props.dimFooters ? TextAttributes.DIM : 0)}
                       wrapMode="none"
                       truncate
                       flexShrink={0}

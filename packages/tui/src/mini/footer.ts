@@ -24,18 +24,18 @@
 // Ctrl-c clears a live prompt draft first; otherwise interrupt and exit use a
 // two-press pattern where the first press shows a hint and the second press
 // within 5 seconds actually fires the action.
-import { CliRenderEvents, type CliRenderer } from "@opentui/core"
+import { CliRenderEvents, type CliRenderer, type ColorInput } from "@opentui/core"
 import { render } from "@opentui/solid"
 import { createComponent, createSignal, type Accessor, type Setter } from "solid-js"
 import { createStore, reconcile } from "solid-js/store"
 import { Keymap } from "../context/keymap"
 import { Locale } from "../util/locale"
-import { RUN_COMMAND_PANEL_ROWS, RUN_SUBAGENT_PANEL_ROWS } from "./footer.command"
+import { RUN_COMMAND_PALETTE_ROWS, RUN_COMMAND_PANEL_ROWS, RUN_SUBAGENT_PANEL_ROWS } from "./footer.command"
 import { SUBAGENT_INSPECTOR_ROWS } from "./footer.subagent"
 import { PROMPT_MAX_ROWS, TEXTAREA_MIN_ROWS } from "./footer.prompt"
 import { RunFooterView } from "./footer.view"
 import { RunScrollbackStream } from "./scrollback.surface"
-import { RUN_THEME_FALLBACK, resolveRunTheme, type RunTheme } from "./theme"
+import { RUN_THEME_FALLBACK, resolveAgentColor, resolveRunTheme, type RunTheme } from "./theme"
 import { modelInfo } from "./variant.shared"
 import type {
   FooterApi,
@@ -207,6 +207,9 @@ export class RunFooter implements FooterApi {
   private exitTimeout: NodeJS.Timeout | undefined
   private noticeTimeout: NodeJS.Timeout | undefined
   private turnAgent: string | undefined
+  private turnAgentColor: Accessor<ColorInput | undefined>
+  private setTurnAgentColor: Setter<ColorInput | undefined>
+  private activityRows = 0
   private requestExitHandler: (() => boolean) | undefined
   private scrollback: RunScrollbackStream
   private themes: RunTheme[]
@@ -268,8 +271,11 @@ export class RunFooter implements FooterApi {
       const agent = currentAgent()
       if (agent) return agent.name
       const selected = selectedAgentID()
-      return selected ? Locale.titlecase(selected) : "Default"
+      return selected ? Locale.titlecase(selected) : ""
     }
+    const [turnAgentColor, setTurnAgentColor] = createSignal<ColorInput | undefined>()
+    this.turnAgentColor = turnAgentColor
+    this.setTurnAgentColor = setTurnAgentColor
     const [currentModel, setCurrentModel] = createSignal<RunInput["model"]>(options.model)
     this.currentModel = currentModel
     this.setCurrentModel = setCurrentModel
@@ -331,6 +337,7 @@ export class RunFooter implements FooterApi {
               currentAgent: footer.currentAgent,
               currentAgentID: footer.currentAgentID,
               currentAgentExplicit: () => selectedAgentID() !== undefined,
+              activeAgentColor: footer.turnAgentColor,
               currentModel: footer.currentModel,
               variants: footer.variants,
               currentVariant: footer.currentVariant,
@@ -415,6 +422,9 @@ export class RunFooter implements FooterApi {
 
     if (next.type === "turn.duration") {
       const agent = this.turnAgent ?? this.currentAgent()
+      const agentColor =
+        this.turnAgentColor() ??
+        resolveAgentColor(this.theme().footer, this.agents(), this.currentAgentID(), this.options.mono)
       this.turnAgent = undefined
       if (this.miniSettings().turn_summary === "hide") return
       const current = this.currentModel()
@@ -423,6 +433,7 @@ export class RunFooter implements FooterApi {
         .then(() =>
           this.scrollback.writeTurnSummary({
             agent,
+            agentColor,
             model: current ? modelInfo(this.providers(), current).model : this.state().model,
             duration: next.duration,
           }),
@@ -482,10 +493,14 @@ export class RunFooter implements FooterApi {
       }
       if (next.type === "turn.send") {
         this.turnAgent = this.currentAgent()
+        this.setTurnAgentColor(
+          resolveAgentColor(this.theme().footer, this.agents(), this.currentAgentID(), this.options.mono),
+        )
         this.clearInterruptTimer()
         this.clearExitTimer()
       }
       this.patch(patch)
+      if (next.type === "turn.idle") this.setTurnAgentColor(undefined)
       return
     }
 
@@ -563,10 +578,17 @@ export class RunFooter implements FooterApi {
       return
     }
 
+    const next =
+      commit.kind === "user" && commit.agentColor === undefined
+        ? {
+            ...commit,
+            agentColor: resolveAgentColor(this.theme().footer, this.agents(), this.currentAgentID(), this.options.mono),
+          }
+        : commit
     const last = this.queue.at(-1)
-    const merged = last ? coalesceProgressCommit(last, commit) : undefined
+    const merged = last ? coalesceProgressCommit(last, next) : undefined
     if (merged) this.queue[this.queue.length - 1] = merged
-    else this.queue.push(commit)
+    else this.queue.push(next)
 
     if (this.pending) {
       return
@@ -702,13 +724,15 @@ export class RunFooter implements FooterApi {
         ? this.base + PERMISSION_ROWS
         : type === "form"
           ? this.base + FORM_ROWS
-          : ["command", "skill", "agent", "model", "variant", "settings"].includes(route)
-            ? 1 + RUN_COMMAND_PANEL_ROWS
-            : route === "queued-menu" || route === "subagent-menu"
-              ? 1 + this.subagentMenuRows
-              : route === "subagent"
-                ? this.base + SUBAGENT_INSPECTOR_ROWS
-                : this.base + Math.max(TEXTAREA_MIN_ROWS, Math.min(PROMPT_MAX_ROWS, this.rows))
+          : route === "command"
+            ? 1 + RUN_COMMAND_PALETTE_ROWS
+            : ["skill", "agent", "model", "variant", "settings"].includes(route)
+              ? 1 + RUN_COMMAND_PANEL_ROWS
+              : route === "queued-menu" || route === "subagent-menu"
+                ? 1 + this.subagentMenuRows
+                : route === "subagent"
+                  ? this.base + SUBAGENT_INSPECTOR_ROWS
+                  : this.base + this.activityRows + Math.max(TEXTAREA_MIN_ROWS, Math.min(PROMPT_MAX_ROWS, this.rows))
 
     if (height !== this.renderer.footerHeight) {
       this.renderer.footerHeight = height
@@ -731,9 +755,10 @@ export class RunFooter implements FooterApi {
     }
   }
 
-  private syncLayout = (next: { route: FooterPromptRoute; subagentRows: number }): void => {
+  private syncLayout = (next: { route: FooterPromptRoute; subagentRows: number; activityRows: number }): void => {
     this.promptRoute = next.route
     this.subagentMenuRows = next.subagentRows
+    this.activityRows = next.activityRows
     if (this.view().type === "prompt") {
       this.applyHeight()
     }

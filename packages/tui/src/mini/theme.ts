@@ -11,7 +11,7 @@ import { ansiToRgba } from "../theme/color"
 import { resolveThemeColors } from "../theme/resolve"
 import { terminalMode } from "../theme/system"
 import type { ThemeV1Json } from "../theme/v1"
-import type { EntryKind, RunTuiConfig } from "./types"
+import type { EntryKind, RunAgent, RunTuiConfig } from "./types"
 
 type Tone = {
   body: ColorInput
@@ -28,6 +28,8 @@ export type RunSplashTheme = {
 
 export type RunFooterTheme = {
   highlight: ColorInput
+  cursor: ColorInput
+  agent: readonly ColorInput[]
   selected: ColorInput
   selectedText: ColorInput
   warning: ColorInput
@@ -64,6 +66,25 @@ export type RunTheme = {
   entry: RunEntryTheme
   splash: RunSplashTheme
   block: RunBlockTheme
+}
+
+export function resolveAgentColor(
+  theme: RunFooterTheme,
+  agents: RunAgent[],
+  current: string | undefined,
+  mono = false,
+) {
+  if (mono) return theme.text
+  const visible = agents.filter((agent) => !agent.hidden)
+  const index = visible.findIndex((agent) => agent.id === current)
+  const agent = visible[index]
+  if (agent?.color) return RGBA.fromHex(agent.color)
+  return theme.agent[Math.max(0, index) % theme.agent.length]!
+}
+
+export function resolveAgentSelectionColor(color: ColorInput, fallback: ColorInput, mono = false) {
+  if (mono || !(color instanceof RGBA)) return fallback
+  return tint(color, RGBA.fromInts(0, 0, 0), 0.55)
 }
 
 type ThemeColor = Exclude<keyof TuiThemeCurrent, "thinkingOpacity">
@@ -367,6 +388,8 @@ function map(
   footerTheme: TuiThemeCurrent,
   scrollbackTheme: TuiThemeCurrent,
   splash: RunSplashTheme,
+  agent: readonly ColorInput[],
+  cursor: ColorInput,
   syntax?: SyntaxStyle,
 ): RunTheme {
   const footerBackground = alpha(footerTheme.background, 1)
@@ -386,6 +409,8 @@ function map(
     background: footerTheme.background,
     footer: {
       highlight: footerTheme.primary,
+      cursor,
+      agent,
       selected: footerTheme.backgroundElement,
       selectedText: footerTheme.selectedListItemText,
       warning: footerTheme.warning,
@@ -441,12 +466,15 @@ function map(
 
 const seed = {
   highlight: RGBA.fromIndex(6, rgba("#38bdf8")),
+  secondary: RGBA.fromIndex(4, rgba("#5c9cf5")),
+  accent: RGBA.fromIndex(5, rgba("#9d7cd8")),
   muted: RGBA.fromIndex(8, rgba("#64748b")),
   text: RGBA.defaultForeground(rgba("#f8fafc")),
   panel: rgba("#0f172a"),
   success: RGBA.fromIndex(2, rgba("#22c55e")),
   warning: RGBA.fromIndex(3, rgba("#f59e0b")),
   error: RGBA.fromIndex(1, rgba("#ef4444")),
+  info: RGBA.fromIndex(6, rgba("#56b6c2")),
 }
 
 function tone(body: ColorInput, start?: ColorInput): Tone {
@@ -464,6 +492,8 @@ export const RUN_THEME_FALLBACK: RunTheme = {
   background: RGBA.fromValues(0, 0, 0, 0),
   footer: {
     highlight: seed.highlight,
+    cursor: seed.warning,
+    agent: [seed.secondary, seed.accent, seed.success, seed.warning, seed.highlight, seed.error, seed.info],
     selected: seed.text,
     selectedText: seed.panel,
     warning: seed.warning,
@@ -513,6 +543,8 @@ function monoTheme(mode: "dark" | "light"): RunTheme {
     background,
     footer: {
       highlight: foreground,
+      cursor: foreground,
+      agent: [foreground],
       selected: background,
       selectedText: foreground,
       warning: foreground,
@@ -586,15 +618,30 @@ export async function resolveRunTheme(
       config?.mode === "dark" || config?.mode === "light"
         ? config.mode
         : (terminalMode(colors) ?? renderer.themeMode ?? colorMode(RGBA.fromHex(bg)))
-    const { generateSyntax } = await import("../theme")
+    const { allThemes, generateSyntax, parseTheme, resolveThemeDocument } = await import("../theme")
     const indexed = indexedPalette(colors, 256)
     const footerTheme = resolveTheme(generateSystem(colors, pick), pick)
     const scrollbackTheme = quantizeTheme(footerTheme, indexed)
+    const name = config?.name ?? "opencode"
+    const source = allThemes()[name]
+    const selected = source ? resolveThemeDocument(parseTheme(source, name), pick) : undefined
+    const agent = selected
+      ? selected.categorical
+          .map((scale) => scale[pick === "light" ? 800 : 200])
+          .filter((color, index, items) => items.findIndex((item) => item.equals(color)) === index)
+      : [4, 5, 2, 3, 6, 1].map((index) => paletteColor(colors, index))
     const syntaxTheme: SharedSyntaxTheme = {
       ...scrollbackTheme,
       _hasSelectedListItemText: true,
     }
-    return map(footerTheme, scrollbackTheme, splashTheme(scrollbackTheme, indexed), generateSyntax(syntaxTheme))
+    return map(
+      footerTheme,
+      scrollbackTheme,
+      splashTheme(scrollbackTheme, indexed),
+      agent,
+      selected?.text.formfield.focused ?? footerTheme.text,
+      generateSyntax(syntaxTheme),
+    )
   } catch {
     return RUN_THEME_FALLBACK
   }

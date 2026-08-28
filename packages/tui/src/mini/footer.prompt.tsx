@@ -5,7 +5,7 @@
 // It produces a PromptState that RunPromptBody renders as a slim single-line
 // composer while the footer view renders any active menus below it.
 /** @jsxImportSource @opentui/solid */
-import { StyledText, fg, type ColorInput, type KeyEvent, type TextareaRenderable } from "@opentui/core"
+import { StyledText, dim, fg, type ColorInput, type KeyEvent, type TextareaRenderable } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import { normalizePromptContent } from "../prompt/content"
 import fuzzysort from "fuzzysort"
@@ -176,6 +176,8 @@ export function selectedCommand(text: string, command: RunPrompt["command"]) {
 export function RunPromptBody(props: {
   theme: () => RunFooterTheme
   background: () => ColorInput
+  agentColor: () => ColorInput
+  mono: boolean
   placeholder: () => StyledText | string
   onSubmit: () => void
   onKeyDown: (event: KeyEvent) => void
@@ -226,9 +228,13 @@ export function RunPromptBody(props: {
 
   return (
     <box width="100%">
-      <box paddingTop={1} paddingBottom={1} paddingRight={2}>
+      <box width="100%" flexDirection="row" paddingTop={1} paddingBottom={1} paddingRight={2}>
+        <text fg={props.agentColor()} flexShrink={0}>
+          {props.mono ? "| " : "│ "}
+        </text>
         <textarea
           width="100%"
+          flexShrink={1}
           minHeight={TEXTAREA_MIN_ROWS}
           maxHeight={TEXTAREA_MAX_ROWS}
           wrapMode="word"
@@ -258,14 +264,14 @@ export function createPromptState(input: PromptInput): PromptState {
   const [shell, setShell] = createSignal(false)
   const placeholder = createMemo(() => {
     if (shell()) {
-      return new StyledText([fg(input.theme().muted)('Run a command... "git status"')])
+      return new StyledText([dim(fg(input.theme().muted)('Run a command... "git status"'))])
     }
 
     if (!input.state().first) {
       return ""
     }
 
-    return new StyledText([fg(input.theme().muted)('Ask anything... "Fix a TODO in the codebase"')])
+    return new StyledText([dim(fg(input.theme().muted)("Ask anything, / for commands, @ for context…"))])
   })
 
   let history = createPromptHistory(input.history?.())

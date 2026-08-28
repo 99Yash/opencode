@@ -6,7 +6,7 @@ import {
   type ScrollbackRenderContext,
   type ScrollbackWriter,
 } from "@opentui/core"
-import { Match, Switch, createMemo } from "solid-js"
+import { Match, Show, Switch, createMemo } from "solid-js"
 import { entryBody, entryFlags } from "./entry.body"
 import { monoMarkdownRenderable, monoMarkdownTableOptions } from "./mono"
 import { entryColor, entryLook, entrySyntax } from "./scrollback.shared"
@@ -93,6 +93,17 @@ export function RunEntryContent(props: {
     const next = body()
     return next.type === "text" ? next : undefined
   })
+  const user = createMemo(() => {
+    const value = text()?.content
+    if (props.commit.kind !== "user" || !value) return
+    const lead = value.match(/^\n+/)?.[0] ?? ""
+    const content = value.slice(lead.length)
+    return {
+      lead,
+      marker: content[0] ?? "",
+      content: content.slice(1),
+    }
+  })
   const code = createMemo(() => {
     const next = body()
     return next.type === "code" ? next : undefined
@@ -134,8 +145,22 @@ export function RunEntryContent(props: {
         </box>
       </Match>
       <Match when={text()}>
-        <text width="100%" wrapMode="word" fg={style().fg} attributes={style().attrs}>
-          {text()!.content}
+        <text
+          width="100%"
+          paddingLeft={props.commit.kind === "assistant" ? 2 : 0}
+          wrapMode="word"
+          fg={style().fg}
+          attributes={style().attrs}
+        >
+          <Show when={user()} fallback={text()!.content}>
+            {(value) => (
+              <>
+                {value().lead}
+                <span style={{ fg: props.commit.agentColor ?? style().fg }}>{value().marker}</span>
+                {value().content}
+              </>
+            )}
+          </Show>
         </text>
       </Match>
       <Match when={code()}>
@@ -258,6 +283,7 @@ export function RunEntryContent(props: {
             if (props.opts?.mono) monoMarkdownRenderable(renderable)
           }}
           width="100%"
+          paddingLeft={props.commit.kind === "assistant" ? 2 : 0}
           syntaxStyle={syntax()}
           streaming={streaming()}
           content={markdown()!.content}
@@ -307,10 +333,13 @@ export function turnSummaryWriter(input: TurnSummary & { theme: RunTheme; mono?:
     () => (
       <box width="100%" height={1}>
         <text wrapMode="none" truncate>
+          <span style={{ fg: input.agentColor ?? input.theme.block.text }}>{input.mono ? "#" : "▣"}</span>{" "}
           <span style={{ fg: input.theme.block.text }}>{input.agent}</span>
-          <span style={{ fg: input.theme.block.muted }}>
+          <span style={{ fg: input.theme.block.muted, dim: true }}> {input.mono ? "-" : "·"} </span>
+          <span style={{ fg: input.theme.block.muted, dim: true }}>{input.model}</span>
+          <span style={{ fg: input.theme.block.muted, dim: true }}>
             {" "}
-            {input.mono ? "-" : "·"} {input.model} {input.mono ? "-" : "·"} {input.duration}
+            {input.mono ? "-" : "·"} {input.duration}
           </span>
         </text>
       </box>

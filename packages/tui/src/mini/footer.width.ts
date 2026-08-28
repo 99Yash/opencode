@@ -29,8 +29,8 @@ export function footerStatuslinePolicy(input: {
     return true
   }
 
-  const showModel = include(input.modelWidth)
   const showAgent = include(input.agentWidth)
+  const showModel = include(input.modelWidth)
   const hiddenContext = input.contextWidths.findIndex((width) => !include(width))
   const contextCount = hiddenContext === -1 ? input.contextWidths.length : hiddenContext
   const contextComplete = contextCount === input.contextWidths.length

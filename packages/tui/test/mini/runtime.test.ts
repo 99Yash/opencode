@@ -31,7 +31,7 @@ function host(): MiniHost {
       sigint: { subscribe: () => () => {} },
       sigusr2: { subscribe: () => () => {} },
     },
-    startup: { showTiming: false, now: () => 0 },
+    startup: { version: "test", showTiming: false, now: () => 0 },
     diagnostics: {},
     preferences: {
       resolveVariant: async () => undefined,

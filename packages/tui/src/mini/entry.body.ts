@@ -56,7 +56,7 @@ function userBody(raw: string, mono: boolean): RunEntryBody {
 
   const lead = raw.match(/^\n+/)?.[0] ?? ""
   const body = lead ? raw.slice(lead.length) : raw
-  return textBody(`${lead}${mono ? ">" : "›"} ${body}`)
+  return textBody(`${lead}${mono ? ">" : "│"} ${body}`)
 }
 
 function reasoningBody(raw: string, mono: boolean): RunEntryBody {

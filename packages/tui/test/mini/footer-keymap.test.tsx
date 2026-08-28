@@ -58,6 +58,7 @@ async function renderSubagent(interrupt: "ctrl+i" | "none") {
           currentAgent={() => "Build"}
           currentAgentID={() => "build"}
           currentAgentExplicit={() => false}
+          activeAgentColor={() => undefined}
           currentModel={() => undefined}
           variants={() => []}
           currentVariant={() => undefined}

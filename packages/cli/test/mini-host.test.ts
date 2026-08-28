@@ -155,6 +155,7 @@ describe("Mini CLI host", () => {
     const file = path.join(directory, "attachment.txt")
     await Bun.write(file, "attachment contents")
     expect(await input.files.readText(pathToFileURL(file).href)).toBe("attachment contents")
+    expect(input.startup.version).toMatch(/^\d+\.\d+\.\d+$/)
     expect(typeof input.startup.showTiming).toBe("boolean")
     expect(typeof input.startup.now()).toBe("number")
   })

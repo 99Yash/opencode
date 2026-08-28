@@ -4,6 +4,8 @@ import fs from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { ReadStream } from "node:tty"
+import packageJson from "../package.json"
+import { OPENCODE_VERSION } from "./version"
 
 export const INTERACTIVE_INPUT_ERROR = "opencode mini requires a controlling terminal for input"
 
@@ -159,6 +161,7 @@ export function createMiniHost(input: {
       sigusr2: signal("SIGUSR2"),
     },
     startup: {
+      version: OPENCODE_VERSION === "local" ? packageJson.version : OPENCODE_VERSION,
       showTiming: ["1", "true"].includes(process.env.OPENCODE_SHOW_TTFD?.toLowerCase() ?? ""),
       now: () => performance.now(),
     },

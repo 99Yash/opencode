@@ -131,12 +131,24 @@ test("turn summary starts at the left edge", async () => {
 
     const commits = claim(out.renderer)
     try {
-      expect(renderRows(commits.at(-1)!)[0]).toBe("Build · Little Frank · 2.2s")
+      expect(renderRows(commits.at(-1)!)[0]).toBe("▣ Build · Little Frank · 2.2s")
     } finally {
       destroy(commits)
     }
   } finally {
     out.scrollback.destroy()
+  }
+})
+
+test("assistant responses are indented two columns", async () => {
+  const out = await setup()
+  await out.scrollback.append(assistant("Hello", "progress"))
+  await out.scrollback.complete()
+  const commits = claim(out.renderer)
+  try {
+    expect(renderRows(commits.at(-1)!)[0]).toBe("  Hello")
+  } finally {
+    destroy(commits)
   }
 })
 
@@ -257,7 +269,7 @@ test("renders monochrome scrollback as ASCII markdown", async () => {
     const rendered = output.join("").replace(/ +\n/g, "\n")
     expect(rendered).toContain("# H?ading ->")
     expect(rendered).toContain('| "quote"')
-    expect(rendered).toContain("------------------------------------------------------------")
+    expect(rendered).toContain("----------------------------------------------------------")
     expect(rendered).toContain("?  ?")
     expect(rendered).toContain("* literal")
     expect(rendered).toContain("------")
@@ -538,7 +550,7 @@ test("inserts spacers for new visible groups", async () => {
     try {
       expect(commits).toHaveLength(2)
       expect(renderCommit(commits[0]!).trim()).toBe("")
-      expect(renderCommit(commits[1]!).trim()).toBe("› use subagent to explore run.ts")
+      expect(renderCommit(commits[1]!).trim()).toBe("│ use subagent to explore run.ts")
     } finally {
       destroy(commits)
     }
@@ -645,7 +657,7 @@ test.skipIf(process.platform === "win32")(
       take()
 
       const output = lines.join("\n")
-      expect(output).toContain("› Hello you")
+      expect(output).toContain("│ Hello you")
       expect(output).toContain("Say hello.")
       expect(output).toContain("Hello.")
     } finally {
@@ -789,8 +801,8 @@ test("renders plain errors with one blank line before and after the error block"
     take()
 
     const output = lines.join("\n")
-    expect(output).toContain("› /fmt error\n\ndemo error event")
-    expect(output).toContain("demo error event\n\nnext line")
+    expect(output).toContain("│ /fmt error\n\ndemo error event")
+    expect(output).toContain("demo error event\n\n  next line")
     expect(output).not.toContain("demo error event\n\n\nnext line")
   } finally {
     out.scrollback.destroy()

@@ -1,9 +1,25 @@
 import { expect, test } from "bun:test"
 import { RGBA, type CliRenderer, type TerminalColors } from "@opentui/core"
-import { RUN_THEME_MONO, RUN_THEME_FALLBACK, generateSystem, resolveRunTheme, resolveTheme } from "../../src/mini/theme"
-import { DEFAULT_THEMES } from "../../src/theme"
+import {
+  RUN_THEME_MONO,
+  RUN_THEME_FALLBACK,
+  generateSystem,
+  resolveAgentSelectionColor,
+  resolveRunTheme,
+  resolveTheme,
+} from "../../src/mini/theme"
+import { DEFAULT_THEMES, parseTheme, resolveThemeDocument } from "../../src/theme"
 
 const palette = ["#15161e", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5"] as const
+
+test("darkens the agent color for menu selections", () => {
+  expect((resolveAgentSelectionColor(RGBA.fromHex("#5c9cf5"), RGBA.fromHex("#ffffff")) as RGBA).toInts()).toEqual([
+    41, 70, 110, 255,
+  ])
+  expect(resolveAgentSelectionColor(RGBA.fromHex("#5c9cf5"), RUN_THEME_MONO.footer.selected, true)).toBe(
+    RUN_THEME_MONO.footer.selected,
+  )
+})
 
 function terminalColors(input: Partial<TerminalColors> = {}): TerminalColors {
   return {
@@ -69,7 +85,7 @@ test("falls back when palette lookup fails", async () => {
   expect(RUN_THEME_MONO.block.syntax).toBeUndefined()
   for (const color of [
     RUN_THEME_MONO.background,
-    ...Object.values(RUN_THEME_MONO.footer),
+    ...Object.entries(RUN_THEME_MONO.footer).flatMap(([key, value]) => (key === "agent" ? value : [value])),
     ...Object.values(RUN_THEME_MONO.splash),
     ...Object.values(RUN_THEME_MONO.entry).flatMap((tone) => [tone.body, tone.start].filter(Boolean)),
     ...Object.entries(RUN_THEME_MONO.block)
@@ -94,6 +110,7 @@ test("resolveTheme preserves Mini indexed color and result shape semantics", () 
 
 test("returns syntax styles and indexed splash colors", async () => {
   const theme = await resolveRunTheme(renderer({ themeMode: "dark" }))
+  const regular = resolveThemeDocument(parseTheme(DEFAULT_THEMES.opencode, "opencode"), "dark")
 
   try {
     expect(theme.block.syntax).toBeDefined()
@@ -104,6 +121,8 @@ test("returns syntax styles and indexed splash colors", async () => {
     expectRgba(theme.footer.highlight)
     expectRgba(theme.footer.statusAccent)
     expectRgba(theme.footer.surface)
+    expect(expectRgba(theme.footer.agent[0]).toInts()).toEqual(regular.categorical[0]![200].toInts())
+    expect(expectRgba(theme.footer.cursor).toInts()).toEqual(regular.text.formfield.focused.toInts())
     expect(expectRgba(theme.footer.statusAccent).toInts()).not.toEqual(expectRgba(theme.footer.status).toInts())
   } finally {
     theme.block.syntax?.destroy()

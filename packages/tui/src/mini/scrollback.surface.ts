@@ -19,7 +19,7 @@ import { entryColor, entryLook, entrySyntax } from "./scrollback.shared"
 import { turnSummaryCommit } from "./turn-summary"
 import { entryWriter, sameEntryGroup, separatorRows, spacerWriter, turnSummaryWriter } from "./scrollback.writer"
 import { type RunTheme } from "./theme"
-import type { RunEntryBody, StreamCommit } from "./types"
+import type { RunEntryBody, StreamCommit, TurnSummary } from "./types"
 
 type ActiveBody = Exclude<RunEntryBody, { type: "none" | "structured" }>
 
@@ -158,6 +158,7 @@ export class RunScrollbackStream {
         ? new TextRenderable(surface.renderContext, {
             content: "",
             width: "100%",
+            paddingLeft: commit.kind === "assistant" ? 2 : 0,
             wrapMode: "word",
             fg: style.fg,
             attributes: style.attrs,
@@ -178,6 +179,7 @@ export class RunScrollbackStream {
               content: "",
               syntaxStyle: entrySyntax(this.theme),
               width: "100%",
+              paddingLeft: commit.kind === "assistant" ? 2 : 0,
               streaming: true,
               internalBlockMode: "top-level",
               tableOptions: this.mono ? monoMarkdownTableOptions : { widthMode: "content" },
@@ -421,7 +423,7 @@ export class RunScrollbackStream {
     this.markRendered(await this.finishActive(trailingNewline))
   }
 
-  public async writeTurnSummary(input: { agent: string; model: string; duration: string }): Promise<void> {
+  public async writeTurnSummary(input: TurnSummary): Promise<void> {
     await this.append(turnSummaryCommit(input))
   }
 
