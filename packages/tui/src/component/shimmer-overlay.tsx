@@ -9,8 +9,17 @@ import {
 import { extend } from "@opentui/solid"
 import { For, Show } from "solid-js"
 
-// Clock wrap keeps phase floats small over long sessions without a visible seam.
-const CLOCK_PERIOD = 3_600_000
+// The shimmer field is precomputed once into a seamless tile; animation just slides an
+// offset into it, so steady-state frames do array lookups only (no trig). Updates are
+// throttled well below the renderer's live frame rate — ambient drift doesn't need 60fps,
+// and each skipped frame skips a whole-app render plus the terminal diff/flush.
+const TILE = 96
+const TICK_MS = 90
+// Cells per tick the pattern drifts at speed 1 (~2 columns/second).
+const DRIFT_PER_TICK = 0.18
+// Strengths quantize to this many levels so a cell's final color changes only when it
+// crosses a level, keeping the frame-to-frame terminal diff small.
+const LEVELS = 5
 
 export type ShimmerParams = {
   enabled: number
@@ -61,30 +70,61 @@ export const SHIMMER_CONTROLS: {
 // Foreground shimmer via color matrices: instead of compositing tint boxes over the app,
 // this renderable rewrites the text colors already in the frame buffer. It renders above the
 // app content, so the buffer it receives holds every glyph below it; one colorMatrix call
-// per frame pulls each cell's foreground toward the tint color, with per-cell strength given
-// by a slowly drifting three-sine interference field. TargetChannel.FG leaves backgrounds
-// untouched, so only the text shimmers. The matrix blends `keep` of the original color with
-// `1 - keep` of the tint (foreground alpha is 1, so the fourth column acts as the additive
-// tint term).
+// per update pulls each cell's foreground toward the tint color, with per-cell strength
+// sampled from the precomputed interference tile at the current drift offset.
+// TargetChannel.FG leaves backgrounds untouched, so only the text shimmers. The matrix
+// blends `keep` of the original color with `1 - keep` of the tint (foreground alpha is 1,
+// so the fourth column acts as the additive tint term).
 export class ShimmerOverlayRenderable extends Renderable {
-  private clock = 0
+  private offset = 0
   private params: ShimmerParams = { ...SHIMMER_DEFAULTS }
   private matrix = new Float32Array(16)
   private mask = new Float32Array(0)
+  private tile = new Float32Array(TILE * TILE)
+  private timer: ReturnType<typeof setInterval> | undefined
 
   constructor(ctx: RenderContext, options: RenderableOptions<ShimmerOverlayRenderable>) {
-    super(ctx, { ...options, live: SHIMMER_DEFAULTS.enabled >= 0.5 })
+    super(ctx, { ...options, live: false })
     this.rebuildMatrix()
+    this.rebuildTile()
+    this.syncTimer()
   }
 
   setParams(value: ShimmerParams) {
     // The App unmounts the overlay while disabled (so it never blocks mouse hit-testing);
     // a stale ref may point at a destroyed instance when params change while unmounted.
     if (this.isDestroyed) return
+    const previous = this.params
     this.params = value
     this.rebuildMatrix()
-    this.live = value.enabled >= 0.5
+    if (
+      value.threshold !== previous.threshold ||
+      value.softness !== previous.softness ||
+      value.density !== previous.density
+    )
+      this.rebuildTile()
+    this.syncTimer()
     this.requestRender()
+  }
+
+  private syncTimer() {
+    const active = this.params.enabled >= 0.5
+    if (active && this.timer === undefined) {
+      this.timer = setInterval(() => {
+        this.offset = (this.offset + this.params.speed * DRIFT_PER_TICK) % TILE
+        this.requestRender()
+      }, TICK_MS)
+    }
+    if (!active && this.timer !== undefined) {
+      clearInterval(this.timer)
+      this.timer = undefined
+    }
+  }
+
+  protected override destroySelf(): void {
+    if (this.timer !== undefined) clearInterval(this.timer)
+    this.timer = undefined
+    super.destroySelf()
   }
 
   private rebuildMatrix() {
@@ -102,10 +142,28 @@ export class ShimmerOverlayRenderable extends Renderable {
     this.matrix[15] = 1
   }
 
-  protected override onUpdate(deltaTime: number): void {
-    if (!this.live) return
-    // Speed scales the clock advance rather than the phase, so changing it never jumps.
-    this.clock = (this.clock + deltaTime * this.params.speed) % CLOCK_PERIOD
+  // Bake the interference field into a seamless tile: wave cycle counts are integers, so
+  // the pattern wraps with no seam and animation is a pure offset into this array.
+  private rebuildTile() {
+    const p = this.params
+    const cycles = (base: number) => Math.max(1, Math.round(base * p.density))
+    const a = cycles(3)
+    const b = cycles(2)
+    const c = cycles(1)
+    const step = (Math.PI * 2) / TILE
+    for (let y = 0; y < TILE; y++) {
+      for (let x = 0; x < TILE; x++) {
+        const field =
+          Math.sin((a * x + c * y) * step + 0.7) +
+          Math.sin((b * x - b * y) * step + 2.1) +
+          Math.sin((c * x + a * y) * step + 4.2)
+        const n = field / 6 + 0.5
+        const v = (n - p.threshold) / p.softness
+        const clamped = v <= 0 ? 0 : v >= 1 ? 1 : v
+        const shaped = clamped * clamped * (3 - 2 * clamped)
+        this.tile[y * TILE + x] = Math.round(shaped * LEVELS) / LEVELS
+      }
+    }
   }
 
   protected override renderSelf(buffer: OptimizedBuffer): void {
@@ -113,24 +171,17 @@ export class ShimmerOverlayRenderable extends Renderable {
     if (p.enabled < 0.5 || !this.visible || this.isDestroyed || this.width <= 0 || this.height <= 0) return
     if (p.strength <= 0) return
     if (this.mask.length < this.width * this.height * 3) this.mask = new Float32Array(this.width * this.height * 3)
-    const t = this.clock / 1000
-    const d = p.density
+    const ox = Math.floor(this.offset)
+    const oy = Math.floor(this.offset * 0.37)
     let count = 0
     for (let j = 0; j < this.height; j++) {
-      // One row spans ~2 columns of visual space; keep wave math in column units so the
-      // shimmer pools read as visually round instead of vertically stretched.
-      const y = j * 2
+      // One row spans ~2 columns of visual space; sampling the tile at 2j keeps the pools
+      // visually round instead of vertically stretched.
+      const row = (((j * 2 + oy) % TILE) + TILE) % TILE
+      const base = row * TILE
       for (let i = 0; i < this.width; i++) {
-        const field =
-          Math.sin((i * 0.21 + y * 0.06) * d + t * 0.5) +
-          Math.sin((i * 0.114 - y * 0.083) * d - t * 0.32) +
-          Math.sin((i * 0.07 + y * 0.117) * d + t * 0.21)
-        const n = field / 6 + 0.5
-        const v = (n - p.threshold) / p.softness
-        if (v <= 0) continue
-        const clamped = v >= 1 ? 1 : v
-        const cell = clamped * clamped * (3 - 2 * clamped)
-        if (cell < 0.02) continue
+        const cell = this.tile[base + ((((i + ox) % TILE) + TILE) % TILE)]
+        if (cell === 0) continue
         this.mask[count] = this.screenX + i
         this.mask[count + 1] = this.screenY + j
         this.mask[count + 2] = cell
