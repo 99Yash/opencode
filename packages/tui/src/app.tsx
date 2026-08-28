@@ -1322,10 +1322,10 @@ function App(props: { pair?: DialogPairCredentials }) {
     if (reconnectTimer) clearTimeout(reconnectTimer)
   })
 
-  // Annotation-mode overlay: a single custom renderable that paints per-cell translucent
-  // backgrounds directly into the frame buffer (see component/shimmer-overlay.tsx). Enabling
-  // it rolls a low-opacity sheet diagonally over the app; Ctrl+R opens a tuner panel whose
-  // arrows select and adjust parameters live.
+  // Foreground shimmer: a single custom renderable that rewrites text colors already in the
+  // frame buffer through a color matrix (see component/shimmer-overlay.tsx), so only glyphs
+  // shimmer and backgrounds stay untouched. Ctrl+R opens a tuner panel whose arrows select
+  // and adjust parameters live.
   let shimmerOverlay: ShimmerOverlayRenderable | undefined
   const [shimmerPanel, setShimmerPanel] = createSignal(false)
   const [shimmerSelected, setShimmerSelected] = createSignal(0)
