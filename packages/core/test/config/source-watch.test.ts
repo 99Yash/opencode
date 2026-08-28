@@ -10,6 +10,20 @@ import { it } from "../lib/effect"
 describe("ConfigSourceWatch", () => {
   it.effect("shares root watches, retains unchanged roots, and releases removed roots and the plugin scope", () => {
     const counts = { starts: 0, stops: 0 }
+    const native = Watcher.Native.of({
+      subscribe: (input) =>
+        Effect.sync(() => {
+          expect(input.type).toBe("directory")
+          expect(input.ignore).toEqual(["**/{node_modules,.git}/**", ".git", "node_modules"])
+          counts.starts++
+          return {
+            unsubscribe: () => {
+              counts.stops++
+              return Promise.resolve()
+            },
+          }
+        }),
+    })
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const root = directory("source")
@@ -33,37 +47,20 @@ describe("ConfigSourceWatch", () => {
         expect(counts).toEqual({ starts: 2, stops: 1 })
       }).pipe(Effect.scoped)
       expect(counts).toEqual({ starts: 2, stops: 2 })
-    }).pipe(
-      Effect.provide(
-        Watcher.layer().pipe(
-          Layer.provide(
-            Layer.succeed(
-              Watcher.Native,
-              Watcher.Native.of({
-                subscribe: (input) =>
-                  Effect.sync(() => {
-                    expect(input.type).toBe("directory")
-                    expect(input.ignore).toEqual(["**/{node_modules,.git}/**", ".git", "node_modules"])
-                    counts.starts++
-                    return {
-                      unsubscribe: () => {
-                        counts.stops++
-                        return Promise.resolve()
-                      },
-                    }
-                  }),
-              }),
-            ),
-          ),
-        ),
-      ),
-    )
+    }).pipe(withNative(native))
   })
 
   it.effect("scope shutdown interrupts pending native watch acquisition", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>()
       const stopped = yield* Deferred.make<void>()
+      const native = Watcher.Native.of({
+        subscribe: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
+          ),
+      })
       yield* Effect.gen(function* () {
         const plugin = yield* Effect.gen(function* () {
           const sources = yield* ConfigSourceWatch.make(["agents"])
@@ -73,24 +70,7 @@ describe("ConfigSourceWatch", () => {
         yield* Deferred.await(started)
         yield* Fiber.interrupt(plugin)
         expect(yield* Deferred.isDone(stopped)).toBe(true)
-      }).pipe(
-        Effect.provide(
-          Watcher.layer().pipe(
-            Layer.provide(
-              Layer.succeed(
-                Watcher.Native,
-                Watcher.Native.of({
-                  subscribe: () =>
-                    Deferred.succeed(started, undefined).pipe(
-                      Effect.andThen(Effect.never),
-                      Effect.onInterrupt(() => Deferred.succeed(stopped, undefined)),
-                    ),
-                }),
-              ),
-            ),
-          ),
-        ),
-      )
+      }).pipe(withNative(native))
     }),
   )
 
@@ -105,6 +85,10 @@ describe("ConfigSourceWatch", () => {
     }).pipe(Effect.provide(Watcher.layer({ enabled: false }).pipe(Layer.provide(Watcher.nativeLayer)))),
   )
 })
+
+function withNative(native: Watcher.NativeInterface) {
+  return Effect.provide(Watcher.layer().pipe(Layer.provide(Layer.succeed(Watcher.Native, native))))
+}
 
 function directory(name: string) {
   return new Directory({ type: "directory", path: AbsolutePath.make(path.resolve(name)) })
