@@ -1,7 +1,7 @@
 export * as Shared from "./shared.js"
 
 import path from "node:path"
-import { Context, Layer } from "effect"
+import { Context, Effect, Layer, Scope } from "effect"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { App } from "./app.js"
 import { Database } from "./database/database.js"
@@ -26,6 +26,7 @@ export type Replacements = readonly (readonly [
 ])[]
 
 export interface Interface {
+  readonly scope: Scope.Scope
   readonly globals: Context.Context<Instance.Globals>
   readonly sessions: Session.Interface
   readonly bindings: SessionBindings.Interface
@@ -66,15 +67,19 @@ export function layer<const Items extends Replacements = readonly []>(options: O
     configured,
   ).pipe(
     Layer.flatMap((context) =>
-      Layer.succeed(Service, {
-        globals: context,
-        sessions: Context.get(context, Session.Service),
-        bindings: Context.get(context, SessionBindings.Service),
-        execution: Context.get(context, SessionExecution.Service),
-        jobs: Context.get(context, Job.Service),
-        persistentPty: Context.get(context, PersistentPty.Service),
-        replacements,
-      }),
+      Layer.effect(
+        Service,
+        Effect.map(Scope.Scope, (scope) => ({
+          scope,
+          globals: context,
+          sessions: Context.get(context, Session.Service),
+          bindings: Context.get(context, SessionBindings.Service),
+          execution: Context.get(context, SessionExecution.Service),
+          jobs: Context.get(context, Job.Service),
+          persistentPty: Context.get(context, PersistentPty.Service),
+          replacements,
+        })),
+      ),
     ),
   )
 }

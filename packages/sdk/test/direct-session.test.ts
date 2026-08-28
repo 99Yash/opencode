@@ -177,6 +177,59 @@ const checkTypes = (handle: Session.Handle, options: Session.Options) => {
 void checkTypes
 
 describe("direct Session", () => {
+  it.live("closes private instances before Shared backing when the caller Scope outlives its provider", () =>
+    Effect.gen(function* () {
+      const directory = yield* tmpdirScoped("opencode-direct-owner-")
+      const lifecycle: string[] = []
+      const owner = yield* Scope.Scope
+      const caller = yield* Scope.fork(owner)
+      const handle = yield* Session.create({
+        location: Location.Ref.make({ directory: AbsolutePath.make(directory.path) }),
+        plugins: [
+          Plugin.define({
+            id: "direct-lifetime",
+            effect: () =>
+              Effect.addFinalizer(() =>
+                Effect.sync(() => {
+                  lifecycle.push("instance")
+                }),
+              ),
+          }),
+        ],
+      }).pipe(
+        Scope.provide(caller),
+        Effect.provide(
+          Shared.layer({
+            replacements: [
+              [
+                Global.node,
+                Layer.effectContext(
+                  Effect.gen(function* () {
+                    const context = yield* Layer.build(tempGlobalLayer)
+                    yield* Effect.addFinalizer(() =>
+                      Effect.sync(() => {
+                        lifecycle.push("shared")
+                      }),
+                    )
+                    return context
+                  }),
+                ),
+              ],
+              [ModelsDev.node, ModelsDev.configured({ fetch: false })],
+              [Watcher.node, Watcher.configured({ enabled: false })],
+            ],
+          }),
+        ),
+      )
+      expect(lifecycle).toEqual(["instance", "shared"])
+      expect(yield* handle.prompt({ text: "After provider close", resume: false }).pipe(Effect.exit)).toEqual(
+        Exit.fail(new Session.ClosedError({ sessionID: handle.id })),
+      )
+      yield* Scope.close(caller, Exit.void)
+      expect(lifecycle).toEqual(["instance", "shared"])
+    }),
+  )
+
   it.live(
     "waits for runtime installation when plugin setup calls Session APIs before the graph is acquired",
     () =>

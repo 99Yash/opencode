@@ -32,7 +32,6 @@ export const create = Effect.fn("DirectSession.create")(function* <
   const Items extends Shared.Replacements = readonly [],
 >(options: Options<Items>) {
   const shared = yield* Shared.Service
-  const owner = yield* Scope.Scope
   const discovery = options.discovery ?? false
   const session =
     options.location === undefined
@@ -48,7 +47,9 @@ export const create = Effect.fn("DirectSession.create")(function* <
           metadata: options.metadata,
           discovery,
         })
-  const scope = yield* Scope.fork(owner)
+  // The backing provider may close before the caller's Scope.
+  const scope = yield* Scope.fork(shared.scope)
+  yield* Effect.addFinalizer((exit) => Scope.close(scope, exit))
   return yield* Effect.gen(function* () {
     const binding = yield* shared.bindings.reserve(session.id)
     const ready = yield* Latch.make()
