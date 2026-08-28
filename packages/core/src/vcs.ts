@@ -97,8 +97,14 @@ const layer = Layer.effect(
         current.info = next
         return changed
       }).pipe(refreshLock.withPermit)
-      // Listeners may refresh again; publish outside the permit using the latest committed branch.
-      if (changed) yield* bus.publish(VcsEvent.BranchUpdated, { branch: current.info.branch.current })
+      if (!changed) return
+      // Legacy listeners can publish nested updates before streams and SSE receive
+      // this event. Re-announce the latest branch if publication was overtaken.
+      while (true) {
+        const branch = current.info.branch.current
+        yield* bus.publish(VcsEvent.BranchUpdated, { branch })
+        if (branch === current.info.branch.current) return
+      }
     })
 
     if (vcs) {

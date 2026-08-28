@@ -1,10 +1,17 @@
 import { describe, expect, test } from "bun:test"
 import { Agent } from "@opencode-ai/core/agent"
 import { Bus } from "@opencode-ai/core/bus"
+import { Database } from "@opencode-ai/core/database/database"
+import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
+import { Location } from "@opencode-ai/core/location"
+import { Vcs } from "@opencode-ai/core/vcs"
 import { Credential } from "@opencode-ai/schema/credential"
 import { Event } from "@opencode-ai/schema/event"
 import { IntegrationID } from "@opencode-ai/schema/integration-id"
-import { Deferred, Effect, Exit, Fiber, Option, Schema, Stream } from "effect"
+import { VcsEvent } from "@opencode-ai/schema/vcs-event"
+import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect"
+import { tempLocationLayer } from "../../core/test/fixture/location"
 import { it } from "../../core/test/lib/effect"
 import { EventFeed } from "../src/event-feed"
 
@@ -43,6 +50,59 @@ describe("EventFeed", () => {
     const payload = event("wire")
     expect(EventFeed.frame(payload)).toBe(`data: ${JSON.stringify(payload)}\n\n`)
   })
+
+  it.effect("delivers the latest VCS branch after an earlier legacy listener reenters", () =>
+    Effect.gen(function* () {
+      const bus = yield* Bus.Service
+      const vcs = yield* Vcs.Service
+      const scope = yield* Scope.Scope
+      const provider = {
+        id: "fixture",
+        name: "Fixture",
+        info: () => Effect.succeed({ branch: { current: "outer" } }),
+        branches: () => Effect.succeed([]),
+        status: () => Effect.succeed([]),
+        diff: () => Effect.succeed([]),
+      }
+      const unsubscribe = yield* bus.listen((event) =>
+        event.type === VcsEvent.BranchUpdated.type &&
+        Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch === "outer"
+          ? vcs
+              .transform((draft) =>
+                draft.add({ ...provider, info: () => Effect.succeed({ branch: { current: "inner" } }) }),
+              )
+              .pipe(Scope.provide(scope), Effect.asVoid)
+          : Effect.void,
+      )
+      const feed = yield* EventFeed.make(bus.listen, {
+        encode: (event) => (event.type === VcsEvent.BranchUpdated.type ? (event.data.branch ?? "none") : event.type),
+      })
+      const stream = yield* feed.subscribe
+      const received = yield* stream.pipe(
+        Stream.takeUntil((frame) => frame === Agent.Event.Updated.type, { excludeLast: true }),
+        Stream.runLast,
+        Effect.forkScoped({ startImmediately: true }),
+      )
+
+      yield* vcs.transform((draft) => {
+        draft.add(provider)
+        draft.default.set(provider.id)
+      })
+      yield* unsubscribe
+      yield* bus.publish(Agent.Event.Updated, {})
+
+      const info = yield* vcs.info()
+      expect(info.branch.current).toBe("inner")
+      expect(Option.getOrUndefined(yield* Fiber.join(received))).toBe(info.branch.current)
+    }).pipe(
+      Effect.provide(
+        AppNodeBuilder.build(LayerNode.group([Vcs.node, Bus.node]), [
+          [Location.node, tempLocationLayer],
+          [Database.node, Database.configured({ path: ":memory:" })],
+        ]),
+      ),
+    ),
+  )
 
   it.effect("encodes once and delivers the same frame to every subscriber", () =>
     Effect.gen(function* () {

@@ -430,6 +430,38 @@ describe("State", () => {
     }),
   )
 
+  it.effect("closes a batched observer's owning scope without losing the body's failure", () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const registrations = yield* Scope.make()
+      const owner = yield* Scope.make()
+      yield* Effect.addFinalizer(() =>
+        Deferred.succeed(release, undefined).pipe(
+          Effect.andThen(Scope.close(owner, Exit.void)),
+          Effect.andThen(State.batch(Scope.close(registrations, Exit.void), { flush: false })),
+        ),
+      )
+      const state = State.create({
+        initial: () => ({}),
+        draft: (draft) => draft,
+        notify: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+      })
+      const writer = yield* State.batch(
+        state.transform(() => {}).pipe(Scope.provide(registrations), Effect.andThen(Effect.fail("batch body failed"))),
+      ).pipe(Effect.forkIn(owner, { startImmediately: true }))
+      yield* Deferred.await(entered)
+
+      const shutdown = yield* Scope.close(owner, Exit.void).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("1 millis")
+      expect(shutdown.pollUnsafe()).toBeDefined()
+      expect(yield* Deferred.isDone(release)).toBe(false)
+      const exit = yield* Fiber.await(writer)
+      expect(Exit.hasInterrupts(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.pretty(exit.cause)).toContain("batch body failed")
+    }),
+  )
+
   it.effect("lets batch observers read the other states' accepted changes", () =>
     Effect.gen(function* () {
       const observed: string[][] = []

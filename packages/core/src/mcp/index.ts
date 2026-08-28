@@ -617,6 +617,7 @@ export const layer = (options?: Options) =>
       const overrides = new Map<ServerName, Mcp.ServerConfig | false>()
       const reconcileLock = Semaphore.makeUnsafe(1)
       const reconcile = Effect.fnUntraced(function* () {
+        if (root.state._tag === "Closed") return
         const servers = new Map(state.get().servers)
         if (!applied && entries.size === 0) {
           for (const [name, server] of servers) {

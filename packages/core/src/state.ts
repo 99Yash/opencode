@@ -52,7 +52,7 @@ export function batch<A, E, R>(effect: Effect.Effect<A, E, R>, options: { readon
       const exit = yield* restore(effect.pipe(Effect.provideService(CurrentBatch, batch))).pipe(Effect.exit)
       batch.active = false
       const notifications = batch.flush
-        ? yield* Effect.forEach(batch.notifications, (notify) => notify().pipe(Effect.exit))
+        ? yield* Effect.forEach(batch.notifications, (notify) => restore(notify()).pipe(Effect.exit))
         : []
       // Accepted writes are not rolled back: one failed observer must not hide
       // the other states' changes, or replace the batch body's failure.

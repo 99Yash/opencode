@@ -19,6 +19,8 @@ import { tmpdir } from "./fixture/tmpdir"
 import { it } from "./lib/effect"
 import { host } from "./plugin/host"
 
+const Done = Bus.ephemeral({ type: "test.vcs.done", schema: {} })
+
 const provide = (directory: string, input: { git?: boolean } = {}) =>
   Effect.provide(
     LayerNode.compile(LayerNode.group([Vcs.node, Bus.node, Location.node, AppProcess.node]), [
@@ -274,12 +276,17 @@ describe("Vcs", () => {
     ),
   )
 
-  it.live("allows branch listeners to change the selected provider", () =>
+  it.live("keeps branch streams current when listeners change the selected provider", () =>
     withTmp((directory) =>
       Effect.gen(function* () {
         const vcs = yield* Vcs.Service
         const bus = yield* Bus.Service
         const scope = yield* Effect.scope
+        const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
+          Stream.takeUntil((event) => event.type === Done.type),
+          Stream.runCollect,
+          Effect.forkScoped({ startImmediately: true }),
+        )
         const unsubscribe = yield* bus.listen((event) => {
           if (
             event.type !== VcsEvent.BranchUpdated.type ||
@@ -292,12 +299,61 @@ describe("Vcs", () => {
             )
             .pipe(Scope.provide(scope), Effect.asVoid)
         })
-        yield* vcs.transform((draft) => {
-          draft.add(provider())
-          draft.default.set("custom")
-        })
-        expect(yield* vcs.info()).toEqual({ branch: { current: "listener" } })
-        yield* unsubscribe
+        yield* Effect.gen(function* () {
+          yield* vcs.transform((draft) => {
+            draft.add(provider())
+            draft.default.set("custom")
+          })
+          yield* bus.publish(Done, {})
+          const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
+          expect(yield* vcs.info()).toEqual({ branch: { current: "listener" } })
+          expect(events.length).toBeGreaterThanOrEqual(2)
+          expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
+        }).pipe(Effect.ensuring(unsubscribe))
+      }).pipe(provide(directory)),
+    ),
+  )
+
+  it.live("does not roll back branch streams when an older listener finishes late", () =>
+    withTmp((directory) =>
+      Effect.gen(function* () {
+        const vcs = yield* Vcs.Service
+        const bus = yield* Bus.Service
+        const entered = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
+          Stream.takeUntil((event) => event.type === Done.type),
+          Stream.runCollect,
+          Effect.forkScoped({ startImmediately: true }),
+        )
+        const unsubscribe = yield* bus.listen((event) =>
+          event.type === VcsEvent.BranchUpdated.type &&
+          Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch === "older"
+            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+            : Effect.void,
+        )
+
+        yield* Effect.gen(function* () {
+          const older = yield* vcs
+            .transform((draft) => {
+              draft.add(provider({ info: () => Effect.succeed({ branch: { current: "older" } }) }))
+              draft.default.set("custom")
+            })
+            .pipe(Effect.forkScoped({ startImmediately: true }))
+          yield* Deferred.await(entered)
+          yield* vcs.transform((draft) =>
+            draft.add(provider({ info: () => Effect.succeed({ branch: { current: "newer" } }) })),
+          )
+          expect(older.pollUnsafe()).toBeUndefined()
+          expect((yield* vcs.info()).branch.current).toBe("newer")
+
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(older)
+          yield* bus.publish(Done, {})
+          const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
+          expect(events.length).toBeGreaterThanOrEqual(2)
+          expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
+        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined).pipe(Effect.andThen(unsubscribe))))
       }).pipe(provide(directory)),
     ),
   )
