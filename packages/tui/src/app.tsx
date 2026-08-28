@@ -1455,11 +1455,16 @@ function App(props: { pair?: DialogPairCredentials }) {
       </Show>
       <MigrationOverlay />
       <Toast />
-      <ShimmerOverlay
-        ref={(renderable) => (shimmerOverlay = renderable)}
-        width={dimensions().width}
-        height={dimensions().height}
-      />
+      <Show when={shimmerParams().enabled >= 0.5}>
+        <ShimmerOverlay
+          ref={(renderable) => {
+            shimmerOverlay = renderable
+            renderable.setParams(shimmerParams())
+          }}
+          width={dimensions().width}
+          height={dimensions().height}
+        />
+      </Show>
       <ShimmerTuner open={shimmerPanel()} selected={shimmerSelected()} params={shimmerParams()} />
     </box>
   )

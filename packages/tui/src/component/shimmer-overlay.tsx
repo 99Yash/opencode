@@ -78,6 +78,9 @@ export class ShimmerOverlayRenderable extends Renderable {
   }
 
   setParams(value: ShimmerParams) {
+    // The App unmounts the overlay while disabled (so it never blocks mouse hit-testing);
+    // a stale ref may point at a destroyed instance when params change while unmounted.
+    if (this.isDestroyed) return
     this.params = value
     this.rebuildMatrix()
     this.live = value.enabled >= 0.5
