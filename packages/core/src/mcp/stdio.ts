@@ -74,6 +74,8 @@ export const make = Effect.fnUntraced(function* (options: Options) {
     ))
 
   const transport: Transport = {
+    // Stdio has one shared stream; cancellation uses a notification, not an HTTP stream abort.
+    hasPerRequestStream: false,
     start: () => {
       if (state.phase !== "ready") return Promise.reject(new Error("Stdio transport already started"))
       state.phase = "starting"

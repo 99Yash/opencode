@@ -2,7 +2,12 @@ import path from "node:path"
 import { describe, expect, test } from "bun:test"
 import { Client, InMemoryTransport, ProtocolError, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
 import { JSONRPCMessageSchema } from "@modelcontextprotocol/core"
-import { Server, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server"
+import {
+  createMcpHandler,
+  inputRequired,
+  Server,
+  WebStandardStreamableHTTPServerTransport,
+} from "@modelcontextprotocol/server"
 import { Document, Event, Info } from "@opencode-ai/schema/config"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
 import { McpEvent } from "@opencode-ai/schema/mcp-event"
@@ -164,6 +169,44 @@ function resourceServer(
         completeElicitation: () => protocol.createElicitationCompletionNotifier("elicitation-test")(),
         close: async () => {
           await protocol.close().catch(() => {})
+          await http.stop(true)
+        },
+      }
+    }),
+    (server) => Effect.promise(server.close),
+  )
+}
+
+function modernUrlElicitationServer() {
+  return Effect.acquireRelease(
+    Effect.sync(() => {
+      const handler = createMcpHandler(
+        () => {
+          const server = new Server({ name: "url-elicitation", version: "1" }, { capabilities: { tools: {} } })
+          server.setRequestHandler("tools/list", async () => ({
+            tools: [{ name: "url-elicitation", inputSchema: { type: "object" } }],
+          }))
+          server.setRequestHandler("tools/call", async (_request, ctx) => {
+            if (!ctx.mcpReq.inputResponses)
+              return inputRequired({
+                inputRequests: {
+                  authorization: inputRequired.elicitUrl({
+                    message: "Authorize access",
+                    url: "https://example.com/authorize",
+                  }),
+                },
+              })
+            return { content: [], structuredContent: ctx.mcpReq.inputResponses.authorization }
+          })
+          return server
+        },
+        { legacy: "reject" },
+      )
+      const http = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: (request) => handler.fetch(request) })
+      return {
+        url: http.url.toString(),
+        close: async () => {
+          await handler.close()
           await http.stop(true)
         },
       }
@@ -708,7 +751,8 @@ testEffect(Layer.empty).live("isolates unresolved output schemas without replayi
     expect(error).toBeInstanceOf(ProtocolError)
     expect(error.message).toContain("Invalid outputSchema for tool server-error: can't resolve reference")
     expect(executed).toEqual(["dependent", "unresolved", "valid", "server-error"])
-    expect(new Set(versions)).toEqual(new Set(["2025-11-25"]))
+    expect(versions[0]).toBe("2026-07-28")
+    expect(new Set(versions.slice(1))).toEqual(new Set(["2025-11-25"]))
   }),
 )
 
@@ -731,13 +775,14 @@ test("spawns local MCP servers through the location environment", async () => {
     ).pipe(Effect.provide(recordingEnvironmentLayer(spawns))),
   )
 
-  expect(spawns).toHaveLength(1)
-  const command = spawns[0]
-  if (!command || !ChildProcess.isStandardCommand(command)) throw new Error("Expected a standard process command")
-  expect(command.command).toBe(process.execPath)
-  expect(command.options.cwd).toBe(cwd)
-  expect(command.options.extendEnv).toBe(true)
-  expect(command.options.env).toEqual({ MCP_LOCATION_TEST: "configured" })
+  expect(spawns).toHaveLength(2)
+  for (const command of spawns) {
+    if (!ChildProcess.isStandardCommand(command)) throw new Error("Expected a standard process command")
+    expect(command.command).toBe(process.execPath)
+    expect(command.options.cwd).toBe(cwd)
+    expect(command.options.extendEnv).toBe(true)
+    expect(command.options.env).toEqual({ MCP_LOCATION_TEST: "configured" })
+  }
 })
 
 test("reports a local MCP server as failed when the location has no execution plane", async () => {
@@ -1020,7 +1065,8 @@ for (const query of ["", "?source=hello%20world&tag=a&tag=b"]) {
 
       expect(server.state.initializations).toBe(2)
       expect(new URL(server.state.urls[0]).searchParams.get("codemode")).toBe("false")
-      expect(new Set(server.state.urls.slice(1))).toEqual(new Set([config.url]))
+      expect(server.state.urls[1]).toBe(server.state.urls[0])
+      expect(new Set(server.state.urls.slice(2))).toEqual(new Set([config.url]))
       expect(new Set(headers)).toEqual(new Set(["preserved"]))
       expect(server.state.toolLists).toBe(1)
       expect(server.state.resourceLists).toBe(1)
@@ -1054,10 +1100,11 @@ for (const entry of [
       const error = yield* connect("resources", config, import.meta.dir).pipe(Effect.flip)
 
       expect(error).toBeInstanceOf(McpClient.ConnectError)
-      expect(server.state.initializations).toBe(entry.attempts)
-      expect(server.state.urls).toHaveLength(entry.attempts)
-      if (entry.query || entry.codemode === false) expect(server.state.urls).toEqual([config.url])
-      if (entry.attempts === 2) expect(server.state.urls[1]).toBe(config.url)
+      const stoppedAtDiscovery = [401, 403, 500].includes(entry.status)
+      expect(server.state.initializations).toBe(stoppedAtDiscovery ? 0 : entry.attempts)
+      expect(server.state.urls).toHaveLength(stoppedAtDiscovery ? 1 : entry.attempts * 2)
+      if (entry.query || entry.codemode === false) expect(new Set(server.state.urls)).toEqual(new Set([config.url]))
+      if (entry.attempts === 2) expect(server.state.urls[2]).toBe(config.url)
     }),
   )
 }
@@ -1315,6 +1362,40 @@ test("acknowledges completed MCP URL elicitations without returning internal con
     ),
   )
 })
+
+for (const era of ["legacy", "modern"] as const) {
+  for (const action of ["accept", "cancel"] as const) {
+    testEffect(Layer.empty).live(
+      `${era} URL elicitation uses the shared Form ${action} flow without a completion notification`,
+      () =>
+        Effect.gen(function* () {
+          const server = yield* era === "legacy"
+            ? resourceServer({ urlElicitation: true })
+            : modernUrlElicitationServer()
+          const created = yield* Deferred.make<Form.Info>()
+          const result = yield* Effect.gen(function* () {
+            const service = yield* Mcp.Service
+            const forms = yield* Form.Service
+            const call = yield* service
+              .callTool({ server: "resources", name: "url-elicitation" })
+              .pipe(Effect.forkScoped)
+            const form = yield* Deferred.await(created)
+            expect(form.fields).toEqual([
+              { key: "elicitation", type: "external", url: "https://example.com/authorize" },
+            ])
+            if (era === "legacy") expect(form.metadata).toHaveProperty("elicitationID", "elicitation-test")
+            if (era === "modern") expect(form.metadata).not.toHaveProperty("elicitationID")
+            if (action === "accept") yield* forms.reply({ id: form.id, answer: { elicitation: true } })
+            if (action === "cancel") yield* forms.cancel(form.id)
+            return yield* Fiber.join(call)
+          }).pipe(
+            Effect.provide(resourceMcpLayer(server.url, (form) => Deferred.succeed(created, form).pipe(Effect.asVoid))),
+          )
+          expect(result.structured).toEqual({ action })
+        }),
+    )
+  }
+}
 
 test("loads and reads MCP resources", async () => {
   await Effect.runPromise(
