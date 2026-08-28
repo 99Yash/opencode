@@ -1,4 +1,5 @@
 import {
+  applyChromaticAberration,
   OptimizedBuffer,
   Renderable,
   RGBA,
@@ -29,6 +30,7 @@ export type ShimmerParams = {
   softness: number
   speed: number
   density: number
+  aberration: number
   red: number
   green: number
   blue: number
@@ -42,6 +44,7 @@ export const SHIMMER_DEFAULTS: ShimmerParams = {
   softness: 0.3,
   speed: 1,
   density: 1,
+  aberration: 1,
   red: 150,
   green: 190,
   blue: 255,
@@ -62,6 +65,7 @@ export const SHIMMER_CONTROLS: {
   { key: "softness", label: "Softness", min: 0.05, max: 1, step: 0.01, digits: 2 },
   { key: "speed", label: "Speed", min: 0, max: 3, step: 0.05, digits: 2 },
   { key: "density", label: "Density", min: 0.3, max: 3, step: 0.05, digits: 2 },
+  { key: "aberration", label: "Aberration", min: 0, max: 4, step: 0.25, digits: 2 },
   { key: "red", label: "Red", min: 0, max: 255, step: 5, digits: 0 },
   { key: "green", label: "Green", min: 0, max: 255, step: 5, digits: 0 },
   { key: "blue", label: "Blue", min: 0, max: 255, step: 5, digits: 0 },
@@ -169,6 +173,9 @@ export class ShimmerOverlayRenderable extends Renderable {
   protected override renderSelf(buffer: OptimizedBuffer): void {
     const p = this.params
     if (p.enabled < 0.5 || !this.visible || this.isDestroyed || this.width <= 0 || this.height <= 0) return
+    // Lens-fringe post-process: offsets red/blue foreground channels horizontally, growing
+    // from zero at screen center to `aberration` cells at the edges. Backgrounds untouched.
+    if (p.aberration > 0) applyChromaticAberration(buffer, p.aberration)
     if (p.strength <= 0) return
     if (this.mask.length < this.width * this.height * 3) this.mask = new Float32Array(this.width * this.height * 3)
     const ox = Math.floor(this.offset)
