@@ -1,18 +1,12 @@
 export * as ConfigCommandPlugin from "./command.js"
 
 import { define } from "@opencode-ai/plugin/effect/plugin"
-import { Agent } from "@opencode-ai/schema/agent"
 import { Info, type Entry } from "@opencode-ai/schema/config"
 import { ConfigCommand } from "@opencode-ai/schema/config/command"
-import { Model } from "@opencode-ai/schema/model"
-import { Provider } from "@opencode-ai/schema/provider"
-import { AppProcess } from "@opencode-ai/util/process"
 import path from "path"
 import { Effect, Option, Schema, Stream } from "effect"
-import { ChildProcess } from "effect/unstable/process"
+import { CommandInvocation } from "../../command/invocation.js"
 import { Config } from "../../config.js"
-import { Location } from "../../location.js"
-import { ShellSelect } from "../../shell/select.js"
 import { FSUtil } from "@opencode-ai/util/fs-util"
 import { ConfigMarkdown } from "../markdown.js"
 
@@ -29,9 +23,7 @@ export const Plugin = define({
       const commands = yield* loadDirectory(fs, entry.path)
       return [{ commands: Object.fromEntries(commands.map((command) => [command.name, command.info])) }]
     })
-    const location = yield* Location.Service
-    const processes = yield* AppProcess.Service
-    const shell = yield* ShellSelect.Service
+    const invoke = yield* CommandInvocation.make(ctx)
     const load = Effect.fn("ConfigCommandPlugin.load")(function* () {
       return yield* Effect.forEach(yield* config.entries(), loadEntry).pipe(Effect.map((documents) => documents.flat()))
     })
@@ -63,38 +55,7 @@ export const Plugin = define({
           draft.add({
             name,
             description: command.description,
-            execute: (input) =>
-              Effect.gen(function* () {
-                const agent = command.agent === undefined ? undefined : Agent.ID.make(command.agent)
-                const commandAgent = yield* Effect.gen(function* () {
-                  if (agent === undefined) return
-                  const session = yield* ctx.session.get({ sessionID: input.sessionID })
-                  if (session.agent !== agent) yield* ctx.session.switchAgent({ sessionID: input.sessionID, agent })
-                  return (yield* ctx.agent.get({ agentID: agent })).data
-                })
-                const model =
-                  command.model === undefined
-                    ? commandAgent?.model
-                    : {
-                        id: Model.ID.make(command.model.model),
-                        providerID: Provider.ID.make(command.model.providerID),
-                        ...(command.model.variant === undefined
-                          ? {}
-                          : { variant: Model.VariantID.make(command.model.variant) }),
-                      }
-                if (model !== undefined) yield* ctx.session.switchModel({ sessionID: input.sessionID, model })
-                yield* ctx.session.prompt({
-                  ...input.prompt,
-                  sessionID: input.sessionID,
-                  text: yield* evaluateTemplate(command.template, input.prompt.text, {
-                    config,
-                    location,
-                    processes,
-                    shell,
-                  }),
-                  delivery: input.delivery,
-                })
-              }).pipe(Effect.asVoid),
+            execute: (input) => invoke(command, input),
           })
         }
       }
@@ -147,67 +108,3 @@ function decode(directory: string, filepath: string, content: string) {
     info,
   }
 }
-
-function evaluateTemplate(
-  template: string,
-  input: string,
-  services: {
-    readonly config: Config.Interface
-    readonly location: Location.Info
-    readonly processes: AppProcess.Interface
-    readonly shell: ShellSelect.Interface
-  },
-) {
-  return Effect.gen(function* () {
-    const args = parseArguments(input)
-    const placeholders = template.match(placeholderRegex) ?? []
-    const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
-    const expanded = template.replaceAll(placeholderRegex, (_, index) => {
-      const position = Number(index)
-      const argIndex = position - 1
-      if (argIndex >= args.length) return ""
-      if (position === last) return args.slice(argIndex).join(" ")
-      return args[argIndex]
-    })
-    const withArguments = expanded.replaceAll("$ARGUMENTS", input)
-    const text =
-      placeholders.length === 0 && !template.includes("$ARGUMENTS") && input.trim()
-        ? `${withArguments}\n\n${input}`.trim()
-        : withArguments.trim()
-    const matches = Array.from(text.matchAll(shellRegex))
-    if (matches.length === 0) return text
-    const shell = yield* services.shell.resolve({ priority: "config" })
-    const outputs = yield* Effect.forEach(
-      matches,
-      (match) => {
-        const source = match[1] ?? ""
-        return services.processes
-          .run(
-            ChildProcess.make(shell, ShellSelect.args(shell, source), {
-              cwd: services.location.directory,
-              stdin: "ignore",
-            }),
-            { combineOutput: true },
-          )
-          .pipe(
-            Effect.map((result) => (result.output ?? Buffer.concat([result.stdout, result.stderr])).toString("utf8")),
-            Effect.mapError((error) =>
-              new Error(`Shell interpolation failed for ${JSON.stringify(source)}: ${error.message}`),
-            ),
-          )
-      },
-      { concurrency: 2 },
-    )
-    const iterator = outputs[Symbol.iterator]()
-    return text.replace(shellRegex, () => iterator.next().value ?? "")
-  })
-}
-
-function parseArguments(input: string) {
-  return (input.match(argsRegex) ?? []).map((arg) => arg.replace(quoteTrimRegex, ""))
-}
-
-const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
-const placeholderRegex = /\$(\d+)/g
-const quoteTrimRegex = /^["']|["']$/g
-const shellRegex = /!`([^`]+)`/g
