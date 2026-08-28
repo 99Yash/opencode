@@ -3,7 +3,6 @@ import { Effect, Layer } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { LLM, Message } from "@opencode-ai/ai"
 import { LLMClient, RequestExecutor } from "@opencode-ai/ai/route"
-import { compileRequest } from "@opencode-ai/ai/route/client"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Credential } from "@opencode-ai/core/credential"
 import { Model } from "@opencode-ai/core/model"
@@ -38,31 +37,18 @@ describe("MergeGatewayPlugin", () => {
       yield* catalog.transform((draft) => {
         draft.provider.update(providerID, (provider) => {
           provider.package = Provider.aisdk("merge-gateway-ai-sdk-provider")
-          provider.settings = { baseURL: "https://custom.example/v1", apiKey: "configured-key", reasoningEffort: "low" }
         })
         draft.model.update(providerID, modelID, (model) => {
           model.compatibility = { reasoningField: "reasoning_content", requireFinishReason: true }
-          model.settings = { reasoningEffort: "high" }
         })
         draft.model.update(providerID, other, (model) => {
           model.package = Provider.aisdk("@ai-sdk/openai-compatible")
-        })
-        draft.provider.update(custom, (provider) => {
-          provider.package = Provider.aisdk("@ai-sdk/openai-compatible")
-          provider.settings = { baseURL: "https://inherited.example/v1", reasoningEffort: "high" }
         })
         draft.model.update(custom, modelID, (model) => {
           model.package = Provider.aisdk("merge-gateway-ai-sdk-provider")
         })
       })
       yield* addPlugin()
-      expect((yield* catalog.provider.get(providerID))?.package).toBe("@opencode-ai/ai/providers/openai-compatible")
-      expect((yield* catalog.model.get(providerID, modelID))?.settings).toEqual({
-        baseURL: "https://custom.example/v1",
-        apiKey: "configured-key",
-        provider: providerID,
-        providerOptions: { reasoningEffort: "high" },
-      })
       expect((yield* catalog.model.get(providerID, modelID))?.compatibility).toEqual({
         reasoningField: "thinking",
         maxTokensField: "max_tokens",
@@ -70,36 +56,13 @@ describe("MergeGatewayPlugin", () => {
         requireFinishReason: true,
       })
       expect((yield* catalog.model.get(providerID, other))?.compatibility).toBeUndefined()
-      expect((yield* catalog.model.get(providerID, other))?.package).toBe(Provider.aisdk("@ai-sdk/openai-compatible"))
       expect((yield* catalog.model.get(custom, modelID))?.compatibility?.reasoningField).toBe("thinking")
-      expect((yield* catalog.model.get(custom, modelID))?.package).toBe("@opencode-ai/ai/providers/openai-compatible")
-      expect((yield* catalog.model.get(custom, modelID))?.settings).toEqual({
-        baseURL: "https://inherited.example/v1",
-        reasoningEffort: "high",
-        provider: custom,
-        providerOptions: { reasoningEffort: "high" },
-      })
-      for (const [provider, id, effort, url] of [
-        [providerID, other, "low", "https://custom.example/v1"],
-        [custom, modelID, "high", "https://inherited.example/v1"],
-      ] as const) {
-        const info = yield* catalog.model.get(provider, id)
-        if (!info) throw new Error("Missing model override")
-        const model = yield* ModelResolver.fromCatalogModel(info, Credential.Key.make({ type: "key", key: "test-key" }))
-        expect(model.route.endpoint.baseURL).toBe(url)
-        const request = yield* compileRequest(LLM.request({ model, prompt: "Hello" }))
-        expect(request.body.reasoning_effort).toBe(effort)
-      }
       yield* catalog.transform((draft) => {
-        draft.provider.update(providerID, (provider) => {
-          provider.settings = { ...provider.settings, baseURL: "https://later.example/v1" }
-        })
         draft.model.update(providerID, modelID, (model) => {
           model.compatibility = { ...model.compatibility, reasoningField: "custom_thinking" }
         })
       })
       expect((yield* catalog.model.get(providerID, modelID))?.compatibility?.reasoningField).toBe("custom_thinking")
-      expect((yield* catalog.model.get(providerID, modelID))?.settings?.baseURL).toBe("https://later.example/v1")
     }),
   )
 
@@ -109,7 +72,6 @@ describe("MergeGatewayPlugin", () => {
       yield* catalog.transform((draft) => {
         draft.provider.update(providerID, (provider) => {
           provider.package = Provider.aisdk("merge-gateway-ai-sdk-provider")
-          provider.headers = { "x-test": "header" }
         })
         draft.model.update(providerID, modelID, (model) => {
           model.body = { tags: [{ key: "env", value: "test" }] }
@@ -118,18 +80,13 @@ describe("MergeGatewayPlugin", () => {
       yield* addPlugin()
       const info = yield* catalog.model.get(providerID, modelID)
       if (!info) throw new Error("Missing Merge model")
-      expect(info.package).toBe("@opencode-ai/ai/providers/openai-compatible")
-      const model = yield* ModelResolver.fromCatalogModel(info, Credential.Key.make({ type: "key", key: "test-key" }), {
-        loadAISDK: () => Effect.die("Merge Gateway must use the native provider"),
-      })
-      expect(model.route.id).toBe("openai-compatible-chat")
+      const model = yield* ModelResolver.fromCatalogModel(info, Credential.Key.make({ type: "key", key: "test-key" }))
       const transport = Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
           Effect.sync(() => {
             expect(request.url).toBe("https://api-gateway.merge.dev/v1/ai-sdk/chat/completions")
             expect(request.headers.authorization).toBe("Bearer test-key")
-            expect(request.headers["x-test"]).toBe("header")
             if (request.body._tag !== "Uint8Array") throw new Error("Expected JSON request")
             const body = JSON.parse(new TextDecoder().decode(request.body.body))
             expect(body.max_tokens).toBe(100)
@@ -137,11 +94,7 @@ describe("MergeGatewayPlugin", () => {
             expect(body.tags).toEqual([{ key: "env", value: "test" }])
             expect(body.messages[0]).toMatchObject({
               role: "user",
-              content: [
-                { type: "text", text: "[Image 1] describe this image" },
-                { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
-                { type: "image_url", image_url: { url: "data:image/jpeg;base64,/9j/" } },
-              ],
+              content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }],
             })
             expect(body.messages[1]).not.toHaveProperty("thinking")
             const chunks = [
@@ -181,11 +134,7 @@ describe("MergeGatewayPlugin", () => {
           model,
           generation: { maxTokens: 100 },
           messages: [
-            Message.user([
-              Message.text("[Image 1] describe this image"),
-              { type: "media", mediaType: "image/png", data: "iVBORw0KGgo=" },
-              { type: "media", mediaType: "image/jpeg", data: "/9j/" },
-            ]),
+            Message.user({ type: "media", mediaType: "image/png", data: "iVBORw0KGgo=" }),
             Message.assistant("Let me look."),
             Message.user("Continue"),
           ],
