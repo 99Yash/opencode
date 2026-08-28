@@ -120,14 +120,21 @@ export function map(input: MapInput): Mapping | undefined {
         },
       }
     case "merge-gateway-ai-sdk-provider":
-    case "@ai-sdk/openai-compatible":
-      if (input.packageName === "@ai-sdk/openai-compatible" && typeof input.settings.baseURL !== "string") return
       return {
         package: "@opencode-ai/ai/providers/openai-compatible",
         settings: {
-          ...(input.packageName === "merge-gateway-ai-sdk-provider"
-            ? { baseURL: "https://api-gateway.merge.dev/v1/ai-sdk" }
-            : {}),
+          baseURL: "https://api-gateway.merge.dev/v1/ai-sdk",
+          ...baseSettings,
+          ...mapAPIKey(input.settings),
+          provider: input.providerID,
+          ...mapProviderOptions(input.settings, ["apiKey", "baseURL"]),
+        },
+      }
+    case "@ai-sdk/openai-compatible":
+      if (typeof input.settings.baseURL !== "string") return
+      return {
+        package: "@opencode-ai/ai/providers/openai-compatible",
+        settings: {
           ...baseSettings,
           ...mapAPIKey(input.settings),
           provider: input.providerID,

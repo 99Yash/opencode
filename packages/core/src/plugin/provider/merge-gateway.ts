@@ -10,7 +10,8 @@ export const MergeGatewayPlugin = define({
         for (const model of item.models.values()) {
           if (Provider.packageName(model.package ?? item.provider.package) !== "merge-gateway-ai-sdk-provider") continue
           evt.model.update(model.providerID, model.id, (model) => {
-            // The gateway's Chat envelope differs from the upstream model's catalog defaults.
+            // Merge uses `thinking` instead of the usual OpenAI-compatible reasoning fields.
+            // models.dev tracks upstream models, not these gateway-specific compatibility defaults.
             model.compatibility = {
               ...model.compatibility,
               reasoningField: "thinking",
