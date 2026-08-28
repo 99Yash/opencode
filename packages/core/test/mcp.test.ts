@@ -33,6 +33,7 @@ import { McpStdio } from "@opencode-ai/core/mcp/stdio"
 import { Permission } from "@opencode-ai/core/permission"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Session } from "@opencode-ai/core/session"
+import { State } from "@opencode-ai/core/state"
 import { McpTool } from "@opencode-ai/core/tool/mcp"
 import { Tool } from "@opencode-ai/core/tool"
 import { Deferred, Effect, Exit, Fiber, Layer, PubSub, Ref, Schedule, Schema, Sink, Stream } from "effect"
@@ -67,7 +68,7 @@ function resourceServer(
     listChanged?: boolean
     emptyElicitation?: boolean
     urlElicitation?: boolean
-    respond?: (request: Request) => Response | undefined
+    respond?: (request: Request) => Response | undefined | Promise<Response | undefined>
   } = {},
 ) {
   return Effect.acquireRelease(
@@ -176,7 +177,7 @@ function resourceServer(
           if (typeof body === "object" && body !== null && "method" in body && body.method === "initialize") {
             state.initializations += 1
           }
-          return input.respond?.(request) ?? transport.handleRequest(request)
+          return (await input.respond?.(request)) ?? transport.handleRequest(request)
         },
       })
       return {
@@ -1410,6 +1411,52 @@ test("reconciles only changed MCP server config", async () => {
     ),
   )
 })
+
+testEffect(Layer.empty).live("serializes MCP config restoration behind an in-flight replacement", () =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>()
+    const release = yield* Deferred.make<void>()
+    const accepted = yield* Deferred.make<void>()
+    const server = yield* resourceServer({
+      respond: (request) =>
+        request.method !== "POST"
+          ? undefined
+          : Effect.runPromise(
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(release)), Effect.as(undefined)),
+            ),
+    })
+
+    yield* Effect.gen(function* () {
+      const service = yield* Mcp.Service
+      expect((yield* service.servers())[0]?.status).toEqual({ status: "disabled" })
+      const replacing = yield* service
+        .transform((draft) => draft.update("resources", (config) => (config.disabled = false)))
+        .pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Deferred.await(started)
+
+      const restoring = yield* State.batch(
+        Effect.gen(function* () {
+          yield* service.transform((draft) => draft.update("resources", (config) => (config.disabled = true)))
+          yield* Deferred.succeed(accepted, undefined)
+        }),
+      ).pipe(Effect.forkScoped({ startImmediately: true }))
+      yield* Deferred.await(accepted)
+      expect((yield* service.servers())[0]?.status).toEqual({ status: "pending" })
+
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(replacing)
+      yield* Fiber.join(restoring)
+      expect((yield* service.servers())[0]?.status).toEqual({ status: "disabled" })
+      expect(yield* service.tools()).toEqual([])
+      expect(server.state.initializations).toBe(1)
+    }).pipe(
+      Effect.ensuring(Deferred.succeed(release, undefined)),
+      Effect.provide(
+        resourceMcpLayer(new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false, disabled: true })),
+      ),
+    )
+  }),
+)
 
 test("serializes concurrent MCP lifecycle operations", async () => {
   await Effect.runPromise(

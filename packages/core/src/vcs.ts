@@ -1,7 +1,7 @@
 export * as Vcs from "./vcs.js"
 
 import path from "path"
-import { Cause, Context, Effect, Layer, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Schema, Semaphore, Stream } from "effect"
 import type { VcsDefinition, VcsDraft } from "@opencode-ai/plugin/effect/vcs"
 import { FileDiff } from "@opencode-ai/schema/file-diff"
 import { FileSystem } from "@opencode-ai/schema/filesystem"
@@ -49,6 +49,7 @@ const layer = Layer.effect(
     const bus = yield* Bus.Service
     const vcs = location.vcs
     const current: { info: Info } = { info: { branch: {} } }
+    const refreshLock = Semaphore.makeUnsafe(1)
     const scope = {
       directory: location.directory,
       worktree: location.project.directory,
@@ -69,7 +70,7 @@ const layer = Layer.effect(
           set: (selection) => (draft.selection = selection),
         },
       }),
-      finalize: () => refresh(),
+      notify: () => refresh(),
     })
     const selected = () => {
       const value = state.get()
@@ -87,13 +88,17 @@ const layer = Layer.effect(
         ),
       )
     const refresh = Effect.fn("Vcs.refresh")(function* () {
-      const provider = selected()
-      const next: Info = provider
-        ? yield* protect(provider, "info", provider.info(scope).pipe(Effect.flatMap(decodeInfo)), { branch: {} })
-        : { branch: {} }
-      const changed = current.info.branch.current !== next.branch.current
-      current.info = next
-      if (changed) yield* bus.publish(VcsEvent.BranchUpdated, { branch: next.branch.current })
+      const changed = yield* Effect.gen(function* () {
+        const provider = selected()
+        const next: Info = provider
+          ? yield* protect(provider, "info", provider.info(scope).pipe(Effect.flatMap(decodeInfo)), { branch: {} })
+          : { branch: {} }
+        const changed = current.info.branch.current !== next.branch.current
+        current.info = next
+        return changed
+      }).pipe(refreshLock.withPermit)
+      // Listeners may refresh again; publish outside the permit using the latest committed branch.
+      if (changed) yield* bus.publish(VcsEvent.BranchUpdated, { branch: current.info.branch.current })
     })
 
     if (vcs) {
