@@ -1,5 +1,5 @@
 diff --git a/dist/index.cjs b/dist/index.cjs
-index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5ca5c44fad 100644
+index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..65816771736ba97868ff55e4b7f10f6184626920 100644
 --- a/dist/index.cjs
 +++ b/dist/index.cjs
 @@ -1250,8 +1250,12 @@ async function exchangeAuthorization(authorizationServerUrl, { metadata, clientI
@@ -31,64 +31,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  }
  /**
  * Unified token fetching that works with any grant type via {@linkcode OAuthClientProvider.prepareTokenRequest | prepareTokenRequest()}.
-@@ -2288,17 +2298,20 @@ function isAuthSeamEscape(error) {
- //#region src/client/probeClassifier.ts
- /** The `-32022` UnsupportedProtocolVersion protocol error code (negotiation-phase recognition). */
- const UNSUPPORTED_PROTOCOL_VERSION = -32022;
-+// Only malformed HTTP discovery replies carry this provenance, never fetch/auth failures.
-+var InvalidDiscoveryReplyError = class extends Error {
-+	constructor(body) {
-+		super("Invalid HTTP discovery reply");
-+		this.body = body;
-+	}
-+};
- /**
- * Deliberately not probe-recognized in either direction: deployed servers
- * overload `-32001` (the SDK-conventional `Session not found` body on a 2025
--* stateful server), and the spec-assigned `-32020` (`HeaderMismatch`) /
--* `-32021` (`MissingRequiredClientCapability`) are not era evidence — all
--* fall into the conservative legacy default.
-+* stateful server), so it falls into the conservative legacy default.
- */
- const NOT_PROBE_RECOGNIZED = new Set([
--	-32001,
--	-32020,
--	-32021
-+	-32001
- ]);
- /**
- * Classify a single probe outcome. Pure: no I/O, no state — loop-guard and
-@@ -2306,6 +2319,7 @@ const NOT_PROBE_RECOGNIZED = new Set([
- */
- function classifyProbeOutcome(outcome, context) {
- 	switch (outcome.kind) {
-+		case "invalid-reply": return { kind: "legacy" };
- 		case "result": return classifyResult(outcome.result, context);
- 		case "rpc-error": return classifyRpcError(outcome, context);
- 		case "http-error": return classifyHttpError(outcome, context);
-@@ -2369,6 +2383,10 @@ function classifyRpcError(outcome, context) {
- 			error
- 		};
- 	}
-+	if (code === require_src.HEADER_MISMATCH_ERROR_CODE || code === require_src.ProtocolErrorCode.MissingRequiredClientCapability) return {
-+		kind: "error",
-+		error: require_src.ProtocolError.fromError(code, message, data)
-+	};
- 	if (NOT_PROBE_RECOGNIZED.has(code)) return { kind: "legacy" };
- 	return { kind: "legacy" };
- }
-@@ -2662,6 +2680,10 @@ function normalizeReply(reply, timeoutMs) {
- 				kind: "auth-required",
- 				error
- 			};
-+			if (error instanceof InvalidDiscoveryReplyError) {
-+				const rpcError = parseJsonRpcErrorBody(error.body);
-+				return rpcError === void 0 ? { kind: "invalid-reply" } : { kind: "rpc-error", ...rpcError };
-+			}
- 			if (error instanceof require_src.SdkHttpError) {
- 				const text = error.data?.text;
- 				return {
-@@ -3200,6 +3222,7 @@ var Client = class extends require_src.Protocol {
+@@ -3200,6 +3210,7 @@ var Client = class extends require_src.Protocol {
  	* ```
  	*/
  	async connect(transport, options) {
@@ -96,7 +39,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  		if (options?.prior != null) return this._connectFromPrior(transport, validatePrior(options.prior), options);
  		const negotiation = resolveVersionNegotiation(this._versionNegotiation, this._supportedProtocolVersionsOption);
  		if (negotiation.kind !== "legacy") return this._connectNegotiated(transport, negotiation, options);
-@@ -5296,8 +5319,26 @@ var StreamableHTTPClientTransport = class {
+@@ -5296,8 +5307,26 @@ var StreamableHTTPClientTransport = class {
  	async send(message, options) {
  		return this._send(message, options, false);
  	}
@@ -106,7 +49,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
 +		if (this._sessionId !== expiredSessionId) return;
 +		this._sessionId = void 0;
 +		this._sessionRecovery = Promise.resolve().then(() => this.onsessionexpired?.());
-+		try {
+ 		try {
 +			await this._sessionRecovery;
 +		} catch (error) {
 +			this._sessionId = void 0;
@@ -117,14 +60,14 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
 +		}
 +	}
 +	async _send(message, options, isAuthRetry, stepUpRetries = 0, isSessionRetry = false) {
- 		try {
++		try {
 +			if (this._sessionRecovery && !require_src.isInitializeRequest(message) && !require_src.isInitializedNotification(message)) await this._sessionRecovery;
 +			options?.requestSignal?.throwIfAborted();
 +			if (options?.isRequestActive?.() === false) throw new Error("Request is no longer active");
  			const { resumptionToken, onresumptiontoken } = options || {};
  			if (resumptionToken) {
  				this._startOrAuthSse({
-@@ -5311,6 +5352,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5311,6 +5340,7 @@ var StreamableHTTPClientTransport = class {
  			this._applyBodyDerivedHeaders(headers, message);
  			const isHandshake = Array.isArray(message) ? message.some((m) => require_src.isInitializeRequest(m)) : require_src.isInitializeRequest(message);
  			if (isHandshake) headers.delete("mcp-session-id");
@@ -132,7 +75,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  			if (options?.headers !== void 0) for (const [name, value] of Object.entries(options.headers)) {
  				if (RESERVED_REQUEST_HEADER_NAMES.has(name.toLowerCase())) continue;
  				headers.set(name, value);
-@@ -5351,7 +5393,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5351,7 +5381,7 @@ var StreamableHTTPClientTransport = class {
  							throw markAuthSeamEscape(error);
  						}
  						await response.text?.().catch(() => {});
@@ -141,7 +84,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  					}
  					await response.text?.().catch(() => {});
  					if (isAuthRetry) throw markAuthSeamEscape(new require_src.SdkHttpError(require_src.SdkErrorCode.ClientHttpAuthentication, "Server returned 401 after re-authentication", {
-@@ -5361,6 +5403,10 @@ var StreamableHTTPClientTransport = class {
+@@ -5361,6 +5391,10 @@ var StreamableHTTPClientTransport = class {
  					throw markAuthSeamEscape(new UnauthorizedError());
  				}
  				const text = await response.text?.().catch(() => null);
@@ -152,7 +95,7 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  				if (response.status === 403) {
  					const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
  					if (error === "insufficient_scope") {
-@@ -5371,7 +5417,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5371,7 +5405,7 @@ var StreamableHTTPClientTransport = class {
  							statusText: response.statusText,
  							text
  						}, stepUpRetries) !== "AUTHORIZED") throw markAuthSeamEscape(new UnauthorizedError());
@@ -161,30 +104,8 @@ index 635f1c0134274c89e7efbcae2adf3d9ecba575ee..8f7898c5e5747313cd263fbc8ca66c5c
  					}
  				}
  				if (response.status === 400 && typeof text === "string" && this._isModernEnvelopedRequest(message)) try {
-@@ -5388,6 +5434,21 @@ var StreamableHTTPClientTransport = class {
- 					text
- 				});
- 			}
-+			if (require_src.isJSONRPCRequest(message) && message.method === "server/discover" && (response.status === 202 || require_src.mediaTypeEssence(response.headers.get("content-type")) !== "text/event-stream")) {
-+				// Read failures remain network errors; only completed, invalid replies permit fallback.
-+				const text = await response.text();
-+				if (response.status === 202 || require_src.mediaTypeEssence(response.headers.get("content-type")) !== "application/json") throw new InvalidDiscoveryReplyError(text);
-+				let replies;
-+				try {
-+					const data = JSON.parse(text);
-+					replies = Array.isArray(data) ? data.map((msg) => _modelcontextprotocol_core_internal.JSONRPCMessageSchema.parse(msg)) : [_modelcontextprotocol_core_internal.JSONRPCMessageSchema.parse(data)];
-+				} catch {
-+					throw new InvalidDiscoveryReplyError(text);
-+				}
-+				if (!replies.some((reply) => (require_src.isJSONRPCResultResponse(reply) || require_src.isJSONRPCErrorResponse(reply)) && reply.id === message.id)) throw new InvalidDiscoveryReplyError(text);
-+				for (const reply of replies) this.onmessage?.(reply);
-+				return;
-+			}
- 			if (response.status === 202) {
- 				await response.text?.().catch(() => {});
- 				if (require_src.isInitializedNotification(message)) this._startOrAuthSse({ resumptionToken: void 0 }).catch((error) => this.onerror?.(error));
 diff --git a/dist/index.mjs b/dist/index.mjs
-index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a8135fd798f7 100644
+index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..a55aa84acbcb99bab3366a4e1bc4725e68c7ea48 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -1247,8 +1247,12 @@ async function exchangeAuthorization(authorizationServerUrl, { metadata, clientI
@@ -216,64 +137,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  }
  /**
  * Unified token fetching that works with any grant type via {@linkcode OAuthClientProvider.prepareTokenRequest | prepareTokenRequest()}.
-@@ -2285,17 +2295,20 @@ function isAuthSeamEscape(error) {
- //#region src/client/probeClassifier.ts
- /** The `-32022` UnsupportedProtocolVersion protocol error code (negotiation-phase recognition). */
- const UNSUPPORTED_PROTOCOL_VERSION = -32022;
-+// Only malformed HTTP discovery replies carry this provenance, never fetch/auth failures.
-+var InvalidDiscoveryReplyError = class extends Error {
-+	constructor(body) {
-+		super("Invalid HTTP discovery reply");
-+		this.body = body;
-+	}
-+};
- /**
- * Deliberately not probe-recognized in either direction: deployed servers
- * overload `-32001` (the SDK-conventional `Session not found` body on a 2025
--* stateful server), and the spec-assigned `-32020` (`HeaderMismatch`) /
--* `-32021` (`MissingRequiredClientCapability`) are not era evidence — all
--* fall into the conservative legacy default.
-+* stateful server), so it falls into the conservative legacy default.
- */
- const NOT_PROBE_RECOGNIZED = new Set([
--	-32001,
--	-32020,
--	-32021
-+	-32001
- ]);
- /**
- * Classify a single probe outcome. Pure: no I/O, no state — loop-guard and
-@@ -2303,6 +2316,7 @@ const NOT_PROBE_RECOGNIZED = new Set([
- */
- function classifyProbeOutcome(outcome, context) {
- 	switch (outcome.kind) {
-+		case "invalid-reply": return { kind: "legacy" };
- 		case "result": return classifyResult(outcome.result, context);
- 		case "rpc-error": return classifyRpcError(outcome, context);
- 		case "http-error": return classifyHttpError(outcome, context);
-@@ -2366,6 +2380,10 @@ function classifyRpcError(outcome, context) {
- 			error
- 		};
- 	}
-+	if (code === HEADER_MISMATCH_ERROR_CODE || code === ProtocolErrorCode.MissingRequiredClientCapability) return {
-+		kind: "error",
-+		error: ProtocolError.fromError(code, message, data)
-+	};
- 	if (NOT_PROBE_RECOGNIZED.has(code)) return { kind: "legacy" };
- 	return { kind: "legacy" };
- }
-@@ -2659,6 +2677,10 @@ function normalizeReply(reply, timeoutMs) {
- 				kind: "auth-required",
- 				error
- 			};
-+			if (error instanceof InvalidDiscoveryReplyError) {
-+				const rpcError = parseJsonRpcErrorBody(error.body);
-+				return rpcError === void 0 ? { kind: "invalid-reply" } : { kind: "rpc-error", ...rpcError };
-+			}
- 			if (error instanceof SdkHttpError) {
- 				const text = error.data?.text;
- 				return {
-@@ -3197,6 +3219,7 @@ var Client = class extends Protocol {
+@@ -3197,6 +3207,7 @@ var Client = class extends Protocol {
  	* ```
  	*/
  	async connect(transport, options) {
@@ -281,7 +145,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  		if (options?.prior != null) return this._connectFromPrior(transport, validatePrior(options.prior), options);
  		const negotiation = resolveVersionNegotiation(this._versionNegotiation, this._supportedProtocolVersionsOption);
  		if (negotiation.kind !== "legacy") return this._connectNegotiated(transport, negotiation, options);
-@@ -5293,8 +5316,26 @@ var StreamableHTTPClientTransport = class {
+@@ -5293,8 +5304,26 @@ var StreamableHTTPClientTransport = class {
  	async send(message, options) {
  		return this._send(message, options, false);
  	}
@@ -291,7 +155,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
 +		if (this._sessionId !== expiredSessionId) return;
 +		this._sessionId = void 0;
 +		this._sessionRecovery = Promise.resolve().then(() => this.onsessionexpired?.());
-+		try {
+ 		try {
 +			await this._sessionRecovery;
 +		} catch (error) {
 +			this._sessionId = void 0;
@@ -302,14 +166,14 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
 +		}
 +	}
 +	async _send(message, options, isAuthRetry, stepUpRetries = 0, isSessionRetry = false) {
- 		try {
++		try {
 +			if (this._sessionRecovery && !isInitializeRequest(message) && !isInitializedNotification(message)) await this._sessionRecovery;
 +			options?.requestSignal?.throwIfAborted();
 +			if (options?.isRequestActive?.() === false) throw new Error("Request is no longer active");
  			const { resumptionToken, onresumptiontoken } = options || {};
  			if (resumptionToken) {
  				this._startOrAuthSse({
-@@ -5308,6 +5349,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5308,6 +5337,7 @@ var StreamableHTTPClientTransport = class {
  			this._applyBodyDerivedHeaders(headers, message);
  			const isHandshake = Array.isArray(message) ? message.some((m) => isInitializeRequest(m)) : isInitializeRequest(message);
  			if (isHandshake) headers.delete("mcp-session-id");
@@ -317,7 +181,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  			if (options?.headers !== void 0) for (const [name, value] of Object.entries(options.headers)) {
  				if (RESERVED_REQUEST_HEADER_NAMES.has(name.toLowerCase())) continue;
  				headers.set(name, value);
-@@ -5348,7 +5390,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5348,7 +5378,7 @@ var StreamableHTTPClientTransport = class {
  							throw markAuthSeamEscape(error);
  						}
  						await response.text?.().catch(() => {});
@@ -326,7 +190,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  					}
  					await response.text?.().catch(() => {});
  					if (isAuthRetry) throw markAuthSeamEscape(new SdkHttpError(SdkErrorCode.ClientHttpAuthentication, "Server returned 401 after re-authentication", {
-@@ -5358,6 +5400,10 @@ var StreamableHTTPClientTransport = class {
+@@ -5358,6 +5388,10 @@ var StreamableHTTPClientTransport = class {
  					throw markAuthSeamEscape(new UnauthorizedError());
  				}
  				const text = await response.text?.().catch(() => null);
@@ -337,7 +201,7 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  				if (response.status === 403) {
  					const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
  					if (error === "insufficient_scope") {
-@@ -5368,7 +5414,7 @@ var StreamableHTTPClientTransport = class {
+@@ -5368,7 +5402,7 @@ var StreamableHTTPClientTransport = class {
  							statusText: response.statusText,
  							text
  						}, stepUpRetries) !== "AUTHORIZED") throw markAuthSeamEscape(new UnauthorizedError());
@@ -346,30 +210,8 @@ index f02ce3ca394e826fc27c9848dbe9a214bf6ba7a9..7cf4a3eef43586f3231caf83ffc7a813
  					}
  				}
  				if (response.status === 400 && typeof text === "string" && this._isModernEnvelopedRequest(message)) try {
-@@ -5385,6 +5431,21 @@ var StreamableHTTPClientTransport = class {
- 					text
- 				});
- 			}
-+			if (isJSONRPCRequest(message) && message.method === "server/discover" && (response.status === 202 || mediaTypeEssence(response.headers.get("content-type")) !== "text/event-stream")) {
-+				// Read failures remain network errors; only completed, invalid replies permit fallback.
-+				const text = await response.text();
-+				if (response.status === 202 || mediaTypeEssence(response.headers.get("content-type")) !== "application/json") throw new InvalidDiscoveryReplyError(text);
-+				let replies;
-+				try {
-+					const data = JSON.parse(text);
-+					replies = Array.isArray(data) ? data.map((msg) => JSONRPCMessageSchema.parse(msg)) : [JSONRPCMessageSchema.parse(data)];
-+				} catch {
-+					throw new InvalidDiscoveryReplyError(text);
-+				}
-+				if (!replies.some((reply) => (isJSONRPCResultResponse(reply) || isJSONRPCErrorResponse(reply)) && reply.id === message.id)) throw new InvalidDiscoveryReplyError(text);
-+				for (const reply of replies) this.onmessage?.(reply);
-+				return;
-+			}
- 			if (response.status === 202) {
- 				await response.text?.().catch(() => {});
- 				if (isInitializedNotification(message)) this._startOrAuthSse({ resumptionToken: void 0 }).catch((error) => this.onerror?.(error));
 diff --git a/dist/src-D_zzAWoS.mjs b/dist/src-D_zzAWoS.mjs
-index 6ac3d5377996c0060cbbae0310646286e1eb0da9..0919f4cf45089cb400f37875419efdddd206d36d 100644
+index 6ac3d5377996c0060cbbae0310646286e1eb0da9..8e37932fa27f4fa31db0462e33341609cd9c2af5 100644
 --- a/dist/src-D_zzAWoS.mjs
 +++ b/dist/src-D_zzAWoS.mjs
 @@ -6153,7 +6153,8 @@ var Protocol = class {
@@ -383,7 +225,7 @@ index 6ac3d5377996c0060cbbae0310646286e1eb0da9..0919f4cf45089cb400f37875419efddd
  				this._progressHandlers.delete(messageId);
  				reject(error);
 diff --git a/dist/src-NAgB4Mp8.cjs b/dist/src-NAgB4Mp8.cjs
-index e8f2499248448c27ad645236543b19c322425467..10ad78a73e76643c29ce9fd9030b03b64cd6ae83 100644
+index e8f2499248448c27ad645236543b19c322425467..b4353007407bd12569bc6c2e2ae0b781c1b893e4 100644
 --- a/dist/src-NAgB4Mp8.cjs
 +++ b/dist/src-NAgB4Mp8.cjs
 @@ -6154,7 +6154,8 @@ var Protocol = class {

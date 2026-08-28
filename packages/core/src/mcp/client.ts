@@ -4,13 +4,10 @@ import path from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   Client,
-  InMemoryResponseCacheStore,
   SdkHttpError,
   StreamableHTTPClientTransport,
   UnauthorizedError,
   type OAuthClientProvider,
-  type ClientCapabilities,
-  type PriorDiscovery,
   type Transport,
   type Tool,
   type Implementation,
@@ -25,7 +22,6 @@ import { ListToolsResultSchema, ToolSchema } from "@modelcontextprotocol/core"
 import { Cause, Effect, Exit, Schema } from "effect"
 import { ConfigMCP } from "@opencode-ai/schema/config/mcp"
 import { McpStdio } from "./stdio.js"
-import { McpStdioDiscovery } from "./stdio-discovery.js"
 
 const DEFAULT_STARTUP_TIMEOUT = 30_000
 const DEFAULT_CATALOG_TIMEOUT = 30_000
@@ -140,7 +136,7 @@ export interface LogMessage {
 
 /** Handle over a connected MCP server that keeps the SDK `Client` out of the rest of core. */
 export interface Connection {
-  /** Server-supplied usage instructions from discovery or initialization, if any. */
+  /** Server-supplied usage instructions from the initialize result, if any. */
   readonly instructions: string | undefined
   /** Lists the server's tools; returns [] when the server doesn't advertise tool support, fails on a transport error. */
   readonly tools: () => Effect.Effect<ToolDefinition[], Error>
@@ -190,40 +186,19 @@ export const connect = Effect.fnUntraced(function* (
   clientInfo: Implementation = { name: "opencode", version: "unknown" },
 ) {
   const validator = new DefaultJsonSchemaValidator()
-  const changed: { tools?: () => void; prompts?: () => void; resources?: () => void } = {}
-  const startupTimeout = config.timeout?.startup ?? DEFAULT_STARTUP_TIMEOUT
-  const capabilities: ClientCapabilities = {
-    ...(elicitation ? { elicitation: { form: { applyDefaults: true }, url: {} } } : {}),
-    // https://github.com/anomalyco/opencode/issues/2308
-    roots: {},
-  }
-  const initialize = Effect.fnUntraced(function* (
-    transport: Transport,
-    prior?: PriorDiscovery,
-    startup?: AbortController,
-  ) {
-    // Keep access to the SDK's normal cache so subscription gaps can invalidate stale catalogs.
-    const cache = new InMemoryResponseCacheStore()
+  const initialize = Effect.fnUntraced(function* (transport: Transport) {
     const client = new Client(clientInfo, {
       jsonSchemaValidator: validator,
-      responseCacheStore: cache,
-      capabilities,
-      versionNegotiation: { mode: "auto", probe: { timeoutMs: startupTimeout } },
+      capabilities: {
+        ...(elicitation ? { elicitation: { form: { applyDefaults: true }, url: {} } } : {}),
+        // https://github.com/anomalyco/opencode/issues/2308
+        roots: {},
+      },
     })
     client.setRequestHandler("roots/list", () => Promise.resolve({ roots: [{ uri: pathToFileURL(directory).href }] }))
     if (elicitation) {
       client.setRequestHandler("elicitation/create", (request, ctx) =>
-        Effect.runPromise(
-          elicitation.create({
-            server,
-            // Modern URL requests complete through MRTR, without the legacy elicitation ID.
-            params:
-              request.params.mode === "url" && client.getProtocolEra() === "modern"
-                ? { ...request.params, elicitationId: crypto.randomUUID() }
-                : request.params,
-            signal: ctx.mcpReq.signal,
-          }),
-        ),
+        Effect.runPromise(elicitation.create({ server, params: request.params, signal: ctx.mcpReq.signal })),
       )
       client.setNotificationHandler("notifications/elicitation/complete", (notification) =>
         Effect.runPromise(elicitation.complete({ server, elicitationID: notification.params.elicitationId })),
@@ -231,61 +206,17 @@ export const connect = Effect.fnUntraced(function* (
     }
 
     yield* Effect.tryPromise({
-      try: (signal) => client.connect(transport, { timeout: startupTimeout, signal, prior }),
+      try: (signal) =>
+        client.connect(transport, { timeout: config.timeout?.startup ?? DEFAULT_STARTUP_TIMEOUT, signal }),
       catch: (error) => error,
-    }).pipe(
-      Effect.onError(() =>
-        Effect.promise(async () => {
-          startup?.abort()
-          await client.close()
-          // During discovery the SDK has not attached this transport to the Client yet.
-          await transport.close()
-        }).pipe(Effect.ignore),
-      ),
-    )
-    const supported = client.getServerCapabilities()
-    const filter = {
-      ...(supported?.tools?.listChanged ? { toolsListChanged: true } : {}),
-      ...(supported?.prompts?.listChanged ? { promptsListChanged: true } : {}),
-      ...(supported?.resources?.listChanged ? { resourcesListChanged: true } : {}),
-    }
-    if (client.getProtocolEra() === "modern" && Object.keys(filter).length > 0) {
-      const listen = Effect.tryPromise({
-        try: (signal) => client.listen(filter, { signal, timeout: startupTimeout }),
-        catch: toError,
-      })
-      const subscription = yield* listen.pipe(
-        Effect.onError(() => Effect.promise(() => client.close()).pipe(Effect.ignore)),
-      )
-      yield* Effect.forkScoped(
-        Effect.gen(function* () {
-          let current = subscription
-          while ((yield* Effect.promise(() => current.closed)) !== "local") {
-            // Modern streams are not resumable; replace an ended subscription instead.
-            yield* Effect.sleep("1 second")
-            current = yield* listen
-            // Changes during the disconnected interval cannot be replayed by modern servers.
-            cache.clear()
-            changed.tools?.()
-            changed.prompts?.()
-            changed.resources?.()
-          }
-        }).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("MCP subscription ended", { server, error: error.message }).pipe(
-              Effect.andThen(Effect.promise(() => client.close())),
-            ),
-          ),
-        ),
-      )
-    }
+    }).pipe(Effect.onError(() => Effect.promise(() => transport.close()).pipe(Effect.ignore)))
     return client
   })
 
-  const opening = Effect.gen(function* () {
+  const exit = yield* Effect.gen(function* () {
     if (config.type === "local") {
       const [command, ...args] = config.command
-      const options = {
+      const transport = yield* McpStdio.make({
         server,
         command,
         args,
@@ -294,11 +225,8 @@ export const connect = Effect.fnUntraced(function* (
           ...(command === "opencode" ? { BUN_BE_BUN: "1" } : {}),
           ...config.environment,
         },
-      }
-      const prior = yield* McpStdioDiscovery.discover(options, clientInfo, capabilities, startupTimeout)
-      const abort = new AbortController()
-      const transport = yield* McpStdio.make(options, abort.signal)
-      return yield* initialize(transport, prior, abort).pipe(Effect.timeout(startupTimeout))
+      })
+      return yield* initialize(transport)
     }
     if (!URL.canParse(config.url))
       return yield* new ConnectError({ server, message: `Invalid MCP URL for "${server}"` })
@@ -321,11 +249,7 @@ export const connect = Effect.fnUntraced(function* (
         return open(new URL(config.url))
       }),
     )
-  })
-  // A silent stdio probe can consume its budget; the fresh legacy child still needs time to initialize.
-  const exit = yield* (config.type === "local" ? opening : opening.pipe(Effect.timeout(startupTimeout))).pipe(
-    Effect.exit,
-  )
+  }).pipe(Effect.exit)
   if (Exit.isSuccess(exit)) {
     const client = exit.value
     // Closing the client closes the transport, which ends stdin and then kills through the spawner
@@ -511,17 +435,14 @@ export const connect = Effect.fnUntraced(function* (
       },
       onToolsChanged: (callback) => {
         if (!client.getServerCapabilities()?.tools?.listChanged) return
-        changed.tools = callback
         client.setNotificationHandler("notifications/tools/list_changed", async () => callback())
       },
       onPromptsChanged: (callback) => {
         if (!client.getServerCapabilities()?.prompts?.listChanged) return
-        changed.prompts = callback
         client.setNotificationHandler("notifications/prompts/list_changed", async () => callback())
       },
       onResourcesChanged: (callback) => {
         if (!client.getServerCapabilities()?.resources?.listChanged) return
-        changed.resources = callback
         client.setNotificationHandler("notifications/resources/list_changed", async () => callback())
       },
     } satisfies Connection

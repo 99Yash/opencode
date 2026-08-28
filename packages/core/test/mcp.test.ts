@@ -708,8 +708,7 @@ testEffect(Layer.empty).live("isolates unresolved output schemas without replayi
     expect(error).toBeInstanceOf(ProtocolError)
     expect(error.message).toContain("Invalid outputSchema for tool server-error: can't resolve reference")
     expect(executed).toEqual(["dependent", "unresolved", "valid", "server-error"])
-    expect(versions[0]).toBe("2026-07-28")
-    expect(new Set(versions.slice(1))).toEqual(new Set(["2025-11-25"]))
+    expect(new Set(versions)).toEqual(new Set(["2025-11-25"]))
   }),
 )
 
@@ -732,15 +731,13 @@ test("spawns local MCP servers through the location environment", async () => {
     ).pipe(Effect.provide(recordingEnvironmentLayer(spawns))),
   )
 
-  // Both the disposable discovery process and the real server use the location environment.
-  expect(spawns).toHaveLength(2)
-  for (const command of spawns) {
-    if (!ChildProcess.isStandardCommand(command)) throw new Error("Expected a standard process command")
-    expect(command.command).toBe(process.execPath)
-    expect(command.options.cwd).toBe(cwd)
-    expect(command.options.extendEnv).toBe(true)
-    expect(command.options.env).toEqual({ MCP_LOCATION_TEST: "configured" })
-  }
+  expect(spawns).toHaveLength(1)
+  const command = spawns[0]
+  if (!command || !ChildProcess.isStandardCommand(command)) throw new Error("Expected a standard process command")
+  expect(command.command).toBe(process.execPath)
+  expect(command.options.cwd).toBe(cwd)
+  expect(command.options.extendEnv).toBe(true)
+  expect(command.options.env).toEqual({ MCP_LOCATION_TEST: "configured" })
 })
 
 test("reports a local MCP server as failed when the location has no execution plane", async () => {
@@ -1023,8 +1020,7 @@ for (const query of ["", "?source=hello%20world&tag=a&tag=b"]) {
 
       expect(server.state.initializations).toBe(2)
       expect(new URL(server.state.urls[0]).searchParams.get("codemode")).toBe("false")
-      expect(server.state.urls[1]).toBe(server.state.urls[0])
-      expect(new Set(server.state.urls.slice(2))).toEqual(new Set([config.url]))
+      expect(new Set(server.state.urls.slice(1))).toEqual(new Set([config.url]))
       expect(new Set(headers)).toEqual(new Set(["preserved"]))
       expect(server.state.toolLists).toBe(1)
       expect(server.state.resourceLists).toBe(1)
@@ -1058,11 +1054,10 @@ for (const entry of [
       const error = yield* connect("resources", config, import.meta.dir).pipe(Effect.flip)
 
       expect(error).toBeInstanceOf(McpClient.ConnectError)
-      const fallback = entry.status === 400 || entry.status === 404
-      expect(server.state.initializations).toBe(fallback ? entry.attempts : 0)
-      expect(server.state.urls).toHaveLength(entry.attempts * (fallback ? 2 : 1))
-      if (entry.query || entry.codemode === false) expect(new Set(server.state.urls)).toEqual(new Set([config.url]))
-      if (entry.attempts === 2) expect(server.state.urls.slice(2)).toEqual([config.url, config.url])
+      expect(server.state.initializations).toBe(entry.attempts)
+      expect(server.state.urls).toHaveLength(entry.attempts)
+      if (entry.query || entry.codemode === false) expect(server.state.urls).toEqual([config.url])
+      if (entry.attempts === 2) expect(server.state.urls[1]).toBe(config.url)
     }),
   )
 }

@@ -38,9 +38,8 @@ export interface Options {
  *
  * The process is acquired in the calling scope: closing the scope kills it (the spawner kills the
  * whole process group, so descendants go too) regardless of whether the transport was closed.
- * A disposable discovery probe can abort a pending spawn via `startupSignal` before awaiting close.
  */
-export const make = Effect.fnUntraced(function* (options: Options, startupSignal?: AbortSignal) {
+export const make = Effect.fnUntraced(function* (options: Options) {
   const environment = yield* Environment.Service
   const scope = yield* Effect.scope
   // Outgoing frames are queued rather than written to `handle.stdin` directly: the sink closes the
@@ -74,17 +73,7 @@ export const make = Effect.fnUntraced(function* (options: Options, startupSignal
       }).pipe(Effect.ensuring(Queue.shutdown(outgoing)), Effect.ensuring(Effect.sync(() => buffer.clear()))),
     ))
 
-  const transport: Transport & {
-    readonly pid: ChildProcessHandle["pid"] | null
-    readonly stderr: ChildProcessHandle["stderr"] | null
-  } = {
-    // The SDK identifies stdio structurally, including for modern request envelopes/cancellation.
-    get pid() {
-      return state.handle?.pid ?? null
-    },
-    get stderr() {
-      return state.handle?.stderr ?? null
-    },
+  const transport: Transport = {
     start: () => {
       if (state.phase !== "ready") return Promise.reject(new Error("Stdio transport already started"))
       state.phase = "starting"
@@ -109,7 +98,6 @@ export const make = Effect.fnUntraced(function* (options: Options, startupSignal
           state.phase = "open"
           yield* startOutput(handle)
         }).pipe(Scope.provide(scope)),
-        { signal: startupSignal },
       )
       return startup
     },
