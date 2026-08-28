@@ -139,7 +139,7 @@ async function mountQuestion(
           )}
         </Show>
         <Show when={current.session.form.list(form.sessionID)?.[0]} keyed fallback={<text>Composer ready</text>}>
-          {(form) => <FormPrompt form={form} />}
+          {(form) => <FormPrompt form={form} answersVisible />}
         </Show>
       </box>
     )

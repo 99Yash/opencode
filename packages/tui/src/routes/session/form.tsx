@@ -40,7 +40,11 @@ function truncate(label: string, max: number) {
   return label.length > max ? label.slice(0, max - 1).trimEnd() + "…" : label
 }
 
-export function FormPrompt(props: { form: FormWithLocation }) {
+export function FormPrompt(props: {
+  form: FormWithLocation
+  answersVisible?: boolean
+  onReply?: (answer: FormAnswer) => Promise<void>
+}) {
   const data = useData()
   const themes = useThemes()
   const theme = useTheme("elevated")
@@ -75,18 +79,6 @@ export function FormPrompt(props: { form: FormWithLocation }) {
   const message = createMemo(() => {
     const value = props.form.metadata?.["message"]
     return typeof value === "string" ? value : undefined
-  })
-  const questionAnswer = createMemo(() => {
-    const tool = props.form.metadata?.tool
-    return props.form.metadata?.kind === "question" &&
-      tool &&
-      typeof tool === "object" &&
-      "id" in tool &&
-      typeof tool.id === "string" &&
-      "messageID" in tool &&
-      typeof tool.messageID === "string"
-      ? data.session.form.answer(props.form.sessionID, tool.messageID, tool.id)
-      : undefined
   })
   const fields = createMemo(() => {
     const answers: Record<string, FormValue | undefined> = {}
@@ -263,9 +255,14 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     if (submitting()) return
     setStore("error", "")
     setSubmitting("reply")
-    void data.session.form
-      .reply({ sessionID: props.form.sessionID, formID: props.form.id, answer }, props.form.location)
-      .catch(showError)
+    void (
+      props.onReply
+        ? props.onReply(answer)
+        : data.session.form.reply(
+            { sessionID: props.form.sessionID, formID: props.form.id, answer },
+            props.form.location,
+          )
+    ).catch(showError)
   }
 
   function replySingle(field: FormAnswerField, value: FormValue) {
@@ -776,7 +773,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
 
   return (
     <box
-      visible={!(submitting() === "reply" && questionAnswer())}
+      visible={!(submitting() === "reply" && props.answersVisible)}
       backgroundColor={theme.background.default}
       border={["left"]}
       borderColor={theme.hue.interactive[themeMode() === "light" ? 800 : 200]}

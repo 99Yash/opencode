@@ -72,8 +72,8 @@ import { deduplicateVisibleImages } from "../../prompt/attachment"
 import { useEpilogue } from "../../context/epilogue"
 import { normalizePath } from "../../util/path"
 import { PermissionPrompt } from "./permission"
-import { FormPrompt } from "./form"
 import { formQuestionAnswers, QuestionAnswers } from "./question-answers"
+import { SessionForm } from "./session-form"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { DialogExportResult } from "../../ui/dialog-export-result"
 import { sessionEpilogue } from "../../util/presentation"
@@ -1453,6 +1453,12 @@ export function Session(props: {
                 }}
                 visibleTerminalID={props.visibleTerminalID}
               />
+              <SessionForm
+                form={forms()[0]}
+                sessionID={route.sessionID}
+                promptID={messages().findLast((message) => message.type === "user")?.id}
+                visible={!composer.open && promptedPermissions().length === 0}
+              />
               <Switch>
                 <Match when={composer.open || (!!session()?.parentID && forms().length === 0)}>{null}</Match>
                 <Match when={promptedPermissions().length > 0}>
@@ -1465,14 +1471,7 @@ export function Session(props: {
                     }}
                   </Show>
                 </Match>
-                <Match when={forms().length > 0}>
-                  <Show when={forms()[0]?.id} keyed>
-                    {(_) => {
-                      const form = forms()[0]
-                      return form ? <FormPrompt form={form} /> : null
-                    }}
-                  </Show>
-                </Match>
+                <Match when={forms().length > 0}>{null}</Match>
                 <Match
                   when={
                     session() &&

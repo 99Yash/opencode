@@ -227,6 +227,7 @@ export function createData(config: CreateDataInput) {
           answer: FormReplyInput["answer"] | undefined
           confirmed: boolean
           posting: boolean
+          toolDone: boolean
         }
       | undefined
     >
@@ -305,6 +306,7 @@ export function createData(config: CreateDataInput) {
       answer,
       confirmed,
       posting: confirmed ? (formAnswers[form.id]?.posting ?? false) : true,
+      toolDone: formAnswers[form.id]?.toolDone ?? false,
     })
   }
 
@@ -316,16 +318,37 @@ export function createData(config: CreateDataInput) {
     )
   }
 
+  function finishFormAnswer(formID: string, metadata: unknown, failed: boolean) {
+    const entry = formAnswers[formID]
+    if (!entry) return
+    const answer = Array.isArray(metadata)
+      ? Object.fromEntries(
+          entry.form.fields.flatMap((field, index) => {
+            const raw = metadata[index]
+            const values = Array.isArray(raw) ? raw.filter((value): value is string => typeof value === "string") : []
+            const value = field.type === "multiselect" ? values : values[0]
+            return value === undefined ? [] : [[field.key, value] as const]
+          }),
+        )
+      : entry.answer
+    setFormAnswers(formID, { answer: failed ? undefined : answer, confirmed: true, toolDone: true })
+    removeForm(entry.form.sessionID, formID)
+    if (!entry.posting) removeFormAnswer(formID)
+  }
+
   function settleForm(input: FormCancelInput, ref: LocationRef | undefined, request: Promise<void>) {
     return request
       .catch(async (error: unknown) => {
-        if (formAnswers[input.formID]?.confirmed) return
-        if (formAnswers[input.formID]) {
+        const entry = formAnswers[input.formID]
+        if (entry?.form.sessionID === input.sessionID && entry.confirmed) return
+        if (entry?.form.sessionID === input.sessionID) {
           // A lost POST or competing reply can settle the form before tool metadata arrives.
           const state = await api()
             .form.state(input, formRequestOptions(input.sessionID, ref))
             .catch(() => undefined)
-          if (formAnswers[input.formID]?.confirmed) return
+          const current = formAnswers[input.formID]
+          if (!current || current.form.sessionID !== input.sessionID) return
+          if (current.confirmed) return
           if (state?.status === "answered" || state?.status === "cancelled") {
             setFormAnswers(input.formID, {
               answer: state.status === "answered" ? state.answer : undefined,
@@ -338,13 +361,20 @@ export function createData(config: CreateDataInput) {
         if ((!isFormNotFoundError(error) && !isFormAlreadySettledError(error)) || error.id !== input.formID) throw error
       })
       .then(() => {
-        if (formAnswers[input.formID]) setFormAnswers(input.formID, "confirmed", true)
+        if (formAnswers[input.formID]?.form.sessionID === input.sessionID)
+          setFormAnswers(input.formID, "confirmed", true)
         if (!removeForm(input.sessionID, input.formID, ref)) return
         result.session.form.invalidate(input.sessionID, ref)
         void result.session.form.sync(input.sessionID, ref).catch(() => undefined)
       })
       .finally(() => {
-        if (formAnswers[input.formID]) setFormAnswers(input.formID, "posting", false)
+        const entry = formAnswers[input.formID]
+        if (entry?.form.sessionID !== input.sessionID) return
+        if (entry.toolDone) {
+          removeFormAnswer(input.formID)
+          return
+        }
+        setFormAnswers(input.formID, "posting", false)
       })
   }
 
@@ -1009,6 +1039,14 @@ export function createData(config: CreateDataInput) {
           match.providerResultState = event.data.resultState
           match.time.completed = event.created
         })
+        Object.entries(formAnswers).forEach(([id, entry]) => {
+          if (
+            entry?.form.sessionID === event.data.sessionID &&
+            entry.tool.messageID === event.data.assistantMessageID &&
+            entry.tool.id === event.data.id
+          )
+            finishFormAnswer(id, event.data.metadata?.answers, false)
+        })
         return
       case "session.tool.failed":
         message.update(event.data.sessionID, (draft, index) => {
@@ -1027,6 +1065,14 @@ export function createData(config: CreateDataInput) {
           match.executed = event.data.executed || match.executed === true
           match.providerResultState = event.data.resultState
           match.time.completed = event.created
+        })
+        Object.entries(formAnswers).forEach(([id, entry]) => {
+          if (
+            entry?.form.sessionID === event.data.sessionID &&
+            entry.tool.messageID === event.data.assistantMessageID &&
+            entry.tool.id === event.data.id
+          )
+            finishFormAnswer(id, undefined, true)
         })
         return
       case "session.reasoning.started":
@@ -1194,15 +1240,17 @@ export function createData(config: CreateDataInput) {
         return
       case "form.replied":
         previewForm(
-          formAnswers[event.data.id]?.form ??
-            store.session.form[event.data.sessionID]?.find((form) => form.id === event.data.id),
+          formAnswers[event.data.id]?.form.sessionID === event.data.sessionID
+            ? formAnswers[event.data.id]?.form
+            : store.session.form[event.data.sessionID]?.find((form) => form.id === event.data.id),
           event.data.answer,
           true,
         )
         removeForm(event.data.sessionID, event.data.id, event.location)
         return
       case "form.cancelled":
-        if (formAnswers[event.data.id]) setFormAnswers(event.data.id, { answer: undefined, confirmed: true })
+        if (formAnswers[event.data.id]?.form.sessionID === event.data.sessionID)
+          setFormAnswers(event.data.id, { answer: undefined, confirmed: true })
         removeForm(event.data.sessionID, event.data.id, event.location)
         return
     }
@@ -1703,6 +1751,10 @@ export function createData(config: CreateDataInput) {
         },
       },
       form: {
+        submission(sessionID: string, formID: string) {
+          const entry = formAnswers[formID]
+          return entry?.form.sessionID === sessionID ? { answer: entry.answer, confirmed: entry.confirmed } : undefined
+        },
         answer(sessionID: string, messageID: string, toolID: string) {
           return Object.values(formAnswers).find(
             (entry) =>
@@ -2087,13 +2139,7 @@ export function createData(config: CreateDataInput) {
       const part = message.content.find((part) => part.type === "tool" && part.id === entry.tool.id)
       if (part?.type !== "tool" || part.state.status === "streaming") return
       if (part.state.status !== "error" && !Array.isArray(part.state.metadata?.answers)) return
-      removeForm(entry.form.sessionID, id)
-      if (entry.posting) {
-        if (part.state.status === "error") setFormAnswers(id, "answer", undefined)
-        setFormAnswers(id, "confirmed", true)
-        return
-      }
-      removeFormAnswer(id)
+      finishFormAnswer(id, part.state.metadata?.answers, part.state.status === "error")
     })
   })
 
