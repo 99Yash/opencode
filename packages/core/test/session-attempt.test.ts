@@ -14,7 +14,7 @@ import { Session } from "@opencode-ai/core/session"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
-import { SessionStep } from "@opencode-ai/core/session/runner/step"
+import { SessionAttempt } from "@opencode-ai/core/session/runner/attempt"
 import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { Snapshot } from "@opencode-ai/core/snapshot"
 import { ToolOutput } from "@opencode-ai/core/tool-output"
@@ -49,7 +49,7 @@ for (const fixture of [
       const files = [RelativePath.make("changed.ts")]
       let captures = 0
       let executions = 0
-      const steps = yield* SessionStep.make.pipe(
+      const attempts = yield* SessionAttempt.make.pipe(
         Effect.provide(
           Layer.mock(Snapshot.Service)({
             capture: () => Effect.sync(() => (captures++ === 0 ? start : end)),
@@ -98,30 +98,31 @@ for (const fixture of [
           LLMEvent.toolCall({ id: "call-test", name: "test", input: {} }),
         ),
       )
-      const result = yield* steps
-        .attempt({
-          sessionID,
-          assistantMessageID,
-          agent: Agent.defaultID,
-          model,
-          prepared: {
-            request: LLM.request({ model: model.model, prompt: "Run one tool", toolChoice: fixture.toolChoice }),
-            options: {},
-            executeTool: () =>
-              Effect.sync(() => {
-                executions++
-                return { content: "Completed tool" }
-              }),
+      const result = yield* attempts
+        .use(
+          {
+            sessionID,
+            assistantMessageID,
+            agent: Agent.defaultID,
+            model,
+            prepared: {
+              request: LLM.request({ model: model.model, prompt: "Run one tool", toolChoice: fixture.toolChoice }),
+              options: {},
+              executeTool: () =>
+                Effect.sync(() => {
+                  executions++
+                  return { content: "Completed tool" }
+                }),
+            },
           },
-          recoverContinuation: true,
-          recoverOverflow: Effect.succeed(false),
-        })
+          () => Effect.succeed(undefined),
+        )
         .pipe(Effect.exit)
       expect(Exit.isSuccess(result)).toBe(fixture.finish === "stop")
       expect(executions).toBe(fixture.toolChoice === "none" ? 0 : 1)
       if (Exit.isSuccess(result))
         expect(result.value).toEqual(
-          SessionStep.Outcome.Completed({ needsContinuation: fixture.toolChoice !== "none" }),
+          SessionAttempt.Outcome.Completed({ needsContinuation: fixture.toolChoice !== "none" }),
         )
       expect(yield* llm.requests()).toHaveLength(1)
       expect(captures).toBe(2)

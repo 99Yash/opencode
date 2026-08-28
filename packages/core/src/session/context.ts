@@ -2,6 +2,7 @@ export * as SessionContext from "./context.js"
 
 import { Context, Effect, Layer } from "effect"
 import { Agent } from "../agent.js"
+import { Bus } from "../bus.js"
 import { Catalog } from "../catalog.js"
 import { CodeModeInstructions } from "../codemode/instructions.js"
 import { Database } from "../database/database.js"
@@ -20,6 +21,7 @@ import { Tool } from "../tool.js"
 import { AgentNotFoundError } from "./error.js"
 import { SessionHistory } from "./history.js"
 import { InstructionEntry } from "./instruction-entry.js"
+import { InstructionState } from "./instruction-state.js"
 import { SessionMessage } from "./message.js"
 import { SessionModelRequest } from "./model-request.js"
 import { SessionRunnerModel } from "./runner/model.js"
@@ -51,6 +53,10 @@ export interface Loaded {
 export interface Interface {
   /** Selects the Session, agent, instructions, and tools used by subsequent work. */
   readonly select: (sessionID: SessionSchema.ID) => Effect.Effect<Selection, AgentNotFoundError>
+  /** Prepares the instruction baseline before delivery, or refreshes it without delivering input. */
+  readonly preflight: (
+    sessionID: SessionSchema.ID,
+  ) => Effect.Effect<Selection, AgentNotFoundError | Instructions.InitializationBlocked>
   /** Resolves the model and active history for that selection. */
   readonly load: (selection: Selection) => Effect.Effect<Loaded, SessionRunnerModel.Error>
   readonly resolveModel: (
@@ -75,6 +81,7 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const agents = yield* Agent.Service
+    const bus = yield* Bus.Service
     const builtins = yield* InstructionBuiltIns.Service
     const catalog = yield* Catalog.Service
     const db = (yield* Database.Service).db
@@ -157,6 +164,13 @@ const layer = Layer.effect(
       }
     })
 
+    const preflight = Effect.fn("SessionContext.preflight")(function* (sessionID: SessionSchema.ID) {
+      const selected = yield* select(sessionID)
+      // A blocked initial instruction baseline must leave admitted input pending.
+      yield* InstructionState.prepare(db, bus, selected.instructions, sessionID)
+      return selected
+    })
+
     const load = Effect.fn("SessionContext.load")(function* (selection: Selection) {
       const model = yield* resolveModel(selection.session)
       const history = yield* SessionHistory.entriesForRunner(db, selection.session.id, selection.instructions)
@@ -170,7 +184,7 @@ const layer = Layer.effect(
       }
     })
 
-    return Service.of({ select, load, resolveModel, selectTitle, prepare: modelRequests.prepare })
+    return Service.of({ select, preflight, load, resolveModel, selectTitle, prepare: modelRequests.prepare })
   }),
 )
 
@@ -182,6 +196,7 @@ export const node = makeLocationNode({
   layer,
   deps: [
     Agent.node,
+    Bus.node,
     Catalog.node,
     Database.node,
     InstructionBuiltIns.node,

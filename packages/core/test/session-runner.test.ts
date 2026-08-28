@@ -205,6 +205,7 @@ const makeRunnerState = () => {
     systemLoadHook: Effect.void,
     skillBaselines: new Map<Agent.ID, string>(),
     pluginFlushHook: Effect.void,
+    compactionEndedHook: Effect.void,
     authorizations: new Array<Tool.Context>(),
     executions: new Array<string>(),
     closedTransports: new Array<Session.ID>(),
@@ -405,6 +406,32 @@ const layer = Layer.unwrap(
         small: () => Effect.undefined,
       },
     })
+    const compaction = makeLocationNode({
+      service: SessionCompaction.Service,
+      layer: SessionCompaction.layer.pipe(
+        Layer.provide(
+          Layer.effect(
+            Bus.Service,
+            Effect.map(Bus.Service, (bus) =>
+              Bus.Service.of({
+                ...bus,
+                publish: (definition, data, options) =>
+                  bus
+                    .publish(definition, data, options)
+                    .pipe(
+                      Effect.tap(() =>
+                        definition.type === SessionEvent.Compaction.Ended.type
+                          ? state.compactionEndedHook
+                          : Effect.void,
+                      ),
+                    ),
+              }),
+            ),
+          ),
+        ),
+      ),
+      deps: [Bus.node, LayerNodePlatform.llmClient],
+    })
     const replacements: LayerNode.Replacements = [
       [Snapshot.node, Snapshot.noopLayer],
       [LayerNodePlatform.llmClient, TestLLM.clientLayer],
@@ -418,6 +445,7 @@ const layer = Layer.unwrap(
       [Config.node, config],
       [PluginSupervisor.node, pluginSupervisor],
       [SessionModelTransport.node, modelTransport],
+      [SessionCompaction.node, compaction],
     ]
     const runnerLayer = AppNodeBuilder.build(SessionRunnerLLM.node, [
       ...replacements,
@@ -2501,6 +2529,29 @@ describe("SessionRunnerLLM", () => {
     )
   })
 
+  scenario("does not publish a held overflow when interrupted with automatic compaction disabled", function* (s) {
+    const compaction = yield* SessionCompaction.Service
+    yield* compaction.transform((draft) => draft.configure({ auto: false }))
+    const tail = yield* Deferred.make<void>()
+    yield* s.admit("Interrupt held overflow")
+    yield* s.llm.push(
+      Stream.concat(
+        Stream.make(LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" })),
+        Stream.fromEffect(Deferred.succeed(tail, undefined)).pipe(Stream.flatMap(() => Stream.never)),
+      ),
+    )
+    const run = yield* s.resume.pipe(Effect.forkChild)
+    yield* Deferred.await(tail)
+
+    yield* s.session.interrupt(sessionID)
+
+    const exit = yield* Fiber.await(run)
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
+    expect(s.requests).toHaveLength(1)
+    expect(yield* s.context).toMatchObject([Expected.user("Interrupt held overflow")])
+    expect((yield* recordedEventTypes(sessionID)).filter((type) => type.startsWith("session.step."))).toEqual([])
+  })
+
   scenario("recovers from provider context overflow without a configured context limit", function* (s) {
     yield* setupOverflowRecovery(s)
     s.currentModel = model
@@ -2629,6 +2680,39 @@ describe("SessionRunnerLLM", () => {
         error: { type: "compaction.interrupted", message: "Compaction was interrupted" },
       }),
     )
+  })
+
+  scenario("interrupts after overflow compaction commits before recovery hands off", function* (s) {
+    yield* setupOverflowRecovery(s)
+    const committed = yield* Deferred.make<void>()
+    // The real Bus publication has returned, but the recovery outcome has not.
+    s.compactionEndedHook = Deferred.succeed(committed, undefined).pipe(Effect.andThen(Effect.never))
+    yield* s.llm.push(
+      [
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.providerError({ message: "prompt too long", classification: "context-overflow" }),
+      ],
+      TestLLM.text("Committed overflow summary", "text-summary"),
+      TestLLM.text("Must not retry", "text-unexpected-retry"),
+    )
+    yield* s.admit("Continue")
+    const run = yield* s.resume.pipe(Effect.forkChild)
+    yield* Deferred.await(committed)
+    const assistant = requireAssistant(yield* s.messages)
+
+    yield* s.session.interrupt(sessionID)
+
+    const exit = yield* Fiber.await(run)
+    expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBeTrue()
+    expect(s.requests).toHaveLength(2)
+    expect(yield* s.context).toMatchObject([
+      { type: "compaction", status: "completed", reason: "auto", summary: "Committed overflow summary" },
+    ])
+    expect(yield* recordedStepSettlementTypes(sessionID, assistant.id)).toEqual(["session.step.started.1"])
+    expect((yield* recordedEventTypes(sessionID)).filter((type) => type.startsWith("session.compaction."))).toEqual([
+      "session.compaction.started.1",
+      "session.compaction.ended.1",
+    ])
   })
 
   scenario("uses epoch values after compaction while a source is unavailable", function* (s) {
@@ -3624,6 +3708,32 @@ describe("SessionRunnerLLM", () => {
     yield* stream.release
 
     expect(userTexts(s.requests[0])).toEqual(["Recover promoted input"])
+  })
+
+  scenario("does not execute a local tool when durable call projection rolls back", function* (s) {
+    const defect = new Error("Tool.Called projection failed")
+    yield* s.bus.project(SessionEvent.Tool.Called, () =>
+      Effect.gen(function* () {
+        // The production projector has updated this transaction; the failure must roll it back.
+        expect(requireAssistant(yield* s.messages.pipe(Effect.orDie)).content).toMatchObject([
+          { type: "tool", id: "call-rollback", state: { status: "running", input: { text: "Must not execute" } } },
+        ])
+        return yield* Effect.die(defect)
+      }),
+    )
+    yield* s.admit("Call echo")
+    yield* s.llm.push(TestLLM.tool("call-rollback", "echo", { text: "Must not execute" }))
+
+    expect(yield* s.resume.pipe(Effect.catchDefect(Effect.succeed))).toBe(defect)
+
+    expect(s.requests).toHaveLength(1)
+    expect(s.executions).toEqual([])
+    expect(s.authorizations).toEqual([])
+    expect(requireAssistant(yield* s.messages).content).toMatchObject([
+      { type: "tool", id: "call-rollback", state: { status: "streaming" } },
+    ])
+    expect(yield* recordedEventTypes(sessionID)).not.toContain("session.tool.called.1")
+    expect(yield* recordedEventTypes(sessionID)).not.toContain("session.tool.success.2")
   })
 
   scenario("does not strand a committed promotion when a post-commit listener defects", function* (s) {
