@@ -484,6 +484,7 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
     selected: keys[0],
     expanded: false,
   })
+  const expanded = createMemo(() => store.expanded && !props.submitting)
   const narrow = createMemo(() => dimensions().width < 80)
   const shortcuts = Keymap.useShortcuts()
   const id = () => props.id ?? "session.permission"
@@ -562,21 +563,29 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
   const hint = createMemo(() => (store.expanded ? "minimize" : "fullscreen"))
   useRenderer()
 
-  const content = () => (
+  // Reparent one dialog tree so leaving fullscreen does not recreate retained controls.
+  const content = (
     <box
       id={id()}
       ref={SimulationSemantics.bind(() => ({
         instance: props.instance,
         role: "dialog",
         label: props.semanticLabel ?? props.title,
-        expanded: store.expanded,
+        expanded: expanded(),
       }))}
       backgroundColor={theme.background.default}
       border={["left"]}
       borderColor={theme.background.action.primary.focused}
       customBorderChars={SplitBorder.customBorderChars}
-      {...(store.expanded
-        ? { top: dimensions().height * -1 + 1, bottom: 1, left: 2, right: 2, position: "absolute" }
+      {...(expanded()
+        ? {
+            top: dimensions().height * -1 + 1,
+            maxHeight: undefined,
+            bottom: 1,
+            left: 2,
+            right: 2,
+            position: "absolute",
+          }
         : {
             top: 0,
             maxHeight: 15,
@@ -691,8 +700,8 @@ export function SessionQuestion<const T extends Record<string, string>>(props: {
   )
 
   return (
-    <Show when={!store.expanded} fallback={<Portal>{content()}</Portal>}>
-      {content()}
+    <Show when={!expanded()} fallback={<Portal>{content}</Portal>}>
+      {content}
     </Show>
   )
 }

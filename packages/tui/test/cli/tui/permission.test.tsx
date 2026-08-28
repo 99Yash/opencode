@@ -75,7 +75,13 @@ async function mountPermission(width: number, child = false) {
               <DataProvider directory={process.cwd()}>
                 <LocationProvider>
                   <ThemeProvider mode="dark" source={emptyThemeSource}>
-                    <CurrentPermission />
+                    <box height="100%">
+                      <box paddingTop={3}>
+                        <text>Transcript stays visible</text>
+                      </box>
+                      <box flexGrow={1} />
+                      <CurrentPermission />
+                    </box>
                   </ThemeProvider>
                 </LocationProvider>
               </DataProvider>
@@ -92,6 +98,51 @@ async function mountPermission(width: number, child = false) {
 }
 
 for (const width of [48, 120]) {
+  test(`an expanded permission submits inline and restores its retained fullscreen controls on failure at ${width} columns`, async () => {
+    const prompt = await mountPermission(width)
+    try {
+      prompt.app.mockInput.pressKey("f", { ctrl: true })
+      await prompt.app.waitForFrame((frame) => frame.includes("minimize"))
+      expect(prompt.app.captureCharFrame()).not.toContain("Transcript stays visible")
+      const dialog = prompt.app.renderer.root.findDescendantById("session.permission")
+      const choice = prompt.app.renderer.root.findDescendantById("session.permission.action.once")
+      expect(dialog).toBeDefined()
+      expect(choice).toBeDefined()
+      expect(dialog?.height).toBeGreaterThan(15)
+
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitForFrame((frame) => frame.includes("Sending approval..."))
+      expect(prompt.app.captureCharFrame()).toContain("Transcript stays visible")
+      expect(dialog?.height).toBeLessThan(15)
+      expect(prompt.app.renderer.root.findDescendantById("session.permission") === dialog).toBe(true)
+      expect(prompt.app.renderer.root.findDescendantById("session.permission.action.once") === choice).toBe(true)
+
+      prompt.app.mockInput.pressEscape()
+      prompt.app.mockInput.pressKey("f", { ctrl: true })
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitFor(() => prompt.replies.length === 1)
+      expect(prompt.replies).toEqual([{ reply: "once" }])
+
+      prompt.pending.resolve(json({}, { status: 500 }))
+      await prompt.app.waitForFrame((frame) => frame.includes("UnexpectedStatus") && frame.includes("minimize"))
+      expect(prompt.app.captureCharFrame()).not.toContain("Transcript stays visible")
+      expect(prompt.app.captureCharFrame()).toContain("README.md")
+      expect(dialog?.height).toBeGreaterThan(15)
+      expect(prompt.app.renderer.root.findDescendantById("session.permission") === dialog).toBe(true)
+      expect(prompt.app.renderer.root.findDescendantById("session.permission.action.once") === choice).toBe(true)
+      expect(choice?.isDestroyed).toBe(false)
+
+      prompt.app.mockInput.pressEscape()
+      await prompt.app.waitForFrame((frame) => frame.includes("Transcript stays visible"))
+      prompt.app.mockInput.pressEnter()
+      await prompt.app.waitForFrame((frame) => frame.includes("Composer ready"))
+      expect(prompt.replies).toEqual([{ reply: "once" }, { reply: "once" }])
+    } finally {
+      prompt.pending.resolve(new Response(null, { status: 204 }))
+      prompt.app.renderer.destroy()
+    }
+  })
+
   for (const reply of ["once", "always", "reject"] as const) {
     test(`acknowledges ${reply} before HTTP completes and restores permission interaction on failure at ${width} columns`, async () => {
       const prompt = await mountPermission(width)
