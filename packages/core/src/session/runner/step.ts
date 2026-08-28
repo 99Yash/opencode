@@ -79,15 +79,14 @@ export const make = Effect.gen(function* () {
         },
         (result, restore) =>
           Effect.gen(function* () {
+            if (result.outputStarted) return undefined
             // The attempt retains its pending terminal while interruptible summarization runs.
             if (result.overflowBeforeOutput) {
               // Even skipped recovery must observe pending interruption before publishing the held error.
               const compacted = yield* restore(
-                Effect.suspend(() =>
-                  recoverOverflow && compaction.enabled()
-                    ? compaction.compact(compactionInput).pipe(Effect.map((result) => result.status === "completed"))
-                    : Effect.succeed(false),
-                ),
+                recoverOverflow && compaction.enabled()
+                  ? compaction.compact(compactionInput).pipe(Effect.map((result) => result.status === "completed"))
+                  : Effect.succeed(false),
               )
               if (compacted) return SessionAttempt.Outcome.Compacted()
             }
@@ -95,16 +94,10 @@ export const make = Effect.gen(function* () {
               recoverContinuation &&
               result.failure?.reason._tag === "Transport" &&
               (result.failure.reason.recovery === "retry-full" ||
-                result.failure.reason.recovery === "rotate-and-retry-full") &&
-              !result.outputStarted
+                result.failure.reason.recovery === "rotate-and-retry-full")
             )
               return SessionAttempt.Outcome.RecoverFull()
-            if (
-              result.failure &&
-              result.error &&
-              SessionRunnerRetry.isRetryable(result.failure) &&
-              !result.outputStarted
-            )
+            if (result.failure && result.error && SessionRunnerRetry.isRetryable(result.failure))
               return SessionAttempt.Outcome.Retry({ cause: result.failure, error: result.error })
             return undefined
           }),

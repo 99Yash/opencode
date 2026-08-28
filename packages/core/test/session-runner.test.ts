@@ -409,25 +409,18 @@ const layer = Layer.unwrap(
     const compaction = makeLocationNode({
       service: SessionCompaction.Service,
       layer: SessionCompaction.layer.pipe(
-        Layer.provide(
-          Layer.effect(
-            Bus.Service,
-            Effect.map(Bus.Service, (bus) =>
-              Bus.Service.of({
-                ...bus,
-                publish: (definition, data, options) =>
-                  bus
-                    .publish(definition, data, options)
-                    .pipe(
-                      Effect.tap(() =>
-                        definition.type === SessionEvent.Compaction.Ended.type
-                          ? state.compactionEndedHook
-                          : Effect.void,
-                      ),
-                    ),
-              }),
-            ),
-          ),
+        Layer.updateService(Bus.Service, (bus) =>
+          Bus.Service.of({
+            ...bus,
+            publish: (definition, data, options) =>
+              bus
+                .publish(definition, data, options)
+                .pipe(
+                  Effect.tap(() =>
+                    definition.type === SessionEvent.Compaction.Ended.type ? state.compactionEndedHook : Effect.void,
+                  ),
+                ),
+          }),
         ),
       ),
       deps: [Bus.node, LayerNodePlatform.llmClient],
