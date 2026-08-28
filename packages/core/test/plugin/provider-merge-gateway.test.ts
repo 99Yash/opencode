@@ -37,9 +37,11 @@ describe("MergeGatewayPlugin", () => {
       yield* catalog.transform((draft) => {
         draft.provider.update(providerID, (provider) => {
           provider.package = Provider.aisdk("merge-gateway-ai-sdk-provider")
+          provider.settings = { baseURL: "https://custom.example/v1", apiKey: "configured-key", reasoningEffort: "low" }
         })
         draft.model.update(providerID, modelID, (model) => {
           model.compatibility = { reasoningField: "reasoning_content", requireFinishReason: true }
+          model.settings = { reasoningEffort: "high" }
         })
         draft.model.update(providerID, other, (model) => {
           model.package = Provider.aisdk("@ai-sdk/openai-compatible")
@@ -49,6 +51,13 @@ describe("MergeGatewayPlugin", () => {
         })
       })
       yield* addPlugin()
+      expect((yield* catalog.provider.get(providerID))?.package).toBe("@opencode-ai/ai/providers/openai-compatible")
+      expect((yield* catalog.model.get(providerID, modelID))?.settings).toEqual({
+        baseURL: "https://custom.example/v1",
+        apiKey: "configured-key",
+        provider: providerID,
+        providerOptions: { reasoningEffort: "high" },
+      })
       expect((yield* catalog.model.get(providerID, modelID))?.compatibility).toEqual({
         reasoningField: "thinking",
         maxTokensField: "max_tokens",
@@ -56,13 +65,23 @@ describe("MergeGatewayPlugin", () => {
         requireFinishReason: true,
       })
       expect((yield* catalog.model.get(providerID, other))?.compatibility).toBeUndefined()
+      expect((yield* catalog.model.get(providerID, other))?.package).toBe(Provider.aisdk("@ai-sdk/openai-compatible"))
       expect((yield* catalog.model.get(custom, modelID))?.compatibility?.reasoningField).toBe("thinking")
+      expect((yield* catalog.model.get(custom, modelID))?.package).toBe("@opencode-ai/ai/providers/openai-compatible")
+      expect((yield* catalog.model.get(custom, modelID))?.settings).toEqual({
+        baseURL: "https://api-gateway.merge.dev/v1/ai-sdk",
+        provider: custom,
+      })
       yield* catalog.transform((draft) => {
+        draft.provider.update(providerID, (provider) => {
+          provider.settings = { ...provider.settings, baseURL: "https://later.example/v1" }
+        })
         draft.model.update(providerID, modelID, (model) => {
           model.compatibility = { ...model.compatibility, reasoningField: "custom_thinking" }
         })
       })
       expect((yield* catalog.model.get(providerID, modelID))?.compatibility?.reasoningField).toBe("custom_thinking")
+      expect((yield* catalog.model.get(providerID, modelID))?.settings?.baseURL).toBe("https://later.example/v1")
     }),
   )
 
@@ -72,6 +91,7 @@ describe("MergeGatewayPlugin", () => {
       yield* catalog.transform((draft) => {
         draft.provider.update(providerID, (provider) => {
           provider.package = Provider.aisdk("merge-gateway-ai-sdk-provider")
+          provider.headers = { "x-test": "header" }
         })
         draft.model.update(providerID, modelID, (model) => {
           model.body = { tags: [{ key: "env", value: "test" }] }
@@ -80,13 +100,18 @@ describe("MergeGatewayPlugin", () => {
       yield* addPlugin()
       const info = yield* catalog.model.get(providerID, modelID)
       if (!info) throw new Error("Missing Merge model")
-      const model = yield* ModelResolver.fromCatalogModel(info, Credential.Key.make({ type: "key", key: "test-key" }))
+      expect(info.package).toBe("@opencode-ai/ai/providers/openai-compatible")
+      const model = yield* ModelResolver.fromCatalogModel(info, Credential.Key.make({ type: "key", key: "test-key" }), {
+        loadAISDK: () => Effect.die("Merge Gateway must use the native provider"),
+      })
+      expect(model.route.id).toBe("openai-compatible-chat")
       const transport = Layer.succeed(
         HttpClient.HttpClient,
         HttpClient.make((request) =>
           Effect.sync(() => {
             expect(request.url).toBe("https://api-gateway.merge.dev/v1/ai-sdk/chat/completions")
             expect(request.headers.authorization).toBe("Bearer test-key")
+            expect(request.headers["x-test"]).toBe("header")
             if (request.body._tag !== "Uint8Array") throw new Error("Expected JSON request")
             const body = JSON.parse(new TextDecoder().decode(request.body.body))
             expect(body.max_tokens).toBe(100)
@@ -94,7 +119,11 @@ describe("MergeGatewayPlugin", () => {
             expect(body.tags).toEqual([{ key: "env", value: "test" }])
             expect(body.messages[0]).toMatchObject({
               role: "user",
-              content: [{ type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }],
+              content: [
+                { type: "text", text: "[Image 1] describe this image" },
+                { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
+                { type: "image_url", image_url: { url: "data:image/jpeg;base64,/9j/" } },
+              ],
             })
             expect(body.messages[1]).not.toHaveProperty("thinking")
             const chunks = [
@@ -134,7 +163,11 @@ describe("MergeGatewayPlugin", () => {
           model,
           generation: { maxTokens: 100 },
           messages: [
-            Message.user({ type: "media", mediaType: "image/png", data: "iVBORw0KGgo=" }),
+            Message.user([
+              Message.text("[Image 1] describe this image"),
+              { type: "media", mediaType: "image/png", data: "iVBORw0KGgo=" },
+              { type: "media", mediaType: "image/jpeg", data: "/9j/" },
+            ]),
             Message.assistant("Let me look."),
             Message.user("Continue"),
           ],
