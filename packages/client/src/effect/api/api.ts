@@ -207,6 +207,7 @@ export type SessionCreateInput = {
   readonly agent?: Agent.ID | undefined
   readonly model?: Model.Ref | undefined
   readonly location?: Location.Ref | undefined
+  readonly metadata?: Session.Metadata | undefined
 }
 export type SessionCreateOutput = Session.Info
 export type SessionCreateOperation<E = never> = (input?: SessionCreateInput) => Effect.Effect<SessionCreateOutput, E>
@@ -434,6 +435,7 @@ export type SessionLogOutput =
             readonly title?: string | undefined
             readonly agent?: Agent.ID | undefined
             readonly model?: Model.Ref | undefined
+            readonly metadata?: Session.Metadata | undefined
             readonly version: string
           }
         }

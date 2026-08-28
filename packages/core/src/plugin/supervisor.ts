@@ -11,6 +11,7 @@ import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { Bus } from "../bus.js"
 import { Npm } from "@opencode-ai/util/npm"
 import { Plugin } from "../plugin.js"
+import { InstancePlugins } from "./instance.js"
 import { PluginInternal } from "./internal.js"
 import { PluginModule } from "./module.js"
 import { SdkPlugins } from "./sdk.js"
@@ -121,6 +122,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* Plugin.Service
     const sdk = yield* SdkPlugins.Service
+    const instance = yield* InstancePlugins.Service
     const sources = yield* ConfigPluginSource.Service
     const bus = yield* Bus.Service
     const npm = yield* Npm.Service
@@ -137,10 +139,13 @@ export const layer = Layer.effect(
       operations: readonly ConfigPluginSource.Operation[],
       previous: ReadonlyMap<string, Cached> = new Map(cache),
     ) {
-      // Combine internal plugins with host-contributed SDK plugins in boot order.
+      // Combine internal plugins with host-contributed plugins in boot order.
+      // Instance-bound plugins come last: later activation can override earlier
+      // container writes, so the instance's explicit choices win over globals.
       const pre = [
         ...internal.pre.map((plugin) => ({ ...plugin, version: "internal", source: { type: "builtin" as const } })),
         ...sdk.all(),
+        ...instance.all(),
       ]
       const post = internal.post.map((plugin) => ({
         ...plugin,
@@ -322,6 +327,7 @@ export const layer = Layer.effect(
 const nodeDeps = [
   Plugin.node,
   SdkPlugins.node,
+  InstancePlugins.node,
   ConfigPluginSource.node,
   Bus.node,
   Npm.node,

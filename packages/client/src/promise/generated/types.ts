@@ -31,6 +31,8 @@ export type TokenUsageInfo = {
 
 export type LocationRef = { directory: string; workspaceID?: string }
 
+export type SessionMetadata = { [x: string]: JsonValue }
+
 export type FileDiffInfo = {
   file: string
   patch: string
@@ -566,6 +568,7 @@ export type SessionCreated = {
     title?: string
     agent?: string
     model?: ModelRef
+    metadata?: SessionMetadata
     version: string
   }
 }
@@ -1660,6 +1663,7 @@ export type SessionInfo = {
   title?: string
   location: LocationRef
   subpath?: string
+  metadata?: SessionMetadata
   revert?: SessionRevert
 }
 
@@ -2745,6 +2749,7 @@ export type SessionCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
   }["id"]
   readonly title?: {
     readonly id?: string | null
@@ -2752,6 +2757,7 @@ export type SessionCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
   }["title"]
   readonly agent?: {
     readonly id?: string | null
@@ -2759,6 +2765,7 @@ export type SessionCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
   }["agent"]
   readonly model?: {
     readonly id?: string | null
@@ -2766,6 +2773,7 @@ export type SessionCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
   }["model"]
   readonly location?: {
     readonly id?: string | null
@@ -2773,7 +2781,16 @@ export type SessionCreateInput = {
     readonly agent?: string | null
     readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
     readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
   }["location"]
+  readonly metadata?: {
+    readonly id?: string | null
+    readonly title?: string | null
+    readonly agent?: string | null
+    readonly model?: { readonly id: string; readonly providerID: string; readonly variant?: string } | null
+    readonly location?: { readonly directory: string; readonly workspaceID?: string } | null
+    readonly metadata?: { readonly [x: string]: JsonValue } | null
+  }["metadata"]
 }
 
 export type SessionCreateOutput = { data: SessionInfo }["data"]
@@ -2810,6 +2827,7 @@ export type SessionImportInput = {
       readonly title?: string
       readonly location: { readonly directory: string; readonly workspaceID?: string }
       readonly subpath?: string
+      readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
         readonly partID?: string
@@ -3086,6 +3104,7 @@ export type SessionImportInput = {
       readonly title?: string
       readonly location: { readonly directory: string; readonly workspaceID?: string }
       readonly subpath?: string
+      readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
         readonly partID?: string
@@ -3362,6 +3381,7 @@ export type SessionImportInput = {
       readonly title?: string
       readonly location: { readonly directory: string; readonly workspaceID?: string }
       readonly subpath?: string
+      readonly metadata?: { readonly [x: string]: JsonValue }
       readonly revert?: {
         readonly messageID: string
         readonly partID?: string
