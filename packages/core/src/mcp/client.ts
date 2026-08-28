@@ -28,10 +28,15 @@ const DEFAULT_CATALOG_TIMEOUT = 30_000
 const DEFAULT_EXECUTION_TIMEOUT = 12 * 60 * 60 * 1_000 // 12 hours
 const toError = (error: unknown) => (error instanceof Error ? error : new Error(String(error)))
 
-// Some servers advertise tool outputSchemas the SDK's strict validator can't resolve; this drops
-// only that field so a single bad schema doesn't blank out the whole tool list.
+// Drop only structurally malformed outputSchema fields; compilation is checked after listing.
+// All other tool fields and the response envelope keep their SDK validation.
 const TolerantListToolsResult = ListToolsResultSchema.extend({
-  tools: ToolSchema.omit({ outputSchema: true }).array(),
+  tools: ToolSchema.extend({ outputSchema: ToolSchema.shape.outputSchema.catch(undefined) })
+    .transform((tool) => {
+      if (tool.outputSchema === undefined) delete tool.outputSchema
+      return tool
+    })
+    .array(),
 })
 
 export class NeedsAuthError extends Schema.TaggedError<NeedsAuthError>()("MCP.NeedsAuthError", {

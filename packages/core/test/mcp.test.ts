@@ -475,6 +475,120 @@ test("retains output schemas across paginated MCP discovery", async () => {
   ])
 })
 
+testEffect(Layer.empty).live("removes only malformed output schemas during paginated MCP discovery", () =>
+  Effect.gen(function* () {
+    const cursors: unknown[] = []
+    const executed: string[] = []
+    const outputSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+      required: ["value"],
+    }
+    const malformed = [null, [], { $schema: 42 }].map((outputSchema, index) => ({
+      name: `malformed-${index}`,
+      description: "Still callable",
+      inputSchema: { type: "object" as const },
+      outputSchema,
+    }))
+    const server = yield* resourceServer({
+      respond: async (request) => {
+        if (request.method !== "POST") return
+        const message = JSONRPCMessageSchema.parse(await request.clone().json())
+        if (!("id" in message) || !("method" in message)) return
+        if (message.method === "tools/list") {
+          cursors.push(message.params?.cursor)
+          const page = Number(message.params?.cursor ?? 0)
+          return Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              tools: [
+                { name: `valid-${page}`, inputSchema: { type: "object" }, outputSchema },
+                ...(page === 1 ? malformed : []),
+              ],
+              nextCursor: page < 2 ? String(page + 1) : undefined,
+            },
+          })
+        }
+        if (message.method === "tools/call" && typeof message.params?.name === "string") {
+          executed.push(message.params.name)
+          return Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: { content: [], structuredContent: { value: 42 } },
+          })
+        }
+      },
+    })
+    const connection = yield* connect(
+      "mixed-output-schemas",
+      new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false }),
+      import.meta.dir,
+    )
+    const tools = yield* connection.tools()
+    expect(cursors).toEqual([undefined, "1", undefined, "1", "2"])
+    expect(tools).toEqual([
+      { name: "valid-0", description: undefined, inputSchema: { type: "object" }, outputSchema },
+      { name: "valid-1", description: undefined, inputSchema: { type: "object" }, outputSchema },
+      ...malformed.map((tool) => ({ ...tool, outputSchema: undefined })),
+      { name: "valid-2", description: undefined, inputSchema: { type: "object" }, outputSchema },
+    ])
+    for (const tool of malformed) {
+      expect(yield* connection.callTool({ name: tool.name })).toMatchObject({ structured: { value: 42 } })
+    }
+    for (const name of ["valid-0", "valid-1", "valid-2"]) {
+      expect((yield* connection.callTool({ name }).pipe(Effect.flip)).message).toContain(
+        "Structured content does not match the tool's output schema",
+      )
+    }
+    expect(executed).toEqual([...malformed.map((tool) => tool.name), "valid-0", "valid-1", "valid-2"])
+  }),
+)
+
+for (const entry of [
+  { field: "name", tool: { name: 42 } },
+  { field: "inputSchema", tool: { inputSchema: { type: "string" } } },
+  { field: "nextCursor", envelope: { nextCursor: 42 } },
+  { field: "_meta", envelope: { _meta: 42 } },
+]) {
+  testEffect(Layer.empty).live(`rejects malformed ${entry.field} during MCP output-schema fallback`, () =>
+    Effect.gen(function* () {
+      const cursors: unknown[] = []
+      const server = yield* resourceServer({
+        respond: async (request) => {
+          if (request.method !== "POST") return
+          const message = JSONRPCMessageSchema.parse(await request.clone().json())
+          if (!("id" in message) || !("method" in message) || message.method !== "tools/list") return
+          cursors.push(message.params?.cursor)
+          return Response.json({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              // Trigger fallback first, then verify it still rejects unrelated malformed data.
+              tools: [
+                {
+                  name: "malformed",
+                  inputSchema: { type: "object" },
+                  outputSchema: null,
+                  ...(cursors.length > 1 ? entry.tool : {}),
+                },
+              ],
+              ...(cursors.length > 1 ? entry.envelope : {}),
+            },
+          })
+        },
+      })
+      const connection = yield* connect(
+        "malformed-tool-list",
+        new ConfigMCP.Remote({ type: "remote", url: server.url, oauth: false }),
+        import.meta.dir,
+      )
+      expect((yield* connection.tools().pipe(Effect.flip)).message).toContain(entry.field)
+      expect(cursors).toEqual([undefined, undefined])
+    }),
+  )
+}
+
 testEffect(Layer.empty).live("isolates unresolved output schemas without replaying tools on a 2025-11-25 server", () =>
   Effect.gen(function* () {
     const executed: string[] = []
