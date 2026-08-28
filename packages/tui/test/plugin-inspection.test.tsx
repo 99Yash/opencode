@@ -6,6 +6,7 @@ import { InputRenderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem } from "effect"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import type { Info } from "../src/config"
 import type { PackageResolver } from "../src/plugin/context"
 import { probe } from "./fixture/plugin-inspection"
@@ -19,6 +20,7 @@ async function boot(
   directory: string,
   options: {
     width?: number
+    kittyKeyboard?: boolean
     plugins?: Info["plugins"]
     server?: () => PluginInfo[]
     check?: PackageResolver["check"]
@@ -29,7 +31,7 @@ async function boot(
     width: options.width ?? 100,
     height: 24,
     useThread: false,
-    kittyKeyboard: true,
+    kittyKeyboard: options.kittyKeyboard ?? true,
   })
   const location = { directory, project: { id: "proj_fixture", directory, canonical: directory } }
   const events = createEventStream()
@@ -206,7 +208,7 @@ test.each([40, 100])("pinned checks, busy/error details, and CLI spec guidance a
   expect(frame).not.toContain("New revision available")
   expect(frame).not.toMatch(/Update package|Reload installed/)
   if (width === 100) expect(frame).toMatch(/Installed\s+Unknown/)
-  app.mockInput.pressKey("PAGEDOWN")
+  app.mockInput.pressKey("\x1b[6~")
   await app.waitForFrame((frame) => frame.includes("cli.json"))
   expect(app.requests).toEqual([])
 })
@@ -305,9 +307,41 @@ test.each(["opencode.system", entrypoint])("builtins and local sources have no p
   const frame = await app.waitForFrame((frame) => frame.includes("Not applicable"))
   expect(frame).not.toContain("Check for updates")
   expect(frame).not.toMatch(/Update package|Reload installed/)
-  app.mockInput.pressKey("PAGEDOWN")
+  app.mockInput.pressKey("\x1b[6~")
   await app.waitForFrame((frame) =>
     frame.includes(spec.startsWith("opencode.") ? "Updates with OpenCode" : "no package check"),
   )
   expect(app.requests).toEqual([])
 })
+
+test.each([false, true])(
+  "real paging keys expose overflowing package revisions with Kitty %s",
+  async (kittyKeyboard) => {
+    await using tmp = await tmpdir()
+    const source = `git+https://example.com/${"nested-directory/".repeat(16)}plugin.git#main`
+    const one = "a".repeat(40)
+    const two = "b".repeat(40)
+    await Bun.write(path.join(tmp.path, "overflow.ts"), 'export default { id: "fixture.overflow", setup() {} }\n')
+    await using app = await boot(tmp.path, {
+      kittyKeyboard,
+      plugins: [source],
+      resolve: async () => ({ entrypoint: pathToFileURL(path.join(tmp.path, "overflow.ts")).href, revision: one }),
+      check: async () => ({ installed: one, available: two, mutable: true }),
+    })
+    await open(app, "fixture.overflow")
+    app.mockInput.pressEnter()
+    const top = await app.waitForFrame((frame) => frame.includes("Source") && frame.includes("Check for updates"))
+    expect(top).not.toContain("Available")
+    app.mockInput.pressKey("r", { ctrl: true })
+    await app.waitForFrame((frame) => frame.includes("New revision available"))
+    app.mockInput.pressKey("\x1b[6~")
+    await app.waitForFrame((frame) => !frame.includes("Runtime"))
+    app.mockInput.pressKey("\x1b[6~")
+    const scrolled = await app.waitForFrame((frame) => frame.includes("Installed") && frame.includes("Available"))
+    expect(scrolled).toContain(one)
+    expect(scrolled).toContain(two)
+    app.mockInput.pressKey("\x1b[5~")
+    app.mockInput.pressKey("\x1b[5~")
+    await app.waitForFrame((frame) => frame.includes("Runtime") && !frame.includes("Available"))
+  },
+)
