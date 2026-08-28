@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { Agent } from "@opencode-ai/core/agent"
 import { Bus } from "@opencode-ai/core/bus"
 import { Database } from "@opencode-ai/core/database/database"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Vcs } from "@opencode-ai/core/vcs"
 import { Credential } from "@opencode-ai/schema/credential"
 import { Event } from "@opencode-ai/schema/event"
@@ -11,11 +11,17 @@ import { IntegrationID } from "@opencode-ai/schema/integration-id"
 import { VcsEvent } from "@opencode-ai/schema/vcs-event"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Deferred, Effect, Exit, Fiber, Option, Schema, Scope, Stream } from "effect"
-import { tempLocationLayer } from "../../core/test/fixture/location"
-import { it } from "../../core/test/lib/effect"
+import { locationLayer } from "../../core/test/fixture/location"
+import { it, testEffect } from "../../core/test/lib/effect"
 import { EventFeed } from "../src/event-feed"
 
 const Internal = Bus.ephemeral({ type: "test.internal", schema: { value: Schema.String } })
+const vcsIt = testEffect(
+  LayerNode.compile(LayerNode.group([Vcs.node, Bus.node]), [
+    [Location.node, locationLayer({ directory: AbsolutePath.make(import.meta.dir) })],
+    [Database.node, Database.configured({ path: ":memory:" })],
+  ]),
+)
 
 const event = (id: string): Event.Payload<typeof Agent.Event.Updated> => ({
   id: Event.ID.make(`evt_${id}`),
@@ -51,7 +57,7 @@ describe("EventFeed", () => {
     expect(EventFeed.frame(payload)).toBe(`data: ${JSON.stringify(payload)}\n\n`)
   })
 
-  it.effect("delivers the latest VCS branch after an earlier legacy listener reenters", () =>
+  vcsIt.effect("delivers the latest VCS branch after an earlier legacy listener reenters", () =>
     Effect.gen(function* () {
       const bus = yield* Bus.Service
       const vcs = yield* Vcs.Service
@@ -74,34 +80,30 @@ describe("EventFeed", () => {
               .pipe(Scope.provide(scope), Effect.asVoid)
           : Effect.void,
       )
-      const feed = yield* EventFeed.make(bus.listen, {
-        encode: (event) => (event.type === VcsEvent.BranchUpdated.type ? (event.data.branch ?? "none") : event.type),
-      })
-      const stream = yield* feed.subscribe
-      const received = yield* stream.pipe(
-        Stream.takeUntil((frame) => frame === Agent.Event.Updated.type, { excludeLast: true }),
-        Stream.runLast,
-        Effect.forkScoped({ startImmediately: true }),
-      )
+      // Unsubscribe before registration teardown can restore "outer" and reenter the listener.
+      yield* Effect.gen(function* () {
+        const feed = yield* EventFeed.make(bus.listen, {
+          encode: (event) => (event.type === VcsEvent.BranchUpdated.type ? (event.data.branch ?? "none") : event.type),
+        })
+        const stream = yield* feed.subscribe
+        const received = yield* stream.pipe(
+          Stream.takeUntil((frame) => frame === Agent.Event.Updated.type, { excludeLast: true }),
+          Stream.runLast,
+          Effect.forkScoped({ startImmediately: true }),
+        )
 
-      yield* vcs.transform((draft) => {
-        draft.add(provider)
-        draft.default.set(provider.id)
-      })
-      yield* unsubscribe
-      yield* bus.publish(Agent.Event.Updated, {})
+        yield* vcs.transform((draft) => {
+          draft.add(provider)
+          draft.default.set(provider.id)
+        })
+        yield* unsubscribe
+        yield* bus.publish(Agent.Event.Updated, {})
 
-      const info = yield* vcs.info()
-      expect(info.branch.current).toBe("inner")
-      expect(Option.getOrUndefined(yield* Fiber.join(received))).toBe(info.branch.current)
-    }).pipe(
-      Effect.provide(
-        AppNodeBuilder.build(LayerNode.group([Vcs.node, Bus.node]), [
-          [Location.node, tempLocationLayer],
-          [Database.node, Database.configured({ path: ":memory:" })],
-        ]),
-      ),
-    ),
+        const info = yield* vcs.info()
+        expect(info.branch.current).toBe("inner")
+        expect(Option.getOrUndefined(yield* Fiber.join(received))).toBe(info.branch.current)
+      }).pipe(Effect.ensuring(unsubscribe))
+    }),
   )
 
   it.effect("encodes once and delivers the same frame to every subscriber", () =>

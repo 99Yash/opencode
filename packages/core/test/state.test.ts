@@ -1,10 +1,18 @@
 import { describe, expect } from "bun:test"
 import { State } from "@opencode-ai/core/state"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer, Scheduler, Scope } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Scheduler, Scope } from "effect"
 import { TestClock } from "effect/testing"
-import { testEffect } from "./lib/effect"
+import { it } from "./lib/effect"
 
-const it = testEffect(Layer.empty)
+function valuesState(
+  hooks: Pick<State.Options<{ values: string[] }, { add: (item: string) => void }>, "prepare" | "notify"> = {},
+) {
+  return State.create({
+    initial: () => ({ values: new Array<string>() }),
+    draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+    ...hooks,
+  })
+}
 
 describe("State", () => {
   it.effect("commits a transform atomically when its updater is interrupted", () =>
@@ -12,17 +20,13 @@ describe("State", () => {
       const rebuilding = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
       let block = true
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (value: string) => draft.values.push(value) }),
+      const state = valuesState({
         notify: () =>
           block ? Deferred.succeed(rebuilding, undefined).pipe(Effect.andThen(Deferred.await(release))) : Effect.void,
       })
       const scope = yield* Scope.make()
       const fiber = yield* state
-        .transform((editor) => {
-          editor.add("registered")
-        })
+        .transform((editor) => editor.add("registered"))
         .pipe(Scope.provide(scope), Effect.forkChild)
       yield* Deferred.await(rebuilding)
       const interruption = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild)
@@ -39,15 +43,11 @@ describe("State", () => {
   it.effect("makes rebuilt state visible before notifying", () =>
     Effect.gen(function* () {
       const observed: string[][] = []
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () => Effect.sync(() => observed.push([...state.get().values])),
       })
 
-      yield* state.transform((draft) => {
-        draft.add("value")
-      })
+      yield* state.transform((draft) => draft.add("value"))
 
       // Update events publish from notify, so consumers reading on the event
       // must observe the rebuilt state, not the previous one.
@@ -58,14 +58,9 @@ describe("State", () => {
   it.effect("runs transforms during every reload", () =>
     Effect.gen(function* () {
       let value = "first"
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-      })
+      const state = valuesState()
 
-      yield* state.transform((editor) => {
-        editor.add(value)
-      })
+      yield* state.transform((editor) => editor.add(value))
       expect(state.get().values).toEqual(["first"])
 
       value = "second"
@@ -80,9 +75,7 @@ describe("State", () => {
     Effect.gen(function* () {
       const observed: string[][] = []
       let replays = 0
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () => Effect.sync(() => observed.push([...state.get().values])),
       })
       const scope = yield* Scope.make()
@@ -118,9 +111,7 @@ describe("State", () => {
       let value = "first"
       let replays = 0
       const observed: string[][] = []
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () => Effect.sync(() => observed.push([...state.get().values])),
       })
       yield* state.transform((draft) => {
@@ -150,11 +141,7 @@ describe("State", () => {
     Effect.gen(function* () {
       let value = "first"
       let notifications = 0
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-        notify: () => Effect.sync(() => notifications++),
-      })
+      const state = valuesState({ notify: () => Effect.sync(() => notifications++) })
 
       yield* State.batch(
         Effect.gen(function* () {
@@ -199,9 +186,7 @@ describe("State", () => {
   it.effect("keeps replay failures observable without replacing the previous snapshot", () =>
     Effect.gen(function* () {
       let fail = false
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state = valuesState({
         prepare: () => {
           if (fail) throw new Error("preparation failed")
         },
@@ -228,9 +213,7 @@ describe("State", () => {
       const scope = yield* Scope.Scope
       let added = false
       const observed: string[][] = []
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () =>
           Effect.gen(function* () {
             observed.push([...state.get().values])
@@ -251,9 +234,7 @@ describe("State", () => {
       let value = "first"
       let reloadAgain = false
       const observed: string[][] = []
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () =>
           Effect.gen(function* () {
             observed.push([...state.get().values])
@@ -284,9 +265,7 @@ describe("State", () => {
       let value = "first"
       let block = false
       const observed: string[][] = []
-      const state: State.Interface<{ values: string[] }, { add: (item: string) => void }> = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state: ReturnType<typeof valuesState> = valuesState({
         notify: () =>
           Effect.gen(function* () {
             observed.push([...state.get().values])
@@ -298,6 +277,8 @@ describe("State", () => {
           }),
       })
       yield* state.transform((draft) => draft.add(value))
+      // Release the detached worker before the earlier registration finalizer runs.
+      yield* Effect.addFinalizer(() => Deferred.succeed(release, undefined))
       observed.length = 0
 
       value = "second"
@@ -344,7 +325,7 @@ describe("State", () => {
       const second = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
       yield* Fiber.interrupt(cancelled)
       yield* TestClock.adjust("500 millis")
-      const exits = yield* Effect.all([Fiber.await(first), Fiber.await(second)])
+      const exits = yield* Fiber.awaitAll([first, second])
       fail = false
 
       expect(Exit.hasInterrupts(yield* Fiber.await(cancelled))).toBe(true)
@@ -363,11 +344,7 @@ describe("State", () => {
       let value = "first"
       let notifications = 0
       let interrupted = false
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-        notify: () => Effect.sync(() => notifications++),
-      })
+      const state = valuesState({ notify: () => Effect.sync(() => notifications++) })
       yield* state.transform((draft) => draft.add(value))
       notifications = 0
 
@@ -412,16 +389,9 @@ describe("State", () => {
 
   it.effect("disposes a transform once and rebuilds remaining state", () =>
     Effect.gen(function* () {
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-      })
-      yield* state.transform((editor) => {
-        editor.add("first")
-      })
-      const registration = yield* state.transform((editor) => {
-        editor.add("second")
-      })
+      const state = valuesState()
+      yield* state.transform((editor) => editor.add("first"))
+      const registration = yield* state.transform((editor) => editor.add("second"))
       expect(state.get().values).toEqual(["first", "second"])
 
       yield* registration.dispose
@@ -434,36 +404,22 @@ describe("State", () => {
 
   it.effect("batches notifications", () =>
     Effect.gen(function* () {
-      let finalized = 0
-      const first = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-        notify: () => Effect.sync(() => finalized++),
-      })
-      const second = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-        notify: () => Effect.sync(() => finalized++),
-      })
+      let notifications = 0
+      const first = valuesState({ notify: () => Effect.sync(() => notifications++) })
+      const second = valuesState({ notify: () => Effect.sync(() => notifications++) })
 
       yield* State.batch(
         Effect.gen(function* () {
-          yield* first.transform((draft) => {
-            draft.add("first")
-          })
-          yield* first.transform((draft) => {
-            draft.add("second")
-          })
-          yield* second.transform((draft) => {
-            draft.add("third")
-          })
-          expect(finalized).toBe(0)
+          yield* first.transform((draft) => draft.add("first"))
+          yield* first.transform((draft) => draft.add("second"))
+          yield* second.transform((draft) => draft.add("third"))
+          expect(notifications).toBe(0)
         }),
       )
 
       expect(first.get().values).toEqual(["first", "second"])
       expect(second.get().values).toEqual(["third"])
-      expect(finalized).toBe(2)
+      expect(notifications).toBe(2)
     }),
   )
 
@@ -502,15 +458,10 @@ describe("State", () => {
   it.effect("lets batch observers read the other states' accepted changes", () =>
     Effect.gen(function* () {
       const observed: string[][] = []
-      const first = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const first = valuesState({
         notify: () => Effect.sync(() => observed.push([...second.get().values])),
       })
-      const second = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-      })
+      const second = valuesState()
 
       yield* State.batch(
         Effect.gen(function* () {
@@ -574,16 +525,14 @@ describe("State", () => {
 
   it.effect("discards teardown rebuilds and pending reloads while still running cleanup", () =>
     Effect.gen(function* () {
-      let finalized = 0
+      let notifications = 0
       let prepared = 0
       let disposed = 0
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
+      const state = valuesState({
         prepare: () => {
           prepared++
         },
-        notify: () => Effect.sync(() => finalized++),
+        notify: () => Effect.sync(() => notifications++),
       })
       const scope = yield* Scope.make()
       yield* Scope.addFinalizer(
@@ -592,14 +541,14 @@ describe("State", () => {
       )
       const registration = yield* state.transform((draft) => draft.add("value")).pipe(Scope.provide(scope))
       const snapshot = state.get()
-      expect(finalized).toBe(1)
+      expect(notifications).toBe(1)
       expect(prepared).toBe(1)
 
       const pending = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
       yield* TestClock.adjust("250 millis")
       yield* State.batch(Scope.close(scope, Exit.void), { flush: false })
       expect(disposed).toBe(1)
-      expect(finalized).toBe(1)
+      expect(notifications).toBe(1)
       expect(state.get()).toBe(snapshot)
       expect(prepared).toBe(1)
 
@@ -607,7 +556,7 @@ describe("State", () => {
       yield* Fiber.join(pending)
       yield* registration.dispose
       yield* state.reload()
-      expect(finalized).toBe(1)
+      expect(notifications).toBe(1)
       expect(state.get()).toBe(snapshot)
       expect(prepared).toBe(1)
     }),
@@ -615,20 +564,20 @@ describe("State", () => {
 
   it.effect("keeps teardown suppression separate from an enclosing live batch", () =>
     Effect.gen(function* () {
-      const finalized: string[] = []
+      const notifications: string[] = []
       const closing = State.create({
         initial: () => ({}),
         draft: (draft) => draft,
-        notify: () => Effect.sync(() => finalized.push("closing")),
+        notify: () => Effect.sync(() => notifications.push("closing")),
       })
       const live = State.create({
         initial: () => ({}),
         draft: (draft) => draft,
-        notify: () => Effect.sync(() => finalized.push("live")),
+        notify: () => Effect.sync(() => notifications.push("live")),
       })
       const scope = yield* Scope.make()
       yield* closing.transform(() => {}).pipe(Scope.provide(scope))
-      finalized.length = 0
+      notifications.length = 0
 
       yield* State.batch(
         Effect.gen(function* () {
@@ -636,33 +585,27 @@ describe("State", () => {
           yield* State.batch(Scope.close(scope, Exit.void), { flush: false })
         }),
       )
-      expect(finalized).toEqual(["live"])
+      expect(notifications).toEqual(["live"])
     }),
   )
 
   it.effect("debounces reload bursts", () =>
     Effect.gen(function* () {
-      let finalized = 0
-      const state = State.create({
-        initial: () => ({ values: [] as string[] }),
-        draft: (draft) => ({ add: (item: string) => draft.values.push(item) }),
-        notify: () => Effect.sync(() => finalized++),
-      })
-      yield* state.transform((draft) => {
-        draft.add("value")
-      })
-      finalized = 0
+      let notifications = 0
+      const state = valuesState({ notify: () => Effect.sync(() => notifications++) })
+      yield* state.transform((draft) => draft.add("value"))
+      notifications = 0
 
       const first = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
       yield* TestClock.adjust("250 millis")
       const second = yield* state.reload().pipe(Effect.forkChild({ startImmediately: true }))
       yield* TestClock.adjust("499 millis")
-      expect(finalized).toBe(0)
+      expect(notifications).toBe(0)
       yield* TestClock.adjust("1 millis")
       yield* Fiber.join(first)
       yield* Fiber.join(second)
 
-      expect(finalized).toBe(1)
+      expect(notifications).toBe(1)
     }),
   )
 })

@@ -105,7 +105,7 @@ describe("Plugin", () => {
     }),
   )
 
-  it.effect("refreshes its own stored OAuth connection during plugin activation", () =>
+  it.live("refreshes its own stored OAuth connection during plugin activation", () =>
     Effect.gen(function* () {
       const plugins = yield* Plugin.Service
       const credentials = yield* Credential.Service

@@ -59,7 +59,7 @@ describe("Integration replay", () => {
         .complete({ integrationID, attemptID: attempt.attemptID, code: "dummy-code" })
         .pipe(Effect.exit)
 
-      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(true)
+      expect(exit).toMatchObject(Exit.die(failure))
       expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(failure)
       expect(yield* integrations.oauth.status({ integrationID, attemptID: attempt.attemptID })).toEqual({
         status: "failed",

@@ -57,7 +57,7 @@ import { ExitCode, makeHandle, ProcessId } from "effect/unstable/process/ChildPr
 import { Image } from "@opencode-ai/core/image"
 import { testEffect } from "./lib/effect"
 import { imagePassthrough } from "./lib/image"
-import { location } from "./fixture/location"
+import { location, locationLayer } from "./fixture/location"
 import { hostEnvironmentLayer, recordingEnvironmentLayer } from "./fixture/environment"
 import { executeTool, toolDefinitions, toolIdentity, waitForTool } from "./lib/tool"
 
@@ -1471,22 +1471,17 @@ testEffect(Layer.empty).live("serializes MCP config restoration behind an in-fli
     )
   }),
 )
+const shutdownIt = testEffect(
+  AppNodeBuilder.build(
+    LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
+    [
+      [Location.node, locationLayer({ directory: AbsolutePath.make(import.meta.dir) })],
+      [Environment.node, hostEnvironmentLayer],
+    ],
+  ),
+)
 ;["active", "queued"].forEach((phase) =>
-  testEffect(
-    AppNodeBuilder.build(
-      LayerNode.group([Bus.node, Integration.node, Credential.node, Form.node, Environment.node, Location.node]),
-      [
-        [
-          Location.node,
-          Layer.succeed(
-            Location.Service,
-            Location.Service.of(location({ directory: AbsolutePath.make(import.meta.dir) })),
-          ),
-        ],
-        [Environment.node, hostEnvironmentLayer],
-      ],
-    ),
-  ).effect(`discards ${phase} MCP notifications after its layer closes`, () =>
+  shutdownIt.effect(`discards ${phase} MCP notifications after its layer closes`, () =>
     Effect.gen(function* () {
       const bus = yield* Bus.Service
       const entered = yield* Deferred.make<void>()
@@ -1498,7 +1493,7 @@ testEffect(Layer.empty).live("serializes MCP config restoration behind an in-fli
           Effect.andThen(TestClock.adjust("500 millis")),
         ),
       )
-      const context = yield* Layer.build(Mcp.layer()).pipe(Scope.provide(root))
+      const context = yield* Layer.buildWithScope(Mcp.layer(), root)
       const service = Context.get(context, Mcp.Service)
       const observed: string[] = []
       let block = false

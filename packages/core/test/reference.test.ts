@@ -9,7 +9,7 @@ import { Global } from "@opencode-ai/util/global"
 import { Reference } from "@opencode-ai/core/reference"
 import { Repository } from "@opencode-ai/core/repository"
 import { RepositoryCache } from "@opencode-ai/core/repository-cache"
-import { it } from "./lib/effect"
+import { it, testEffect } from "./lib/effect"
 
 const cache = Layer.mock(RepositoryCache.Service, {
   ensure: () => Effect.die("unexpected Git materialization"),
@@ -17,6 +17,7 @@ const cache = Layer.mock(RepositoryCache.Service, {
 const referenceLayer = AppNodeBuilder.build(LayerNode.group([Reference.node, Bus.node]), [
   [RepositoryCache.node, cache],
 ])
+const referenceIt = testEffect(referenceLayer)
 
 describe("Reference", () => {
   it.effect("prepares batched references before cache work or update events", () => {
@@ -95,10 +96,10 @@ describe("Reference", () => {
           refresh: input.refresh,
         })),
       ).toEqual([{ repository: "owner/repo", branch: "feature/docs", refresh: true }])
-    }).pipe(Effect.provide(referenceLayer))
+    }).pipe(Effect.scoped, Effect.provide(referenceLayer))
   })
 
-  it.effect("lets update listeners replace references and refetch the latest projection", () =>
+  referenceIt.effect("lets update listeners replace references and refetch the latest projection", () =>
     Effect.gen(function* () {
       const references = yield* Reference.Service
       const bus = yield* Bus.Service
@@ -133,13 +134,14 @@ describe("Reference", () => {
 
       expect((yield* references.list()).map((info) => info.path)).toEqual([AbsolutePath.make("/new")])
       expect(observed).toEqual([["/new"], ["/new"]])
-    }).pipe(Effect.provide(referenceLayer)),
+    }),
   )
 
-  it.effect("registers normalized sources for the owning scope", () =>
+  referenceIt.effect("registers normalized sources for the owning scope", () =>
     Effect.gen(function* () {
       const references = yield* Reference.Service
-      const scope = yield* Scope.make()
+      const parent = yield* Effect.scope
+      const scope = yield* Scope.fork(parent)
       const path = AbsolutePath.make("/docs")
       const source = Reference.LocalSource.make({
         type: "local",
@@ -155,10 +157,10 @@ describe("Reference", () => {
 
       yield* Scope.close(scope, Exit.void)
       expect(yield* references.list()).toEqual([])
-    }).pipe(Effect.provide(referenceLayer)),
+    }),
   )
 
-  it.effect("derives Git paths without exposing cache operations", () =>
+  referenceIt.effect("derives Git paths without exposing cache operations", () =>
     Effect.gen(function* () {
       const references = yield* Reference.Service
       const repository = Repository.parseRemote("owner/repo")
@@ -172,10 +174,10 @@ describe("Reference", () => {
           source,
         }),
       ])
-    }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
+    }),
   )
 
-  it.effect("preserves configured Git descriptions", () =>
+  referenceIt.effect("preserves configured Git descriptions", () =>
     Effect.gen(function* () {
       const references = yield* Reference.Service
       const repository = Repository.parseRemote("owner/repo")
@@ -194,6 +196,6 @@ describe("Reference", () => {
           source,
         }),
       ])
-    }).pipe(Effect.scoped, Effect.provide(referenceLayer)),
+    }),
   )
 })

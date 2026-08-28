@@ -2,7 +2,7 @@ import { $ } from "bun"
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
-import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Schema, Scope, Stream } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { AppProcess } from "@opencode-ai/util/process"
@@ -15,26 +15,27 @@ import { VcsGitPlugin } from "@opencode-ai/core/plugin/vcs/git"
 import type { VcsDefinition, VcsDiffInput } from "@opencode-ai/plugin/effect/vcs"
 import { FileSystem } from "@opencode-ai/schema/filesystem"
 import { VcsEvent } from "@opencode-ai/schema/vcs-event"
-import { location } from "./fixture/location"
+import { locationLayer } from "./fixture/location"
 import { tmpdir } from "./fixture/tmpdir"
-import { it } from "./lib/effect"
+import { it, testEffect } from "./lib/effect"
 import { host } from "./plugin/host"
 
 const Done = Bus.ephemeral({ type: "test.vcs.done", schema: {} })
+
+const synthetic = testEffect(
+  LayerNode.compile(LayerNode.group([Vcs.node, Bus.node, Location.node]), [
+    [Location.node, locationLayer({ directory: AbsolutePath.make(import.meta.dir) })],
+  ]),
+)
 
 const provide = (directory: string, input: { git?: boolean } = {}) =>
   Effect.provide(
     LayerNode.compile(LayerNode.group([Vcs.node, Bus.node, Location.node, AppProcess.node]), [
       [
         Location.node,
-        Layer.succeed(
-          Location.Service,
-          Location.Service.of(
-            location(
-              { directory: AbsolutePath.make(directory) },
-              input.git ? { vcs: { type: "git", store: AbsolutePath.make(path.join(directory, ".git")) } } : {},
-            ),
-          ),
+        locationLayer(
+          { directory: AbsolutePath.make(directory) },
+          input.git ? { vcs: { type: "git", store: AbsolutePath.make(path.join(directory, ".git")) } } : {},
         ),
       ],
     ]),
@@ -88,40 +89,36 @@ const provider = (input: Partial<VcsDefinition> = {}) =>
   }) satisfies VcsDefinition
 
 describe("Vcs", () => {
-  it.live("returns empty results outside version control", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        expect(yield* vcs.info()).toEqual({ branch: {} })
-        expect(yield* vcs.branches()).toEqual([])
-        expect(yield* vcs.status()).toEqual([])
-        expect(yield* vcs.diff("working")).toEqual([])
-        expect(yield* vcs.diff("branch")).toEqual([])
-      }).pipe(provide(directory)),
-    ),
+  synthetic.effect("returns empty results outside version control", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      expect(yield* vcs.info()).toEqual({ branch: {} })
+      expect(yield* vcs.branches()).toEqual([])
+      expect(yield* vcs.status()).toEqual([])
+      expect(yield* vcs.diff("working")).toEqual([])
+      expect(yield* vcs.diff("branch")).toEqual([])
+    }),
   )
 
-  it.live("serves scoped providers and restores the fallback after disposal", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        const registration = yield* vcs.transform((draft) => {
-          draft.add(provider())
-          draft.default.set("custom")
-        })
+  synthetic.effect("serves scoped providers and restores the fallback after disposal", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      const registration = yield* vcs.transform((draft) => {
+        draft.add(provider())
+        draft.default.set("custom")
+      })
 
-        expect(yield* vcs.info()).toEqual({ branch: { current: "feature", default: "main" } })
-        expect(yield* vcs.branches()).toEqual(["feature", "main"])
-        expect(yield* vcs.status()).toEqual([{ file: "file.txt", additions: 1, deletions: 0, status: "added" }])
-        expect(yield* vcs.diff("working")).toEqual([
-          { file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" },
-        ])
+      expect(yield* vcs.info()).toEqual({ branch: { current: "feature", default: "main" } })
+      expect(yield* vcs.branches()).toEqual(["feature", "main"])
+      expect(yield* vcs.status()).toEqual([{ file: "file.txt", additions: 1, deletions: 0, status: "added" }])
+      expect(yield* vcs.diff("working")).toEqual([
+        { file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" },
+      ])
 
-        yield* registration.dispose
-        expect(yield* vcs.info()).toEqual({ branch: {} })
-        expect(yield* vcs.status()).toEqual([])
-      }).pipe(provide(directory)),
-    ),
+      yield* registration.dispose
+      expect(yield* vcs.info()).toEqual({ branch: {} })
+      expect(yield* vcs.status()).toEqual([])
+    }),
   )
 
   it.live("automatically selects a provider matching the resolved repository", () =>
@@ -137,91 +134,88 @@ describe("Vcs", () => {
     ),
   )
 
-  it.live("passes location scope and bounded diff options to providers", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const observed: VcsDiffInput[] = []
-        const vcs = yield* Vcs.Service
-        yield* vcs.transform((draft) => {
-          draft.add(
-            provider({
-              diff: (input) =>
-                Effect.sync(() => {
-                  observed.push(input)
-                  return [{ file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" }]
-                }),
-            }),
-          )
-          draft.default.set("custom")
-        })
+  synthetic.effect("passes location scope and bounded diff options to providers", () =>
+    Effect.gen(function* () {
+      const observed: VcsDiffInput[] = []
+      const vcs = yield* Vcs.Service
+      const location = yield* Location.Service
+      yield* vcs.transform((draft) => {
+        draft.add(
+          provider({
+            diff: (input) =>
+              Effect.sync(() => {
+                observed.push(input)
+                return [{ file: "file.txt", patch: "+hello", additions: 1, deletions: 0, status: "added" }]
+              }),
+          }),
+        )
+        draft.default.set("custom")
+      })
 
-        yield* vcs.diff("branch", { context: 3 })
-        expect(observed).toEqual([
-          {
-            directory,
-            worktree: directory,
-            canonical: directory,
-            mode: "branch",
-            context: 3,
-            maxOutputBytes: 10_000_000,
-          },
-        ])
-      }).pipe(provide(directory)),
-    ),
+      yield* vcs.diff("branch", { context: 3 })
+      expect(observed).toEqual([
+        {
+          directory: location.directory,
+          worktree: location.directory,
+          canonical: location.directory,
+          mode: "branch",
+          context: 3,
+          maxOutputBytes: 10_000_000,
+        },
+      ])
+    }),
   )
 
-  it.live("validates provider results and bounds oversized patches", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        yield* vcs.transform((draft) => {
-          draft.add(
-            provider({
-              status: () => Effect.succeed([{ file: "file.txt", additions: -1, deletions: 0, status: "added" }]),
-              diff: () =>
-                Effect.succeed([
-                  { file: "file.txt", patch: "x".repeat(10_000_001), additions: 1, deletions: 0, status: "added" },
-                ]),
-            }),
-          )
-          draft.default.set("custom")
-        })
+  synthetic.effect("validates provider results and bounds oversized patches", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      yield* vcs.transform((draft) => {
+        draft.add(
+          provider({
+            status: () => Effect.succeed([{ file: "file.txt", additions: -1, deletions: 0, status: "added" }]),
+            diff: () =>
+              Effect.succeed([
+                { file: "file.txt", patch: "x".repeat(10_000_001), additions: 1, deletions: 0, status: "added" },
+              ]),
+          }),
+        )
+        draft.default.set("custom")
+      })
 
-        expect(yield* vcs.status()).toEqual([])
-        const rows = yield* vcs.diff("working")
-        expect(rows).toHaveLength(1)
-        expect(Buffer.byteLength(rows[0].patch)).toBeLessThan(1000)
-        expect(rows[0].additions).toBe(1)
-      }).pipe(provide(directory)),
-    ),
+      expect(yield* vcs.status()).toEqual([])
+      const rows = yield* vcs.diff("working")
+      expect(rows).toHaveLength(1)
+      expect(Buffer.byteLength(rows[0].patch)).toBeLessThan(1000)
+      expect(rows[0].additions).toBe(1)
+    }),
   )
 
-  it.live("preserves provider interruption", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        let interrupt = false
-        yield* vcs.transform((draft) => {
-          draft.add(
-            provider({
-              info: () =>
-                interrupt ? Effect.interrupt : Effect.succeed({ branch: { current: "feature", default: "main" } }),
-              status: () => Effect.never,
-            }),
-          )
-          draft.default.set("custom")
-        })
+  synthetic.effect("preserves provider interruption", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      let interrupt = false
+      yield* vcs.transform((draft) => {
+        draft.add(
+          provider({
+            info: () =>
+              interrupt ? Effect.interrupt : Effect.succeed({ branch: { current: "feature", default: "main" } }),
+            status: () => Effect.never,
+          }),
+        )
+        draft.default.set("custom")
+      })
 
-        const fiber = yield* Effect.forkChild(vcs.status())
-        yield* Fiber.interrupt(fiber)
-        const exit = yield* Fiber.await(fiber)
-        expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBeTrue()
+      const fiber = yield* Effect.forkChild(vcs.status())
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBeTrue()
 
-        interrupt = true
-        const reload = yield* vcs.reload().pipe(Effect.timeout("1 second"), Effect.exit)
-        expect(Exit.isFailure(reload) && Cause.hasInterruptsOnly(reload.cause)).toBeTrue()
-      }).pipe(provide(directory)),
-    ),
+      interrupt = true
+      const reload = yield* vcs.reload().pipe(Effect.timeout("1 second"), Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("1 second")
+      const reloaded = yield* Fiber.await(reload)
+      expect(Exit.isFailure(reloaded) && Cause.hasInterruptsOnly(reloaded.cause)).toBeTrue()
+    }),
   )
 
   it.live("keeps watching HEAD changes after a transform replay failure", () =>
@@ -258,15 +252,12 @@ describe("Vcs", () => {
         expect((yield* vcs.info()).branch.current).toBe("recovered")
         const updated = yield* bus
           .subscribe(VcsEvent.BranchUpdated)
-          .pipe(Stream.runHead, Effect.timeout("1 second"), Effect.exit, Effect.forkScoped({ startImmediately: true }))
+          .pipe(Stream.runHead, Effect.timeout("1 second"), Effect.forkScoped({ startImmediately: true }))
         branch = "after-recovery"
         yield* bus.publish(FileSystem.Event.Changed, { file: path.join(directory, ".git", "HEAD"), event: "change" })
         const event = yield* Fiber.join(updated)
         expect((yield* vcs.info()).branch.current).toBe("after-recovery")
-        expect(event).toMatchObject({
-          _tag: "Success",
-          value: { _tag: "Some", value: { data: { branch: "after-recovery" } } },
-        })
+        expect(Option.getOrUndefined(event)).toMatchObject({ data: { branch: "after-recovery" } })
       }),
     ),
   )
@@ -283,28 +274,25 @@ describe("Vcs", () => {
           Effect.andThen(TestClock.adjust("500 millis")),
         ),
       )
-      const context = yield* Layer.build(
+      const context = yield* Layer.buildWithScope(
         LayerNode.compile(Vcs.node, [
           [Bus.node, Layer.succeed(Bus.Service, bus)],
-          [
-            Location.node,
-            Layer.succeed(
-              Location.Service,
-              Location.Service.of(location({ directory: AbsolutePath.make(import.meta.dir) })),
-            ),
-          ],
+          [Location.node, locationLayer({ directory: AbsolutePath.make(import.meta.dir) })],
         ]),
-      ).pipe(Scope.provide(root))
+        root,
+      )
       const vcs = Context.get(context, Vcs.Service)
       const reads: string[] = []
       const observed: (string | undefined)[] = []
-      const unsubscribe = yield* bus.listen((event) =>
-        Effect.sync(() => {
-          if (event.type !== VcsEvent.BranchUpdated.type) return
-          observed.push(Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch)
-        }),
+      yield* Effect.acquireRelease(
+        bus.listen((event) =>
+          Effect.sync(() => {
+            if (event.type !== VcsEvent.BranchUpdated.type) return
+            observed.push(Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch)
+          }),
+        ),
+        (unsubscribe) => unsubscribe,
       )
-      yield* Effect.addFinalizer(() => unsubscribe)
       let branch = "initial"
       let block = false
       yield* vcs
@@ -352,8 +340,8 @@ describe("Vcs", () => {
       expect(yield* Deferred.isDone(release)).toBe(false)
       yield* Fiber.join(shutdown)
       yield* Deferred.succeed(release, undefined)
-      yield* Fiber.join(first).pipe(Effect.timeout("1 second"), TestClock.withLive)
-      yield* Fiber.join(second).pipe(Effect.timeout("1 second"), TestClock.withLive)
+      yield* Fiber.join(first)
+      yield* Fiber.join(second)
       expect(reads).toEqual(["initial", "initial"])
       expect(observed).toEqual([])
       expect(yield* vcs.info()).toBe(snapshot)
@@ -386,7 +374,7 @@ describe("Vcs", () => {
         )
         const updates = yield* bus
           .subscribe(VcsEvent.BranchUpdated)
-          .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped({ startImmediately: true }))
+          .pipe(Stream.take(2), Stream.runLast, Effect.forkScoped({ startImmediately: true }))
 
         yield* Effect.gen(function* () {
           yield* bus.publish(FileSystem.Event.Changed, { file: path.join(directory, ".git", "HEAD"), event: "change" })
@@ -416,7 +404,7 @@ describe("Vcs", () => {
 
           yield* Deferred.succeed(release, undefined)
           yield* Fiber.join(configured)
-          expect((yield* Fiber.join(updates)).at(-1)?.data.branch).toBe("config")
+          expect(Option.getOrUndefined(yield* Fiber.join(updates))?.data.branch).toBe("config")
           expect(yield* vcs.info()).toEqual({ branch: { current: "config" } })
           expect(reads).toEqual(["initial", "filesystem", "config"])
         }).pipe(Effect.ensuring(Deferred.succeed(release, undefined)))
@@ -424,86 +412,82 @@ describe("Vcs", () => {
     ),
   )
 
-  it.live("keeps branch streams current when listeners change the selected provider", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        const bus = yield* Bus.Service
-        const scope = yield* Effect.scope
-        const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
-          Stream.takeUntil((event) => event.type === Done.type),
-          Stream.runCollect,
-          Effect.forkScoped({ startImmediately: true }),
+  synthetic.effect("keeps branch streams current when listeners change the selected provider", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      const bus = yield* Bus.Service
+      const scope = yield* Effect.scope
+      const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
+        Stream.takeUntil((event) => event.type === Done.type),
+        Stream.runCollect,
+        Effect.forkScoped({ startImmediately: true }),
+      )
+      const unsubscribe = yield* bus.listen((event) => {
+        if (
+          event.type !== VcsEvent.BranchUpdated.type ||
+          Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch !== "feature"
         )
-        const unsubscribe = yield* bus.listen((event) => {
-          if (
-            event.type !== VcsEvent.BranchUpdated.type ||
-            Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch !== "feature"
+          return Effect.void
+        return vcs
+          .transform((draft) =>
+            draft.add(provider({ info: () => Effect.succeed({ branch: { current: "listener" } }) })),
           )
-            return Effect.void
-          return vcs
-            .transform((draft) =>
-              draft.add(provider({ info: () => Effect.succeed({ branch: { current: "listener" } }) })),
-            )
-            .pipe(Scope.provide(scope), Effect.asVoid)
+          .pipe(Scope.provide(scope), Effect.asVoid)
+      })
+      yield* Effect.gen(function* () {
+        yield* vcs.transform((draft) => {
+          draft.add(provider())
+          draft.default.set("custom")
         })
-        yield* Effect.gen(function* () {
-          yield* vcs.transform((draft) => {
-            draft.add(provider())
-            draft.default.set("custom")
-          })
-          yield* bus.publish(Done, {})
-          const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
-          expect(yield* vcs.info()).toEqual({ branch: { current: "listener" } })
-          expect(events.length).toBeGreaterThanOrEqual(2)
-          expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
-        }).pipe(Effect.ensuring(unsubscribe))
-      }).pipe(provide(directory)),
-    ),
+        yield* bus.publish(Done, {})
+        const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
+        expect(yield* vcs.info()).toEqual({ branch: { current: "listener" } })
+        expect(events.length).toBeGreaterThanOrEqual(2)
+        expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
+      }).pipe(Effect.ensuring(unsubscribe))
+    }),
   )
 
-  it.live("does not roll back branch streams when an older listener finishes late", () =>
-    withTmp((directory) =>
-      Effect.gen(function* () {
-        const vcs = yield* Vcs.Service
-        const bus = yield* Bus.Service
-        const entered = yield* Deferred.make<void>()
-        const release = yield* Deferred.make<void>()
-        const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
-          Stream.takeUntil((event) => event.type === Done.type),
-          Stream.runCollect,
-          Effect.forkScoped({ startImmediately: true }),
-        )
-        const unsubscribe = yield* bus.listen((event) =>
-          event.type === VcsEvent.BranchUpdated.type &&
-          Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch === "older"
-            ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
-            : Effect.void,
-        )
+  synthetic.effect("does not roll back branch streams when an older listener finishes late", () =>
+    Effect.gen(function* () {
+      const vcs = yield* Vcs.Service
+      const bus = yield* Bus.Service
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const updates = yield* bus.subscribe([VcsEvent.BranchUpdated, Done]).pipe(
+        Stream.takeUntil((event) => event.type === Done.type),
+        Stream.runCollect,
+        Effect.forkScoped({ startImmediately: true }),
+      )
+      const unsubscribe = yield* bus.listen((event) =>
+        event.type === VcsEvent.BranchUpdated.type &&
+        Schema.decodeUnknownSync(VcsEvent.BranchUpdated.data)(event.data).branch === "older"
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void,
+      )
 
-        yield* Effect.gen(function* () {
-          const older = yield* vcs
-            .transform((draft) => {
-              draft.add(provider({ info: () => Effect.succeed({ branch: { current: "older" } }) }))
-              draft.default.set("custom")
-            })
-            .pipe(Effect.forkScoped({ startImmediately: true }))
-          yield* Deferred.await(entered)
-          yield* vcs.transform((draft) =>
-            draft.add(provider({ info: () => Effect.succeed({ branch: { current: "newer" } }) })),
-          )
-          expect(older.pollUnsafe()).toBeUndefined()
-          expect((yield* vcs.info()).branch.current).toBe("newer")
+      yield* Effect.gen(function* () {
+        const older = yield* vcs
+          .transform((draft) => {
+            draft.add(provider({ info: () => Effect.succeed({ branch: { current: "older" } }) }))
+            draft.default.set("custom")
+          })
+          .pipe(Effect.forkScoped({ startImmediately: true }))
+        yield* Deferred.await(entered)
+        yield* vcs.transform((draft) =>
+          draft.add(provider({ info: () => Effect.succeed({ branch: { current: "newer" } }) })),
+        )
+        expect(older.pollUnsafe()).toBeUndefined()
+        expect((yield* vcs.info()).branch.current).toBe("newer")
 
-          yield* Deferred.succeed(release, undefined)
-          yield* Fiber.join(older)
-          yield* bus.publish(Done, {})
-          const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
-          expect(events.length).toBeGreaterThanOrEqual(2)
-          expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
-        }).pipe(Effect.ensuring(Deferred.succeed(release, undefined).pipe(Effect.andThen(unsubscribe))))
-      }).pipe(provide(directory)),
-    ),
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(older)
+        yield* bus.publish(Done, {})
+        const events = (yield* Fiber.join(updates)).filter((event) => event.type === VcsEvent.BranchUpdated.type)
+        expect(events.length).toBeGreaterThanOrEqual(2)
+        expect(events.at(-1)?.data.branch).toBe((yield* vcs.info()).branch.current)
+      }).pipe(Effect.ensuring(Deferred.succeed(release, undefined).pipe(Effect.andThen(unsubscribe))))
+    }),
   )
 
   it.live("lists local branches by recent activity", () =>
