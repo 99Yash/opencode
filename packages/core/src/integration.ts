@@ -361,6 +361,7 @@ const layer = Layer.effect(
       Info.make({
         id: entry.ref.id,
         name: entry.ref.name,
+        ...(entry.ref.metadata === undefined ? {} : { metadata: entry.ref.metadata }),
         methods: entry.methods,
         connections,
       })
@@ -718,16 +719,7 @@ const layer = Layer.effect(
             }),
           })
         }),
-        activate: Effect.fn("Integration.connection.activate")(function* (credentialID) {
-          const credential = yield* credentials.get(credentialID)
-          if (!credential) return
-          const active = resolveConnections(
-            state.get().integrations.get(credential.integrationID),
-            yield* credentials.list(credential.integrationID),
-          )[0]
-          if (active?.type === "credential" && active.id === credentialID) return
-          yield* credentials.activate(credentialID)
-        }),
+        activate: Effect.fn("Integration.connection.activate")((credentialID) => credentials.activate(credentialID)),
         update: Effect.fn("Integration.connection.update")((credentialID, updates) =>
           credentials.update(credentialID, updates),
         ),

@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Cause, Clock, Duration, Effect, Exit, Fiber, Layer, Scope, Stream } from "effect"
-import * as TestClock from "effect/testing/TestClock"
+import { TestClock } from "effect/testing"
 import { Credential } from "@opencode-ai/core/credential"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { makeGlobalNode } from "@opencode-ai/util/effect/app-node"
@@ -52,10 +52,21 @@ describe("Integration", () => {
       const openai = Integration.ID.make("openai")
 
       yield* integrations
-        .transform((editor) => editor.update(openai, (integration) => (integration.name = "OpenAI")))
+        .transform((editor) =>
+          editor.update(openai, (integration) => {
+            integration.name = "OpenAI"
+            integration.metadata = { source: "plugin", featured: true }
+          }),
+        )
         .pipe(Scope.provide(scope))
       expect(yield* integrations.get(openai)).toEqual(
-        Integration.Info.make({ id: openai, name: "OpenAI", methods: [], connections: [] }),
+        Integration.Info.make({
+          id: openai,
+          name: "OpenAI",
+          metadata: { source: "plugin", featured: true },
+          methods: [],
+          connections: [],
+        }),
       )
 
       yield* Scope.close(scope, Exit.void)
