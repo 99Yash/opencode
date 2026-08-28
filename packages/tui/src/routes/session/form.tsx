@@ -76,6 +76,16 @@ export function FormPrompt(props: { form: FormWithLocation }) {
     const value = props.form.metadata?.["message"]
     return typeof value === "string" ? value : undefined
   })
+  const questionAnswer = createMemo(() => {
+    const tool = props.form.metadata?.tool
+    return props.form.metadata?.kind === "question" &&
+      tool &&
+      typeof tool === "object" &&
+      "id" in tool &&
+      typeof tool.id === "string"
+      ? data.session.form.answer(props.form.sessionID, tool.id)
+      : undefined
+  })
   const fields = createMemo(() => {
     const answers: Record<string, FormValue | undefined> = {}
     return props.form.fields.filter((field) => {
@@ -764,6 +774,7 @@ export function FormPrompt(props: { form: FormWithLocation }) {
 
   return (
     <box
+      visible={!(submitting() === "reply" && questionAnswer())}
       backgroundColor={theme.background.default}
       border={["left"]}
       borderColor={theme.hue.interactive[themeMode() === "light" ? 800 : 200]}
@@ -772,9 +783,25 @@ export function FormPrompt(props: { form: FormWithLocation }) {
       <Show when={submitting()}>
         <box padding={1} paddingLeft={2} gap={1}>
           <text fg={theme.text.subdued}>{props.form.title}</text>
-          <text fg={theme.text.feedback.info.default}>
-            {submitting() === "reply" ? "Sending answers..." : "Dismissing form..."}
-          </text>
+          <Show
+            when={submitting() === "reply"}
+            fallback={<text fg={theme.text.feedback.info.default}>Dismissing form...</text>}
+          >
+            <box id="session.form.answers" gap={1}>
+              <For each={fields()}>
+                {(field) => (
+                  <box>
+                    <text fg={theme.text.subdued}>{field.description ?? formLabel(field)}</text>
+                    <text fg={theme.text.default}>
+                      {field.type === "external"
+                        ? "Acknowledged"
+                        : formDisplayValue(field, store.answers[field.key], "(no answer)")}
+                    </text>
+                  </box>
+                )}
+              </For>
+            </box>
+          </Show>
         </box>
       </Show>
       {/* Keep the controls mounted so a failed request retains uncommitted editor text. */}

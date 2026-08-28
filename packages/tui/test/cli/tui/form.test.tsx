@@ -166,7 +166,8 @@ for (const width of [48, 120]) {
       await prompt.app.mockInput.pasteBracketedText("production west")
       await prompt.app.waitFor(() => prompt.app.renderer.currentFocusedEditor?.plainText === "production west")
       prompt.app.mockInput.pressEnter()
-      await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+      await prompt.app.waitForFrame((frame) => frame.includes("production west") && !frame.includes("enter submit"))
+      expect(prompt.app.captureCharFrame()).not.toContain("Sending answers")
       expect(prompt.app.captureCharFrame()).not.toContain("Composer ready")
       expect(prompt.app.captureCharFrame()).not.toContain("enter submit")
 
@@ -237,7 +238,7 @@ test("only restores the composer after the submitted form is acknowledged", asyn
   })
   try {
     prompt.app.mockInput.pressEnter()
-    await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+    await prompt.app.waitForFrame((frame) => frame.includes("Yes") && !frame.includes("enter submit"))
     expect(prompt.app.captureCharFrame()).not.toContain("Composer ready")
     pending.resolve(new Response(null, { status: 204 }))
     await prompt.app.waitForFrame((frame) => frame.includes("Composer ready"))
@@ -269,7 +270,9 @@ test("a failed review submission retains every answer and ignores competing mous
     const lines = prompt.app.captureCharFrame().split("\n")
     const row = lines.findIndex((line) => line.includes("enter submit"))
     await prompt.app.mockMouse.click(lines[row].indexOf("enter submit"), row)
-    await prompt.app.waitForFrame((frame) => frame.includes("Sending answers..."))
+    await prompt.app.waitForFrame(
+      (frame) => frame.includes("Keep the existing config") && !frame.includes("enter submit"),
+    )
     await prompt.app.mockMouse.click(lines[row].indexOf("enter submit"), row)
     await prompt.app.mockMouse.click(lines[row].indexOf("esc dismiss"), row)
     prompt.app.mockInput.pressEnter()

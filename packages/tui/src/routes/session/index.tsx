@@ -73,6 +73,7 @@ import { useEpilogue } from "../../context/epilogue"
 import { normalizePath } from "../../util/path"
 import { PermissionPrompt } from "./permission"
 import { FormPrompt } from "./form"
+import { formQuestionAnswers, QuestionAnswers } from "./question-answers"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { DialogExportResult } from "../../ui/dialog-export-result"
 import { sessionEpilogue } from "../../util/presentation"
@@ -3759,30 +3760,21 @@ function ApplyPatch(props: ToolProps) {
 }
 
 function Question(props: ToolProps) {
-  const theme = useTheme()
+  const ctx = use()
+  const data = useData()
   const questions = createMemo(() => parseQuestions(props.input.questions))
-  const answers = createMemo(() => parseQuestionAnswers(props.metadata.answers))
+  const answers = createMemo(
+    () =>
+      parseQuestionAnswers(props.metadata.answers) ??
+      formQuestionAnswers(data.session.form.answer(ctx.sessionID, props.part.id), questions().length),
+  )
   const count = createMemo(() => questions().length)
-
-  function format(answer?: ReadonlyArray<string>) {
-    if (!answer?.length) return "(no answer)"
-    return answer.join(", ")
-  }
 
   return (
     <Switch>
       <Match when={answers()}>
         <BlockTool title="# Questions" part={props.part}>
-          <box gap={1}>
-            <For each={questions()}>
-              {(q, i) => (
-                <box flexDirection="column">
-                  <text fg={theme.text.subdued}>{q.question}</text>
-                  <text fg={theme.text.default}>{format(answers()?.[i()])}</text>
-                </box>
-              )}
-            </For>
-          </box>
+          <QuestionAnswers questions={questions()} answers={answers() ?? []} />
         </BlockTool>
       </Match>
       <Match when={true}>
