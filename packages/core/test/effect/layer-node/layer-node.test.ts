@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Context, Effect, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
+import { it } from "../../lib/effect"
 
 class Value extends Context.Service<Value, { readonly value: string }>()("test/LayerNodeValue") {}
 class Greeting extends Context.Service<Greeting, { readonly value: string }>()("test/LayerNodeGreeting") {}
@@ -23,6 +24,27 @@ const value = make({ service: Value, layer: valueLayer, deps: [] })
 const greeting = make({ service: Greeting, layer: greetingLayer, deps: [value] })
 
 describe("layer node", () => {
+  it.effect("discards selected root outputs while retaining replaceable dependencies", () =>
+    Effect.gen(function* () {
+      const seen: string[] = []
+      const job = make({
+        service: Greeting,
+        layer: greetingLayer.pipe(
+          Layer.tap((context) => Effect.sync(() => seen.push(Context.get(context, Greeting).value))),
+        ),
+        deps: [value],
+      })
+      const unused = make({ service: Left, layer: Layer.effect(Left, Effect.die("unused job")), deps: [] })
+      const jobs = LayerNode.discard(LayerNode.group([job, unused]), (node) => node.name === job.name)
+      const layer: Layer.Layer<never> = LayerNode.compile(jobs, [
+        [value, Layer.succeed(Value, { value: "configured" })],
+      ])
+      const context = yield* Layer.build(layer)
+      expect(Context.getOption(context, Greeting)._tag).toBe("None")
+      expect(seen).toEqual(["hello configured"])
+    }),
+  )
+
   test("builds an untagged graph", async () => {
     const value = LayerNode.make({ service: Value, layer: valueLayer, deps: [] })
     const greeting = LayerNode.make({ service: Greeting, layer: greetingLayer, deps: [value] })

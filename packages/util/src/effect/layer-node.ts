@@ -111,8 +111,49 @@ export function group<const Items extends readonly AnyNode[]>(
   return { kind: "group", name: "group", dependencies }
 }
 
+// Select root jobs without exposing their outputs; keep their dependency graphs
+// intact so caller replacements still reach infrastructure used by those jobs.
+export function discard<A, E, T extends Tag | undefined>(
+  root: Node<A, E, T>,
+  select: (node: Node<unknown, unknown, Tag | undefined>) => boolean = () => true,
+): Node<never, E, T> {
+  return {
+    kind: "group",
+    name: "group",
+    tag: root.tag,
+    dependencies: flatten(root)
+      .filter(select)
+      .map((node) => ({
+        ...node,
+        implementation: Layer.isLayer(node.implementation)
+          ? Layer.flatMap(node.implementation, () => Layer.empty)
+          : undefined,
+      })),
+  }
+}
+
 export type Replacement = readonly [source: AnyNode, replacement: AnyNode | Layer.Any]
 export type Replacements = readonly Replacement[]
+export type ReplacementError<Items extends Replacements> = Items[number][1] extends infer Item
+  ? Item extends Layer.Any
+    ? Layer.Error<Item>
+    : Error<Item>
+  : never
+export type ReplacementServices<Items extends Replacements> = Items[number][1] extends infer Item
+  ? Item extends Layer.Any
+    ? Layer.Services<Item>
+    : never
+  : never
+
+// Open composition can retain new errors and requirements, but replacements
+// must still provide the original output and preserve node placement tags.
+export type ComposableReplacements<Items extends Replacements> = Items & {
+  readonly [K in keyof Items]: Items[K] extends readonly [Node<infer A, unknown, infer T>, infer Replacement]
+    ? Replacement extends Node<NoInfer<A>, unknown, T> | Layer.Layer<NoInfer<A>, unknown, unknown>
+      ? unknown
+      : { readonly "Invalid replacement": Replacement }
+    : { readonly "Invalid replacement": Items[K] }
+}
 
 type CheckReplacementErrors<SourceError, ReplacementError> = [Exclude<ReplacementError, SourceError>] extends [never]
   ? unknown
