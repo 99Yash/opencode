@@ -19,20 +19,22 @@ export { Info, Ref, response }
  */
 export function instanceKey(ref: Ref): Instance.Key {
   const directory = process.platform === "win32" ? path.normalize(ref.directory) : ref.directory
-  return Instance.Key.make(ref.workspaceID ? `location:${ref.workspaceID}:${directory}` : `location:${directory}`)
+  return Instance.Key.make(
+    ref.workspaceID ? `location:${encodeURIComponent(ref.workspaceID)}:${directory}` : `location:${directory}`,
+  )
 }
 
 /** Inverts {@link instanceKey}. Keys not minted by the location policy are a defect. */
 export function parseInstanceKey(key: Instance.Key): Ref {
   if (!key.startsWith("location:")) throw new Error(`Unknown instance key: ${key}`)
   const rest = key.slice("location:".length)
-  // Workspace IDs are `wrk`-prefixed and colon-free; absolute paths never start with `wrk`.
+  // Escaped workspace IDs start with `wrk`; absolute paths never do.
   if (!rest.startsWith("wrk")) return Ref.make({ directory: AbsolutePath.make(rest) })
   const separator = rest.indexOf(":")
   if (separator === -1) throw new Error(`Unknown instance key: ${key}`)
   return Ref.make({
     directory: AbsolutePath.make(rest.slice(separator + 1)),
-    workspaceID: WorkspaceID.make(rest.slice(0, separator)),
+    workspaceID: WorkspaceID.make(decodeURIComponent(rest.slice(0, separator))),
   })
 }
 

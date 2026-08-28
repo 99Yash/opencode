@@ -42,6 +42,7 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { tmpdir } from "./fixture/tmpdir"
 import { tempGlobalLayer } from "./fixture/global"
+import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
 import { toolDefinitions, waitForTool } from "./lib/tool"
 import { Database } from "../src/database/database"
@@ -66,14 +67,7 @@ const activityLocations = Layer.effect(
       (key: Instance.Key) => {
         const ref = Location.parseInstanceKey(key)
         // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-        return Layer.succeed(
-          Location.Service,
-          Location.Service.of({
-            directory: ref.directory,
-            workspaceID: ref.workspaceID,
-            project: { id: Project.ID.global, directory: ref.directory, canonical: ref.directory },
-          }),
-        ) as unknown as Layer.Layer<LocationServices>
+        return Layer.succeed(Location.Service, location(ref)) as unknown as Layer.Layer<LocationServices>
       },
       { idleTimeToLive: Duration.infinity },
     ),
@@ -1027,19 +1021,16 @@ describe("LocationServiceMap", () => {
 })
 
 describe("Location.instanceKey", () => {
-  // The two documented forms are the built-in assignment policy's contract:
-  // workspace IDs are `wrk`-prefixed and colon-free, absolute paths never
-  // start with `wrk`, so the forms cannot collide.
   test("mints the documented forms and parses them back", () => {
-    const local = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key") })
-    expect(Location.instanceKey(local)).toBe(Instance.Key.make("location:/tmp/instance-key"))
+    const local = Location.Ref.make({ directory: AbsolutePath.make(path.resolve("instance-key")) })
+    expect(Location.instanceKey(local)).toBe(Instance.Key.make(`location:${local.directory}`))
     expect(Location.parseInstanceKey(Location.instanceKey(local))).toEqual(local)
 
     const workspace = Location.Ref.make({
-      directory: AbsolutePath.make("/workspace/repo"),
+      directory: AbsolutePath.make(path.resolve("workspace", "repo")),
       workspaceID: Workspace.ID.make("wrk_instance_key"),
     })
-    expect(Location.instanceKey(workspace)).toBe(Instance.Key.make("location:wrk_instance_key:/workspace/repo"))
+    expect(Location.instanceKey(workspace)).toBe(Instance.Key.make(`location:wrk_instance_key:${workspace.directory}`))
     expect(Location.parseInstanceKey(Location.instanceKey(workspace))).toEqual(workspace)
   })
 
@@ -1047,6 +1038,22 @@ describe("Location.instanceKey", () => {
     const explicit = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key"), workspaceID: undefined })
     const implicit = Location.Ref.make({ directory: AbsolutePath.make("/tmp/instance-key") })
     expect(Location.instanceKey(explicit)).toBe(Location.instanceKey(implicit))
+  })
+
+  test("round-trips workspace IDs containing key separators and escapes", () => {
+    const ref = Location.Ref.make({
+      directory: AbsolutePath.make(path.resolve("repo")),
+      workspaceID: Workspace.ID.make("wrk_team:alpha%3A"),
+    })
+    expect(Location.instanceKey(ref)).toBe(Instance.Key.make(`location:wrk_team%3Aalpha%253A:${ref.directory}`))
+    expect(Location.parseInstanceKey(Location.instanceKey(ref))).toEqual(ref)
+  })
+
+  test.skipIf(process.platform !== "win32")("normalizes Windows separators before minting", () => {
+    const ref = Location.Ref.make({ directory: AbsolutePath.make("C:\\workspace\\repo") })
+    const mixed = Location.Ref.make({ directory: AbsolutePath.make("C:/workspace\\repo") })
+    expect(Location.instanceKey(mixed)).toBe(Location.instanceKey(ref))
+    expect(Location.parseInstanceKey(Location.instanceKey(mixed))).toEqual(ref)
   })
 
   test("rejects keys not minted by the location policy", () => {

@@ -20,42 +20,38 @@ export function layer(options: { readonly timeToLive?: Duration.Input; readonly 
       const bus = yield* Bus.Service
       const locations = yield* LocationServiceMap.Service
       const timeToLive = Duration.toMillis(options.timeToLive ?? "60 minutes")
-      const entries = new Map<Instance.Key, { readonly ref: Location.Ref; expiresAt: number }>()
-      const touch = (ref: Location.Ref) =>
+      const entries = new Map<Instance.Key, number>()
+      const touch = (key: Instance.Key) =>
         Effect.sync(() => {
-          entries.set(Location.instanceKey(ref), { ref, expiresAt: clock.currentTimeMillisUnsafe() + timeToLive })
+          entries.set(key, clock.currentTimeMillisUnsafe() + timeToLive)
         })
 
       const unsubscribe = yield* bus.listen((event) => {
         if (!isSessionEvent(event)) return Effect.void
         const location = event.location
         if (!location) return Effect.void
-        return RcMap.has(locations.rcMap, Location.instanceKey(location)).pipe(
-          Effect.flatMap((active) => (active ? touch(location) : Effect.void)),
-        )
+        const key = Location.instanceKey(location)
+        return RcMap.has(locations.rcMap, key).pipe(Effect.flatMap((active) => (active ? touch(key) : Effect.void)))
       })
       yield* Effect.addFinalizer(() => unsubscribe)
       yield* Effect.gen(function* () {
         yield* Effect.sleep(options.sweepInterval ?? "1 minute")
         const cached = new Set(yield* RcMap.keys(locations.rcMap))
-        yield* Effect.forEach(
-          cached,
-          (key) => (entries.has(key) ? Effect.void : touch(Location.parseInstanceKey(key))),
-          { discard: true },
-        )
+        yield* Effect.forEach(cached, (key) => (entries.has(key) ? Effect.void : touch(key)), { discard: true })
         for (const id of entries.keys()) {
           if (!cached.has(id)) entries.delete(id)
         }
         const now = clock.currentTimeMillisUnsafe()
-        const expired = Array.from(entries.values()).filter((entry) => entry.expiresAt <= now)
+        const expired = Array.from(entries).filter(([, expiresAt]) => expiresAt <= now)
         yield* Effect.forEach(
           expired,
-          (entry) => {
-            entries.delete(Location.instanceKey(entry.ref))
+          ([key]) => {
+            entries.delete(key)
+            const ref = Location.parseInstanceKey(key)
             return Effect.logInfo("location services evicted", {
-              directory: entry.ref.directory,
-              workspaceID: entry.ref.workspaceID,
-            }).pipe(Effect.andThen(locations.invalidate(entry.ref)))
+              directory: ref.directory,
+              workspaceID: ref.workspaceID,
+            }).pipe(Effect.andThen(locations.invalidate(ref)))
           },
           { discard: true },
         )

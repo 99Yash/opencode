@@ -8,17 +8,16 @@ import { Effect, Layer, LayerMap } from "effect"
 import { tmpdir } from "./tmpdir"
 
 /**
- * A LocationServiceMap whose every instance resolves to the given services.
- * Unit fixtures provide only the services their test exercises, so the
- * narrowing assertion each caller used to repeat lives here once.
+ * Builds isolated services per key using the real map and location policy.
+ * Only provided services are widened; required dependencies remain typed.
  */
-export function stubLocations<A, E, R>(services: Layer.Layer<A, E, R>) {
+export function stubLocations<A, R>(services: Layer.Layer<A, Instance.Error, R>) {
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-  const layer = services as unknown as Layer.Layer<LocationServices>
+  const layer = services as unknown as Layer.Layer<LocationServices, Instance.Error, R>
   return Layer.effect(
     LocationServiceMap.Service,
     Effect.map(
-      LayerMap.make((_: Instance.Key) => layer),
+      LayerMap.make((_: Instance.Key) => Layer.fresh(layer)),
       LocationServiceMap.fromKeyed,
     ),
   )

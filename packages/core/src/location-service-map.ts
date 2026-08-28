@@ -12,9 +12,7 @@ export interface Interface {
   ) => Effect.Effect<Context.Context<Instance.Services>, Instance.Error, Scope.Scope>
   readonly invalidate: (ref: Location.Ref) => Effect.Effect<void>
   /** Assignment lookup: services for the instance the Session belongs to. */
-  readonly forSession: (session: {
-    readonly location: Location.Ref
-  }) => Layer.Layer<Instance.Services, Instance.Error>
+  readonly forSession: (session: { readonly location: Location.Ref }) => Layer.Layer<Instance.Services, Instance.Error>
   /** The string-keyed store; keys are minted by the assignment policy. */
   readonly rcMap: RcMap.RcMap<Instance.Key, Context.Context<Instance.Services>, Instance.Error>
 }

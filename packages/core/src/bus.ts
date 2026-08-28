@@ -741,15 +741,15 @@ export function configured(options?: Options) {
                 Option.match(location, {
                   onNone: () => stream,
                   onSome: (location) => {
-                    const self = Location.instanceKey({
-                      directory: location.directory,
-                      workspaceID: location.workspaceID,
-                    })
+                    const self = Location.instanceKey(location)
                     return stream.pipe(
                       Stream.filter((event) => {
                         const keys = routes.get(event)
                         if (keys) return keys.includes(self)
-                        return !event.location || Location.instanceKey(event.location) === self
+                        if (!event.location) return true
+                        const key = Location.instanceKey(event.location)
+                        routes.set(event, [key])
+                        return key === self
                       }),
                     )
                   },

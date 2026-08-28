@@ -30,7 +30,7 @@ const it = testEffect(
     ],
   ),
 )
-const unavailableLocations = stubLocations(Layer.effectDiscard(Effect.fail(new Error("broken location"))))
+const unavailableLocations = stubLocations(Layer.effectDiscard(Effect.die(new Error("broken location"))))
 const itWithUnavailableDestination = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),

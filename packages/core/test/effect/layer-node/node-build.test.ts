@@ -10,6 +10,7 @@ import type { LocationError, LocationServices } from "@opencode-ai/core/location
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { tmpdir } from "../../fixture/tmpdir"
+import { location } from "../../fixture/location"
 
 class Value extends Context.Service<Value, { readonly value: string }>()("test/TagValue") {}
 class Result extends Context.Service<Result, { readonly value: string }>()("test/TagResult") {}
@@ -53,14 +54,7 @@ describe("node build", () => {
         const keyed = yield* LayerMap.make(
           (key: Instance.Key) => {
             const ref = Location.parseInstanceKey(key)
-            return Layer.succeed(
-              Location.Service,
-              Location.Service.of({
-                directory: ref.directory,
-                workspaceID: ref.workspaceID,
-                project: { id: Project.ID.global, directory: service.directory, canonical: service.directory },
-              }),
-            )
+            return Layer.succeed(Location.Service, location(ref, { projectDirectory: service.directory }))
           },
           { idleTimeToLive: "1 minute" },
         )
