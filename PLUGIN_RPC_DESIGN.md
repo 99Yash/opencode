@@ -2,7 +2,7 @@
 
 Design notes and implementation record. Shared definitions, the location-scoped
 Core registry, local Promise/Effect plugin APIs, HTTP dispatch, external typed
-clients, shared event connections, and durable Bus publication are implemented.
+clients, shared event connections, and Bus publication are implemented.
 Plugin log/replay APIs and per-namespace OpenAPI discovery are intentionally deferred.
 
 ## First Slice
@@ -35,7 +35,6 @@ also be declared as an RPC method.
 - Promise RPC stays runtime-independent from Effect and accepts only portable definitions. Effect clients decode Effect codecs normally.
 - Native and RPC Promise plugin subscriptions share scoped iterator cleanup and respect subscriber-local signals.
 - Public protocol/client/OpenAPI artifacts are regenerated; plugin/client guides document the feature.
-- Real SDK integration tests cover cold-start calls, cross-style plugins, locations, events, overrides, cancellation, and shutdown.
 
 Intended usage passes one concrete RPC definition. Conditional definition
 unions and numeric event names are not part of the supported usage being designed.
@@ -47,9 +46,7 @@ unions and numeric event names are not part of the supported usage being designe
 - Infer types for method arguments, results, handlers, and event payloads from a shared contract.
 - Support both Promise and Effect execution without forcing plugin authors to use Effect.
 
-Custom events may be ephemeral or durable. Both use normal Bus publication.
-Durable events use existing Bus sequencing and persistence; no plugin-facing
-log replay/follow API is exposed yet.
+Custom events are ephemeral and use normal Bus publication.
 
 ## Shared Definition
 
@@ -100,7 +97,6 @@ export const Acme = Rpc.define({
   events: {
     updated: {
       schema: z.object({ itemID: z.string(), text: z.string() }),
-      durable: { version: 1, aggregate: "itemID" },
     },
     progress: {
       schema: z.object({ percent: z.number() }),
@@ -116,11 +112,8 @@ separate event builder or explicit `type` field is required. Each map key is a
 local event name; the public event type is automatically prefixed with the namespace:
 `rpc.${namespace}.${eventName}`. The example defines `rpc.acme.updated` and `rpc.acme.progress`.
 
-Each event definition has a `schema` accepting `Tool.ValueSchema` and optional
-`durable: { version, aggregate }`. Omit it for an ephemeral event. When present,
-`aggregate` names a string field in the encoded/output payload passed to Bus.
-Publishing uses the normal durable Bus path, including aggregate validation,
-sequence allocation, and configured persistence.
+Each event definition has a `schema` accepting `Tool.ValueSchema`. Publishing
+uses the normal ephemeral Bus path.
 
 Custom event data must be an object. Effect and Standard Schema definitions
 enforce that in their inferred types; plain JSON Schema is checked when emitting.
@@ -128,7 +121,7 @@ Scalars, arrays, `null`, and `undefined` are not valid event payloads.
 
 Publishing supplies only the payload. Subscribers receive the standard event
 envelope with `id`, `created`, `type`, `data`, required `location`, optional
-`metadata`, and, for durable events, `durable: { aggregateID, seq, version }`.
+`metadata`.
 OpenCode supplies the emitting plugin instance's location; publishers do not
 provide or override it.
 
@@ -142,8 +135,7 @@ filter using the required `event.location` field. Server plugin subscriptions
 are bound to the calling plugin instance's location.
 
 Live subscriptions do not replay missed events. Events emitted while a consumer
-is disconnected are missed, including durable events. Persistence does not turn
-the live subscription into replay; there is no plugin log API in this design yet.
+is disconnected are missed; there is no plugin log API in this design yet.
 
 ## Client API
 
@@ -249,11 +241,12 @@ server to separately import a well-known RPC export from each plugin package.
 The request body is `{ input?: unknown }` and the success body is `{ output?: unknown }`.
 Omitted fields represent no value. Location uses the existing native deep-object
 query/header resolution; call metadata is not part of the method input.
-The endpoint uses the standard `RpcError` HTTP wrapper around a generic
-`{ type, message, data? }` RPC failure. Typed clients remove that transport
-wrapper and decode declared error data through the selected method's error map.
-Validation and lookup failures retain reserved `rpc.*` types. Interruption is
-not converted to a method failure.
+The endpoint uses standard HTTP error wrappers around generic
+`{ type, message, data? }` RPC failures. Declared and request failures use
+`RpcError` at 400; unexpected defects use `RpcInternalError` at 500. Typed
+clients remove those transport wrappers and decode declared error data through
+the selected method's error map. Validation and lookup failures retain reserved
+`rpc.*` types. Interruption is not converted to a method failure.
 
 ## Deferred OpenAPI Integration
 
@@ -324,16 +317,14 @@ Reuse the existing `/api/event` stream for custom RPC events alongside native
 events. Do not add a separate event endpoint per namespace.
 
 The native stream carries the actual `rpc.<namespace>.<event>` type and direct
-JSON object payload. Ephemeral and durable events share that type pattern; durable events
-also carry the normal Bus envelope. Reserving the `rpc.` prefix keeps dynamic
-events disjoint from native event literals, preserving native union narrowing.
+JSON object payload. Reserving the `rpc.` prefix keeps dynamic events disjoint
+from native event literals, preserving native union narrowing.
 
 The subclient's `subscribe` API and Promise `on` wrapper match namespace and local
 name, then apply the declared payload schema. External
 clients receive matching namespace events across all locations. Server plugin RPC
 subscriptions stay bound to their own location. The shared definition supplies
-the payload schema and inferred types. Durable publication may persist, but live
-delivery still has no implicit replay.
+the payload schema and inferred types. Live delivery has no implicit replay.
 
 ### Shared Connection Lifecycle
 
@@ -347,15 +338,15 @@ Handwritten public client facades wrap the generated raw event transport with
 this shared source. Server plugin subscriptions use the internal bus directly
 and do not open HTTP event connections.
 
-Cache and copy only the latest `server.connected` marker for late subscribers,
+Cache only the latest `server.connected` marker for late subscribers,
 so native connection consumers still receive their initial handshake. Do not
-replay business events. A replacement connection waits for the previous source's
-cleanup rather than overlapping it.
+replay business events. A replacement connection may open while the previous
+source finishes cleanup.
 
-Each subscriber has a 4096-event queue limit, matching the existing native
-overflow contract. A slow subscriber fails independently; it does not block
-other consumers or create an unbounded queue. Source EOF/failure ends current
-subscriptions, without automatic retry. Consumers resubscribe after recovery.
+The shared source advances after every active subscriber accepts the current
+event. Consumers that perform slow work should drain and buffer events themselves.
+Source EOF/failure ends current subscriptions, without automatic retry. Consumers
+resubscribe after recovery.
 Promise `on` logs callback/source failures and ends its listener.
 Callbacks may be async: each listener awaits its callback before processing the
 next event, so rejected callbacks are caught and only that listener ends.

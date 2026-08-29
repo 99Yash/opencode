@@ -17,7 +17,6 @@ import { it } from "../../core/test/lib/effect"
 import { createRoutes } from "../src/routes"
 
 type RpcEvent = Extract<OpenCodeEvent, { type: `rpc.${string}` }>
-type DurableRpcEvent = RpcEvent & { durable: NonNullable<RpcEvent["durable"]> }
 
 const authorization = `Basic ${btoa("opencode:secret")}`
 
@@ -159,11 +158,6 @@ it.live("dispatches RPC wrappers with query, header and default locations and ge
           body: {},
           error: { type: "rejected", message: "handler failed", data: { reason: "declared" } },
         },
-        {
-          route: "transport.echo/defect",
-          body: {},
-          error: { type: "rpc.internal", message: "handler defect" },
-        },
         { route: "transport.echo/echo", body: { input: 123 }, error: { type: "rpc.invalid_input" } },
         { route: "transport.echo/invalid", body: {}, error: { type: "rpc.invalid_output" } },
       ],
@@ -178,6 +172,13 @@ it.live("dispatches RPC wrappers with query, header and default locations and ge
           })
         }),
     )
+    const defect = yield* server.call("transport.echo/defect")
+    expect(defect.status).toBe(500)
+    expect(yield* Effect.promise(() => defect.json())).toEqual({
+      _tag: "RpcInternalError",
+      type: "rpc.internal",
+      message: "handler defect",
+    })
     const malformed = yield* server.call("transport.echo/echo", "not a wrapper")
     expect(malformed.status).toBe(400)
     expect(yield* Effect.promise(() => malformed.json())).toMatchObject({
@@ -335,9 +336,7 @@ it.live("public SSE and generic native plugin subscriptions receive RPC events a
           .split("\n\n")
           .filter((frame) => frame.startsWith("data: "))
           .map((frame) => Schema.decodeUnknownSync(Schema.fromJsonString(OpenCodeEvent))(frame.slice(6)))
-          .filter(
-            (event): event is RpcEvent => event.type === "rpc.updates.updated" && event.durable === undefined,
-          ),
+          .filter((event): event is RpcEvent => event.type === "rpc.updates.updated"),
       )
     }
     yield* Deferred.await(observed)
@@ -354,96 +353,5 @@ it.live("public SSE and generic native plugin subscriptions receive RPC events a
       },
     ])
     expect(received).toEqual(events)
-    expect(events.every((event) => event.durable === undefined)).toBe(true)
-  }),
-)
-
-it.live("durable RPC events use the Bus sequence on the public stream", () =>
-  Effect.gen(function* () {
-    const Updates = Rpc.define({
-      namespace: "durable-updates",
-      methods: {
-        emit: {
-          input: Schema.Struct({ itemID: Schema.String, text: Schema.String }),
-          output: Schema.Undefined,
-        },
-      },
-      events: {
-        recorded: {
-          schema: Schema.Struct({ itemID: Schema.String, text: Schema.String }),
-          durable: { version: 2, aggregate: "itemID" },
-        },
-      },
-    })
-    const server = yield* fixture([
-      Plugin.define({
-        id: "durable-updates-implementer",
-        effect: (ctx) =>
-          Effect.gen(function* () {
-            const registration = yield* ctx.rpc.register(Updates, {
-              emit: (input): Effect.Effect<undefined> =>
-                registration.events.emit("recorded", input).pipe(Effect.as(undefined), Effect.orDie),
-            })
-          }).pipe(Effect.orDie),
-      }),
-    ])
-    yield* server.boot(server.first)
-    const response = yield* Effect.promise(() =>
-      server.handler(
-        new Request("http://opencode.local/api/event", {
-          headers: { authorization, "x-opencode-directory": encodeURIComponent(server.first) },
-        }),
-      ),
-    )
-    if (!response.body) throw new Error("Expected an SSE body")
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
-    yield* Effect.addFinalizer(() => Effect.promise(() => reader.cancel()))
-    expect((yield* Effect.promise(() => reader.read())).value).toContain('"type":"server.connected"')
-    yield* server.call(
-      "durable-updates/emit",
-      { input: { itemID: "item-1", text: "first" } },
-      { directory: server.first },
-    )
-    yield* server.call(
-      "durable-updates/emit",
-      { input: { itemID: "item-1", text: "second" } },
-      { directory: server.first },
-    )
-    const events: DurableRpcEvent[] = []
-    while (events.length < 2) {
-      const chunk = yield* Effect.promise(() => reader.read())
-      if (chunk.done) throw new Error("Event stream closed before durable RPC events arrived")
-      events.push(
-        ...chunk.value
-          .split("\n\n")
-          .filter((frame) => frame.startsWith("data: "))
-          .map((frame) => Schema.decodeUnknownSync(Schema.fromJsonString(OpenCodeEvent))(frame.slice(6)))
-          .filter(
-            (event): event is DurableRpcEvent =>
-              event.type === "rpc.durable-updates.recorded" && event.durable !== undefined,
-          ),
-      )
-    }
-    expect(
-      events.map((event) => ({
-        aggregateID: event.durable.aggregateID,
-        seq: Number(event.durable.seq),
-        version: Number(event.durable.version),
-        data: event.data,
-      })),
-    ).toEqual([
-      {
-        aggregateID: "item-1",
-        seq: 0,
-        version: 2,
-        data: { itemID: "item-1", text: "first" },
-      },
-      {
-        aggregateID: "item-1",
-        seq: 1,
-        version: 2,
-        data: { itemID: "item-1", text: "second" },
-      },
-    ])
   }),
 )

@@ -21,6 +21,16 @@ export class RpcError extends Schema.TaggedError<RpcError>()(
   { httpApiStatus: 400 },
 ) {}
 
+export class RpcInternalError extends Schema.TaggedError<RpcInternalError>()(
+  "RpcInternalError",
+  {
+    type: Schema.Literal("rpc.internal"),
+    message: Schema.String,
+    data: Schema.optional(Schema.Unknown),
+  },
+  { httpApiStatus: 500 },
+) {}
+
 export class UnauthorizedError extends Schema.TaggedError<UnauthorizedError>()(
   "UnauthorizedError",
   { message: Schema.String },

@@ -1,7 +1,7 @@
 import { optional } from "@opencode-ai/schema/schema"
 import { Schema } from "effect"
 import { HttpApiEndpoint, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { RpcError } from "../errors.js"
+import { RpcError, RpcInternalError } from "../errors.js"
 import { LocationQuery, locationQueryOpenApi } from "./location.js"
 
 export const RpcInput = Schema.Struct({ input: optional(Schema.Unknown) }).annotate({ identifier: "Rpc.Input" })
@@ -14,7 +14,7 @@ export const RpcGroup = HttpApiGroup.make("server.rpc")
       query: LocationQuery,
       payload: RpcInput,
       success: RpcOutput,
-      error: RpcError,
+      error: [RpcError, RpcInternalError],
     })
       .annotateMerge(locationQueryOpenApi)
       .annotateMerge(

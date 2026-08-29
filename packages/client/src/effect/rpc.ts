@@ -1,7 +1,7 @@
 export * as RpcClientRuntime from "./rpc.js"
 
 import type { Rpc } from "@opencode-ai/schema/rpc"
-import type { RpcError } from "@opencode-ai/protocol/errors"
+import type { RpcError, RpcInternalError } from "@opencode-ai/protocol/errors"
 import type { OpenCodeEvent } from "@opencode-ai/protocol/groups/event"
 import { Effect, Stream } from "effect"
 import type { RpcArguments, RpcCallOptions } from "../promise/rpc.js"
@@ -34,7 +34,7 @@ export interface RpcApi<E = never, Options = RpcCallOptions, EventError = E> {
 export function make<CallError, EventError>(
   call: (input: RpcCallInput, options?: RpcCallOptions) => Effect.Effect<RpcCallOutput, CallError>,
   subscribe: () => Stream.Stream<OpenCodeEvent, EventError>,
-): RpcApi<Exclude<CallError, RpcError> | Rpc.SystemError, RpcCallOptions, EventError> {
+): RpcApi<Exclude<CallError, RpcError | RpcInternalError> | Rpc.SystemError, RpcCallOptions, EventError> {
   return <D extends Rpc.Definition>(definition: D) => {
     const methods = Object.fromEntries(
       Object.entries(definition.methods).map(([name, method]) => [
@@ -76,7 +76,7 @@ export function make<CallError, EventError>(
             )
           },
       },
-    }) as RpcClient<D, Exclude<CallError, RpcError> | Rpc.SystemError, RpcCallOptions, EventError>
+    }) as RpcClient<D, Exclude<CallError, RpcError | RpcInternalError> | Rpc.SystemError, RpcCallOptions, EventError>
   }
 }
 

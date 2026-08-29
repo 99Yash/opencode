@@ -72,8 +72,8 @@ for await (const event of client.event.subscribe()) {
 Native and RPC event subscribers share one lazy connection per client. Client,
 handle, and iterable creation open no event connection; consumption starts it.
 Breaking iteration or aborting a subscriber ends only that iterator. The last
-subscriber leaving closes the connection. A slow subscriber that exceeds the
-4096-event queue fails without stopping other consumers.
+subscriber leaving closes the connection. The shared source waits for active
+subscribers to accept each event; consumers should buffer before performing slow work.
 
 Subscriptions are live-only, with no replay or automatic reconnection. A source
 failure ends current subscriptions; subscribe again after recovery. A late native
@@ -85,7 +85,6 @@ Import a plugin's shared contract and pass it to `client.rpc`:
 
 ```ts
 import { OpenCode } from "@opencode-ai/client"
-import { Rpc } from "@opencode-ai/plugin/rpc"
 import { Acme } from "opencode-acme-plugin/rpc"
 
 const acme = client.rpc(Acme)
@@ -97,14 +96,6 @@ const result = await acme.search(
 const unsubscribe = acme.events.on("updated", (event) => {
   console.log(event.type, event.location.directory, event.data.text)
 })
-
-try {
-  await acme.search({ query: "missing" })
-} catch (error) {
-  if (Rpc.isError(Acme, "search", error) && error.type === "not_found") {
-    console.log(error.message, error.data.query)
-  }
-}
 ```
 
 The second optional method argument holds `location`, `signal`, and `headers`,
@@ -119,12 +110,11 @@ plain JSON Schema definitions and does
 not run schema parsers locally: the server returns already parsed and transformed
 output. Effect Schema definitions require the Effect client.
 
-Declared method errors reject like errors from other Promise client endpoints.
-`Rpc.isError(definition, method, error)` narrows a caught value to the union
-inferred from that method's error map. The generic HTTP `RpcError` wrapper is
-removed by the typed subclient. Reserved `rpc.*` framework failures remain plain
-RPC failures, while unrelated authentication, transport, and protocol errors keep
-their normal client representations.
+Declared method errors reject like errors from other Promise client endpoints,
+and caught errors remain untyped. Generic HTTP RPC error wrappers are removed by
+the typed subclient. Reserved `rpc.*` framework failures remain plain RPC failures,
+while unrelated authentication, transport, and protocol errors keep their normal
+client representations.
 
 RPC subscriptions use local names and receive that namespace's events across all
 locations. Inspect the required `event.location` to filter them. `events.subscribe`
@@ -139,8 +129,7 @@ for await (const event of acme.events.subscribe("updated")) {
 `events.on` is a convenience wrapper over the same source. It returns unsubscribe;
 async callbacks are awaited sequentially. Callback or source failures are logged
 and end that listener. Native and typed subscriptions receive the same normal
-`rpc.<namespace>.<event>` envelope with direct object event data. Durable definitions
-also expose the declared `aggregateID`, `seq`, and `version`, but live subscriptions
+`rpc.<namespace>.<event>` envelope with direct object event data. Live subscriptions
 do not replay missed events.
 
 The server plugin must be configured and implement the namespace; importing a

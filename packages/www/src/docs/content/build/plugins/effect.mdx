@@ -680,9 +680,8 @@ yield *
 ```
 
 There is no Effect callback-style `on` API. Subscriptions are location-bound,
-live-only, and close when Stream consumption stops. Durable definitions still use
-the normal Bus sequence and persistence path; this API does not currently expose
-replay. Method `errors` maps become typed Effect error channels. Construct one
+live-only, and close when Stream consumption stops. Events use the normal
+ephemeral Bus path. Method `errors` maps become typed Effect error channels. Construct one
 with `context.error(...)` and fail it with `Effect.fail`; unexpected failures and
 transport errors remain separate from the declared method errors.
 

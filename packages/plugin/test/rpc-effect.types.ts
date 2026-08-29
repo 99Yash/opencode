@@ -142,7 +142,6 @@ Effect.gen(function* () {
   const active = yield* registration
   yield* active.events.emit("updated", { itemID: "123", text: "hello" })
   yield* active.events.emit("counted", { count: 42 })
-  yield* active.events.emit("recorded", { itemID: "item-1", text: "saved" })
   yield* active.events.emit(...emission)
   yield* active.dispose
   // @ts-expect-error Published payloads are inferred from the selected event schema.

@@ -69,7 +69,8 @@ test("Promise event streams support cancellation", async () => {
     expect(await events.next()).toMatchObject({ value: { type: "server.connected" }, done: false })
     const pending = events.next()
     controller.abort()
-    expect(await pending).toEqual({ done: true, value: undefined })
+    const error = await pending.catch((error: unknown) => error)
+    expect(error).toMatchObject({ name: "ClientError", reason: "Transport" })
     await events.return?.()
   }
 })

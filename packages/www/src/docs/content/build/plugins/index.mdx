@@ -603,7 +603,6 @@ export const Acme = Rpc.define({
   events: {
     updated: {
       schema: z.object({ itemID: z.string(), text: z.string() }),
-      durable: { version: 1, aggregate: "itemID" },
     },
   },
 })
@@ -678,14 +677,11 @@ callback convenience returning unsubscribe. Plugin unload closes its subscriptio
 
 Event keys are local names. Subscribers see normal prefixed types such as
 `rpc.acme.updated`, with `id`, `created`, direct `data`, required `location`, and optional
-`metadata`. Event definitions may include `durable: { version, aggregate }`, where
-`aggregate` names a string field in the schema output passed to Bus. Durable emits
-use the normal Bus sequence and configured persistence flow, and subscribers also
-receive `durable: { aggregateID, seq, version }`.
+`metadata`. Events publish through the normal ephemeral Bus path.
 
 Subscriptions remain live-only: there is no plugin log/replay API yet, and events
-while disconnected are missed even when they were published durably. The method
-name `events` is reserved for the subclient's event API.
+while disconnected are missed. The method name `events` is reserved for the
+subclient's event API.
 
 External [clients](/build/client#plugin-rpc) use `client.rpc(Acme)` and receive
 that namespace's events across all locations. The native `/api/event` stream and

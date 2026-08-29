@@ -1,19 +1,9 @@
 export * as SharedEvents from "./shared-events.js"
 
-export class SubscriberOverflowError extends Error {
-  constructor() {
-    super("Event subscriber queue overflow")
-    this.name = "SubscriberOverflowError"
-  }
-}
-
-export function make<A extends { readonly type: string }>(
-  connect: (signal: AbortSignal) => AsyncIterable<A>,
-  options?: { readonly capacity?: number },
-) {
+export function make<A extends { readonly type: string }>(connect: (signal: AbortSignal) => AsyncIterable<A>) {
   type Completion = { readonly error: unknown } | Record<string, never>
   type Subscriber = {
-    push: (value: A) => void
+    push: (value: A) => Promise<void>
     finish: (completion: Completion) => void
   }
   type Connection = {
@@ -21,16 +11,15 @@ export function make<A extends { readonly type: string }>(
     subscribers: Set<Subscriber>
     connected?: A
     read?: ReturnType<typeof Promise.withResolvers<IteratorResult<A>>>
-    done: ReturnType<typeof Promise.withResolvers<void>>
   }
 
-  const capacity = options?.capacity ?? 4096
   let current: Connection | undefined
 
   function stop(connection: Connection) {
     connection.connected = undefined
     connection.read?.resolve({ done: true, value: undefined })
     connection.controller.abort()
+    if (current === connection) current = undefined
   }
 
   async function run(connection: Connection) {
@@ -46,8 +35,8 @@ export function make<A extends { readonly type: string }>(
         const item = await connection.read.promise
         connection.read = undefined
         if (item.done || connection.controller.signal.aborted) break
-        if (item.value.type === "server.connected") connection.connected = { ...item.value }
-        connection.subscribers.forEach((subscriber) => subscriber.push(item.value))
+        if (item.value.type === "server.connected") connection.connected = item.value
+        await Promise.all(Array.from(connection.subscribers, (subscriber) => subscriber.push(item.value)))
       }
     } catch (error) {
       completion = { error }
@@ -59,8 +48,6 @@ export function make<A extends { readonly type: string }>(
         if (!("error" in completion)) completion = { error }
       }
       connection.subscribers.forEach((subscriber) => subscriber.finish(completion))
-      current = undefined
-      connection.done.resolve()
     }
   }
 
@@ -68,15 +55,18 @@ export function make<A extends { readonly type: string }>(
     subscribe(options?: { readonly signal?: AbortSignal }): AsyncIterable<A> {
       return {
         [Symbol.asyncIterator]() {
-          const queue: A[] = []
           const pending: ReturnType<typeof Promise.withResolvers<IteratorResult<A>>>[] = []
           let started = false
           let completion: Completion | undefined
           let connection: Connection | undefined
+          let offered: { readonly value: A; readonly accepted: ReturnType<typeof Promise.withResolvers<void>> } | undefined
 
           function finish(result: Completion, discard = false) {
             completion = result
-            if (discard || "error" in result) queue.length = 0
+            if (discard || "error" in result) {
+              offered?.accepted.resolve()
+              offered = undefined
+            }
             options?.signal?.removeEventListener("abort", abort)
             if (connection?.subscribers.delete(subscriber) && !connection.subscribers.size) stop(connection)
             pending.splice(0).forEach((request) => {
@@ -92,29 +82,24 @@ export function make<A extends { readonly type: string }>(
           const subscriber: Subscriber = {
             finish,
             push(value) {
-              const event = value.type === "server.connected" ? { ...value } : value
+              if (completion) return Promise.resolve()
               const request = pending.shift()
               if (request) {
-                request.resolve({ done: false, value: event })
-                return
+                request.resolve({ done: false, value })
+                return Promise.resolve()
               }
-              if (queue.length >= capacity) {
-                finish({ error: new SubscriberOverflowError() })
-                return
-              }
-              queue.push(event)
+              const accepted = Promise.withResolvers<void>()
+              offered = { value, accepted }
+              return accepted.promise
             },
           }
 
           async function start() {
-            // A replacement connection cannot overlap the previous iterator's cleanup.
-            while (current?.controller.signal.aborted) await current.done.promise
             if (completion) return
             const fresh = !current
             connection = current ?? {
               controller: new AbortController(),
               subscribers: new Set<Subscriber>(),
-              done: Promise.withResolvers<void>(),
             }
             current = connection
             connection.subscribers.add(subscriber)
@@ -124,8 +109,12 @@ export function make<A extends { readonly type: string }>(
 
           return {
             next(): Promise<IteratorResult<A>> {
-              const value = queue.shift()
-              if (value !== undefined) return Promise.resolve({ done: false, value })
+              if (offered) {
+                const current = offered
+                offered = undefined
+                current.accepted.resolve()
+                return Promise.resolve({ done: false, value: current.value })
+              }
               if (completion) {
                 if ("error" in completion) return Promise.reject(completion.error)
                 return Promise.resolve({ done: true, value: undefined })

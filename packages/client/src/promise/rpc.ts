@@ -1,6 +1,6 @@
 import type { Rpc } from "@opencode-ai/schema/rpc"
 import type { make, RequestOptions } from "./generated/client.js"
-import { isRpcError } from "./generated/types.js"
+import { isRpcError, isRpcInternalError } from "./generated/types.js"
 import type { EventSubscribeOutput, LocationGetInput, RpcCallInput } from "./generated/types.js"
 
 type RpcEvent = Extract<EventSubscribeOutput, { type: `rpc.${string}` }>
@@ -37,18 +37,10 @@ export type RpcClient<D extends Rpc.PortableDefinition, Options = RpcCallOptions
 type RpcEventPayloadFor<
   D extends Rpc.PortableDefinition,
   Name extends keyof D["events"] & string,
-  E extends Rpc.PortableEventDefinition = D["events"][Name],
-> = E extends Rpc.DurableEventDefinition
-  ? Omit<RpcEvent, "type" | "data" | "durable"> & {
-      type: `rpc.${D["namespace"]}.${Name}`
-      data: Rpc.EventData<E["schema"]>
-      durable: { aggregateID: string; seq: number; version: number }
-    }
-  : Omit<RpcEvent, "type" | "data" | "durable"> & {
-      durable?: never
-      type: `rpc.${D["namespace"]}.${Name}`
-      data: Rpc.EventData<E["schema"]>
-    }
+> = Omit<RpcEvent, "type" | "data"> & {
+  type: `rpc.${D["namespace"]}.${Name}`
+  data: Rpc.EventData<D["events"][Name]["schema"]>
+}
 
 export type RpcEventPayload<
   D extends Rpc.PortableDefinition,
@@ -80,7 +72,7 @@ export function makeRpc(
               for await (const published of events.subscribe({ signal })) {
                 if (signal.aborted) return
                 if (!isRpcEvent(published, type)) continue
-                yield event(type, schema, published)
+                yield event(type, published)
               }
             } catch (error) {
               if (!signal.aborted) throw error
@@ -120,7 +112,7 @@ export function makeRpc(
               )
               return result.output
             } catch (error) {
-              if (!isRpcError(error)) throw error
+              if (!isRpcError(error) && !isRpcInternalError(error)) throw error
               throw error.data === undefined
                 ? { type: error.type, message: error.message }
                 : { type: error.type, message: error.message, data: error.data }
@@ -152,20 +144,8 @@ export function makeRpc(
 
 function event(
   type: RpcEventType,
-  schema: Rpc.PortableEventDefinition,
   event: RpcEvent,
 ): RpcEventPayload<Rpc.PortableDefinition> {
-  if (!schema.durable) {
-    if (event.durable) throw new Error(`Expected ephemeral RPC event: ${type}`)
-    return {
-      ...event,
-      type,
-      location: { ...event.location },
-    }
-  }
-  if (!event.durable) throw new Error(`Expected durable RPC event: ${type}`)
-  if (event.durable.version !== schema.durable.version)
-    throw new Error(`RPC event version mismatch for ${type}: expected ${schema.durable.version}, got ${event.durable.version}`)
   return {
     ...event,
     type,

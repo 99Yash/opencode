@@ -224,121 +224,6 @@ describe("Rpc", () => {
     }),
   )
 
-  it.effect("publishes durable custom events through normal Bus sequencing", () =>
-    Effect.gen(function* () {
-      const rpc = yield* Rpc.Service
-      const bus = yield* Bus.Service
-      const Updates = Rpc.define({
-        namespace: "durable-updates",
-        methods: {},
-        events: {
-          recorded: {
-            schema: Schema.Struct({ itemID: Schema.String, text: Schema.String }),
-            durable: { version: 2, aggregate: "itemID" },
-          },
-        },
-      })
-      const registration = yield* rpc.register(Updates, {})
-      const logical = yield* rpc
-        .client(Updates)
-        .events.subscribe("recorded")
-        .pipe(Stream.take(2), Stream.runCollect, Effect.forkScoped)
-      const published = yield* bus.subscribe().pipe(
-        Stream.filter((event) => event.type === "rpc.durable-updates.recorded"),
-        Stream.take(2),
-        Stream.runCollect,
-        Effect.forkScoped,
-      )
-      yield* Effect.yieldNow
-      yield* registration.events.emit("recorded", { itemID: "item-1", text: "first" })
-      yield* registration.events.emit("recorded", { itemID: "item-1", text: "second" })
-
-      const events = Array.from(yield* Fiber.join(logical))
-      expect(events.map((event) => event.type)).toEqual([
-        "rpc.durable-updates.recorded",
-        "rpc.durable-updates.recorded",
-      ])
-      expect(events.map((event) => event.data.text)).toEqual(["first", "second"])
-      expect(
-        events.map((event) => ({
-          aggregateID: event.durable.aggregateID,
-          seq: Number(event.durable.seq),
-          version: Number(event.durable.version),
-        })),
-      ).toEqual([
-        { aggregateID: "item-1", seq: 0, version: 2 },
-        { aggregateID: "item-1", seq: 1, version: 2 },
-      ])
-
-      const busEvents = Array.from(yield* Fiber.join(published))
-      expect(busEvents.map((event) => event.type)).toEqual([
-        "rpc.durable-updates.recorded",
-        "rpc.durable-updates.recorded",
-      ])
-      expect(
-        busEvents.map((event) => ({
-          aggregateID: event.durable?.aggregateID,
-          seq: Number(event.durable?.seq),
-          version: Number(event.durable?.version),
-        })),
-      ).toEqual([
-        { aggregateID: "item-1", seq: 0, version: 2 },
-        { aggregateID: "item-1", seq: 1, version: 2 },
-      ])
-      expect(busEvents.map((event) => event.data)).toEqual([
-        { itemID: "item-1", text: "first" },
-        { itemID: "item-1", text: "second" },
-      ])
-    }),
-  )
-
-  it.effect("requires durable aggregate fields to parse as strings", () =>
-    Effect.gen(function* () {
-      const rpc = yield* Rpc.Service
-      const Invalid = Rpc.define({
-        namespace: "invalid-durable",
-        methods: {},
-        events: {
-          recorded: {
-            schema: Schema.Struct({ itemID: Schema.Number }),
-            durable: { version: 1, aggregate: "itemID" },
-          },
-        },
-      })
-      const registration = yield* rpc.register(Invalid, {})
-      const exit = yield* registration.events.emit("recorded", { itemID: 1 }).pipe(Effect.exit)
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isSuccess(exit)) return
-      expect(Cause.pretty(exit.cause)).toContain("Expected string aggregate field itemID")
-    }),
-  )
-
-  it.effect("selects durable aggregates from the schema-parsed payload", () =>
-    Effect.gen(function* () {
-      const rpc = yield* Rpc.Service
-      const Parsed = Rpc.define({
-        namespace: "parsed-durable",
-        methods: {},
-        events: {
-          recorded: {
-            schema: z.object({ source: z.string() }).transform(({ source }) => ({ itemID: source })),
-            durable: { version: 1, aggregate: "itemID" },
-          },
-        },
-      })
-      const registration = yield* rpc.register(Parsed, {})
-      const received = yield* rpc
-        .client(Parsed)
-        .events.subscribe("recorded")
-        .pipe(Stream.take(1), Stream.runCollect, Effect.forkScoped)
-      yield* Effect.yieldNow
-      yield* registration.events.emit("recorded", { source: "item-1" })
-      const event = Array.from(yield* Fiber.join(received))[0]
-      expect(event.data).toEqual({ itemID: "item-1" })
-      expect(event.durable.aggregateID).toBe("item-1")
-    }),
-  )
-
   it.effect("keeps other event consumers running after one subscription ends", () =>
     Effect.gen(function* () {
       const rpc = yield* Rpc.Service
@@ -483,7 +368,6 @@ describe("Rpc", () => {
         location: otherRef,
       })
       expect(all.map((event) => event.location)).toEqual([otherRef, ref])
-      expect(all.every((event) => !("durable" in event))).toBe(true)
       yield* unsubscribe
     }),
   )

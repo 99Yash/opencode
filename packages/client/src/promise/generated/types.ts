@@ -468,7 +468,6 @@ export type V2EventRpc = {
   type: `${"rpc."}${string}`
   location: LocationRef
   data: { [x: string]: any }
-  durable?: { aggregateID: string; seq: number; version: number } | undefined
 }
 
 export type V2EventServerConnected = {
@@ -2502,6 +2501,15 @@ export type RpcError = {
 }
 export const isRpcError = (value: unknown): value is RpcError =>
   typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "RpcError"
+
+export type RpcInternalError = {
+  readonly _tag: "RpcInternalError"
+  readonly type: "rpc.internal"
+  readonly message: string
+  readonly data?: unknown | undefined
+}
+export const isRpcInternalError = (value: unknown): value is RpcInternalError =>
+  typeof value === "object" && value !== null && "_tag" in value && value["_tag"] === "RpcInternalError"
 
 export type PtyNotFoundError = { readonly _tag: "PtyNotFoundError"; readonly ptyID: string; readonly message: string }
 export const isPtyNotFoundError = (value: unknown): value is PtyNotFoundError =>

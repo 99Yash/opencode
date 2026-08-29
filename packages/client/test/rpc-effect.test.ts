@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { Rpc } from "@opencode-ai/schema/rpc"
-import { Cause, Context, Effect, Exit, Fiber, Option, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Fiber, Schema, Stream } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { OpenCode } from "../src/effect/index"
 
@@ -19,10 +19,6 @@ const definition = Rpc.define({
   events: {
     progress: { schema: Schema.Struct({ count: Schema.FiniteFromString }) },
     message: { schema: Schema.Struct({ text: Schema.String }) },
-    recorded: {
-      schema: Schema.Struct({ itemID: Schema.String, count: Schema.FiniteFromString }),
-      durable: { version: 2, aggregate: "itemID" },
-    },
   },
 })
 
@@ -36,17 +32,6 @@ function rpcEvent(count: unknown, directory = "/project/one", namespace = "examp
     location: { directory },
     metadata: { origin: "test" },
     data: { count },
-  }
-}
-
-function durableEvent(data: unknown, directory = "/project/one") {
-  return {
-    id: "evt_recorded",
-    created: 124,
-    type: "rpc.example.recorded",
-    durable: { aggregateID: "item-1", seq: 3, version: 2 },
-    location: { directory },
-    data,
   }
 }
 
@@ -216,6 +201,26 @@ test("Effect RPC decodes declared errors and removes the generic transport wrapp
   expect(error).toEqual({ type: "too_large", message: "Too large", data: { limit: 3 } })
 })
 
+test("Effect RPC removes the internal transport wrapper", async () => {
+  const httpClient = HttpClient.make((request) =>
+    Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        Response.json(
+          { _tag: "RpcInternalError", type: "rpc.internal", message: "Failed" },
+          { status: 500 },
+        ),
+      ),
+    ),
+  )
+  const error = await Effect.gen(function* () {
+    const client = yield* OpenCode.make({ baseUrl: "http://localhost:3000" })
+    return yield* client.rpc(definition).count({ count: "4" }).pipe(Effect.flip)
+  }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.runPromise)
+
+  expect(error).toEqual({ type: "rpc.internal", message: "Failed" })
+})
+
 test("Effect RPC isolates per-call location and headers while preserving configured defaults and native behavior", async () => {
   const requests: Array<{ url: URL; headers: HttpClientRequest.HttpClientRequest["headers"] }> = []
   const release = Promise.withResolvers<void>()
@@ -323,6 +328,8 @@ test("native and RPC Effect streams share one lazy source, cache connected, and 
   const first = progress.next()
   const late = Stream.toAsyncIterable(client.event.subscribe())[Symbol.asyncIterator]()
   expect((await late.next()).value).toEqual(connected)
+  await native.return?.()
+  await late.return?.()
   await source.push(rpcEvent("ignored", "/project/one", "other"))
   await source.push(rpcEvent("ignored", "/project/one", "example", "message"))
   await source.push(rpcEvent("1"))
@@ -341,8 +348,6 @@ test("native and RPC Effect streams share one lazy source, cache connected, and 
   )
   expect(source.requests).toHaveLength(1)
 
-  await native.return?.()
-  await late.return?.()
   expect((await source.opened).signal.aborted).toBe(false)
   const third = progress.next()
   await source.push(rpcEvent("3"))
@@ -372,25 +377,6 @@ test("interrupting a native Effect stream leaves an active RPC consumer running"
   await source.push(rpcEvent("2"))
   expect((await second).value.data).toEqual({ count: 2 })
   await progress.return?.()
-  await source.cancelled
-})
-
-test("Effect RPC streams receive direct durable Bus events", async () => {
-  const source = eventSource()
-  const result = Effect.gen(function* () {
-    const client = yield* OpenCode.make({ baseUrl: "http://localhost:3000" })
-    return yield* client
-      .rpc(definition)
-      .events.subscribe("recorded")
-      .pipe(Stream.runHead, Effect.map(Option.getOrThrow))
-  }).pipe(Effect.provideService(HttpClient.HttpClient, source.httpClient), Effect.runPromise)
-  await source.push(durableEvent({ itemID: "item-1", count: "42" }))
-  expect(await result).toMatchObject({
-    type: "rpc.example.recorded",
-    data: { itemID: "item-1", count: 42 },
-    durable: { aggregateID: "item-1", seq: 3, version: 2 },
-    location: { directory: "/project/one" },
-  })
   await source.cancelled
 })
 

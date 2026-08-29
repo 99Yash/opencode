@@ -35,20 +35,9 @@ type PortableEventValueSchema =
   | StandardSchemaV1<unknown, EventDataObject>
   | (JsonSchema.JsonSchema & { readonly type: "object" })
 
-export interface EphemeralEventDefinition {
+export interface EventDefinition {
   readonly schema: EventValueSchema
-  readonly durable?: never
 }
-
-export interface DurableEventDefinition {
-  readonly schema: EventValueSchema
-  readonly durable: {
-    readonly version: number
-    readonly aggregate: string
-  }
-}
-
-export type EventDefinition = EphemeralEventDefinition | DurableEventDefinition
 export type PortableEventDefinition = EventDefinition & { readonly schema: PortableEventValueSchema }
 
 export interface Definition {
@@ -143,7 +132,6 @@ export type MethodErrorFor<M extends Method, Name extends ErrorName<M>> = Simpli
 export type MethodError<M extends Method> = {
   readonly [Name in ErrorName<M>]: MethodErrorFor<M, Name>
 }[ErrorName<M>]
-export type Error<D extends Definition, Name extends keyof D["methods"] & string> = MethodError<D["methods"][Name]>
 export type ErrorArguments<M extends Method, Name extends ErrorName<M>> = [
   type: Name,
   message: string,
@@ -152,23 +140,6 @@ export type ErrorArguments<M extends Method, Name extends ErrorName<M>> = [
 export type ErrorFactory<M extends Method> = <Name extends ErrorName<M>>(
   ...args: ErrorArguments<M, Name>
 ) => HandlerErrorFor<M, Name>
-
-export function isError<
-  D extends Definition,
-  Name extends keyof D["methods"] & string,
->(definition: D, method: Name, error: unknown): error is Error<D, Name> {
-  if (
-    typeof error !== "object" ||
-    error === null ||
-    !("type" in error) ||
-    typeof error.type !== "string" ||
-    !("message" in error) ||
-    typeof error.message !== "string"
-  )
-    return false
-  const errors = definition.methods[method]?.errors
-  return errors !== undefined && Object.hasOwn(errors, error.type)
-}
 
 export type EventInputData<S extends EventValueSchema> = S extends JsonSchema.JsonSchema
   ? EventDataObject
@@ -185,20 +156,11 @@ export type EventInput<D extends Definition> = {
 type EventPayloadFor<
   D extends Definition,
   Name extends keyof D["events"] & string,
-  E extends EventDefinition = D["events"][Name],
-> = E extends DurableEventDefinition
-  ? Omit<Event.Payload<Event.EphemeralDefinition>, "type" | "data" | "durable" | "location"> & {
-      readonly durable: Event.DurableEnvelope
-      readonly type: `rpc.${D["namespace"]}.${Name}`
-      readonly data: EventData<E["schema"]>
-      readonly location: Location.Ref
-    }
-  : Omit<Event.Payload<Event.EphemeralDefinition>, "type" | "data" | "durable" | "location"> & {
-      readonly durable?: never
-      readonly type: `rpc.${D["namespace"]}.${Name}`
-      readonly data: EventData<E["schema"]>
-      readonly location: Location.Ref
-    }
+> = Omit<Event.Payload<Event.EphemeralDefinition>, "type" | "data" | "durable" | "location"> & {
+  readonly type: `rpc.${D["namespace"]}.${Name}`
+  readonly data: EventData<D["events"][Name]["schema"]>
+  readonly location: Location.Ref
+}
 
 export type EventPayload<D extends Definition, Name extends keyof D["events"] & string = keyof D["events"] & string> = {
   readonly [K in Name]: EventPayloadFor<D, K>

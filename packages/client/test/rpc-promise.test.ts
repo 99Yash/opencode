@@ -23,10 +23,6 @@ const Echo = Rpc.define({
   },
   events: {
     updated: { schema: z.object({ count: z.number() }) },
-    recorded: {
-      schema: z.object({ itemID: z.string(), count: z.number() }),
-      durable: { version: 2, aggregate: "itemID" },
-    },
   },
 })
 const connected = { id: "evt_connected", created: 0, type: "server.connected", data: {} }
@@ -38,16 +34,6 @@ const rpcEvent = (data: unknown, directory = "/first", namespace = Echo.namespac
   metadata: { source: "test" },
   data,
 })
-const durableEvent = (data: unknown, directory = "/first", namespace = Echo.namespace, name = "recorded") => ({
-  id: "evt_rpc_durable",
-  created: 11,
-  type: `rpc.${namespace}.${name}`,
-  durable: { aggregateID: "item-1", seq: 3, version: 2 },
-  location: { directory },
-  metadata: { source: "test" },
-  data,
-})
-
 function http(fetch: (request: Request) => Response | Promise<Response>) {
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch })
   cleanup.add(() => server.stop(true))
@@ -237,13 +223,12 @@ test("RPC method failures remove the generic transport wrapper", async () => {
   const error = await client.rpc(Echo).echo("hello").catch((error: unknown) => error)
 
   expect(error).toEqual({ type: "rejected", message: "Rejected", data: { reason: "busy" } })
-  expect(Rpc.isError(Echo, "echo", error)).toBe(true)
   await expect(client.rpc.call({ namespace: Echo.namespace, method: "echo", input: "hello" })).rejects.toEqual(response)
 })
 
 test("RPC transport failures remove the generic transport wrapper", async () => {
-  const response = { _tag: "RpcError", type: "rpc.internal", message: "Failed" }
-  await expect(http(() => Response.json(response, { status: 400 })).rpc(Echo).echo("hello")).rejects.toEqual({
+  const response = { _tag: "RpcInternalError", type: "rpc.internal", message: "Failed" }
+  await expect(http(() => Response.json(response, { status: 500 })).rpc(Echo).echo("hello")).rejects.toEqual({
     type: "rpc.internal",
     message: "Failed",
   })
@@ -265,8 +250,15 @@ test("native events and multiple RPC clients share one lazy source across locati
   expect(source.requests[0].headers.get("authorization")).toBe("Bearer events")
   const late = source.client.event.subscribe()[Symbol.asyncIterator]()
   expect(await late.next()).toEqual({ done: false, value: connected })
+  await Promise.all([native.return?.(), late.return?.()])
   await source.send(rpcEvent({ ignored: true }, "/first", Echo.namespace, "unknown"))
   await source.send(rpcEvent({ count: 9 }, "/other", otherDefinition.namespace))
+  expect((await otherNext).value).toMatchObject({
+    type: "rpc.other.updated",
+    location: { directory: "/other" },
+    data: { count: 9 },
+  })
+  await other.return?.()
   await source.send(rpcEvent({ count: 42 }))
   const expected = {
     id: "evt_rpc",
@@ -278,15 +270,10 @@ test("native events and multiple RPC clients share one lazy source across locati
   }
   expect(await firstNext).toEqual({ done: false, value: expected })
   expect(await secondNext).toEqual({ done: false, value: expected })
-  expect((await otherNext).value).toMatchObject({
-    type: "rpc.other.updated",
-    location: { directory: "/other" },
-    data: { count: 9 },
-  })
   const next = first.next()
   await source.send(rpcEvent({ count: 43 }, "/second"))
   expect((await next).value).toMatchObject({ location: { directory: "/second" }, data: { count: 43 } })
-  await Promise.all([native.return?.(), late.return?.(), first.return?.(), second.return?.(), other.return?.()])
+  await Promise.all([first.return?.(), second.return?.()])
   await source.cancelled
   expect(source.requests[0].signal.aborted).toBe(true)
   expect(source.requests).toHaveLength(1)
@@ -313,26 +300,6 @@ test("RPC iterator return and abort cancel only their pending subscribers", asyn
   await source.send(event)
   expect(await nativeNext).toEqual({ done: false, value: event })
   await native.return?.()
-  await source.cancelled
-})
-
-test("RPC subscriptions receive direct durable Bus events", async () => {
-  const source = events()
-  const native = source.client.event.subscribe()[Symbol.asyncIterator]()
-  const recorded = source.client.rpc(Echo).events.subscribe("recorded")[Symbol.asyncIterator]()
-  await native.next()
-  const raw = native.next()
-  const typed = recorded.next()
-  await source.send(durableEvent({ itemID: "item-1", count: 42 }))
-  expect((await raw).value).toEqual(durableEvent({ itemID: "item-1", count: 42 }))
-  expect((await typed).value).toMatchObject({
-    type: "rpc.acme/jobs.recorded",
-    data: { itemID: "item-1", count: 42 },
-    durable: { aggregateID: "item-1", seq: 3, version: 2 },
-    location: { directory: "/first" },
-  })
-  await native.return?.()
-  await recorded.return?.()
   await source.cancelled
 })
 
@@ -402,21 +369,6 @@ test("RPC source transport errors propagate to native and RPC subscribers", asyn
   expect(await rpcError).toMatchObject({ name: "ClientError", reason: "Transport" })
   expect(await nativeError).toMatchObject({ name: "ClientError", reason: "Transport" })
   expect(source.requests).toHaveLength(1)
-})
-
-test("RPC event envelope mismatches close only the matching subscriber", async () => {
-  const source = events()
-  const native = source.client.event.subscribe()[Symbol.asyncIterator]()
-  await native.next()
-  const iterator = source.client.rpc(Echo).events.subscribe("updated")[Symbol.asyncIterator]()
-  const failed = iterator.next().catch((error: unknown) => error)
-  const mismatched = durableEvent({ count: 42 }, "/first", Echo.namespace, "updated")
-  await source.send(mismatched)
-  expect(await failed).toBeInstanceOf(Error)
-  expect(source.requests[0].signal.aborted).toBe(false)
-  expect((await native.next()).value).toEqual(mismatched)
-  await native.return?.()
-  await source.cancelled
 })
 
 test("RPC checks unknown event names and pre-aborted subscriptions remain lazy", async () => {

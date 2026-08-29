@@ -2,7 +2,7 @@ export * as RpcRuntime from "./rpc-runtime.js"
 
 import type { Rpc } from "@opencode-ai/schema/rpc"
 import type { OpenCodeEvent } from "@opencode-ai/protocol/groups/event"
-import { RpcError } from "@opencode-ai/protocol/errors"
+import { RpcError, RpcInternalError } from "@opencode-ai/protocol/errors"
 import { Effect, Schema } from "effect"
 
 type RpcEvent = Extract<OpenCodeEvent, { type: `rpc.${string}` }>
@@ -13,7 +13,7 @@ export function read(schema: Rpc.Method["output"], value: unknown) {
 }
 
 export function readError(method: Rpc.Method, error: unknown): Effect.Effect<never, unknown> {
-  if (!(error instanceof RpcError)) return Effect.fail(error)
+  if (!(error instanceof RpcError) && !(error instanceof RpcInternalError)) return Effect.fail(error)
   if (!method.errors || !Object.hasOwn(method.errors, error.type)) {
     return Effect.fail(
       error.data === undefined
@@ -43,25 +43,7 @@ export const event = Effect.fn("Client.Rpc.event")(function* <
   event: RpcEvent,
 ): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
   const data = yield* read(schema.schema, event.data)
-  if (!schema.durable) {
-    if (event.durable) return yield* Effect.fail(new Error(`Expected ephemeral RPC event: ${event.type}`))
-    // SAFETY: The event type and ephemeral envelope were checked above, and data was decoded with this event's schema.
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-    return {
-      ...event,
-      type: eventType(definition, name),
-      data,
-      location: { ...event.location },
-    } as Rpc.EventPayload<D, Name>
-  }
-  if (!event.durable) return yield* Effect.fail(new Error(`Expected durable RPC event: ${event.type}`))
-  if (event.durable.version !== schema.durable.version)
-    return yield* Effect.fail(
-      new Error(
-        `RPC event version mismatch for ${definition.namespace}.${name}: expected ${schema.durable.version}, got ${event.durable.version}`,
-      ),
-    )
-  // SAFETY: The event type, durable envelope/version, and decoded data all match this definition.
+  // SAFETY: The event type was selected by the caller and data was decoded with this event's schema.
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return {
     ...event,

@@ -35,10 +35,6 @@ export const Acme = Rpc.define({
     updated: { schema: z.object({ itemID: z.string(), text: z.string() }) },
     progress: { schema: z.object({ percent: z.number() }) },
     counted: { schema: z.object({ count: z.number() }).transform(({ count }) => ({ text: String(count) })) },
-    recorded: {
-      schema: z.object({ itemID: z.string(), text: z.string() }),
-      durable: { version: 2, aggregate: "itemID" },
-    },
   },
 })
 

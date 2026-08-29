@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { Schema } from "effect"
 import { OpenApi } from "effect/unstable/httpapi"
 import { ClientApi, groupNames } from "../src/client.js"
-import { RpcError } from "../src/errors.js"
+import { RpcError, RpcInternalError } from "../src/errors.js"
 import { RpcInput, RpcOutput } from "../src/groups/rpc.js"
 
 test("RPC wrappers preserve JSON primitives and omit undefined fields", () => {
@@ -33,6 +33,9 @@ test("RPC errors use the standard transport wrapper", () => {
   expect(
     Schema.decodeUnknownSync(RpcError)({ _tag: "RpcError", type: "not_found", message: "Missing", data: {} }),
   ).toBeInstanceOf(RpcError)
+  expect(
+    Schema.encodeSync(RpcInternalError)(new RpcInternalError({ type: "rpc.internal", message: "Failed" })),
+  ).toEqual({ _tag: "RpcInternalError", type: "rpc.internal", message: "Failed" })
 })
 
 test("exposes one generic RPC operation with location routing and ordinary transport errors", () => {
@@ -54,4 +57,5 @@ test("exposes one generic RPC operation with location routing and ordinary trans
   expect(operation?.responses).toHaveProperty("200")
   expect(operation?.responses).toHaveProperty("400")
   expect(operation?.responses).toHaveProperty("401")
+  expect(operation?.responses).toHaveProperty("500")
 })

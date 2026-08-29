@@ -32,17 +32,9 @@ export type Checks = [
   Assert<Equal<Rpc.HandlerOutput<typeof Acme.methods.codec.output>, number>>,
   Assert<Equal<Rpc.EventPayload<typeof Acme, "updated">["type"], "rpc.acme.updated">>,
   Assert<Equal<RpcEventPayload<typeof Acme, "updated">["location"], { directory: string; workspaceID?: string }>>,
-  Assert<Equal<RpcEventPayload<typeof Acme, "recorded">["durable"]["aggregateID"], string>>,
   Assert<Equal<Rpc.Input<StandardSchemaV1<string, number>>, string>>,
   Assert<Equal<Rpc.Output<StandardSchemaV1<string, number>>, number>>,
   Assert<Equal<Rpc.HandlerOutput<StandardSchemaV1<string, number>>, string>>,
-  Assert<
-    Equal<
-      Rpc.Error<typeof Acme, "search">,
-      | { readonly type: "not_found"; readonly message: string; readonly data: { query: string; attempts: number } }
-      | { readonly type: "unavailable"; readonly message: string; readonly data?: undefined }
-    >
-  >,
 ]
 
 await acme.search({ query: "hello" }, { location: { directory: "/project", workspace: "workspace" } })
@@ -101,11 +93,6 @@ const handlers: RpcHandlers<typeof Acme> = {
   ping: async () => null,
 }
 
-declare const caught: unknown
-if (Rpc.isError(Acme, "search", caught)) {
-  caught.type satisfies "not_found" | "unavailable"
-}
-
 // @ts-expect-error Error names must be declared by the method.
 handlers.search({ query: "missing" }, { signal: AbortSignal.abort(), error: () => ({ type: "missing" }) })
 
@@ -118,7 +105,6 @@ const registration = await ctx.rpc.register(Acme, handlers)
 await registration.events.emit("updated", { itemID: "123", text: "hello" })
 await registration.events.emit("progress", { percent: 50 })
 await registration.events.emit("counted", { count: 42 })
-await registration.events.emit("recorded", { itemID: "item-1", text: "saved" })
 await registration.dispose()
 
 await ctx.rpc.register(Acme, {
@@ -165,13 +151,6 @@ for await (const event of acme.events.subscribe("counted")) {
   event.data.text satisfies string
 }
 
-for await (const event of acme.events.subscribe("recorded")) {
-  event.durable.aggregateID satisfies string
-  event.durable.seq satisfies number
-  event.durable.version satisfies number
-  event.data.itemID satisfies string
-}
-
 declare const name: "updated" | "progress"
 // @ts-expect-error A union name cannot publish a payload matching only one possible event.
 await registration.events.emit(name, { percent: 50 })
@@ -211,12 +190,6 @@ Rpc.define({
 })
 // @ts-expect-error The subclient's events member is reserved, not an RPC method.
 Rpc.define({ namespace: "invalid", methods: { events: Acme.methods.search }, events: {} })
-Rpc.define({
-  namespace: "invalid",
-  methods: {},
-  // @ts-expect-error Durable event metadata requires both version and aggregate.
-  events: { updated: { schema: Acme.events.updated.schema, durable: { version: 1 } } },
-})
 // @ts-expect-error Custom event data must be an object.
 Rpc.define({ namespace: "invalid-event", methods: {}, events: { updated: { schema: z.string() } } })
 // @ts-expect-error Custom event data cannot be an array.

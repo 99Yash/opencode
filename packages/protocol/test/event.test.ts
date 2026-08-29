@@ -53,15 +53,6 @@ test("decodes direct plugin RPC events", () => {
   expect(() => Schema.decodeUnknownSync(OpenCodeEvent)({ ...event, data: "value" })).toThrow()
   expect(() => Schema.decodeUnknownSync(OpenCodeEvent)({ ...event, data: [] })).toThrow()
   expect(() => Schema.decodeUnknownSync(OpenCodeEvent)({ ...event, data: null })).toThrow()
-  const durable = {
-    id: "evt_rpc_durable",
-    created: 2,
-    type: "rpc.acme.recorded",
-    durable: { aggregateID: "item-1", seq: 3, version: 2 },
-    location: { directory: "/project" },
-    data: { itemID: "item-1" },
-  }
-  expect(Schema.decodeUnknownSync(OpenCodeEvent)(durable)).toMatchObject(durable)
 })
 
 test("keeps native event data discriminated by type", () => {

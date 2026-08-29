@@ -1,6 +1,6 @@
 import { Rpc } from "@opencode-ai/core/rpc"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
-import { RpcError } from "@opencode-ai/protocol/errors"
+import { RpcError, RpcInternalError } from "@opencode-ai/protocol/errors"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -17,7 +17,7 @@ export const RpcHandler = HttpApiBuilder.group(Api, "server.rpc", (handlers) =>
       Effect.mapError(toRpcError),
       Effect.catchDefect((error) =>
         Effect.fail(
-          new RpcError({
+          new RpcInternalError({
             type: "rpc.internal",
             message: error instanceof Error ? error.message : "RPC call failed",
           }),

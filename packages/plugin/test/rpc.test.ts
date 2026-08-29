@@ -6,7 +6,7 @@ import { Acme } from "./rpc.fixture.js"
 test("definitions preserve their schemas and namespace without registering anything", () => {
   expect(Rpc.define(Acme)).toBe(Acme)
   expect(Acme.namespace).toBe("acme")
-  expect(Object.keys(Acme.events)).toEqual(["updated", "progress", "counted", "recorded"])
+  expect(Object.keys(Acme.events)).toEqual(["updated", "progress", "counted"])
 })
 
 test("defining an RPC contract does not invoke its schema parser", () => {
@@ -37,11 +37,6 @@ test("framework RPC error names are reserved", () => {
   expect(() =>
     Rpc.define({ namespace: "reserved", methods: { call: { input: schema, output: schema, errors } }, events: {} }),
   ).toThrow('RPC error names starting with "rpc." are reserved: rpc.internal')
-})
-
-test("error narrowing returns false for unknown methods", () => {
-  const definition: Rpc.Definition = Acme
-  expect(Rpc.isError(definition, "missing", { type: "not_found", message: "Missing" })).toBe(false)
 })
 
 test("the shared definition entrypoint bundles without Effect or host runtime dependencies", async () => {

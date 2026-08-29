@@ -18,13 +18,6 @@ const rpcEvent = Schema.Struct({
   type: Schema.TemplateLiteral(["rpc.", Schema.String]),
   location: Location.Ref,
   data: Schema.Record(Schema.String, Schema.Unknown),
-  durable: Schema.optional(
-    Schema.Struct({
-      aggregateID: Schema.String,
-      seq: Event.Seq,
-      version: Event.Version,
-    }),
-  ),
 }).annotate({ identifier: "V2Event.rpc" })
 
 const schema = <const Definitions extends ReadonlyArray<Definition>>(definitions: Definitions) =>
