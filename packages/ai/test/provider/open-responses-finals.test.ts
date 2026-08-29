@@ -140,7 +140,7 @@ describe("Open Responses completed item reasoning", () => {
         expect(response.message.content.find((part) => part.type === "reasoning")?.providerMetadata).toEqual({
           "openai-compatible": {
             itemId: "rs_1",
-            ...(fixture.name === "raw text" ? { reasoningChannel: "raw" } : {}),
+            ...(fixture.name === "raw text" ? { reasoningTextIsRaw: true } : {}),
             reasoningEncryptedContent: "encrypted",
           },
         })
@@ -148,7 +148,7 @@ describe("Open Responses completed item reasoning", () => {
     )
   })
 
-  it.effect("replaces only the still-open summary without repeating earlier text", () =>
+  it.effect("replaces all streamed summary parts with completed text", () =>
     Effect.gen(function* () {
       const response = yield* generate(
         { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
@@ -168,8 +168,8 @@ describe("Open Responses completed item reasoning", () => {
         },
         completed,
       )
-      expect(response.reasoning).toBe("First final")
-      expect(response.events.filter(LLMEvent.is.reasoningEnd).map((event) => event.text)).toEqual([undefined, "final"])
+      expect(response.reasoning).toBe("First \n\nfinal")
+      expect(response.events.filter(LLMEvent.is.reasoningEnd).map((event) => event.text)).toEqual(["First \n\nfinal"])
     }),
   )
 })

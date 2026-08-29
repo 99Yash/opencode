@@ -388,7 +388,11 @@ describe("Open Responses-compatible route", () => {
                     providerMetadata: {
                       "openai-compatible": {
                         itemId: routing.id,
-                        ...(event.type.startsWith("response.reasoning_text") ? { reasoningChannel: "raw" } : {}),
+                        ...(event.type === "response.reasoning.delta" ||
+                        event.type === "response.reasoning.done" ||
+                        event.type.startsWith("response.reasoning_text")
+                          ? { reasoningTextIsRaw: true }
+                          : {}),
                         reasoningEncryptedContent: "encrypted-state",
                       },
                     },
@@ -441,25 +445,14 @@ describe("Open Responses-compatible route", () => {
           expect(response.message.content).toEqual([
             {
               type: "reasoning",
-              text: "First.",
-              providerMetadata: { "openai-compatible": { itemId: routing.id } },
-            },
-            {
-              type: "reasoning",
-              text: "Second.",
+              text: "First.\n\nSecond.",
               providerMetadata: {
                 "openai-compatible": { itemId: routing.id, reasoningEncryptedContent: null },
               },
             },
           ])
           expect(response.events.filter(LLMEvent.is.reasoningEnd)).toEqual([
-            {
-              type: "reasoning-end",
-              id: `${routing.id}:0`,
-              text: undefined,
-              providerMetadata: { "openai-compatible": { itemId: routing.id } },
-            },
-            { type: "reasoning-end", id: `${routing.id}:1` },
+            { type: "reasoning-end", id: `${routing.id}:0` },
           ])
         }),
       )

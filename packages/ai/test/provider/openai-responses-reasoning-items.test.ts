@@ -1,0 +1,125 @@
+import { describe, expect } from "bun:test"
+import { Effect } from "effect"
+import { LLM, LLMEvent } from "../../src/index.js"
+import { Auth, LLMClient } from "../../src/route.js"
+import { compileRequest } from "../../src/route/client.js"
+import { OpenAIResponses } from "../../src/protocols/openai-responses.js"
+import { it } from "../lib/effect.js"
+import { fixedResponse } from "../lib/http.js"
+import { sseEvents } from "../lib/sse.js"
+
+const model = OpenAIResponses.route
+  .with({ endpoint: { baseURL: "https://api.openai.test/v1/" }, auth: Auth.bearer("test") })
+  .model({ id: "reasoning-model" })
+const request = LLM.request({ model, prompt: "Think it through." })
+const completed = { type: "response.completed", response: { id: "resp_1" } }
+const generate = (...events: OpenAIResponses.Event[]) =>
+  LLMClient.generate(request).pipe(Effect.provide(fixedResponse(sseEvents(...events))))
+
+describe("OpenAI Responses reasoning items", () => {
+  it.effect("streams raw and summary events into one reasoning block", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        { type: "response.output_item.added", output_index: 2, item: { type: "reasoning", id: "rs_1" } },
+        {
+          type: "response.reasoning_text.delta",
+          output_index: 2,
+          item_id: "wrong",
+          content_index: 0,
+          delta: "Raw delta. ",
+        },
+        {
+          type: "response.reasoning_summary_text.delta",
+          output_index: 2,
+          item_id: "wrong",
+          summary_index: 0,
+          delta: "Summary delta.",
+        },
+        { type: "response.reasoning_summary_part.added", item_id: "rs_1", summary_index: 1 },
+        {
+          type: "response.reasoning_summary_text.done",
+          item_id: "rs_1",
+          summary_index: 1,
+          text: "Second summary.",
+        },
+        { type: "response.reasoning.delta", item_id: "rs_1", content_index: 1, delta: " Raw tail." },
+        {
+          type: "response.output_item.done",
+          item: {
+            type: "reasoning",
+            id: "rs_1",
+            summary: [
+              { type: "summary_text", text: "Corrected summary." },
+              { type: "summary_text", text: "Second summary." },
+            ],
+            content: [{ type: "reasoning_text", text: "Completed raw." }],
+            encrypted_content: "state",
+          },
+        },
+        completed,
+      )
+
+      expect(response.events.filter(LLMEvent.is.reasoningStart)).toHaveLength(1)
+      expect(response.events.filter(LLMEvent.is.reasoningDelta).map((event) => event.text)).toEqual([
+        "Raw delta. ",
+        "Summary delta.",
+        "\n\nSecond summary.",
+        " Raw tail.",
+      ])
+      expect(response.events.filter(LLMEvent.is.reasoningEnd).map((event) => event.text)).toEqual([
+        "Corrected summary.\n\nSecond summary.",
+      ])
+      expect(response.reasoning).toBe("Corrected summary.\n\nSecond summary.")
+    }),
+  )
+
+  it.effect("tracks raw and summary final indexes independently", () =>
+    Effect.gen(function* () {
+      const response = yield* generate(
+        { type: "response.output_item.added", item: { type: "reasoning", id: "rs_1" } },
+        { type: "response.reasoning_text.delta", item_id: "rs_1", content_index: 0, delta: "Raw" },
+        { type: "response.reasoning_text.done", item_id: "rs_1", content_index: 0, text: "Raw duplicate" },
+        { type: "response.reasoning_summary_text.done", item_id: "rs_1", summary_index: 0, text: "Summary" },
+        { type: "response.reasoning.done", item_id: "rs_1", content_index: 1, text: " raw final" },
+        { type: "response.output_item.done", item: { type: "reasoning", id: "rs_1" } },
+        completed,
+      )
+
+      expect(response.events.filter(LLMEvent.is.reasoningDelta).map((event) => event.text)).toEqual([
+        "Raw",
+        "Summary",
+        " raw final",
+      ])
+      expect(response.reasoning).toBe("RawSummary raw final")
+    }),
+  )
+
+  it.effect("replays raw-only reasoning without serializing it as a summary", () =>
+    Effect.gen(function* () {
+      for (const done of [
+        undefined,
+        {
+          type: "response.output_item.done",
+          item: { type: "reasoning", id: "rs_1", content: [{ type: "reasoning_text", text: "Internal detail." }] },
+        } satisfies OpenAIResponses.Event,
+      ]) {
+        const response = yield* generate(
+          {
+            type: "response.output_item.added",
+            item: { type: "reasoning", id: "rs_1", encrypted_content: "state" },
+          },
+          { type: "response.reasoning_text.delta", item_id: "rs_1", delta: "Internal detail." },
+          ...(done ? [done] : []),
+          completed,
+        )
+        const prepared = yield* compileRequest(
+          LLM.request({ model, messages: [response.message], providerOptions: { store: false } }),
+        )
+
+        expect(prepared.body.input).toEqual([
+          { type: "reasoning", id: "rs_1", summary: [], encrypted_content: "state" },
+        ])
+      }
+    }),
+  )
+})
