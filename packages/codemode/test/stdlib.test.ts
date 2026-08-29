@@ -840,6 +840,20 @@ describe("stdlib integration", () => {
     expect(Object.hasOwn(target, IteratorSymbol)).toBe(false)
   })
 
+  test("Object.assign ignores nested non-enumerable supported symbols during cycle checks", () => {
+    const target = {}
+    const reads: Array<boolean> = []
+    const nested = Object.defineProperty({}, IteratorSymbol, {
+      get() {
+        reads.push(true)
+        return target
+      },
+    })
+    expect(invokeObjectMethod("assign", [target, { nested }], { type: "CallExpression" })).toBe(target)
+    expect(reads).toEqual([])
+    expect(target).toEqual({ nested })
+  })
+
   test("Object.assign rejects cycles through supported symbols on nested arrays", () => {
     const target = {}
     const nested = Object.defineProperty([], IteratorSymbol, { enumerable: true, value: target })

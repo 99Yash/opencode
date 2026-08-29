@@ -52,7 +52,12 @@ function* childValues(value: object): Generator {
     yield* Object.values(value)
   }
   for (const symbol of Object.getOwnPropertySymbols(value)) {
-    if (symbol === AsyncIteratorSymbol || symbol === IteratorSymbol) yield Reflect.get(value, symbol)
+    if (
+      (symbol === AsyncIteratorSymbol || symbol === IteratorSymbol) &&
+      Object.prototype.propertyIsEnumerable.call(value, symbol)
+    ) {
+      yield Reflect.get(value, symbol)
+    }
   }
 }
 
