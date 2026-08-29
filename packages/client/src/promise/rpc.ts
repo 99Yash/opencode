@@ -4,6 +4,7 @@ import { isRpcError } from "./generated/types.js"
 import type { EventSubscribeOutput, LocationGetInput, RpcCallInput } from "./generated/types.js"
 
 type RpcEvent = Extract<EventSubscribeOutput, { type: `rpc.${string}` }>
+type RpcEventType = RpcEventPayload<Rpc.PortableDefinition>["type"]
 
 export interface RpcCallOptions extends RequestOptions {
   readonly location?: LocationGetInput["location"]
@@ -67,7 +68,8 @@ export function makeRpc(
       name: string,
       options?: Pick<RequestOptions, "signal">,
     ): AsyncIterable<RpcEventPayload<Rpc.PortableDefinition>> => {
-      if (!Object.hasOwn(definition.events, name)) throw new Error(`Unknown RPC event: ${definition.namespace}.${name}`)
+      const schema = definition.events[name]
+      if (!schema) throw new Error(`Unknown RPC event: ${definition.namespace}.${name}`)
       const type = eventType(definition, name)
       return {
         [Symbol.asyncIterator]() {
@@ -77,8 +79,8 @@ export function makeRpc(
             try {
               for await (const published of events.subscribe({ signal })) {
                 if (signal.aborted) return
-                if (!isRpcEvent(published) || published.type !== type) continue
-                if (!signal.aborted) yield event(definition, name, published)
+                if (!isRpcEvent(published, type)) continue
+                yield event(type, schema, published)
               }
             } catch (error) {
               if (!signal.aborted) throw error
@@ -97,8 +99,8 @@ export function makeRpc(
         },
       }
     }
-    // Runtime keys are built directly from the checked definition's mapped public type.
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- runtime keys come from the checked definition.
+    // SAFETY: Every runtime key comes from this definition's method and event maps, which define RpcClient's mapped keys.
+    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
     return Object.assign(
       Object.fromEntries(
         Object.keys(definition.methods).map((name) => [
@@ -109,7 +111,7 @@ export function makeRpc(
                 {
                   namespace: definition.namespace,
                   method: name,
-                  // The generated transport owns JSON serialization; RPC adds no preflight parser.
+                  // SAFETY: The method schema defines the accepted input; this assertion bridges it to the generic JSON transport.
                   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
                   input: input as RpcCallInput["input"],
                   location: options?.location,
@@ -149,34 +151,30 @@ export function makeRpc(
 }
 
 function event(
-  definition: Rpc.PortableDefinition,
-  name: string,
+  type: RpcEventType,
+  schema: Rpc.PortableEventDefinition,
   event: RpcEvent,
 ): RpcEventPayload<Rpc.PortableDefinition> {
-  const schema = definition.events[name]
-  if (!schema) throw new Error(`Unknown RPC event: ${definition.namespace}.${name}`)
   if (!schema.durable) {
-    if (event.durable) throw new Error(`Expected ephemeral RPC event: ${eventType(definition, name)}`)
+    if (event.durable) throw new Error(`Expected ephemeral RPC event: ${type}`)
     return {
       ...event,
-      type: eventType(definition, name),
+      type,
       location: { ...event.location },
     }
   }
-  if (!event.durable) throw new Error(`Expected durable RPC event: ${eventType(definition, name)}`)
+  if (!event.durable) throw new Error(`Expected durable RPC event: ${type}`)
   if (event.durable.version !== schema.durable.version)
-    throw new Error(
-      `RPC event version mismatch for ${definition.namespace}.${name}: expected ${schema.durable.version}, got ${event.durable.version}`,
-    )
+    throw new Error(`RPC event version mismatch for ${type}: expected ${schema.durable.version}, got ${event.durable.version}`)
   return {
     ...event,
-    type: eventType(definition, name),
+    type,
     location: { ...event.location },
   }
 }
 
-function isRpcEvent(event: EventSubscribeOutput): event is RpcEvent {
-  return event.type.startsWith("rpc.")
+function isRpcEvent(event: EventSubscribeOutput, type: RpcEventType): event is RpcEvent {
+  return event.type === type
 }
 
 function eventType(definition: Rpc.PortableDefinition, name: string) {

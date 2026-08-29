@@ -62,17 +62,19 @@ export function make<CallError, EventError>(
         },
       ]),
     )
-    // Runtime keys and decoded values follow the definition's mapped public type.
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- runtime keys come from the checked definition.
+    // SAFETY: Every runtime key comes from this definition, and each value is decoded through its corresponding schema.
+    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
     return Object.assign(methods, {
-      events: {
-        subscribe: (name: keyof D["events"] & string) => {
-          const type = RpcRuntime.eventType(definition, name)
-          return subscribe().pipe(
-            Stream.filter((event): event is RpcEvent => event.type.startsWith("rpc.") && event.type === type),
-            Stream.mapEffect((event) => RpcRuntime.event(definition, name, event)),
-          )
-        },
+        events: {
+          subscribe: (name: keyof D["events"] & string) => {
+            const type = RpcRuntime.eventType(definition, name)
+            const schema = definition.events[name]
+            if (!schema) return Stream.fail(new Error(`Unknown RPC event: ${type}`))
+            return subscribe().pipe(
+              Stream.filter((event): event is RpcEvent => event.type === type),
+              Stream.mapEffect((event) => RpcRuntime.event(definition, name, schema, event)),
+            )
+          },
       },
     }) as RpcClient<D, Exclude<CallError, RpcError> | Rpc.SystemError, RpcCallOptions, EventError>
   }

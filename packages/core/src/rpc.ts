@@ -133,7 +133,8 @@ const layer = Layer.effect(
             ),
         ]),
       )
-      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- runtime keys come from the checked definition.
+      // SAFETY: Every runtime key comes from this definition, and each method delegates through its corresponding schema.
+      // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
       return {
         ...methods,
         events: {
@@ -142,7 +143,7 @@ const layer = Layer.effect(
             if (!registered) return Stream.fail(new Error(`Unknown RPC event: ${definition.namespace}.${name}`))
             return bus.subscribe(registered.definition).pipe(
               Stream.provideService(Location.Service, location),
-              Stream.mapEffect((payload) => logicalEvent(definition, name, payload)),
+              Stream.mapEffect((payload) => logicalEvent(definition, name, payload, ref)),
             )
           },
         },
@@ -162,6 +163,7 @@ const fields = {
   location: optional(Location.Ref),
 }
 const EventData = Schema.Record(Schema.String, Schema.Unknown)
+const jsonSchemas = new WeakMap<JsonSchema.JsonSchema, Schema.Codec<unknown>>()
 
 function eventType<const D extends Rpc.Definition, const Name extends keyof D["events"] & string>(
   definition: D,
@@ -201,10 +203,15 @@ function parse(schema: Tool.ValueSchema, value: unknown): Effect.Effect<unknown,
     })
   }
   return Effect.try({
-    try: () =>
-      Schema.make<Schema.Codec<unknown>>(
+    try: () => {
+      const existing = jsonSchemas.get(schema)
+      if (existing) return existing
+      const codec = Schema.make<Schema.Codec<unknown>>(
         SchemaRepresentation.fromJsonSchemaDocument(JsonSchema.fromSchemaDraft2020_12(schema)).ast,
-      ),
+      )
+      jsonSchemas.set(schema, codec)
+      return codec
+    },
     catch: (cause) => cause,
   }).pipe(Effect.flatMap((codec) => Schema.decodeUnknownEffect(codec)(value)))
 }
@@ -243,7 +250,7 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 function applyEventSchema(schema: Rpc.EventDefinition["schema"], value: unknown) {
-  // The public event-schema contract guarantees an object encoded/output type.
+  // SAFETY: The public event-schema contract guarantees an object encoded/output type.
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return encode(schema, value) as Effect.Effect<Readonly<Record<string, unknown>>, unknown>
 }
@@ -260,33 +267,20 @@ function read(schema: Tool.ValueSchema, value: unknown): Effect.Effect<unknown, 
 const logicalEvent = Effect.fn("Rpc.logicalEvent")(function* <
   D extends Rpc.Definition,
   Name extends keyof D["events"] & string,
->(definition: D, name: Name, payload: Event.Payload): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
+>(
+  definition: D,
+  name: Name,
+  payload: Event.Payload,
+  ref: Location.Ref,
+): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
   const event = definition.events[name]
   const data = yield* read(event.schema, payload.data)
-  if (!payload.location) return yield* Effect.fail(new Error(`RPC event is missing location: ${payload.type}`))
-  if (!event.durable) {
-    if (payload.durable) return yield* Effect.fail(new Error(`Expected ephemeral RPC event: ${payload.type}`))
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- event envelope and definition durability are checked above.
-    return {
-      ...payload,
-      type: eventType(definition, name),
-      data,
-      location: Location.Ref.make({ directory: payload.location.directory, workspaceID: payload.location.workspaceID }),
-    } as Rpc.EventPayload<D, Name>
-  }
-  if (!payload.durable) return yield* Effect.fail(new Error(`Expected durable RPC event: ${payload.type}`))
-  if (payload.durable.version !== event.durable.version)
-    return yield* Effect.fail(
-      new Error(
-        `RPC event version mismatch for ${definition.namespace}.${name}: expected ${event.durable.version}, got ${payload.durable.version}`,
-      ),
-    )
-  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- event envelope, version, and definition are checked above.
+  // SAFETY: The private Bus definition owns the envelope, durability, version, and location.
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return {
     ...payload,
     type: eventType(definition, name),
     data,
-    durable: payload.durable,
-    location: Location.Ref.make({ directory: payload.location.directory, workspaceID: payload.location.workspaceID }),
+    location: Location.Ref.make({ directory: ref.directory, workspaceID: ref.workspaceID }),
   } as Rpc.EventPayload<D, Name>
 })

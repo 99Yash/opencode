@@ -39,6 +39,11 @@ test("framework RPC error names are reserved", () => {
   ).toThrow('RPC error names starting with "rpc." are reserved: rpc.internal')
 })
 
+test("error narrowing returns false for unknown methods", () => {
+  const definition: Rpc.Definition = Acme
+  expect(Rpc.isError(definition, "missing", { type: "not_found", message: "Missing" })).toBe(false)
+})
+
 test("the shared definition entrypoint bundles without Effect or host runtime dependencies", async () => {
   const inputs = new Set<string>()
   const result = await Bun.build({

@@ -36,15 +36,17 @@ export function readError(method: Rpc.Method, error: unknown): Effect.Effect<nev
 export const event = Effect.fn("Client.Rpc.event")(function* <
   D extends Rpc.Definition,
   Name extends keyof D["events"] & string,
->(definition: D, name: Name, event: RpcEvent): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
-  const schema = definition.events[name]
-  if (!schema) return yield* Effect.fail(new Error(`Unknown RPC event: ${definition.namespace}.${name}`))
-  if (event.type !== eventType(definition, name))
-    return yield* Effect.fail(new Error(`Unexpected RPC event type: ${event.type}`))
+>(
+  definition: D,
+  name: Name,
+  schema: Rpc.EventDefinition,
+  event: RpcEvent,
+): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
   const data = yield* read(schema.schema, event.data)
   if (!schema.durable) {
     if (event.durable) return yield* Effect.fail(new Error(`Expected ephemeral RPC event: ${event.type}`))
-    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- event envelope and definition durability are checked above.
+    // SAFETY: The event type and ephemeral envelope were checked above, and data was decoded with this event's schema.
+    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
     return {
       ...event,
       type: eventType(definition, name),
@@ -59,7 +61,8 @@ export const event = Effect.fn("Client.Rpc.event")(function* <
         `RPC event version mismatch for ${definition.namespace}.${name}: expected ${schema.durable.version}, got ${event.durable.version}`,
       ),
     )
-  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- event envelope, version, and definition are checked above.
+  // SAFETY: The event type, durable envelope/version, and decoded data all match this definition.
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return {
     ...event,
     type: eventType(definition, name),

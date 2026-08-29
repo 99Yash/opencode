@@ -166,7 +166,7 @@ export function isError<
     typeof error.message !== "string"
   )
     return false
-  const errors = definition.methods[method].errors
+  const errors = definition.methods[method]?.errors
   return errors !== undefined && Object.hasOwn(errors, error.type)
 }
 

@@ -85,17 +85,15 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
     ): AsyncIterable<RpcEventPayload<Rpc.PortableDefinition>> => streams(local.events.subscribe(name), options)
     return Object.assign(
       Object.fromEntries(
-        Object.entries(local).flatMap(([name, method]) =>
-          typeof method !== "function"
-            ? []
-            : [
-                [
-                  name,
-                  (input: unknown, options?: Pick<RpcCallOptions, "signal">) =>
-                    run(method(input), { signal: options?.signal }),
-                ],
-              ],
-        ),
+        Object.keys(definition.methods).map((name) => [
+          name,
+          (input: unknown, options?: Pick<RpcCallOptions, "signal">) => {
+            // SAFETY: The local client was built from this definition, so every declared key is an Effect method.
+            // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+            const method = local[name] as (input: unknown) => Effect.Effect<unknown, unknown>
+            return run(method(input), { signal: options?.signal })
+          },
+        ]),
       ),
       {
         events: {
@@ -121,7 +119,7 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
     run(
       host.register(
         definition,
-        // The runtime adapter restores each concrete method's erased error map below.
+        // SAFETY: Each entry preserves its definition key; Core restores that method's erased schema and error types.
         // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
         Object.fromEntries(
           Object.entries(handlers).map(([name, handler]) => [
@@ -155,8 +153,8 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
       events: { emit: (...args: Rpc.EventInput<Rpc.PortableDefinition>) => run(registration.events.emit(...args)) },
     }))
 
-  // The adapter implements the portable callable domain dynamically from each checked definition.
-  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- runtime methods adapt the portable typed domain.
+  // SAFETY: Client and register implement RpcDomain from the same portable definitions and schema adapters.
+  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return Object.assign(client, { register }) as RpcDomain
 })
 
