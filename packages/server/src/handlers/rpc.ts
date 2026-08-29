@@ -14,7 +14,14 @@ export const RpcHandler = HttpApiBuilder.group(Api, "server.rpc", (handlers) =>
       const output = yield* rpc.call(params.namespace, params.method, payload.input)
       return output === undefined ? {} : { output }
     }).pipe(
-      Effect.mapError(toRpcError),
+      Effect.mapError(
+        (error) =>
+          new RpcError({
+            type: error.type,
+            message: error.message,
+            ...(error.data === undefined ? {} : { data: error.data }),
+          }),
+      ),
       Effect.catchDefect((error) =>
         Effect.fail(
           new RpcInternalError({
@@ -26,11 +33,3 @@ export const RpcHandler = HttpApiBuilder.group(Api, "server.rpc", (handlers) =>
     ),
   ),
 )
-
-function toRpcError(error: Rpc.Failure): RpcError {
-  return new RpcError({
-    type: error.type,
-    message: error.message,
-    ...(error.data === undefined ? {} : { data: error.data }),
-  })
-}

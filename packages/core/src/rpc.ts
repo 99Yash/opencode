@@ -93,7 +93,9 @@ const layer = Layer.effect(
             if (!registered)
               return yield* Effect.fail(new Error(`Unknown RPC event: ${definition.namespace}.${args[0]}`))
             const event = registered.event
-            const data = yield* applyEventSchema(event.schema, args[1])
+            // SAFETY: The public event-schema contract guarantees an object encoded/output type.
+            // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+            const data = (yield* encode(event.schema, args[1])) as Readonly<Record<string, unknown>>
             return yield* bus
               .publish(registered.definition, data, {
                 location: Location.Ref.make({ directory: ref.directory, workspaceID: ref.workspaceID }),
@@ -240,12 +242,6 @@ function errorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message
   if (typeof error === "string") return error
   return fallback
-}
-
-function applyEventSchema(schema: Rpc.EventDefinition["schema"], value: unknown) {
-  // SAFETY: The public event-schema contract guarantees an object encoded/output type.
-  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
-  return encode(schema, value) as Effect.Effect<Readonly<Record<string, unknown>>, unknown>
 }
 
 function isStandardSchema(schema: Tool.ValueSchema): schema is Extract<Tool.ValueSchema, StandardSchemaV1> {

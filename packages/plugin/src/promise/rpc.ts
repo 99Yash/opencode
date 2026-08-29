@@ -1,28 +1,19 @@
-import type { RpcApi, RpcCallOptions, RpcEventPayload } from "@opencode-ai/client/promise/api"
+import type { RpcApi, RpcCallOptions } from "@opencode-ai/client/promise/api"
 import type { Rpc } from "@opencode-ai/schema/rpc"
 import type { Registration } from "./registration.js"
 
 export type { RpcEventPayload } from "@opencode-ai/client/promise/api"
 
-declare const ReturnedErrorTypeId: unique symbol
-interface ReturnedError {
-  readonly [ReturnedErrorTypeId]: true
-}
-
 export interface RpcCallContext<M extends Rpc.Method> {
   readonly signal: AbortSignal
-  readonly error: <Name extends Rpc.ErrorName<M>>(
-    ...args: Rpc.ErrorArguments<M, Name>
-  ) => Rpc.HandlerErrorFor<M, Name> & ReturnedError
+  readonly error: Rpc.ErrorFactory<M>
 }
 
 export type RpcHandlers<D extends Rpc.PortableDefinition> = {
   readonly [Name in keyof D["methods"]]: (
     input: Rpc.Output<D["methods"][Name]["input"]>,
     context: RpcCallContext<D["methods"][Name]>,
-  ) => Promise<
-    Rpc.HandlerOutput<D["methods"][Name]["output"]> | (Rpc.HandlerError<D["methods"][Name]> & ReturnedError)
-  >
+  ) => Promise<Rpc.HandlerOutput<D["methods"][Name]["output"]> | Rpc.HandlerError<D["methods"][Name]>>
 }
 
 export interface RpcRegistration<D extends Rpc.PortableDefinition> extends Registration {

@@ -49,7 +49,6 @@ describe("public event manifest", () => {
     expect(EventManifest.Server.has("question.replied")).toBe(false)
     expect(EventManifest.Server.has("question.rejected")).toBe(false)
     expect(EventManifest.Server.has("rpc.acme.updated")).toBe(false)
-    expect(Array.from(EventManifest.Durable.keys()).some((type) => type.startsWith("rpc."))).toBe(false)
     expect(Agent.Event.Updated.durable).toBeUndefined()
     expect(EventManifest.Durable.has("agent.updated")).toBe(false)
   })

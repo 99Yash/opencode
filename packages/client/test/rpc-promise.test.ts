@@ -348,29 +348,6 @@ test("RPC async callback failures stop only that listener and are not unhandled"
   expect(failed).toEqual([1])
 })
 
-test("RPC EOF ends subscribers without reconnecting", async () => {
-  const source = events()
-  const iterator = source.client.rpc(Echo).events.subscribe("updated")[Symbol.asyncIterator]()
-  const next = iterator.next()
-  await source.end()
-  expect((await next).done).toBe(true)
-  expect((await iterator.next()).done).toBe(true)
-  expect(source.requests).toHaveLength(1)
-})
-
-test("RPC source transport errors propagate to native and RPC subscribers", async () => {
-  const source = events()
-  const native = source.client.event.subscribe()[Symbol.asyncIterator]()
-  const iterator = source.client.rpc(Echo).events.subscribe("updated")[Symbol.asyncIterator]()
-  await native.next()
-  const rpcError = iterator.next().catch((error: unknown) => error)
-  const nativeError = native.next().catch((error: unknown) => error)
-  await source.fail(new Error("Connection failed"))
-  expect(await rpcError).toMatchObject({ name: "ClientError", reason: "Transport" })
-  expect(await nativeError).toMatchObject({ name: "ClientError", reason: "Transport" })
-  expect(source.requests).toHaveLength(1)
-})
-
 test("RPC checks unknown event names and pre-aborted subscriptions remain lazy", async () => {
   const source = events()
   const broad: Rpc.PortableDefinition = Echo

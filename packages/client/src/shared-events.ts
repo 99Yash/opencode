@@ -3,7 +3,7 @@ export * as SharedEvents from "./shared-events.js"
 export function make<A extends { readonly type: string }>(connect: (signal: AbortSignal) => AsyncIterable<A>) {
   type Completion = { readonly error: unknown } | Record<string, never>
   type Subscriber = {
-    push: (value: A) => void | Promise<void>
+    push: (value: A) => Promise<void>
     finish: (completion: Completion) => void
   }
   type Connection = {
@@ -14,6 +14,7 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
   }
 
   let current: Connection | undefined
+  const delivered = Promise.resolve()
 
   function stop(connection: Connection) {
     connection.connected = undefined
@@ -82,11 +83,11 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
           const subscriber: Subscriber = {
             finish,
             push(value) {
-              if (completion) return
+              if (completion) return delivered
               const request = pending.shift()
               if (request) {
                 request.resolve({ done: false, value })
-                return
+                return delivered
               }
               const accepted = Promise.withResolvers<void>()
               offered = { value, accepted }
@@ -103,7 +104,7 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
             }
             current = connection
             connection.subscribers.add(subscriber)
-            if (connection.connected) subscriber.push(connection.connected)
+            if (connection.connected) void subscriber.push(connection.connected)
             if (fresh) void run(connection)
           }
 
@@ -128,7 +129,7 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
               if (!started) {
                 started = true
                 options?.signal?.addEventListener("abort", abort, { once: true })
-                void start()
+                start()
               }
               return request.promise
             },

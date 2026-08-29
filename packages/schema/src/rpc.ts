@@ -16,7 +16,7 @@ export interface Method {
   readonly errors?: ErrorMap
 }
 
-export type PortableValueSchema<A = unknown> = StandardSchemaV1<unknown, A> | JsonSchema.JsonSchema
+export type PortableValueSchema = StandardSchemaV1<unknown, unknown> | JsonSchema.JsonSchema
 
 export interface PortableMethod extends Method {
   readonly input: PortableValueSchema

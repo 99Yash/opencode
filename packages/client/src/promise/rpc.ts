@@ -4,7 +4,6 @@ import { isRpcError, isRpcInternalError } from "./generated/types.js"
 import type { EventSubscribeOutput, LocationGetInput, RpcCallInput } from "./generated/types.js"
 
 type RpcEvent = Extract<EventSubscribeOutput, { type: `rpc.${string}` }>
-type RpcEventType = RpcEventPayload<Rpc.PortableDefinition>["type"]
 
 export interface RpcCallOptions extends RequestOptions {
   readonly location?: LocationGetInput["location"]
@@ -70,7 +69,7 @@ export function makeRpc(
             try {
               for await (const published of events.subscribe({ signal })) {
                 if (signal.aborted) return
-                if (!isRpcEvent(published, type)) continue
+                if (published.type !== type) continue
                 // SAFETY: The exact RPC type was selected above; Promise contracts require no client-side transform.
                 // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
                 yield published as RpcEventPayload<Rpc.PortableDefinition>
@@ -141,10 +140,6 @@ export function makeRpc(
       },
     ) as RpcClient<typeof definition>
   }
-}
-
-function isRpcEvent(event: EventSubscribeOutput, type: RpcEventType): event is RpcEvent {
-  return event.type === type
 }
 
 function eventType(definition: Rpc.PortableDefinition, name: string) {
