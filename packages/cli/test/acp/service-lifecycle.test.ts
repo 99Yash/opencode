@@ -172,6 +172,157 @@ describe("acp service lifecycle", () => {
     })
   })
 
+  test("loads authoritative config after an overlapping switch completes", async () => {
+    const switchStarted = Promise.withResolvers<void>()
+    const releaseSwitch = Promise.withResolvers<void>()
+    const nativeFetch = fetch
+    let switching = true
+    let serverModel = makeSession("server").model
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (init?.method !== "GET" || url.pathname !== "/api/session/ses_load_during_switch") {
+          return nativeFetch(input, init)
+        }
+        return Promise.resolve(Response.json({ data: makeSession("ses_load_during_switch", { model: serverModel }) }))
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_load_during_switch", { model: serverModel }) })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_load_during_switch/model") {
+          if (!switching) return new Response(null, { status: 204 })
+          switching = false
+          switchStarted.resolve()
+          return releaseSwitch.promise.then(() => {
+            serverModel = { providerID: "test", id: secondModel.id }
+            return new Response(null, { status: 204 })
+          })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_load_during_switch/message") {
+          return Response.json({ data: [], cursor: {} })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const switched = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/second-model",
+    })
+    await switchStarted.promise
+    const loaded = fixture.service.loadSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [] })
+    releaseSwitch.resolve()
+    await switched
+    const result = await loaded
+    const effort = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "medium",
+    })
+
+    expect(currentValue(result, "model")).toBe("test/second-model")
+    expect(currentValue(effort, "effort")).toBe("medium")
+  })
+
+  test("detaches and resumes after an overlapping switch completes", async () => {
+    const switchStarted = Promise.withResolvers<void>()
+    const releaseSwitch = Promise.withResolvers<void>()
+    const nativeFetch = fetch
+    let switching = true
+    let serverModel = makeSession("server").model
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (init?.method !== "GET" || url.pathname !== "/api/session/ses_resume_during_switch") {
+          return nativeFetch(input, init)
+        }
+        return Promise.resolve(Response.json({ data: makeSession("ses_resume_during_switch", { model: serverModel }) }))
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_resume_during_switch", { model: serverModel }) })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_resume_during_switch/model") {
+          if (!switching) return new Response(null, { status: 204 })
+          switching = false
+          switchStarted.resolve()
+          return releaseSwitch.promise.then(() => {
+            serverModel = { providerID: "test", id: secondModel.id }
+            return new Response(null, { status: 204 })
+          })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_resume_during_switch/interrupt") {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const switched = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/second-model",
+    })
+    await switchStarted.promise
+    const closed = fixture.service.closeSession({ sessionId: session.sessionId })
+    const resumed = fixture.service.resumeSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [] })
+    releaseSwitch.resolve()
+    await Promise.all([switched, closed])
+    const result = await resumed
+    const effort = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "medium",
+    })
+
+    expect(currentValue(result, "model")).toBe("test/second-model")
+    expect(currentValue(effort, "effort")).toBe("medium")
+  })
+
+  test("allows config switches for distinct sessions to proceed concurrently", async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const releaseFirst = Promise.withResolvers<void>()
+    let created = 0
+    await using fixture = makeACPFixture({
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          created++
+          return Response.json({ data: makeSession(`ses_concurrent_${created}`) })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_concurrent_1/model") {
+          firstStarted.resolve()
+          return releaseFirst.promise.then(() => new Response(null, { status: 204 }))
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_concurrent_2/model") {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const first = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const second = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const blocked = fixture.service.setSessionConfigOption({
+      sessionId: first.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+    await firstStarted.promise
+    const concurrent = await fixture.service.setSessionConfigOption({
+      sessionId: second.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+    releaseFirst.resolve()
+    await blocked
+
+    expect(currentValue(concurrent, "effort")).toBe("high")
+  })
+
   test("lists server-backed pages and forwards cwd and cursor", async () => {
     const firstPage = Array.from({ length: 100 }, (_, index) =>
       makeSession(`ses_${100 - index}`, {

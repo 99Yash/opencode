@@ -74,7 +74,6 @@ type Attached = {
   readonly id: string
   readonly cwd: string
   readonly abort: AbortController
-  readonly configLock: Semaphore.Semaphore
   catalog: Catalog
   model: ModelRef
   modeID: string
@@ -111,7 +110,31 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
   const catalogs = new Map<string, Promise<Catalog>>()
   const registeredMcp = new Map<string, Set<string>>()
   const active = new Map<string, TurnControl>()
+  const sessionLocks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
   const capabilities = { writeTextFile: false, childSessionUpdates: false }
+
+  const withSessionLock = async <A>(sessionID: string, operation: () => Promise<A>) => {
+    const current = sessionLocks.get(sessionID)
+    const entry = current ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
+    if (!current) sessionLocks.set(sessionID, entry)
+    // Count holders and waiters so cleanup cannot split one session across two locks.
+    entry.users++
+    const result = await Effect.runPromise(
+      entry.semaphore.withPermit(
+        Effect.promise(() =>
+          operation().then(
+            (value) => ({ success: true as const, value }),
+            (error) => ({ success: false as const, error }),
+          ),
+        ),
+      ),
+    ).finally(() => {
+      entry.users--
+      if (entry.users === 0) sessionLocks.delete(sessionID)
+    })
+    if (!result.success) throw result.error
+    return result.value
+  }
 
   const catalog = (cwd: string) => {
     const cached = catalogs.get(cwd)
@@ -143,7 +166,6 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       id: session.id,
       cwd,
       abort: new AbortController(),
-      configLock: Semaphore.makeUnsafe(1),
       catalog: currentCatalog,
       model: session.model ?? currentCatalog.defaultModel,
       modeID: session.agent ?? currentCatalog.defaultModeID,
@@ -216,15 +238,16 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         agent: currentCatalog.defaultModeID,
         model: currentCatalog.defaultModel,
       })
-      const state = await attach(created, params.cwd, params.mcpServers)
+      const state = await withSessionLock(created.id, () => attach(created, params.cwd, params.mcpServers))
       return { sessionId: state.id, configOptions: configOptions(state) }
     },
-    loadSession: async (params) => {
-      const session = await getSession(input.client, params.sessionId)
-      const state = await attach(session, session.location.directory, params.mcpServers)
-      await replay(state)
-      return { configOptions: configOptions(state) }
-    },
+    loadSession: (params) =>
+      withSessionLock(params.sessionId, async () => {
+        const session = await getSession(input.client, params.sessionId)
+        const state = await attach(session, session.location.directory, params.mcpServers)
+        await replay(state)
+        return { configOptions: configOptions(state) }
+      }),
     listSessions: async (params) => {
       const page = await input.client.session.list({
         ...(params.cwd ? { directory: params.cwd } : {}),
@@ -242,41 +265,47 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         ...(page.cursor.next ? { nextCursor: page.cursor.next } : {}),
       }
     },
-    deleteSession: async (params) => {
-      await input.client.session.remove({ sessionID: params.sessionId }).catch((error) => {
-        if (!isSessionNotFoundError(error)) throw error
-      })
-      detach(params.sessionId)
-      return {}
-    },
-    resumeSession: async (params) => {
-      const session = await getSession(input.client, params.sessionId)
-      const state = await attach(session, session.location.directory, params.mcpServers ?? [])
-      return { configOptions: configOptions(state) }
-    },
-    closeSession: async (params) => {
-      detach(params.sessionId)
-      const turn = active.get(params.sessionId)
-      if (turn) {
-        turn.cancelled = true
-        turn.admission.abort()
-      }
-      await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
-      return {}
-    },
+    deleteSession: (params) =>
+      withSessionLock(params.sessionId, async () => {
+        await input.client.session.remove({ sessionID: params.sessionId }).catch((error) => {
+          if (!isSessionNotFoundError(error)) throw error
+        })
+        detach(params.sessionId)
+        return {}
+      }),
+    resumeSession: (params) =>
+      withSessionLock(params.sessionId, async () => {
+        const session = await getSession(input.client, params.sessionId)
+        const state = await attach(session, session.location.directory, params.mcpServers ?? [])
+        return { configOptions: configOptions(state) }
+      }),
+    closeSession: (params) =>
+      withSessionLock(params.sessionId, async () => {
+        detach(params.sessionId)
+        const turn = active.get(params.sessionId)
+        if (turn) {
+          turn.cancelled = true
+          turn.admission.abort()
+        }
+        await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
+        return {}
+      }),
     forkSession: async (params) => {
       const forked = await input.client.session.fork({
         sessionID: params.sessionId,
         boundary: { type: "through" },
       })
-      const state = await attach(forked, forked.location.directory, params.mcpServers ?? [])
-      await replay(state)
+      const state = await withSessionLock(forked.id, async () => {
+        const attached = await attach(forked, forked.location.directory, params.mcpServers ?? [])
+        await replay(attached)
+        return attached
+      })
       return { sessionId: state.id, configOptions: configOptions(state) }
     },
     setSessionConfigOption: async (params) => {
-      const state = await requireSession(params.sessionId)
       if (typeof params.value !== "string") throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
-      return withConfigLock(state, async () => {
+      return withSessionLock(params.sessionId, async () => {
+        const state = await requireSession(params.sessionId)
         switch (params.configId) {
           case "model": {
             const selected = requireModel(state.catalog, params.value)
@@ -305,8 +334,10 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       })
     },
     setSessionMode: async (params) => {
-      const state = await requireSession(params.sessionId)
-      await withConfigLock(state, () => selectMode(input.client, state, params.modeId))
+      await withSessionLock(params.sessionId, async () => {
+        const state = await requireSession(params.sessionId)
+        await selectMode(input.client, state, params.modeId)
+      })
       return {}
     },
     prompt: async (params) => {
@@ -470,21 +501,6 @@ async function selectMode(client: OpenCodeClient, state: Attached, modeID: strin
   if (!state.catalog.modes.some((mode) => mode.id === modeID)) throw new ACPError.InvalidModeError({ mode: modeID })
   await client.session.switchAgent({ sessionID: state.id, agent: modeID })
   state.modeID = modeID
-}
-
-async function withConfigLock<A>(state: Attached, operation: () => Promise<A>) {
-  const result = await Effect.runPromise(
-    state.configLock.withPermit(
-      Effect.promise(() =>
-        operation().then(
-          (value) => ({ success: true as const, value }),
-          (error) => ({ success: false as const, error }),
-        ),
-      ),
-    ),
-  )
-  if (!result.success) throw result.error
-  return result.value
 }
 
 async function getSession(client: OpenCodeClient, sessionID: string) {
