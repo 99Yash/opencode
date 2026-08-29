@@ -1,1 +1,1 @@
-opencode core must be node runtime agnostic, use node compatible APIs. Never rely on Bun.* APIs. This will crash on Node. Desktop is an example of a node consumer of the core!, or other SDK users
+Core must run on Node.js. Never use Bun globals or Bun-only imports in shared runtime code. Bun-specific adapters must have Node equivalents. This overrides the root Bun preference; tests and build scripts are exempt.
