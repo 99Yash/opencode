@@ -849,6 +849,15 @@ describe("stdlib integration", () => {
         return true
       `),
     ).toBe(false)
+    expect(
+      await value(`
+        const target = {}
+        const nested = {}
+        nested[Symbol.iterator] = target
+        try { Object.assign(target, { nested }) } catch { return Object.hasOwn(target, "nested") }
+        return true
+      `),
+    ).toBe(false)
   })
 
   test("Object.assign preserves mutations before a circular field", async () => {
@@ -859,6 +868,19 @@ describe("stdlib integration", () => {
         return null
       `),
     ).toEqual({ before: 1 })
+    expect(
+      await value(`
+        const target = {}
+        const marker = {}
+        const source = {}
+        source[Symbol.iterator] = marker
+        source[Symbol.asyncIterator] = target
+        try { Object.assign(target, source) } catch {
+          return [target[Symbol.iterator] === marker, Object.hasOwn(target, Symbol.asyncIterator)]
+        }
+        return null
+      `),
+    ).toEqual([true, false])
   })
 
   test("Object.assign preserves target identity and acyclic shared aliases", async () => {

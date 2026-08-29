@@ -1,5 +1,6 @@
 import {
   type AstNode,
+  AsyncIteratorSymbol,
   CodeModeFunction,
   CodeModeGenerator,
   CoercionFunction,
@@ -9,6 +10,7 @@ import {
   GeneratorMethodReference,
   InterpreterRuntimeError,
   IntrinsicReference,
+  IteratorSymbol,
   JsonMethodReference,
   PromiseCapabilityFunction,
   PromiseInstanceMethodReference,
@@ -42,13 +44,16 @@ export const isRuntimeReference = (value: unknown): boolean =>
   value instanceof SymbolNamespace ||
   isCodeModeValue(value)
 
-function* childValues(value: object): Generator<unknown> {
+function* childValues(value: object): Generator {
   if (Array.isArray(value)) {
     const length = value.length
     for (let index = 0; index < length; index++) yield value[index]
-    return
+  } else {
+    yield* Object.values(value)
   }
-  yield* Object.values(value)
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    if (symbol === AsyncIteratorSymbol || symbol === IteratorSymbol) yield Reflect.get(value, symbol)
+  }
 }
 
 export const containsRuntimeReference = (value: unknown): boolean => {
