@@ -79,6 +79,16 @@ type Attached = {
   modeID: string
 }
 
+type ActiveTurn = {
+  readonly state: Attached
+  readonly control: TurnControl
+}
+
+type RegisteredMcp = {
+  readonly server: string
+  readonly config: ReturnType<typeof mcpConfig>
+}
+
 type PreparedPrompt = {
   readonly start: TurnStart
   readonly text: string
@@ -108,8 +118,8 @@ export interface Interface {
 export function make(input: { readonly client: OpenCodeClient; readonly connection: Connection }): Interface {
   const sessions = new Map<string, Attached>()
   const catalogs = new Map<string, Promise<Catalog>>()
-  const registeredMcp = new Map<string, Set<string>>()
-  const active = new Map<string, TurnControl>()
+  const registeredMcp = new Map<string, Map<string, RegisteredMcp>>()
+  const active = new Map<string, ActiveTurn>()
   const sessionLocks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
   const capabilities = { writeTextFile: false, childSessionUpdates: false }
 
@@ -153,15 +163,23 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     throw new ACPError.SessionNotFoundError({ sessionId: sessionID })
   }
 
+  const retire = (state: Attached) => {
+    state.abort.abort()
+    const turn = active.get(state.id)
+    if (turn?.state !== state) return
+    turn.control.admission.abort()
+    active.delete(state.id)
+  }
+
   const detach = (sessionID: string) => {
-    sessions.get(sessionID)?.abort.abort()
+    const state = sessions.get(sessionID)
+    if (state) retire(state)
     sessions.delete(sessionID)
     registeredMcp.delete(sessionID)
   }
 
   const attach = async (session: SessionInfo, cwd: string, mcpServers: readonly McpServer[]) => {
     const currentCatalog = await catalog(cwd)
-    sessions.get(session.id)?.abort.abort()
     const state: Attached = {
       id: session.id,
       cwd,
@@ -170,20 +188,37 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       model: session.model ?? currentCatalog.defaultModel,
       modeID: session.agent ?? currentCatalog.defaultModeID,
     }
-    sessions.set(session.id, state)
-    await registerMcpServers(input.client, registeredMcp, state, mcpServers)
-    await input.connection.sessionUpdate({
-      sessionId: state.id,
-      update: {
-        sessionUpdate: "available_commands_update",
-        availableCommands: [
-          ...state.catalog.commands,
-          ...state.catalog.skills.filter(
-            (skill) => !state.catalog.commands.some((command) => command.name === skill.name),
-          ),
-        ].map((command) => ({ name: command.name, description: command.description ?? "" })),
-      },
+    const registration = await registerMcpServers(
+      input.client,
+      registeredMcp.get(session.id) ?? new Map(),
+      state,
+      mcpServers,
+    ).catch((error) => {
+      state.abort.abort()
+      throw error
     })
+    await input.connection
+      .sessionUpdate({
+        sessionId: state.id,
+        update: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            ...state.catalog.commands,
+            ...state.catalog.skills.filter(
+              (skill) => !state.catalog.commands.some((command) => command.name === skill.name),
+            ),
+          ].map((command) => ({ name: command.name, description: command.description ?? "" })),
+        },
+      })
+      .catch(async (error) => {
+        state.abort.abort()
+        await registration.rollback()
+        throw error
+      })
+    const previous = sessions.get(session.id)
+    if (previous) retire(previous)
+    sessions.set(session.id, state)
+    registeredMcp.set(session.id, registration.registered)
     return state
   }
 
@@ -281,12 +316,11 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       }),
     closeSession: (params) =>
       withSessionLock(params.sessionId, async () => {
-        detach(params.sessionId)
         const turn = active.get(params.sessionId)
         if (turn) {
-          turn.cancelled = true
-          turn.admission.abort()
+          turn.control.cancelled = true
         }
+        detach(params.sessionId)
         await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
         return {}
       }),
@@ -353,7 +387,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         }
         const prepared = preparePrompt(state.catalog, params.prompt, SessionMessage.ID.create())
         const control: TurnControl = { cancelled: false, admission: new AbortController() }
-        active.set(state.id, control)
+        active.set(state.id, { state, control })
         return { state, control, prepared }
       })
       const state = acquired.state
@@ -378,17 +412,19 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         submit: (signal) => submitPrompt(input.client, state, prepared, signal),
         ...(childSessionUpdate ? { childSessionUpdate } : {}),
       }).finally(() => {
-        if (active.get(state.id) === control) active.delete(state.id)
+        if (active.get(state.id)?.control === control) active.delete(state.id)
       })
       await sendUsageUpdate(input.client, input.connection, state, response.usage?.totalTokens).catch(() => {})
       return response
     },
     cancel: async (params) => {
-      const current = active.get(params.sessionId)
-      if (current) {
-        current.cancelled = true
-        current.admission.abort()
-      }
+      await withSessionLock(params.sessionId, async () => {
+        const current = active.get(params.sessionId)
+        if (!current) return
+        current.control.cancelled = true
+        current.control.admission.abort()
+        if (active.get(params.sessionId) === current) active.delete(params.sessionId)
+      })
       await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
     },
   }
@@ -409,16 +445,21 @@ function preparePrompt(catalog: Catalog, prompt: PromptRequest["prompt"], messag
 
 async function submitPrompt(client: OpenCodeClient, session: Attached, prompt: PreparedPrompt, signal: AbortSignal) {
   if (prompt.synthetic.length > 0) {
-    await client.session.synthetic({
-      sessionID: session.id,
-      text: prompt.synthetic.join("\n\n"),
-      description: "ACP embedded context",
-      delivery: "steer",
-      resume: false,
-    })
+    await client.session.synthetic(
+      {
+        sessionID: session.id,
+        text: prompt.synthetic.join("\n\n"),
+        description: "ACP embedded context",
+        delivery: "steer",
+        resume: false,
+      },
+      { signal },
+    )
   }
-  if (prompt.start.type === "compaction") return client.session.compact({ sessionID: session.id, id: prompt.start.id })
-  if (prompt.skill) return client.session.skill({ sessionID: session.id, id: prompt.start.id, skill: prompt.skill.id })
+  if (prompt.start.type === "compaction")
+    return client.session.compact({ sessionID: session.id, id: prompt.start.id }, { signal })
+  if (prompt.skill)
+    return client.session.skill({ sessionID: session.id, id: prompt.start.id, skill: prompt.skill.id }, { signal })
   if (prompt.command) {
     return client.session.command(
       {
@@ -532,26 +573,47 @@ async function messages(client: OpenCodeClient, sessionID: string) {
 
 async function registerMcpServers(
   client: OpenCodeClient,
-  registered: Map<string, Set<string>>,
+  current: Map<string, RegisteredMcp>,
   session: Attached,
   servers: readonly McpServer[],
 ) {
-  const current = registered.get(session.id) ?? new Set<string>()
-  registered.set(session.id, current)
-  await Promise.all(
-    servers.flatMap((server) => {
+  const requested = new Map(
+    servers.map((server) => {
       const config = mcpConfig(server)
-      const key = `${server.name}:${stableStringify(config)}`
-      if (current.has(key)) return []
-      current.add(key)
-      return [
-        client.mcp.add({ server: server.name, location: { directory: session.cwd }, config }).catch((error) => {
-          current.delete(key)
-          throw error
-        }),
-      ]
+      return [server.name, { server: server.name, config }] as const
     }),
   )
+  const changed = [...requested.values()].filter(
+    (entry) => stableStringify(current.get(entry.server)?.config) !== stableStringify(entry.config),
+  )
+  const registered = new Map(current)
+  changed.forEach((entry) => registered.set(entry.server, entry))
+  const rollback = async () => {
+    await Promise.allSettled(
+      changed.map((entry) => {
+        const previous = current.get(entry.server)
+        if (previous) {
+          return client.mcp.add({
+            server: previous.server,
+            location: { directory: session.cwd },
+            config: previous.config,
+          })
+        }
+        return client.mcp.remove({ server: entry.server, location: { directory: session.cwd } })
+      }),
+    )
+  }
+  const additions = await Promise.allSettled(
+    changed.map((entry) =>
+      client.mcp.add({ server: entry.server, location: { directory: session.cwd }, config: entry.config }),
+    ),
+  )
+  const failure = additions.find((result): result is PromiseRejectedResult => result.status === "rejected")
+  if (failure) {
+    await rollback()
+    throw failure.reason
+  }
+  return { registered, rollback }
 }
 
 function mcpConfig(server: McpServer) {

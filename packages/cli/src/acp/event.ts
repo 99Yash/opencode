@@ -342,7 +342,14 @@ export async function streamTurn(input: {
     return "interrupted" as const
   }
 
-  const completed = consume("turn")
+  const completed = consume("turn").then(
+    (value) => ({ success: true as const, value }),
+    (error) => ({ success: false as const, error }),
+  )
+  const submitted = input.submit(control.admission.signal).then(
+    (value) => ({ success: true as const, value }),
+    (error) => ({ success: false as const, error }),
+  )
   const closeStream = async () => {
     streamController.abort()
     input.connectionSignal?.removeEventListener("abort", connectionAbort)
@@ -350,23 +357,24 @@ export async function streamTurn(input: {
     await stream.return?.(undefined).catch(() => {})
   }
   try {
-    await input.submit(control.admission.signal).catch((error) => {
-      if (!control.cancelled) throw error
-    })
+    const admission = await submitted
+    if (!admission.success && !control.cancelled) throw admission.error
     if (input.action) {
       streamController.abort()
-      await completed.catch(() => {})
+      await completed
       return response(undefined, undefined, "succeeded", control.cancelled, undefined)
     }
     if (control.cancelled) {
       await input.client.session.interrupt({ sessionID: input.sessionID }).catch(() => {})
       if (!started) {
         streamController.abort()
-        await completed.catch(() => {})
+        await completed
         return response(undefined, undefined, "interrupted", true, undefined)
       }
     }
-    const terminal = await completed
+    const completion = await completed
+    if (!completion.success) throw completion.error
+    const terminal = completion.value
     if (input.childSessionUpdate && openChildren.size > 0 && !input.sessionSignal?.aborted) {
       handedOff = true
       void consume("background")
@@ -387,7 +395,7 @@ export async function streamTurn(input: {
     )
   } catch (error) {
     streamController.abort()
-    await completed.catch(() => {})
+    await completed
     throw error
   } finally {
     if (!handedOff) await closeStream()

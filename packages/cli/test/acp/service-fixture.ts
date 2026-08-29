@@ -31,6 +31,7 @@ type FixtureHandler = (
 type FixtureOptions = {
   readonly fetch?: FixtureHandler
   readonly clientFetch?: (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>
+  readonly sessionUpdate?: AgentSideConnection["sessionUpdate"]
   readonly models?: readonly ModelInfo[]
   readonly defaultModel?: ModelInfo
   readonly agents?: readonly AgentInfo[]
@@ -193,6 +194,7 @@ export function makeACPFixture(options: FixtureOptions = {}) {
     connection: {
       sessionUpdate: async (update) => {
         updates.push(update)
+        await options.sessionUpdate?.(update)
       },
       requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
     },

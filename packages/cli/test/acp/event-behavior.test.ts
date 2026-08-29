@@ -678,6 +678,45 @@ describe("acp event behavior", () => {
     }
   })
 
+  test("observes stream failure while cancelled admission settles", async () => {
+    const fixture = createSseFixture()
+
+    try {
+      for (let index = 0; index < 20; index++) {
+        const submitted = Promise.withResolvers<void>()
+        const session = new AbortController()
+        const result = streamTurn({
+          client: fixture.client,
+          connection: recordingConnection([]),
+          sessionID: `ses_abort_stress_${index}`,
+          cwd: "/workspace",
+          start: { type: "input", id: `input_abort_stress_${index}` },
+          writeTextFile: false,
+          control: { cancelled: false, admission: new AbortController() },
+          sessionSignal: session.signal,
+          submit: (signal) =>
+            new Promise<void>((resolve) => {
+              submitted.resolve()
+              signal.addEventListener(
+                "abort",
+                () => {
+                  void Bun.sleep(5).then(resolve)
+                },
+                { once: true },
+              )
+            }),
+        })
+        const observed = result.catch((error: unknown) => error)
+
+        await submitted.promise
+        session.abort()
+        expect(await withTimeout(observed, "cancelled stress turn did not settle")).toBeInstanceOf(Error)
+      }
+    } finally {
+      await fixture.stop()
+    }
+  })
+
   test("cancels unsupported session forms so execution can continue", async () => {
     const fixture = createSseFixture({
       onPrompt({ id, send }) {

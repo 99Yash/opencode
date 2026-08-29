@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { makeACPFixture, makeSession, secondModel, type FixtureContext, type FixtureRequest } from "./service-fixture"
+import { withTimeout } from "./sse-fixture"
 
 describe("acp service prompt routing and usage", () => {
   test("routes slash commands, skills, and compact through their session endpoints", async () => {
@@ -67,6 +68,87 @@ describe("acp service prompt routing and usage", () => {
     expect(skill?.body).toMatchObject({ id: expect.any(String), skill: "verify" })
     expect(compact?.body).toMatchObject({ id: expect.any(String) })
     expect(fixture.requests.some((request) => request.path === "/api/session/ses_routes/prompt")).toBe(false)
+  })
+
+  test("forwards admission signals through every prompt route", async () => {
+    const nativeFetch = fetch
+    const signalled: string[] = []
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (
+          ["synthetic", "prompt", "skill", "compact", "command"].some((suffix) => url.pathname.endsWith(`/${suffix}`))
+        ) {
+          if (init?.signal instanceof AbortSignal) signalled.push(url.pathname.split("/").at(-1) ?? "")
+        }
+        return nativeFetch(input, init)
+      },
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_signals") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_signals/synthetic") {
+          return Response.json({ data: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_signals/prompt") {
+          const id = requestID(request)
+          completeTurn(context, "ses_signals", {
+            id: id.replace(/^msg_/, "evt_"),
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_signals", inboxID: id },
+          })
+          return Response.json({ data: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_signals/skill") {
+          const id = requestID(request)
+          completeTurn(context, "ses_signals", {
+            id: id.replace(/^msg_/, "evt_"),
+            type: "session.skill.activated",
+            data: { sessionID: "ses_signals", skill: "verify" },
+          })
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_signals/compact") {
+          const id = requestID(request)
+          completeTurn(context, "ses_signals", {
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_signals", inboxID: id },
+          })
+          return Response.json({ data: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_signals/command") {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    await withTimeout(
+      fixture.service.prompt({
+        sessionId: session.sessionId,
+        prompt: [
+          { type: "text", text: "context", annotations: { audience: ["assistant"] } },
+          { type: "text", text: "hello" },
+        ],
+      }),
+      "synthetic prompt did not complete",
+    )
+    await withTimeout(
+      fixture.service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/verify" }] }),
+      "skill prompt did not complete",
+    )
+    await withTimeout(
+      fixture.service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/compact" }] }),
+      "compact prompt did not complete",
+    )
+    await withTimeout(
+      fixture.service.prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "/review" }] }),
+      "command prompt did not complete",
+    )
+
+    expect(signalled).toEqual(["synthetic", "prompt", "skill", "compact", "command"])
   })
 
   test("returns turn usage and publishes current context usage with cumulative session cost", async () => {

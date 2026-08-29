@@ -333,6 +333,87 @@ describe("acp service lifecycle", () => {
     expect(currentValue(result, "model")).toBe("test/second-model")
   })
 
+  test("keeps the prior attachment when staged MCP or command setup fails", async () => {
+    let phase: "mcp" | "commands" | "success" = "mcp"
+    await using fixture = makeACPFixture({
+      sessionUpdate: async () => {
+        if (phase === "commands") throw new Error("command publication failed")
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_attach_transaction") })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_attach_transaction") {
+          return Response.json({
+            data: makeSession("ses_attach_transaction", {
+              model: { providerID: secondModel.providerID, id: secondModel.id },
+            }),
+          })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_attach_transaction/model") {
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "PUT" && request.path === "/api/mcp/docs" && phase === "mcp") {
+          return new Response(null, { status: 500 })
+        }
+        if (request.method === "PUT" && request.path.startsWith("/api/mcp/")) {
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "DELETE" && request.path.startsWith("/api/mcp/")) {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const tools = { name: "tools", command: "bun", args: ["tools.ts"], env: [] }
+    const docs = { name: "docs", command: "bun", args: ["docs.ts"], env: [] }
+
+    const mcpFailure = await fixture.service
+      .loadSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [tools, docs] })
+      .catch((error: unknown) => error)
+    const afterMcpFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+
+    phase = "commands"
+    const commandFailure = await fixture.service
+      .resumeSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [tools] })
+      .catch((error: unknown) => error)
+    const afterCommandFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "default",
+    })
+
+    phase = "success"
+    const attached = await fixture.service.resumeSession({
+      cwd: "/workspace",
+      sessionId: session.sessionId,
+      mcpServers: [tools],
+    })
+
+    expect([mcpFailure, commandFailure]).toEqual([expect.any(Error), expect.any(Error)])
+    expect(currentValue(afterMcpFailure, "model")).toBe("test/test-model")
+    expect(currentValue(afterCommandFailure, "model")).toBe("test/test-model")
+    expect(currentValue(attached, "model")).toBe("test/second-model")
+    expect(
+      fixture.requests
+        .filter((request) => request.path.startsWith("/api/mcp/"))
+        .map((request) => `${request.method} ${request.path}`),
+    ).toEqual([
+      "PUT /api/mcp/tools",
+      "PUT /api/mcp/docs",
+      "DELETE /api/mcp/tools",
+      "DELETE /api/mcp/docs",
+      "PUT /api/mcp/tools",
+      "DELETE /api/mcp/tools",
+      "PUT /api/mcp/tools",
+    ])
+  })
+
   test("allows config switches for distinct sessions to proceed concurrently", async () => {
     const firstStarted = Promise.withResolvers<void>()
     const releaseFirst = Promise.withResolvers<void>()
@@ -424,6 +505,125 @@ describe("acp service lifecycle", () => {
 
     expect(stopped).toBe("rejected")
     expect(second.stopReason).toBe("end_turn")
+  })
+
+  test("replacement permits a new prompt while the retired request does not settle", async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const firstAborted = Promise.withResolvers<void>()
+    const nativeFetch = fetch
+    let prompts = 0
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (init?.method !== "POST" || url.pathname !== "/api/session/ses_prompt_handoff/prompt") {
+          return nativeFetch(input, init)
+        }
+        prompts++
+        if (prompts > 1) return nativeFetch(input, init)
+        firstStarted.resolve()
+        init.signal?.addEventListener("abort", () => firstAborted.resolve(), { once: true })
+        return new Promise<Response>(() => {})
+      },
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_prompt_handoff") })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_prompt_handoff") {
+          return Response.json({ data: makeSession("ses_prompt_handoff") })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_prompt_handoff/message") {
+          return Response.json({ data: [], cursor: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_handoff/prompt") {
+          const id = requestField(request.body, "id")
+          context.send({
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_prompt_handoff", inboxID: id },
+          })
+          context.send({
+            id: "evt_handoff_complete",
+            type: "session.execution.succeeded",
+            data: { sessionID: "ses_prompt_handoff" },
+          })
+          return Response.json({ data: {} })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    void fixture.service
+      .prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "never settles" }] })
+      .catch(() => undefined)
+    await firstStarted.promise
+
+    await fixture.service.loadSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [] })
+    await firstAborted.promise
+    const current = await fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "new owner" }],
+    })
+
+    expect(current.stopReason).toBe("end_turn")
+    expect(prompts).toBe(2)
+  })
+
+  test("cancel permits a new prompt while the cancelled request does not settle", async () => {
+    const firstStarted = Promise.withResolvers<void>()
+    const firstAborted = Promise.withResolvers<void>()
+    const nativeFetch = fetch
+    let prompts = 0
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (init?.method !== "POST" || url.pathname !== "/api/session/ses_prompt_cancel_handoff/prompt") {
+          return nativeFetch(input, init)
+        }
+        prompts++
+        if (prompts > 1) return nativeFetch(input, init)
+        firstStarted.resolve()
+        init.signal?.addEventListener("abort", () => firstAborted.resolve(), { once: true })
+        return new Promise<Response>(() => {})
+      },
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_prompt_cancel_handoff") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_cancel_handoff/interrupt") {
+          return Response.json({ interrupted: true })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_cancel_handoff/prompt") {
+          const id = requestField(request.body, "id")
+          context.send({
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_prompt_cancel_handoff", inboxID: id },
+          })
+          context.send({
+            id: "evt_cancel_handoff_complete",
+            type: "session.execution.succeeded",
+            data: { sessionID: "ses_prompt_cancel_handoff" },
+          })
+          return Response.json({ data: {} })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    void fixture.service
+      .prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "never settles" }] })
+      .catch(() => undefined)
+    await firstStarted.promise
+
+    await fixture.service.cancel({ sessionId: session.sessionId })
+    await firstAborted.promise
+    const current = await fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "new owner" }],
+    })
+
+    expect(current.stopReason).toBe("end_turn")
+    expect(prompts).toBe(2)
   })
 
   test("delete detaches and cancels an active foreground prompt", async () => {
