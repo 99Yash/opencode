@@ -1124,7 +1124,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const tools =
       registered !== undefined
         ? state.tools
-        : ToolStream.start(state.tools, id, {
+        : ToolStream.start(ToolStream.empty<string>(), id, {
             id: callID,
             name: item.name,
             providerMetadata: metadata,
@@ -1149,7 +1149,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
         hasFunctionCall:
           resultEvents.some((event) => LLMEvent.is.toolCall(event) || LLMEvent.is.toolInputError(event)) ||
           state.hasFunctionCall,
-        tools: result.tools,
+        tools: registered === undefined ? state.tools : result.tools,
         completedTools: new Set([...state.completedTools, callID]),
       },
       events,

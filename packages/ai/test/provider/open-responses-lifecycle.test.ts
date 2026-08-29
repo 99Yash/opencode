@@ -302,6 +302,50 @@ describe("Open Responses basic-item lifecycles", () => {
     )
   })
 
+  it.effect("isolates a done-only call whose item id collides with a pending call", () =>
+    Effect.gen(function* () {
+      const first = { type: "function_call", id: "fc_1", call_id: "call_1", name: "first" }
+      const second = {
+        type: "function_call",
+        id: "fc_1",
+        call_id: "call_2",
+        name: "second",
+        arguments: '{"second":true}',
+      }
+      const events = yield* collect(
+        { type: "response.output_item.added", item: first },
+        { type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"first":"draft"}' },
+        { type: "response.output_item.done", item: second },
+        { type: "response.output_item.done", item: second },
+        {
+          type: "response.output_item.done",
+          item: { ...first, arguments: '{"first":"final"}' },
+        },
+        {
+          type: "response.output_item.done",
+          item: { ...first, arguments: '{"first":"duplicate"}' },
+        },
+        completed,
+      )
+      const providerMetadata = { "openai-compatible": { itemId: "fc_1" } }
+      expect(events.filter((event) => event.type.startsWith("tool-"))).toEqual([
+        { type: "tool-input-start", id: "call_1", name: "first", providerMetadata },
+        {
+          type: "tool-input-delta",
+          id: "call_1",
+          name: "first",
+          text: '{"first":"draft"}',
+          input: { first: "draft" },
+        },
+        { type: "tool-input-start", id: "call_2", name: "second", providerMetadata },
+        { type: "tool-input-end", id: "call_2", name: "second", providerMetadata },
+        { type: "tool-call", id: "call_2", name: "second", input: { second: true }, providerMetadata },
+        { type: "tool-input-end", id: "call_1", name: "first", providerMetadata },
+        { type: "tool-call", id: "call_1", name: "first", input: { first: "final" }, providerMetadata },
+      ])
+    }),
+  )
+
   it.effect("recovers pending calls without reconciling terminal reasoning", () =>
     Effect.gen(function* () {
       const events = yield* collect(
