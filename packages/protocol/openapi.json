@@ -8950,6 +8950,122 @@
         "summary": "List skills"
       }
     },
+    "/api/rpc/{namespace}/{method}": {
+      "post": {
+        "tags": ["rpc"],
+        "operationId": "v2.rpc.call",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "method",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "location",
+            "in": "query",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "directory": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "workspace": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "required": false,
+            "style": "deepObject",
+            "explode": true
+          }
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Rpc.Output",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rpc.Output"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "InvalidRequestError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          }
+        },
+        "description": "Dispatch a method to the currently registered RPC namespace at the requested location.",
+        "summary": "Call a plugin RPC",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Rpc.Input"
+              }
+            }
+          },
+          "required": true
+        }
+      }
+    },
     "/api/event": {
       "get": {
         "tags": ["event"],
@@ -9069,7 +9185,7 @@
             }
           }
         },
-        "description": "Subscribe to native event payloads for the server. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.",
+        "description": "Subscribe to native events and plugin RPC events across all server locations. Volatile by contract: a slow consumer overflows and fails the stream, and events during disconnection are missed.",
         "summary": "Subscribe to events"
       }
     },
@@ -16982,6 +17098,20 @@
           }
         ]
       },
+      "Rpc.Input": {
+        "type": "object",
+        "properties": {
+          "input": {}
+        },
+        "additionalProperties": false
+      },
+      "Rpc.Output": {
+        "type": "object",
+        "properties": {
+          "output": {}
+        },
+        "additionalProperties": false
+      },
       "ServiceHealth": {
         "type": "object",
         "properties": {
@@ -19156,6 +19286,10 @@
     {
       "name": "skill",
       "description": "Experimental skill routes."
+    },
+    {
+      "name": "rpc",
+      "description": "Plugin RPC routes."
     },
     {
       "name": "event",

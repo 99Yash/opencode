@@ -1,0 +1,88 @@
+export * as RpcClientRuntime from "./rpc.js"
+
+import type { Rpc } from "@opencode-ai/schema/rpc"
+import type { RpcError } from "@opencode-ai/protocol/errors"
+import type { OpenCodeEvent } from "@opencode-ai/protocol/groups/event"
+import { Effect, Stream } from "effect"
+import type { RpcArguments, RpcCallOptions } from "../promise/rpc.js"
+import { RpcRuntime } from "../rpc-runtime.js"
+import type { RpcCallInput, RpcCallOutput } from "./api/api.js"
+
+type RpcEvent = Extract<OpenCodeEvent, { type: `rpc.${string}` }>
+
+export type RpcClient<
+  D extends Rpc.Definition,
+  E = never,
+  Options = RpcCallOptions,
+  EventError = E,
+> = {
+  readonly [Name in keyof D["methods"]]: (
+    ...args: RpcArguments<Rpc.Input<D["methods"][Name]["input"]>, Options>
+  ) => Effect.Effect<Rpc.Output<D["methods"][Name]["output"]>, Rpc.MethodError<D["methods"][Name]> | E>
+} & {
+  readonly events: {
+    readonly subscribe: <Name extends keyof D["events"] & string>(
+      name: Name,
+    ) => Stream.Stream<Rpc.EventPayload<D, Name>, EventError>
+  }
+}
+
+export interface RpcApi<E = never, Options = RpcCallOptions, EventError = E> {
+  <D extends Rpc.Definition>(definition: D): RpcClient<D, E, Options, EventError>
+}
+
+export function make<CallError, EventError>(
+  call: (input: RpcCallInput, options?: RpcCallOptions) => Effect.Effect<RpcCallOutput, CallError>,
+  subscribe: () => Stream.Stream<OpenCodeEvent, EventError>,
+): RpcApi<Exclude<CallError, RpcError> | Rpc.SystemError, RpcCallOptions, EventError> {
+  return <D extends Rpc.Definition>(definition: D) => {
+    const methods = Object.fromEntries(
+      Object.entries(definition.methods).map(([name, method]) => [
+        name,
+        (input?: unknown, options?: RpcCallOptions) => {
+          const result = Effect.gen(function* () {
+            const response = yield* call(
+              {
+                namespace: definition.namespace,
+                method: name,
+                input,
+                location: options?.location,
+              },
+              options,
+            )
+            return yield* RpcRuntime.read(method.output, response.output)
+          }).pipe(Effect.catch((error) => RpcRuntime.readError(method, error)))
+          const signal = options?.signal
+          if (!signal) return result
+          return Effect.suspend(() =>
+            signal.aborted
+              ? Effect.interrupt
+              : Effect.raceFirst(result, Effect.andThen(aborted(signal), Effect.interrupt)),
+          )
+        },
+      ]),
+    )
+    // Runtime keys and decoded values follow the definition's mapped public type.
+    // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion -- runtime keys come from the checked definition.
+    return Object.assign(methods, {
+      events: {
+        subscribe: (name: keyof D["events"] & string) => {
+          const type = RpcRuntime.eventType(definition, name)
+          return subscribe().pipe(
+            Stream.filter((event): event is RpcEvent => event.type.startsWith("rpc.") && event.type === type),
+            Stream.mapEffect((event) => RpcRuntime.event(definition, name, event)),
+          )
+        },
+      },
+    }) as RpcClient<D, Exclude<CallError, RpcError> | Rpc.SystemError, RpcCallOptions, EventError>
+  }
+}
+
+export function aborted(signal: AbortSignal) {
+  return Effect.callback<void>((resume) => {
+    if (signal.aborted) return resume(Effect.void)
+    const abort = () => resume(Effect.void)
+    signal.addEventListener("abort", abort, { once: true })
+    return Effect.sync(() => signal.removeEventListener("abort", abort))
+  })
+}

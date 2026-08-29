@@ -183,6 +183,7 @@
         "@typescript/native-preview": "catalog:",
         "effect": "catalog:",
         "solid-js": "catalog:",
+        "zod": "catalog:",
       },
       "peerDependencies": {
         "effect": "4.0.0-rc.112",
@@ -673,6 +674,7 @@
         "@tsconfig/bun": "catalog:",
         "@types/bun": "catalog:",
         "@typescript/native-preview": "catalog:",
+        "zod": "catalog:",
       },
     },
     "packages/server": {
