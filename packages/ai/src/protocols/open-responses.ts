@@ -1118,12 +1118,8 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     if (state.completedTools.has(callID)) return [state, NO_EVENTS] satisfies StepResult
     const metadata = item.id !== undefined ? providerMetadata(state, { itemId: item.id }) : undefined
     const fallback = item.id ?? callID
-    // Match the pending tool by call id so item events that disagree on
-    // whether `item.id` is present still resolve the same call.
-    const registered =
-      state.tools[fallback] !== undefined
-        ? fallback
-        : Object.keys(state.tools).find((key) => state.tools[key]?.id === callID)
+    // Match by call id before the optional item id, which may change or collide.
+    const registered = Object.keys(state.tools).find((key) => state.tools[key]?.id === callID)
     const id = registered ?? fallback
     const tools =
       registered !== undefined
@@ -1245,9 +1241,12 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
   const events: LLMEvent[] = []
   if (event.type === "response.completed") {
     for (const item of event.response?.output ?? []) {
-      const id = item.id ?? (item.type === "function_call" ? item.call_id : undefined)
-      if (id === undefined) continue
-      if (item.type !== "function_call" || !current.tools[id]) continue
+      if (
+        item.type !== "function_call" ||
+        !item.call_id ||
+        !Object.values(current.tools).some((tool) => tool?.id === item.call_id)
+      )
+        continue
       const [next, emitted] = yield* onOutputItemDone(current, item)
       current = next
       events.push(...emitted)

@@ -344,6 +344,76 @@ describe("Open Responses basic-item lifecycles", () => {
       ])
     }),
   )
+  ;[
+    { label: "introduced", firstID: undefined, finalID: "fc_1" },
+    { label: "omitted", firstID: "fc_1", finalID: undefined },
+    { label: "changed", firstID: "fc_old", finalID: "fc_new" },
+  ].forEach((scenario) => {
+    it.effect(`reconciles a terminal call whose item id is ${scenario.label}`, () =>
+      Effect.gen(function* () {
+        const first = {
+          type: "function_call",
+          ...(scenario.firstID === undefined ? {} : { id: scenario.firstID }),
+          call_id: "call_1",
+          name: "lookup",
+        }
+        const terminal = {
+          ...first,
+          ...(scenario.finalID === undefined ? { id: undefined } : { id: scenario.finalID }),
+          arguments: '{"query":"final"}',
+        }
+        const events = yield* collect(
+          { type: "response.output_item.added", item: first },
+          {
+            type: "response.completed",
+            response: { id: "resp_1", output: [terminal, terminal] },
+          },
+        )
+        const providerMetadata =
+          scenario.firstID === undefined ? undefined : { "openai-compatible": { itemId: scenario.firstID } }
+        expect(events.filter((event) => event.type.startsWith("tool-"))).toEqual([
+          { type: "tool-input-start", id: "call_1", name: "lookup", providerMetadata },
+          { type: "tool-input-end", id: "call_1", name: "lookup", providerMetadata },
+          { type: "tool-call", id: "call_1", name: "lookup", input: { query: "final" }, providerMetadata },
+        ])
+      }),
+    )
+  })
+
+  it.effect("does not reconcile an unseen terminal call through a colliding item id", () =>
+    Effect.gen(function* () {
+      const events = yield* collect(
+        {
+          type: "response.output_item.added",
+          item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "lookup", arguments: "{}" },
+        },
+        {
+          type: "response.completed",
+          response: {
+            id: "resp_1",
+            output: [
+              {
+                type: "function_call",
+                id: "fc_1",
+                call_id: "call_unseen",
+                name: "wrong",
+                arguments: '{"wrong":true}',
+              },
+            ],
+          },
+        },
+      )
+      expect(events.filter(LLMEvent.is.toolCall)).toEqual([
+        {
+          type: "tool-call",
+          id: "call_1",
+          name: "lookup",
+          input: {},
+          providerMetadata: { "openai-compatible": { itemId: "fc_1" } },
+        },
+      ])
+    }),
+  )
 
   it.effect("preserves call identity and pending order when an item id is reused", () =>
     Effect.gen(function* () {
