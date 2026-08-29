@@ -31,7 +31,7 @@ also be declared as an RPC method.
 - One `POST /api/rpc/:namespace/:method` handler routes through existing location and authentication middleware. Input/output wrappers support primitives and omitted values.
 - The HTTP boundary awaits the existing plugin activation barrier so cold locations are ready. Core and `ctx.rpc` lookup do not wait for registrations or reload implementations.
 - Custom events use direct `rpc.<namespace>.<event>` envelopes with required location. Native and typed RPC subscriptions observe the same event; typed subclients apply the declared payload schema.
-- One lazy shared source per base client fans out native and RPC events, caches connection metadata only, bounds each subscriber queue, and closes on the last subscriber leaving.
+- One lazy shared source per base client fans out native and RPC events, caches connection metadata only, and closes on the last subscriber leaving.
 - Promise RPC stays runtime-independent from Effect and accepts only portable definitions. Effect clients decode Effect codecs normally.
 - Native and RPC Promise plugin subscriptions share scoped iterator cleanup and respect subscriber-local signals.
 - Public protocol/client/OpenAPI artifacts are regenerated; plugin/client guides document the feature.
