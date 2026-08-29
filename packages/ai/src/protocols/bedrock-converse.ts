@@ -498,9 +498,10 @@ interface ParserState {
   readonly tools: ToolStream.State<number>
   readonly finishedTools: ReadonlySet<number>
   // Bedrock splits the finish into `messageStop` (carries `stopReason`) and
-  // `metadata` (carries usage). Hold the terminal event in state so `onHalt`
-  // can emit exactly one finish after both chunks have had a chance to arrive.
-  readonly pendingFinish: { readonly reason: FinishReasonDetails; readonly usage?: Usage } | undefined
+  // `metadata` (carries usage). Hold both in state so `onHalt` can emit exactly
+  // one finish after both chunks have had a chance to arrive.
+  readonly finishReason: FinishReasonDetails | undefined
+  readonly usage: Usage | undefined
   readonly hasToolCalls: boolean
   readonly lifecycle: Lifecycle.State
   readonly reasoningSignatures: Readonly<Record<number, string>>
@@ -627,12 +628,9 @@ const step = (state: ParserState, event: BedrockEvent) =>
       return [
         {
           ...state,
-          pendingFinish: {
-            reason: {
-              normalized: mapFinishReason(event.messageStop.stopReason),
-              raw: event.messageStop.stopReason,
-            },
-            usage: state.pendingFinish?.usage,
+          finishReason: {
+            normalized: mapFinishReason(event.messageStop.stopReason),
+            raw: event.messageStop.stopReason,
           },
         },
         [],
@@ -640,14 +638,11 @@ const step = (state: ParserState, event: BedrockEvent) =>
     }
 
     if (event.metadata) {
-      const usage = mapUsage(event.metadata.usage, state.providerMetadataKey) ?? state.pendingFinish?.usage
+      const usage = mapUsage(event.metadata.usage, state.providerMetadataKey) ?? state.usage
       return [
         {
           ...state,
-          pendingFinish: {
-            reason: state.pendingFinish?.reason ?? { normalized: "stop" },
-            usage,
-          },
+          usage,
         },
         [],
       ] as const
@@ -671,18 +666,18 @@ const step = (state: ParserState, event: BedrockEvent) =>
 const framing = BedrockEventStream.framing(ADAPTER)
 
 const onHalt = (state: ParserState): ReadonlyArray<LLMEvent> =>
-  state.pendingFinish
+  state.finishReason
     ? (() => {
         const events: LLMEvent[] = []
         Lifecycle.finish(state.lifecycle, events, {
           reason: {
-            ...state.pendingFinish.reason,
+            ...state.finishReason,
             normalized:
-              state.pendingFinish.reason.normalized === "stop" && state.hasToolCalls
+              state.finishReason.normalized === "stop" && state.hasToolCalls
                 ? "tool-calls"
-                : state.pendingFinish.reason.normalized,
+                : state.finishReason.normalized,
           },
-          usage: state.pendingFinish.usage,
+          usage: state.usage,
         })
         return events
       })()
@@ -707,7 +702,8 @@ export const protocol = Protocol.make({
       providerMetadataKey: request.model.route.providerMetadataKey ?? String(request.model.provider),
       tools: ToolStream.empty<number>(),
       finishedTools: new Set<number>(),
-      pendingFinish: undefined,
+      finishReason: undefined,
+      usage: undefined,
       hasToolCalls: false,
       lifecycle: Lifecycle.initial(),
       reasoningSignatures: {},
