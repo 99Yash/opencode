@@ -276,8 +276,8 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       switch (params.configId) {
         case "model": {
           const selected = requireModel(state.catalog, params.value)
-          state.model = selected
           await input.client.session.switchModel({ sessionID: state.id, model: selected })
+          state.model = selected
           break
         }
         case "effort": {
@@ -286,8 +286,9 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
           )
           if (!model?.variants.some((variant) => variant.id === params.value))
             throw new ACPError.InvalidEffortError({ effort: params.value })
-          state.model = { ...state.model, variant: params.value }
-          await input.client.session.switchModel({ sessionID: state.id, model: state.model })
+          const selected = { ...state.model, variant: params.value }
+          await input.client.session.switchModel({ sessionID: state.id, model: selected })
+          state.model = selected
           break
         }
         case "mode":
@@ -461,8 +462,8 @@ function requireModel(catalog: Catalog, modelID: string): ModelRef {
 
 async function selectMode(client: OpenCodeClient, state: Attached, modeID: string) {
   if (!state.catalog.modes.some((mode) => mode.id === modeID)) throw new ACPError.InvalidModeError({ mode: modeID })
-  state.modeID = modeID
   await client.session.switchAgent({ sessionID: state.id, agent: modeID })
+  state.modeID = modeID
 }
 
 async function getSession(client: OpenCodeClient, sessionID: string) {

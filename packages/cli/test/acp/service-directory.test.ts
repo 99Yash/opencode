@@ -181,6 +181,83 @@ describe("acp service directory behavior", () => {
     expect(invalidConfig).toMatchObject({ _tag: "ACPInvalidConfigOptionError" })
   })
 
+  test("keeps the last confirmed config after switch requests are rejected", async () => {
+    let rejected: "model" | "effort" | "config-mode" | "mode" | undefined
+    await using fixture = makeACPFixture({
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_rejected_config") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_rejected_config/model") {
+          if (rejected === "model" || rejected === "effort") return new Response(null, { status: 409 })
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_rejected_config/agent") {
+          if (rejected === "config-mode" || rejected === "mode") return new Response(null, { status: 409 })
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    rejected = "model"
+    const modelFailure = await fixture.service
+      .setSessionConfigOption({ sessionId: session.sessionId, configId: "model", value: "test/second-model" })
+      .catch((error: unknown) => error)
+    rejected = undefined
+    const afterModelFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+
+    rejected = "effort"
+    const effortFailure = await fixture.service
+      .setSessionConfigOption({ sessionId: session.sessionId, configId: "effort", value: "default" })
+      .catch((error: unknown) => error)
+    rejected = undefined
+    const afterEffortFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "mode",
+      value: "plan",
+    })
+
+    rejected = "config-mode"
+    const configModeFailure = await fixture.service
+      .setSessionConfigOption({ sessionId: session.sessionId, configId: "mode", value: "build" })
+      .catch((error: unknown) => error)
+    rejected = undefined
+    const afterConfigModeFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/test-model",
+    })
+
+    rejected = "mode"
+    const modeFailure = await fixture.service
+      .setSessionMode({ sessionId: session.sessionId, modeId: "build" })
+      .catch((error: unknown) => error)
+    rejected = undefined
+    const afterModeFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+
+    expect([modelFailure, effortFailure, configModeFailure, modeFailure]).toEqual([
+      expect.any(Error),
+      expect.any(Error),
+      expect.any(Error),
+      expect.any(Error),
+    ])
+    expect(currentValue(afterModelFailure, "model")).toBe("test/test-model")
+    expect(currentValue(afterModelFailure, "effort")).toBe("high")
+    expect(currentValue(afterEffortFailure, "effort")).toBe("high")
+    expect(currentValue(afterConfigModeFailure, "mode")).toBe("plan")
+    expect(currentValue(afterModeFailure, "mode")).toBe("plan")
+  })
+
   test("converts MCP configs and deduplicates registrations per session and config", async () => {
     const local: McpServer = {
       name: "tools",
