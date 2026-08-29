@@ -22,6 +22,7 @@ type Connection = Pick<AgentSideConnection, "sessionUpdate" | "requestPermission
 
 export type TurnControl = {
   cancelled: boolean
+  interrupting?: boolean
   readonly admission: AbortController
 }
 
@@ -84,7 +85,10 @@ export async function streamTurn(input: {
   readonly sessionSignal?: AbortSignal
 }): Promise<PromptResponse> {
   const streamController = new AbortController()
-  const connectionAbort = () => streamController.abort()
+  const connectionAbort = () => {
+    streamController.abort()
+    input.control.admission.abort()
+  }
   const sessionAbort = () => {
     streamController.abort()
     input.control.admission.abort()
@@ -346,10 +350,17 @@ export async function streamTurn(input: {
     (value) => ({ success: true as const, value }),
     (error) => ({ success: false as const, error }),
   )
-  const submitted = input.submit(control.admission.signal).then(
-    (value) => ({ success: true as const, value }),
-    (error) => ({ success: false as const, error }),
-  )
+  let admissionResult: { readonly success: true } | { readonly success: false; readonly error: unknown } | undefined
+  const submitted = input
+    .submit(control.admission.signal)
+    .then(
+      () => ({ success: true as const }),
+      (error) => ({ success: false as const, error }),
+    )
+    .then((result) => {
+      admissionResult = result
+      return result
+    })
   const closeStream = async () => {
     streamController.abort()
     input.connectionSignal?.removeEventListener("abort", connectionAbort)
@@ -357,6 +368,19 @@ export async function streamTurn(input: {
     await stream.return?.(undefined).catch(() => {})
   }
   try {
+    const first = await Promise.race([
+      submitted.then(() => "admission" as const),
+      completed.then(() => "stream" as const),
+    ])
+    if (first === "stream") {
+      const completion = await completed
+      if (!completion.success) {
+        const admission = admissionResult
+        control.admission.abort()
+        if (admission && !admission.success && !control.cancelled) throw admission.error
+        throw completion.error
+      }
+    }
     const admission = await submitted
     if (!admission.success && !control.cancelled) throw admission.error
     if (input.action) {
@@ -365,7 +389,10 @@ export async function streamTurn(input: {
       return response(undefined, undefined, "succeeded", control.cancelled, undefined)
     }
     if (control.cancelled) {
-      await input.client.session.interrupt({ sessionID: input.sessionID }).catch(() => {})
+      if (!control.interrupting) {
+        control.interrupting = true
+        await input.client.session.interrupt({ sessionID: input.sessionID }).catch(() => {})
+      }
       if (!started) {
         streamController.abort()
         await completed

@@ -624,6 +624,7 @@ describe("acp event behavior", () => {
     try {
       await withTimeout(submitted.promise, "cancel test prompt was not admitted")
       control.cancelled = true
+      control.interrupting = true
       control.admission.abort()
       expect(await fixture.client.session.interrupt({ sessionID: "ses_cancel" })).toEqual({ interrupted: true })
 
@@ -712,6 +713,39 @@ describe("acp event behavior", () => {
         session.abort()
         expect(await withTimeout(observed, "cancelled stress turn did not settle")).toBeInstanceOf(Error)
       }
+    } finally {
+      await fixture.stop()
+    }
+  })
+
+  test("connection abort stops a turn with hanging admission", async () => {
+    const fixture = createSseFixture()
+    const submitted = Promise.withResolvers<void>()
+    const admissionAborted = Promise.withResolvers<void>()
+    const connection = new AbortController()
+    const result = streamTurn({
+      client: fixture.client,
+      connection: recordingConnection([]),
+      connectionSignal: connection.signal,
+      sessionID: "ses_connection_abort",
+      cwd: "/workspace",
+      start: { type: "input", id: "input_connection_abort" },
+      writeTextFile: false,
+      control: { cancelled: false, admission: new AbortController() },
+      submit: (signal) =>
+        new Promise<void>(() => {
+          submitted.resolve()
+          signal.addEventListener("abort", () => admissionAborted.resolve(), { once: true })
+        }),
+    })
+    const observed = result.catch((error: unknown) => error)
+
+    try {
+      await submitted.promise
+      connection.abort()
+
+      await withTimeout(admissionAborted.promise, "connection abort did not cancel admission")
+      expect(await withTimeout(observed, "connection-aborted turn did not settle")).toBeInstanceOf(Error)
     } finally {
       await fixture.stop()
     }

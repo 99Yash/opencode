@@ -115,19 +115,15 @@ export interface Interface {
   cancel(input: CancelNotification): Promise<void>
 }
 
-export function make(input: { readonly client: OpenCodeClient; readonly connection: Connection }): Interface {
-  const sessions = new Map<string, Attached>()
-  const catalogs = new Map<string, Promise<Catalog>>()
-  const registeredMcp = new Map<string, Map<string, RegisteredMcp>>()
-  const active = new Map<string, ActiveTurn>()
-  const sessionLocks = new Map<string, { readonly semaphore: Semaphore.Semaphore; users: number }>()
-  const capabilities = { writeTextFile: false, childSessionUpdates: false }
+type KeyedLock<Key> = <A>(key: Key, operation: () => Promise<A>) => Promise<A>
 
-  const withSessionLock = async <A>(sessionID: string, operation: () => Promise<A>) => {
-    const current = sessionLocks.get(sessionID)
+function makeKeyedLock<Key>(): KeyedLock<Key> {
+  const entries = new Map<Key, { readonly semaphore: Semaphore.Semaphore; users: number }>()
+  return async <A>(key: Key, operation: () => Promise<A>) => {
+    const current = entries.get(key)
     const entry = current ?? { semaphore: Semaphore.makeUnsafe(1), users: 0 }
-    if (!current) sessionLocks.set(sessionID, entry)
-    // Count holders and waiters so cleanup cannot split one session across two locks.
+    if (!current) entries.set(key, entry)
+    // Count holders and waiters so cleanup cannot split one key across two locks.
     entry.users++
     const result = await Effect.runPromise(
       entry.semaphore.withPermit(
@@ -140,11 +136,21 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       ),
     ).finally(() => {
       entry.users--
-      if (entry.users === 0) sessionLocks.delete(sessionID)
+      if (entry.users === 0) entries.delete(key)
     })
     if (!result.success) throw result.error
     return result.value
   }
+}
+
+export function make(input: { readonly client: OpenCodeClient; readonly connection: Connection }): Interface {
+  const sessions = new Map<string, Attached>()
+  const catalogs = new Map<string, Promise<Catalog>>()
+  const registeredMcp = new Map<string, Map<string, RegisteredMcp>>()
+  const active = new Map<string, ActiveTurn>()
+  const withSessionLock = makeKeyedLock<string>()
+  const withLocationLock = makeKeyedLock<string>()
+  const capabilities = { writeTextFile: false, childSessionUpdates: false }
 
   const catalog = (cwd: string) => {
     const cached = catalogs.get(cwd)
@@ -175,10 +181,15 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     const state = sessions.get(sessionID)
     if (state) retire(state)
     sessions.delete(sessionID)
-    registeredMcp.delete(sessionID)
   }
 
-  const attach = async (session: SessionInfo, cwd: string, mcpServers: readonly McpServer[]) => {
+  // Lifecycle operations acquire Session ID before entering this Location transaction.
+  const attach = async (
+    session: SessionInfo,
+    cwd: string,
+    mcpServers: readonly McpServer[],
+    replayHistory: boolean,
+  ) => {
     const currentCatalog = await catalog(cwd)
     const state: Attached = {
       id: session.id,
@@ -188,42 +199,47 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       model: session.model ?? currentCatalog.defaultModel,
       modeID: session.agent ?? currentCatalog.defaultModeID,
     }
-    const registration = await registerMcpServers(
-      input.client,
-      registeredMcp.get(session.id) ?? new Map(),
-      state,
-      mcpServers,
-    ).catch((error) => {
+    return withLocationLock(cwd, async () => {
+      const history = replayHistory ? await messages(input.client, state.id) : undefined
+      const registration = await registerMcpServers(
+        input.client,
+        registeredMcp.get(cwd) ?? new Map(),
+        state,
+        mcpServers,
+      ).catch((error) => {
+        state.abort.abort()
+        throw error
+      })
+      return input.connection
+        .sessionUpdate({
+          sessionId: state.id,
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [
+              ...state.catalog.commands,
+              ...state.catalog.skills.filter(
+                (skill) => !state.catalog.commands.some((command) => command.name === skill.name),
+              ),
+            ].map((command) => ({ name: command.name, description: command.description ?? "" })),
+          },
+        })
+        .then(async () => {
+          if (history) await replayMessages(input.connection, state.id, state.cwd, history)
+          const previous = sessions.get(session.id)
+          if (previous) retire(previous)
+          sessions.set(session.id, state)
+          registeredMcp.set(cwd, registration.registered)
+          return state
+        })
+        .catch(async (error) => {
+          state.abort.abort()
+          await registration.rollback()
+          throw error
+        })
+    }).catch((error) => {
       state.abort.abort()
       throw error
     })
-    await input.connection
-      .sessionUpdate({
-        sessionId: state.id,
-        update: {
-          sessionUpdate: "available_commands_update",
-          availableCommands: [
-            ...state.catalog.commands,
-            ...state.catalog.skills.filter(
-              (skill) => !state.catalog.commands.some((command) => command.name === skill.name),
-            ),
-          ].map((command) => ({ name: command.name, description: command.description ?? "" })),
-        },
-      })
-      .catch(async (error) => {
-        state.abort.abort()
-        await registration.rollback()
-        throw error
-      })
-    const previous = sessions.get(session.id)
-    if (previous) retire(previous)
-    sessions.set(session.id, state)
-    registeredMcp.set(session.id, registration.registered)
-    return state
-  }
-
-  const replay = async (state: Attached) => {
-    await replayMessages(input.connection, state.id, state.cwd, await messages(input.client, state.id))
   }
 
   const configOptions = (state: Attached) =>
@@ -273,14 +289,13 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         agent: currentCatalog.defaultModeID,
         model: currentCatalog.defaultModel,
       })
-      const state = await withSessionLock(created.id, () => attach(created, params.cwd, params.mcpServers))
+      const state = await withSessionLock(created.id, () => attach(created, params.cwd, params.mcpServers, false))
       return { sessionId: state.id, configOptions: configOptions(state) }
     },
     loadSession: (params) =>
       withSessionLock(params.sessionId, async () => {
         const session = await getSession(input.client, params.sessionId)
-        const state = await attach(session, session.location.directory, params.mcpServers)
-        await replay(state)
+        const state = await attach(session, session.location.directory, params.mcpServers, true)
         return { configOptions: configOptions(state) }
       }),
     listSessions: async (params) => {
@@ -311,7 +326,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     resumeSession: (params) =>
       withSessionLock(params.sessionId, async () => {
         const session = await getSession(input.client, params.sessionId)
-        const state = await attach(session, session.location.directory, params.mcpServers ?? [])
+        const state = await attach(session, session.location.directory, params.mcpServers ?? [], false)
         return { configOptions: configOptions(state) }
       }),
     closeSession: (params) =>
@@ -319,6 +334,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         const turn = active.get(params.sessionId)
         if (turn) {
           turn.control.cancelled = true
+          turn.control.interrupting = true
         }
         detach(params.sessionId)
         await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
@@ -332,9 +348,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         }),
       )
       const state = await withSessionLock(forked.id, async () => {
-        const attached = await attach(forked, forked.location.directory, params.mcpServers ?? [])
-        await replay(attached)
-        return attached
+        return attach(forked, forked.location.directory, params.mcpServers ?? [], true)
       })
       return { sessionId: state.id, configOptions: configOptions(state) }
     },
@@ -422,6 +436,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         const current = active.get(params.sessionId)
         if (!current) return
         current.control.cancelled = true
+        current.control.interrupting = true
         current.control.admission.abort()
         if (active.get(params.sessionId) === current) active.delete(params.sessionId)
       })

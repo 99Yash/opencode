@@ -333,8 +333,8 @@ describe("acp service lifecycle", () => {
     expect(currentValue(result, "model")).toBe("test/second-model")
   })
 
-  test("keeps the prior attachment when staged MCP or command setup fails", async () => {
-    let phase: "mcp" | "commands" | "success" = "mcp"
+  test("keeps the prior attachment when staged MCP, command, or replay setup fails", async () => {
+    let phase: "mcp" | "commands" | "replay" | "success" = "mcp"
     await using fixture = makeACPFixture({
       sessionUpdate: async () => {
         if (phase === "commands") throw new Error("command publication failed")
@@ -352,6 +352,10 @@ describe("acp service lifecycle", () => {
         }
         if (request.method === "POST" && request.path === "/api/session/ses_attach_transaction/model") {
           return new Response(null, { status: 204 })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_attach_transaction/message") {
+          if (phase === "replay") return new Response(null, { status: 500 })
+          return Response.json({ data: [], cursor: {} })
         }
         if (request.method === "PUT" && request.path === "/api/mcp/docs" && phase === "mcp") {
           return new Response(null, { status: 500 })
@@ -388,6 +392,16 @@ describe("acp service lifecycle", () => {
       value: "default",
     })
 
+    phase = "replay"
+    const replayFailure = await fixture.service
+      .loadSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [tools] })
+      .catch((error: unknown) => error)
+    const afterReplayFailure = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+
     phase = "success"
     const attached = await fixture.service.resumeSession({
       cwd: "/workspace",
@@ -395,9 +409,14 @@ describe("acp service lifecycle", () => {
       mcpServers: [tools],
     })
 
-    expect([mcpFailure, commandFailure]).toEqual([expect.any(Error), expect.any(Error)])
+    expect([mcpFailure, commandFailure, replayFailure]).toEqual([
+      expect.any(Error),
+      expect.any(Error),
+      expect.any(Error),
+    ])
     expect(currentValue(afterMcpFailure, "model")).toBe("test/test-model")
     expect(currentValue(afterCommandFailure, "model")).toBe("test/test-model")
+    expect(currentValue(afterReplayFailure, "model")).toBe("test/test-model")
     expect(currentValue(attached, "model")).toBe("test/second-model")
     expect(
       fixture.requests
@@ -412,6 +431,127 @@ describe("acp service lifecycle", () => {
       "DELETE /api/mcp/tools",
       "PUT /api/mcp/tools",
     ])
+  })
+
+  test("serializes MCP attachment transactions for sessions in the same location", async () => {
+    const firstStaged = Promise.withResolvers<void>()
+    const releaseFirst = Promise.withResolvers<void>()
+    let racing = false
+    let created = 0
+    let installed: unknown
+    await using fixture = makeACPFixture({
+      sessionUpdate: async (update) => {
+        if (!racing || update.sessionId !== "ses_location_1") return
+        firstStaged.resolve()
+        await releaseFirst.promise
+        throw new Error("first publication failed")
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          created++
+          return Response.json({ data: makeSession(`ses_location_${created}`) })
+        }
+        if (request.method === "GET" && request.path.startsWith("/api/session/ses_location_")) {
+          return Response.json({ data: makeSession(request.path.split("/").at(-1) ?? "missing") })
+        }
+        if (request.method === "PUT" && request.path === "/api/mcp/shared") {
+          installed = request.body
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "DELETE" && request.path === "/api/mcp/shared") {
+          installed = undefined
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const first = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const second = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    racing = true
+
+    const failed = fixture.service
+      .resumeSession({
+        cwd: "/workspace",
+        sessionId: first.sessionId,
+        mcpServers: [{ name: "shared", command: "bun", args: ["first.ts"], env: [] }],
+      })
+      .catch((error: unknown) => error)
+    await firstStaged.promise
+    const succeeded = fixture.service.resumeSession({
+      cwd: "/workspace",
+      sessionId: second.sessionId,
+      mcpServers: [{ name: "shared", command: "bun", args: ["second.ts"], env: [] }],
+    })
+    releaseFirst.resolve()
+
+    expect(await failed).toBeInstanceOf(Error)
+    await succeeded
+    expect(installed).toEqual({
+      config: { type: "local", command: ["bun", "second.ts"], environment: {} },
+    })
+    expect(
+      fixture.requests
+        .filter((request) => request.path === "/api/mcp/shared")
+        .map((request) => ({ method: request.method, body: request.body })),
+    ).toEqual([
+      {
+        method: "PUT",
+        body: { config: { type: "local", command: ["bun", "first.ts"], environment: {} } },
+      },
+      { method: "DELETE", body: undefined },
+      {
+        method: "PUT",
+        body: { config: { type: "local", command: ["bun", "second.ts"], environment: {} } },
+      },
+    ])
+  })
+
+  test("allows MCP attachment transactions in distinct locations to proceed concurrently", async () => {
+    const firstStaged = Promise.withResolvers<void>()
+    const releaseFirst = Promise.withResolvers<void>()
+    let racing = false
+    let created = 0
+    await using fixture = makeACPFixture({
+      sessionUpdate: async (update) => {
+        if (!racing || update.sessionId !== "ses_distinct_1") return
+        firstStaged.resolve()
+        await releaseFirst.promise
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          created++
+          const cwd = created === 1 ? "/first" : "/second"
+          return Response.json({ data: makeSession(`ses_distinct_${created}`, { cwd }) })
+        }
+        if (request.method === "GET" && request.path.startsWith("/api/session/ses_distinct_")) {
+          const id = request.path.split("/").at(-1) ?? "missing"
+          return Response.json({ data: makeSession(id, { cwd: id.endsWith("1") ? "/first" : "/second" }) })
+        }
+        if (request.method === "PUT" && request.path === "/api/mcp/shared") {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const first = await fixture.service.newSession({ cwd: "/first", mcpServers: [] })
+    const second = await fixture.service.newSession({ cwd: "/second", mcpServers: [] })
+    racing = true
+
+    const blocked = fixture.service.resumeSession({
+      cwd: "/first",
+      sessionId: first.sessionId,
+      mcpServers: [{ name: "shared", command: "bun", args: ["first.ts"], env: [] }],
+    })
+    await firstStaged.promise
+    const concurrent = fixture.service.resumeSession({
+      cwd: "/second",
+      sessionId: second.sessionId,
+      mcpServers: [{ name: "shared", command: "bun", args: ["second.ts"], env: [] }],
+    })
+
+    await withTimeout(concurrent, "distinct location transaction was blocked")
+    releaseFirst.resolve()
+    await blocked
   })
 
   test("allows config switches for distinct sessions to proceed concurrently", async () => {
