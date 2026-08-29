@@ -107,6 +107,21 @@ yield *
   )
 ```
 
+## Declining A Tool
+
+Tools and `execute.before` hooks can fail with the canonical `Tool.Declined`.
+OpenCode treats this as a refused interaction, not an ordinary tool error for
+the model to recover from. Defects and interruptions retain their meaning.
+
+```ts
+import { Tool } from "@opencode-ai/plugin/effect"
+
+yield *
+  ctx.tool.hook("execute.before", (event) =>
+    event.tool === "deploy" ? Effect.fail(new Tool.Declined({ message: "Deployment was declined" })) : Effect.void,
+  )
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

@@ -44,9 +44,9 @@ export interface ToolHooks {
   )
 }
 
-// Only execute.before may fail: a Tool.Error rejects the call before the tool runs.
+// Only execute.before may fail, rejecting or declining the call before the tool runs.
 export interface ToolFailures extends Record<keyof ToolHooks, unknown> {
-  readonly "execute.before": Tool.Error
+  readonly "execute.before": Tool.Error | Tool.Declined
   readonly "execute.after": never
 }
 

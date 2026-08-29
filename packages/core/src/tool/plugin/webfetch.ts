@@ -118,18 +118,25 @@ export const Plugin = {
             Effect.gen(function* () {
               yield* Effect.try({
                 try: () => assertHttpUrl(new URL(input.url)),
-                catch: (error) => error,
+                catch: (error) => new ToolFailure({ message: `Unable to fetch ${input.url}`, error }),
               })
 
-              yield* permission.assert({
-                action: name,
-                resources: [input.url],
-                save: ["*"],
-                metadata: input,
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source: { type: "tool", messageID: context.messageID, id: context.id },
-              })
+              yield* permission
+                .assert({
+                  action: name,
+                  resources: [input.url],
+                  save: ["*"],
+                  metadata: input,
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: { type: "tool", messageID: context.messageID, id: context.id },
+                })
+                .pipe(
+                  Effect.catchTag(
+                    ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                    (error) => new ToolFailure({ message: `Unable to fetch ${input.url}`, error }),
+                  ),
+                )
 
               const { body, contentType } = yield* Effect.gen(function* () {
                 const response = yield* execute(http, input.url, input.format).pipe(
@@ -147,11 +154,12 @@ export const Plugin = {
                   duration: Duration.seconds(input.timeout ?? DEFAULT_TIMEOUT_SECONDS),
                   orElse: () => Effect.fail(new Error("Request timed out")),
                 }),
+                Effect.mapError((error) => new ToolFailure({ message: `Unable to fetch ${input.url}`, error })),
               )
               const content = new TextDecoder().decode(body)
               const output = yield* Effect.try({
                 try: () => convert(content, contentType, input.format),
-                catch: (error) => error,
+                catch: (error) => new ToolFailure({ message: `Unable to fetch ${input.url}`, error }),
               })
               const result = {
                 url: input.url,
@@ -160,7 +168,7 @@ export const Plugin = {
                 output,
               }
               return { output: result, content: result.output, metadata: { contentType: result.contentType } }
-            }).pipe(Effect.mapError((error) => new ToolFailure({ message: `Unable to fetch ${input.url}`, error }))),
+            }),
         }),
       )
       .pipe(Effect.orDie)

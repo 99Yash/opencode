@@ -1,5 +1,5 @@
 export * as Tool from "./tool.js"
-export { CallID, Content, Error, FileContent, TextContent } from "@opencode-ai/schema/tool"
+export { CallID, Content, Declined, Error, FileContent, TextContent } from "@opencode-ai/schema/tool"
 export type { Context, Metadata, Options, Result } from "@opencode-ai/schema/tool"
 
 import { ToolDefinition, type ToolCall } from "@opencode-ai/ai"
@@ -51,7 +51,7 @@ export interface Snapshot {
     readonly progress?: (update: Tool.Metadata) => Effect.Effect<void>
     /** Surviving request definitions, keyed by the names advertised after session context hooks. */
     readonly definitions?: ReadonlyMap<string, ToolDefinition>
-  }) => Effect.Effect<Tool.Result & { readonly content: ReadonlyArray<Tool.Content> }, Tool.Error>
+  }) => Effect.Effect<Tool.Result & { readonly content: ReadonlyArray<Tool.Content> }, Tool.Error | Tool.Declined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Tool") {}

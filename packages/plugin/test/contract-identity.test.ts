@@ -12,11 +12,13 @@ import { PersistentPty } from "@opencode-ai/schema/persistent-pty"
 import { Provider } from "@opencode-ai/schema/provider"
 import { Reference } from "@opencode-ai/schema/reference"
 import { Skill } from "@opencode-ai/schema/skill"
+import { Tool } from "@opencode-ai/schema/tool"
 import { Vcs } from "@opencode-ai/schema/vcs"
 import { WebSearch } from "@opencode-ai/schema/websearch"
 
 const Plugin = await import("../src/effect/index")
 const PromisePlugin = await import("../src/promise/index")
+const PromiseTool = await import("../src/promise/tool")
 const TuiPlugin = await import("../src/tui/index")
 
 test.each([
@@ -35,6 +37,8 @@ test.each([
   expect(entrypoint.Provider).toBe(Provider)
   expect(entrypoint.Reference).toBe(Reference)
   expect(entrypoint.Skill).toBe(Skill)
+  expect(entrypoint.Tool).toBe(Tool)
+  expect(entrypoint.Tool.Declined).toBe(Tool.Declined)
   expect(entrypoint.Vcs).toBe(Vcs)
   expect(entrypoint.WebSearch).toBe(WebSearch)
   expect(Object.keys(entrypoint).sort()).toEqual([
@@ -51,6 +55,7 @@ test.each([
     "Provider",
     "Reference",
     "Skill",
+    "Tool",
     "Vcs",
     "WebSearch",
   ])
@@ -61,6 +66,10 @@ test.each([
   ["promise", PromisePlugin.Plugin.define({ id: "svn", vcs: { markers: [".svn"] }, setup() {} })],
 ])("%s plugin definitions retain repository markers", (_name, plugin) => {
   expect(plugin.vcs).toEqual({ markers: [".svn"] })
+})
+
+test("Promise tool entrypoint exposes the canonical decline", () => {
+  expect(PromiseTool.Declined).toBe(Tool.Declined)
 })
 
 test("tui entrypoint exposes the plugin definition", () => {

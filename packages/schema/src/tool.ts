@@ -59,6 +59,11 @@ export class Error extends Schema.TaggedError<Error>()("Tool.Error", {
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
 }) {}
 
+/** A refused interaction, not a model-facing tool error or a shutdown interruption. */
+export class Declined extends Schema.TaggedError<Declined>()("Tool.Declined", {
+  message: Schema.String,
+}) {}
+
 export interface TextContent extends Schema.Schema.Type<typeof TextContent> {}
 export const TextContent = Schema.Struct({
   type: Schema.Literal("text"),
@@ -91,7 +96,8 @@ export type Info<
   readonly name: string
   readonly input: Input
   readonly description: string
-  readonly execute: (input: InputValue<Input>, context: Context) => Effect.Effect<Result<Output>, Error>
+  /** Producer failures are classified by the host at execution, not at registration. */
+  readonly execute: (input: InputValue<Input>, context: Context) => Effect.Effect<Result<Output>, unknown>
   readonly output?: Output
   readonly options?: Options
 }

@@ -104,10 +104,9 @@ export const layer = Layer.effect(
                       ...(content.length === 0 ? {} : { content }),
                     }
                   }).pipe(
-                    Effect.mapError((error) =>
-                      error instanceof ToolFailure
-                        ? error
-                        : new ToolFailure({ message: `Unable to execute ${name(tool.server, tool.name)}` }),
+                    Effect.catchTag(
+                      ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                      () => new ToolFailure({ message: `Unable to execute ${name(tool.server, tool.name)}` }),
                     ),
                   ),
               })

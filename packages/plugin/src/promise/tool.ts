@@ -1,4 +1,4 @@
-export { CallID, Error } from "@opencode-ai/schema/tool"
+export { CallID, Declined, Error } from "@opencode-ai/schema/tool"
 export type { Metadata, Options, Result } from "@opencode-ai/schema/tool"
 
 import { Tool } from "@opencode-ai/schema/tool"

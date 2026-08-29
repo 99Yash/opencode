@@ -3,6 +3,7 @@ import { Effect, Schema, SchemaAST, Stream } from "effect"
 import type { Scope } from "effect"
 import { HttpApiEndpoint, HttpApiSchema } from "effect/unstable/httpapi"
 import { define } from "../effect/plugin.js"
+import type { ToolFailures } from "../effect/tool.js"
 import type { Context, Plugin } from "./plugin.js"
 import type { Info } from "./tool.js"
 
@@ -341,7 +342,17 @@ export function fromPromise(plugin: Plugin) {
                 ),
               ),
             hook: (name, callback) =>
-              register(host.tool.hook(name, (event) => Effect.promise(() => Promise.resolve(callback(event))))),
+              register(
+                host.tool.hook(name, (event) =>
+                  Effect.promise(() => Promise.resolve(callback(event))).pipe(
+                    Effect.catchDefect((error) =>
+                      name === "execute.before" && error instanceof Tool.Declined
+                        ? Effect.fail(error as ToolFailures[typeof name])
+                        : Effect.die(error),
+                    ),
+                  ),
+                ),
+              ),
           },
           vcs: {
             get: adaptApiMethod(VcsEndpoints["vcs.get"], host.vcs.get),
@@ -431,4 +442,4 @@ const executePromiseTool = (tool: Info, input: any, context: Tool.Context) =>
       ...context,
       progress: (update) => Effect.runPromise(context.progress(update)),
     }),
-  )
+  ).pipe(Effect.catchDefect((error) => (error instanceof Tool.Declined ? Effect.fail(error) : Effect.die(error))))

@@ -47,8 +47,8 @@ export const Plugin = {
             Effect.gen(function* () {
               const skill = yield* skills.get(input.id)
               if (!skill) return yield* unableToLoad(input.id)
-              return yield* Effect.gen(function* () {
-                yield* permission.assert({
+              yield* permission
+                .assert({
                   action: name,
                   resources: [skill.id],
                   save: [skill.id],
@@ -56,8 +56,16 @@ export const Plugin = {
                   agent: context.agent,
                   source: { type: "tool", messageID: context.messageID, id: context.id },
                 })
-                return { name: skill.name, ...(yield* Skill.prepare(fs, skill)) }
-              }).pipe(Effect.mapError((error) => unableToLoad(input.id, error)))
+                .pipe(
+                  Effect.catchTag(
+                    ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                    (error) => unableToLoad(input.id, error),
+                  ),
+                )
+              return {
+                name: skill.name,
+                ...(yield* Skill.prepare(fs, skill).pipe(Effect.mapError((error) => unableToLoad(input.id, error)))),
+              }
             }).pipe(
               Effect.map((output) => ({
                 output,

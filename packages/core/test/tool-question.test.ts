@@ -255,7 +255,8 @@ describe("QuestionTool", () => {
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {
         const error = Cause.squash(exit.cause)
-        expect(error).toBeInstanceOf(QuestionTool.CancelledError)
+        expect(error).toBeInstanceOf(Tool.Declined)
+        expect(Cause.hasDies(exit.cause)).toBe(false)
         expect(error).toHaveProperty("message", "The user dismissed this question")
       }
     }),

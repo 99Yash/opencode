@@ -41,15 +41,22 @@ export const Plugin = {
           output: Output,
           execute: (input, context) =>
             Effect.gen(function* () {
-              yield* permission.assert({
-                action: name,
-                resources: [input.query],
-                save: ["*"],
-                metadata: input,
-                sessionID: context.sessionID,
-                agent: context.agent,
-                source: { type: "tool", messageID: context.messageID, id: context.id },
-              })
+              yield* permission
+                .assert({
+                  action: name,
+                  resources: [input.query],
+                  save: ["*"],
+                  metadata: input,
+                  sessionID: context.sessionID,
+                  agent: context.agent,
+                  source: { type: "tool", messageID: context.messageID, id: context.id },
+                })
+                .pipe(
+                  Effect.catchTag(
+                    ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                    (error) => new ToolFailure({ message: `Unable to search the web for ${input.query}`, error }),
+                  ),
+                )
               const search = (): Effect.Effect<Effect.Success<ReturnType<typeof ctx.websearch.query>>, unknown> =>
                 websearch.default().pipe(
                   Effect.flatMap((provider) => {
@@ -146,7 +153,37 @@ export const Plugin = {
                       )
                   }),
                 )
-              const result = yield* search()
+              const result = yield* search().pipe(
+                Effect.mapError((error) => {
+                  const fallback = `Unable to search the web for ${input.query}`
+                  if (!Schema.is(WebSearch.RequestError)(error)) return new ToolFailure({ message: fallback, error })
+                  const status = HttpClientError.isHttpClientError(error.cause)
+                    ? error.cause.response?.status
+                    : undefined
+                  switch (status) {
+                    case 429:
+                      return new ToolFailure({
+                        message: "Web search rate limited (HTTP 429)",
+                        error,
+                        metadata: { provider: error.providerID },
+                      })
+                    case 401:
+                      return new ToolFailure({
+                        message: "Web search authentication failed (HTTP 401)",
+                        error,
+                        metadata: { provider: error.providerID },
+                      })
+                    case undefined:
+                      return new ToolFailure({ message: fallback, error, metadata: { provider: error.providerID } })
+                    default:
+                      return new ToolFailure({
+                        message: `Web search request failed (HTTP ${status})`,
+                        error,
+                        metadata: { provider: error.providerID },
+                      })
+                  }
+                }),
+              )
               const output = {
                 provider: result.data.providerID,
                 results: result.data.results,
@@ -163,35 +200,7 @@ export const Plugin = {
                     .join("\n\n")
                 : NO_RESULTS
               return { output, content, metadata: { provider: output.provider } }
-            }).pipe(
-              Effect.mapError((error) => {
-                const fallback = `Unable to search the web for ${input.query}`
-                if (!Schema.is(WebSearch.RequestError)(error)) return new ToolFailure({ message: fallback, error })
-                const status = HttpClientError.isHttpClientError(error.cause) ? error.cause.response?.status : undefined
-                switch (status) {
-                  case 429:
-                    return new ToolFailure({
-                      message: "Web search rate limited (HTTP 429)",
-                      error,
-                      metadata: { provider: error.providerID },
-                    })
-                  case 401:
-                    return new ToolFailure({
-                      message: "Web search authentication failed (HTTP 401)",
-                      error,
-                      metadata: { provider: error.providerID },
-                    })
-                  case undefined:
-                    return new ToolFailure({ message: fallback, error, metadata: { provider: error.providerID } })
-                  default:
-                    return new ToolFailure({
-                      message: `Web search request failed (HTTP ${status})`,
-                      error,
-                      metadata: { provider: error.providerID },
-                    })
-                }
-              }),
-            ),
+            }),
         }),
       )
       .pipe(Effect.orDie)

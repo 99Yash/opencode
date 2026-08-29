@@ -90,7 +90,7 @@ export const layer = Layer.effect(
       ).pipe(
         Effect.provide(locations.get(session.location)),
         Effect.tapCause((cause) =>
-          Cause.hasInterruptsOnly(cause)
+          Cause.hasInterruptsOnly(cause) || Cause.squash(cause) instanceof UserInterruptedError
             ? Effect.void
             : Effect.logError("Failed to drain Session", cause).pipe(Effect.annotateLogs({ sessionID })),
         ),

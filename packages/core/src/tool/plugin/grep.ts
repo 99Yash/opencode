@@ -151,12 +151,20 @@ export const Plugin = {
                 ),
                 metadata: { matches: result.matches.length, truncated: result.truncated },
               })),
-              Effect.mapError((error) =>
-                error instanceof ToolFailure
-                  ? error
-                  : error instanceof Ripgrep.InvalidPatternError
-                    ? new ToolFailure({ message: `Invalid regex pattern: ${error.message}` })
-                    : new ToolFailure({ message: `Unable to grep for ${input.pattern}`, error }),
+              Effect.catchTag(
+                "Ripgrep.InvalidPatternError",
+                (error) => new ToolFailure({ message: `Invalid regex pattern: ${error.message}` }),
+              ),
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.Failed",
+                  "Ripgrep.Error",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
+                (error) => new ToolFailure({ message: `Unable to grep for ${input.pattern}`, error }),
               ),
             ),
         }),

@@ -35,7 +35,11 @@ import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellSelect } from "@opencode-ai/core/shell/select"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
+import { EditTool } from "@opencode-ai/core/tool/plugin/edit"
+import { PatchTool } from "@opencode-ai/core/tool/plugin/patch"
+import { ReadTool } from "@opencode-ai/core/tool/plugin/read"
 import { ShellTool } from "@opencode-ai/core/tool/plugin/shell"
+import { WriteTool } from "@opencode-ai/core/tool/plugin/write"
 import { ToolOutput } from "@opencode-ai/core/tool-output"
 import { Tool } from "@opencode-ai/core/tool"
 import { tmpdir } from "./fixture/tmpdir"
@@ -288,6 +292,69 @@ const runPermissionCommand = (
     return { exit, requests }
   }).pipe(Effect.scoped, Effect.timeout(Duration.seconds(5)))
 
+permissionIt.live("preserves declines through file-tool wrappers before mutation", () =>
+  withScanner(false, (registry, fixture) =>
+    Effect.gen(function* () {
+      yield* registerToolPlugin(ReadTool.Plugin)
+      yield* registerToolPlugin(WriteTool.Plugin)
+      yield* registerToolPlugin(EditTool.Plugin)
+      yield* registerToolPlugin(PatchTool.Plugin)
+      const target = path.join(fixture.active, "target.txt")
+      const outside = path.join(fixture.outside, "target.txt")
+      yield* Effect.promise(() => Promise.all([Bun.write(target, "before\n"), Bun.write(outside, "outside\n")]))
+      const permission = yield* Permission.Service
+      const bus = yield* Bus.Service
+      const requests = yield* Queue.unbounded<Permission.Request>()
+      yield* bus.subscribe(Permission.Event.Asked).pipe(
+        Stream.runForEach((event) => Queue.offer(requests, event.data)),
+        Effect.forkScoped({ startImmediately: true }),
+      )
+      const tools = yield* registry.snapshot()
+      for (const fixture of [
+        { name: "read", action: "read", input: { path: target } },
+        { name: "write", action: "edit", input: { path: target, content: "after\n" } },
+        { name: "edit", action: "edit", input: { path: target, oldString: "before", newString: "after" } },
+        {
+          name: "patch",
+          action: "edit",
+          input: { patchText: `*** Begin Patch\n*** Delete File: ${target}\n*** End Patch` },
+        },
+        {
+          name: "patch",
+          action: "external_directory",
+          input: { patchText: `*** Begin Patch\n*** Delete File: ${outside}\n*** End Patch` },
+        },
+      ]) {
+        const execution = yield* tools
+          .execute({
+            sessionID,
+            ...toolIdentity,
+            call: {
+              type: "tool-call",
+              id: `decline-${fixture.name}-${fixture.action}`,
+              name: fixture.name,
+              input: fixture.input,
+            },
+          })
+          .pipe(Effect.forkScoped)
+        const request = yield* Queue.take(requests)
+        expect(request.action).toBe(fixture.action)
+        yield* permission.reply({ requestID: request.id, reply: "reject" })
+        expect(yield* Fiber.await(execution)).toMatchObject({
+          _tag: "Failure",
+          cause: {
+            reasons: [{ _tag: "Fail", error: new Tool.Declined({ message: "The user declined this tool call" }) }],
+          },
+        })
+        expect(yield* Effect.promise(() => Bun.file(target).text())).toBe("before\n")
+        expect(yield* Effect.promise(() => Bun.file(outside).text())).toBe("outside\n")
+        expect(yield* permission.list()).toEqual([])
+      }
+      expect(yield* Queue.size(requests)).toBe(0)
+    }).pipe(Effect.scoped, Effect.timeout(Duration.seconds(5))),
+  ),
+)
+
 // Directory cases still document inherited limitations; fixed scanner cases require matching behavior.
 describe("ShellTool scanner permissions", () => {
   const test = isWindows || !Bun.which("sh") ? permissionIt.live.skip : permissionIt.live
@@ -327,7 +394,7 @@ describe("ShellTool scanner permissions", () => {
               if (Exit.isFailure(result.exit))
                 expect(
                   result.exit.cause.reasons.some(
-                    (reason) => Cause.isDieReason(reason) && reason.defect instanceof Permission.DeclinedError,
+                    (reason) => Cause.isFailReason(reason) && reason.error instanceof Tool.Declined,
                   ),
                 ).toBe(true)
               expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
@@ -424,7 +491,7 @@ describe("ShellTool scanner permissions", () => {
               if (Exit.isFailure(result.exit))
                 expect(
                   result.exit.cause.reasons.some(
-                    (reason) => Cause.isDieReason(reason) && reason.defect instanceof Permission.DeclinedError,
+                    (reason) => Cause.isFailReason(reason) && reason.error instanceof Tool.Declined,
                   ),
                 ).toBe(true)
               expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)
@@ -505,7 +572,7 @@ describe("ShellTool scanner permissions", () => {
               if (Exit.isFailure(result.exit))
                 expect(
                   result.exit.cause.reasons.some(
-                    (reason) => Cause.isDieReason(reason) && reason.defect instanceof Permission.DeclinedError,
+                    (reason) => Cause.isFailReason(reason) && reason.error instanceof Tool.Declined,
                   ),
                 ).toBe(true)
               expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(false)

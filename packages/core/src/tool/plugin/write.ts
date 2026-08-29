@@ -99,7 +99,18 @@ export const Plugin = {
               return result
             }).pipe(
               Effect.map((output) => ({ output, content: toModelContent(output) })),
-              Effect.mapError((error) => new ToolFailure({ message: `Unable to write ${input.path}`, error })),
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.NotFound",
+                  "Environment.WrongKind",
+                  "Environment.Failed",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
+                (error) => new ToolFailure({ message: `Unable to write ${input.path}`, error }),
+              ),
             ),
         }),
       )

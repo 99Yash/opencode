@@ -136,6 +136,28 @@ describe("SessionExecution lifecycle", () => {
     }),
   )
 
+  it.effect("releases a declined execution's claim without resuming it after restart", () =>
+    Effect.gen(function* () {
+      const database = yield* Database.Service
+      const sessionID = Session.ID.make("ses_claim_declined")
+      yield* seedSessions(database, [sessionID])
+      const drained: Session.ID[] = []
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* buildExecution(scope, ({ sessionID }) =>
+        Effect.sync(() => drained.push(sessionID)).pipe(Effect.andThen(new UserInterruptedError())),
+      )
+      const execution = Context.get(context, SessionExecution.Service)
+      const error = yield* execution.resume(sessionID).pipe(Effect.flip)
+      expect(error).toBeInstanceOf(UserInterruptedError)
+      yield* execution.awaitIdle(sessionID)
+      expect((yield* claims(database))[sessionID]).toBe(false)
+
+      yield* Context.get(context, SessionRestart.Service).resumeSuspendedSessions
+      expect(drained).toEqual([sessionID])
+    }),
+  )
+
   it.effect("reports an idle interrupt as a no-op", () =>
     Effect.gen(function* () {
       const sessionID = Session.ID.make("ses_idle_cancel")

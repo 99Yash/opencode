@@ -15,6 +15,7 @@ import { SessionInbox } from "@opencode-ai/schema/session-inbox"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import { Workspace } from "@opencode-ai/schema/workspace"
 import { Worktree } from "@opencode-ai/schema/worktree"
+import { Tool } from "@opencode-ai/schema/tool"
 import { Api } from "@opencode-ai/server/api"
 import { ClientApi, groupNames, promiseOmitEndpoints } from "@opencode-ai/protocol/client"
 import { compile, emitPromise } from "@opencode-ai/httpapi-codegen"
@@ -90,6 +91,12 @@ test("Core and Server reuse the authoritative Schema and Protocol values", () =>
   expect(String(Project.ID.global)).toBe("global")
   expect(String(Provider.ID.anthropic)).toBe("anthropic")
   expect(Workspace.ID.create()).toStartWith("wrk_")
+})
+
+test("both SDK tool facades expose the canonical decline", async () => {
+  const EffectSDK = await import("../src/effect/index")
+  expect(SDK.Tool.Declined).toBe(Tool.Declined)
+  expect(EffectSDK.Tool.Declined).toBe(Tool.Declined)
 })
 
 test("client and Server contracts generate identically", () => {

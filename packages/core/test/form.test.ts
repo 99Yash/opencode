@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Exit, Fiber } from "effect"
+import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
 import { LayerNode } from "@opencode-ai/util/effect/layer-node"
 import { Bus } from "@opencode-ai/core/bus"
@@ -48,6 +48,29 @@ describe("Form", () => {
 
       expect(yield* Fiber.join(fiber)).toEqual({ status: "cancelled" })
       expect(yield* service.state(form.id)).toEqual({ status: "cancelled" })
+    }),
+  )
+
+  it.effect("interrupts pending asks on service teardown rather than returning a dismissal", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* Layer.buildWithScope(Layer.fresh(Form.layer), scope)
+      const service = Context.get(context, Form.Service)
+      const bus = yield* Bus.Service
+      const created = yield* Deferred.make<void>()
+      const unsubscribe = yield* bus.listen((event) =>
+        event.type === Form.Event.Created.type ? Deferred.succeed(created, undefined).pipe(Effect.asVoid) : Effect.void,
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const fiber = yield* service.ask(input).pipe(Effect.forkScoped)
+      yield* Deferred.await(created)
+
+      yield* Scope.close(scope, Exit.void)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* service.state(formID)).toEqual({ status: "cancelled" })
     }),
   )
 

@@ -128,10 +128,16 @@ export const Plugin = {
                 ),
                 metadata: { count: result.entries.length, truncated: result.truncated },
               })),
-              Effect.mapError((error) =>
-                error instanceof ToolFailure
-                  ? error
-                  : new ToolFailure({ message: `Unable to find files matching ${input.pattern}`, error }),
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.Failed",
+                  "Ripgrep.Error",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
+                (error) => new ToolFailure({ message: `Unable to find files matching ${input.pattern}`, error }),
               ),
             ),
         }),

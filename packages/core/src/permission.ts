@@ -61,7 +61,7 @@ export type AskResult = typeof AskResult.Type
 
 export { Event } from "@opencode-ai/schema/permission"
 
-export class DeclinedError extends Schema.TaggedError<DeclinedError>()("Permission.DeclinedError", {}) {}
+export class Declined extends Schema.TaggedError<Declined>()("Permission.Declined", {}) {}
 
 export class CorrectedError extends Schema.TaggedError<CorrectedError>()("Permission.CorrectedError", {
   feedback: Schema.String,
@@ -82,7 +82,7 @@ export class NotFoundError extends Schema.TaggedError<NotFoundError>()("Permissi
   requestID: ID,
 }) {}
 
-export type Error = BlockedError | CorrectedError
+export type Error = BlockedError | CorrectedError | Declined
 
 export function evaluate(action: string, resource: string, ...rulesets: Permission.Ruleset[]): Permission.Rule {
   return (
@@ -114,7 +114,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Pe
 interface Pending {
   readonly request: Request
   readonly agent?: Agent.ID
-  readonly deferred: Deferred.Deferred<void, DeclinedError | CorrectedError>
+  readonly deferred: Deferred.Deferred<void, Declined | CorrectedError>
 }
 
 const layer = Layer.effect(
@@ -129,7 +129,7 @@ const layer = Layer.effect(
     const pending = new Map<ID, Pending>()
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new DeclinedError()), {
+      Effect.forEach(pending.values(), (item) => Deferred.interrupt(item.deferred), {
         discard: true,
       }).pipe(
         Effect.ensuring(
@@ -199,7 +199,7 @@ const layer = Layer.effect(
     const create = (request: Request, agent?: Agent.ID) =>
       Effect.uninterruptible(
         Effect.gen(function* () {
-          const deferred = yield* Deferred.make<void, DeclinedError | CorrectedError>()
+          const deferred = yield* Deferred.make<void, Declined | CorrectedError>()
           const item = { request, agent, deferred }
           if (pending.has(request.id))
             return yield* Effect.die(new Error(`Duplicate pending permission ID: ${request.id}`))
@@ -234,12 +234,6 @@ const layer = Layer.effect(
             if (result.effect === "allow") return
             const item = yield* create(request(input, result.message), input.agent)
             return yield* restore(Deferred.await(item.deferred)).pipe(
-              // Deliberate defect tunnel: leaves wrap execution in blanket `mapError`, which
-              // must not convert a user's decline into model-facing tool output. The decline
-              // resurfaces as a typed failure at SessionModelRequest.executeTool. A decline
-              // WITH feedback (CorrectedError) intentionally stays typed so the leaf can turn
-              // it into ToolFailure and the model continues.
-              Effect.catchTag("Permission.DeclinedError", (error) => Effect.die(error)),
               Effect.ensuring(
                 Effect.sync(() => {
                   pending.delete(item.request.id)
@@ -265,7 +259,7 @@ const layer = Layer.effect(
           if (input.reply === "reject") {
             yield* Deferred.fail(
               existing.deferred,
-              input.message ? new CorrectedError({ feedback: input.message }) : new DeclinedError(),
+              input.message ? new CorrectedError({ feedback: input.message }) : new Declined(),
             )
             pending.delete(input.requestID)
             for (const [id, item] of pending) {
@@ -275,7 +269,7 @@ const layer = Layer.effect(
                 requestID: item.request.id,
                 reply: "reject",
               })
-              yield* Deferred.fail(item.deferred, new DeclinedError())
+              yield* Deferred.fail(item.deferred, new Declined())
               pending.delete(id)
             }
             return

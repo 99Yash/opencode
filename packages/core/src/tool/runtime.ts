@@ -1,8 +1,9 @@
 import type { ToolDefinition } from "@opencode-ai/ai"
 import { Tool } from "@opencode-ai/schema/tool"
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from "@standard-schema/spec"
-import { Cache, Effect, JsonSchema, Schema, SchemaIssue, SchemaRepresentation } from "effect"
+import { Cache, Cause, Effect, JsonSchema, Result, Schema, SchemaIssue, SchemaRepresentation } from "effect"
 import { $ZodType, toJSONSchema } from "zod/v4/core"
+import { Permission } from "../permission.js"
 
 const formatEffectIssues = SchemaIssue.makeFormatterStandardSchemaV1()
 
@@ -27,18 +28,26 @@ export const definition = (tool: Tool.Info<any, any>): ToolDefinition => ({
 export const execute = (tool: Tool.Info<any, any>, input: unknown, context: Tool.Context) =>
   Effect.gen(function* () {
     const decoded = yield* decodeInput(tool, input)
-    // Tool implementations declare `Tool.Error` but plugins can fail with anything at
-    // runtime. A foreign typed failure would slip past every `catchTag("Tool.Error")`
-    // downstream and leave its call permanently unsettled, so the declared contract is
-    // enforced here at the untrusted boundary. Declines tunnel through as defects and
-    // interrupts are not errors; neither is touched.
+    // Keep user decisions distinct from failures the model can recover from.
     const result = yield* tool.execute(decoded, context).pipe(
-      Effect.mapError((error: unknown) =>
-        error instanceof Tool.Error
-          ? error
-          : new Tool.Error({
-              message: error instanceof globalThis.Error ? error.message : String(error),
-            }),
+      // Promise wrappers turn inner Effect failures into exceptions. Only recover a lone decline;
+      // an accompanying interruption or defect must retain its original cause.
+      Effect.catchCauseFilter((cause) => {
+        const reason = cause.reasons[0]
+        return cause.reasons.length === 1 &&
+          Cause.isDieReason(reason) &&
+          (reason.defect instanceof Permission.Declined || reason.defect instanceof Tool.Declined)
+          ? Result.succeed(reason.defect)
+          : Result.fail(cause)
+      }, Effect.fail),
+      Effect.mapError((error) =>
+        error instanceof Permission.Declined
+          ? new Tool.Declined({ message: "The user declined this tool call" })
+          : error instanceof Tool.Error || error instanceof Tool.Declined
+            ? error
+            : new Tool.Error({
+                message: error instanceof globalThis.Error ? error.message : String(error),
+              }),
       ),
     )
     if (tool.output === undefined) {

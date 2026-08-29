@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Message, SystemPart } from "@opencode-ai/ai"
-import { DateTime, Effect, Schema } from "effect"
+import { Cause, DateTime, Effect, Exit, Schema } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Model } from "@opencode-ai/core/model"
@@ -9,6 +9,7 @@ import { Plugin } from "@opencode-ai/core/plugin"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { PluginHost } from "@opencode-ai/core/plugin/host"
 import { PluginPromise } from "@opencode-ai/core/plugin/promise"
+import { Permission } from "@opencode-ai/core/permission"
 import { WebSearch } from "@opencode-ai/core/websearch"
 import { Vcs } from "@opencode-ai/core/vcs"
 import { Session } from "@opencode-ai/core/session"
@@ -723,6 +724,198 @@ describe("fromPromise", () => {
         content: [{ type: "text", text: "Hello, world!" }],
       })
       expect(progress).toEqual([{ phase: "greeting" }])
+    }),
+  )
+
+  it.live("preserves canonical declines from Promise tools and wrapped Effect tools", () =>
+    Effect.gen(function* () {
+      const PromisePlugin = yield* Effect.promise(() => import("@opencode-ai/plugin"))
+      const EffectPlugin = yield* Effect.promise(() => import("@opencode-ai/plugin/effect"))
+      const plugins = yield* Plugin.Service
+      const registry = yield* Tool.Service
+      const host = yield* PluginHost.make(plugins)
+      const declined = new PromisePlugin.Tool.Declined({ message: "The user declined this tool call" })
+      expect(PromisePlugin.Tool.Declined).toBe(Tool.Declined)
+      expect(EffectPlugin.Tool.Declined).toBe(Tool.Declined)
+
+      yield* host.tool.transform((draft) => {
+        for (const name of ["effect_decline", "wrapped_decline", "wrapped_permission_decline"]) {
+          draft.add({
+            name,
+            description: "Decline",
+            options: { codemode: false },
+            input: Schema.Struct({}),
+            execute: () => Effect.fail(name === "wrapped_permission_decline" ? new Permission.Declined() : declined),
+          })
+        }
+      })
+      yield* PluginPromise.fromPromise(
+        PromisePlugin.Plugin.define({
+          id: "promise-tool-declined",
+          setup: async (ctx) => {
+            await ctx.tool.transform((draft) => {
+              draft.add({
+                name: "sync_decline",
+                description: "Decline synchronously",
+                options: { codemode: false },
+                input: Schema.Struct({}),
+                execute: () => {
+                  throw declined
+                },
+              })
+              draft.add({
+                name: "async_decline",
+                description: "Decline asynchronously",
+                options: { codemode: false },
+                input: Schema.Struct({}),
+                execute: async () => {
+                  throw declined
+                },
+              })
+              for (const name of ["wrapped_decline", "wrapped_permission_decline"])
+                draft.update(name, (tool) => {
+                  const execute = tool.execute
+                  tool.execute = async (input, context) => execute(input, context)
+                })
+            })
+          },
+        }),
+      ).effect(host)
+
+      const snapshot = yield* registry.snapshot()
+      for (const name of [
+        "sync_decline",
+        "async_decline",
+        "effect_decline",
+        "wrapped_decline",
+        "wrapped_permission_decline",
+      ]) {
+        const error = yield* snapshot
+          .execute({
+            sessionID: Session.ID.make("ses_plugin_declined"),
+            agent: Agent.ID.make("build"),
+            messageID: SessionMessage.ID.make("msg_plugin_declined"),
+            call: { type: "tool-call", id: `call_${name}`, name, input: {} },
+          })
+          .pipe(Effect.flip)
+        expect(error).toBeInstanceOf(Tool.Declined)
+        if (name !== "wrapped_permission_decline") expect(error).toBe(declined)
+        expect(error.message).toBe("The user declined this tool call")
+      }
+    }),
+  )
+
+  it.live("preserves declines from Effect and synchronous or asynchronous Promise before hooks", () =>
+    Effect.gen(function* () {
+      const PromisePlugin = yield* Effect.promise(() => import("@opencode-ai/plugin"))
+      const EffectPlugin = yield* Effect.promise(() => import("@opencode-ai/plugin/effect"))
+      const plugins = yield* Plugin.Service
+      const registry = yield* Tool.Service
+      const host = yield* PluginHost.make(plugins)
+      const declined = new EffectPlugin.Tool.Declined({ message: "The plugin declined this tool call" })
+      const calls: string[] = []
+      yield* host.tool.transform((draft) => {
+        for (const name of ["effect_decline", "sync_decline", "async_decline"]) {
+          draft.add({
+            name,
+            description: "Must not execute",
+            options: { codemode: false },
+            input: Schema.Struct({}),
+            execute: () =>
+              Effect.sync(() => {
+                calls.push(name)
+                return { content: "executed" }
+              }),
+          })
+        }
+      })
+      yield* host.tool.hook("execute.before", (event) =>
+        event.tool === "effect_decline" ? Effect.fail(declined) : Effect.void,
+      )
+      yield* PluginPromise.fromPromise(
+        PromisePlugin.Plugin.define({
+          id: "promise-before-declined",
+          setup: async (ctx) => {
+            await ctx.tool.hook("execute.before", (event) => {
+              if (event.tool === "sync_decline") throw declined
+            })
+            await ctx.tool.hook("execute.before", async (event) => {
+              if (event.tool === "async_decline") throw declined
+            })
+          },
+        }),
+      ).effect(host)
+
+      const snapshot = yield* registry.snapshot()
+      for (const name of ["effect_decline", "sync_decline", "async_decline"]) {
+        const error = yield* snapshot
+          .execute({
+            sessionID: Session.ID.make("ses_plugin_before_declined"),
+            agent: Agent.ID.make("build"),
+            messageID: SessionMessage.ID.make("msg_plugin_before_declined"),
+            call: { type: "tool-call", id: `call_${name}`, name, input: {} },
+          })
+          .pipe(Effect.flip)
+        expect(error).toBe(declined)
+        expect(error.message).toBe("The plugin declined this tool call")
+      }
+      expect(calls).toEqual([])
+    }),
+  )
+
+  it.live("keeps unrelated Promise exceptions and after-hook declines as defects", () =>
+    Effect.gen(function* () {
+      const PromisePlugin = yield* Effect.promise(() => import("@opencode-ai/plugin"))
+      const plugins = yield* Plugin.Service
+      const registry = yield* Tool.Service
+      const host = yield* PluginHost.make(plugins)
+      const failure = new Error("Unexpected plugin failure")
+      const declined = new PromisePlugin.Tool.Declined({ message: "Too late to decline" })
+      yield* PluginPromise.fromPromise(
+        PromisePlugin.Plugin.define({
+          id: "promise-tool-defects",
+          setup: async (ctx) => {
+            await ctx.tool.transform((draft) => {
+              for (const name of ["sync_defect", "async_defect", "before_defect", "after_decline"]) {
+                draft.add({
+                  name,
+                  description: "Fail unexpectedly",
+                  options: { codemode: false },
+                  input: Schema.Struct({}),
+                  execute: () => {
+                    if (name === "sync_defect") throw failure
+                    if (name === "async_defect") return Promise.reject(failure)
+                    return Promise.resolve({ content: "executed" })
+                  },
+                })
+              }
+            })
+            await ctx.tool.hook("execute.before", async (event) => {
+              if (event.tool === "before_defect") throw failure
+            })
+            await ctx.tool.hook("execute.after", (event) => {
+              if (event.tool === "after_decline") throw declined
+            })
+          },
+        }),
+      ).effect(host)
+
+      const snapshot = yield* registry.snapshot()
+      for (const name of ["sync_defect", "async_defect", "before_defect", "after_decline"]) {
+        const exit = yield* snapshot
+          .execute({
+            sessionID: Session.ID.make("ses_plugin_defects"),
+            agent: Agent.ID.make("build"),
+            messageID: SessionMessage.ID.make("msg_plugin_defects"),
+            call: { type: "tool-call", id: `call_${name}`, name, input: {} },
+          })
+          .pipe(Effect.exit)
+        expect(Exit.isFailure(exit)).toBe(true)
+        if (Exit.isFailure(exit)) {
+          expect(Cause.hasDies(exit.cause)).toBe(true)
+          expect(Cause.squash(exit.cause)).toBe(name === "after_decline" ? declined : failure)
+        }
+      }
     }),
   )
 

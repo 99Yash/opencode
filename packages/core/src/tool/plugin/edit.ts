@@ -224,10 +224,17 @@ export const Plugin = {
                 content: `Edited ${output.files[0]?.file} (${output.replacements} replacement${output.replacements === 1 ? "" : "s"})`,
                 metadata: { files: output.files },
               })),
-              Effect.mapError((error) =>
-                error instanceof ToolFailure
-                  ? error
-                  : new ToolFailure({ message: `Unable to edit ${input.path}`, error }),
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.NotFound",
+                  "Environment.WrongKind",
+                  "Environment.Failed",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
+                (error) => new ToolFailure({ message: `Unable to edit ${input.path}`, error }),
               ),
             )
           },

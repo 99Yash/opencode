@@ -124,6 +124,22 @@ await ctx.tool.transform((tools) => {
 })
 ```
 
+## Declining A Tool
+
+Tools and `execute.before` hooks can decline a call by throwing the canonical
+`Tool.Declined`. OpenCode treats this as a refused interaction, not an ordinary
+tool error for the model to recover from. Other thrown errors remain defects.
+
+```ts
+import { Tool } from "@opencode-ai/plugin"
+
+await ctx.tool.hook("execute.before", (event) => {
+  if (event.tool === "deploy") {
+    throw new Tool.Declined({ message: "Deployment was declined" })
+  }
+})
+```
+
 ## Reloading A Domain
 
 When data captured by a transform changes, reload the affected domain:

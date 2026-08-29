@@ -1,5 +1,5 @@
 import { describe, expect } from "bun:test"
-import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { Agent } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -26,20 +26,19 @@ const current = Layer.succeed(
   Location.Service,
   Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
 )
-const it = testEffect(
-  AppNodeBuilder.build(
-    LayerNode.group([
-      Database.node,
-      Bus.node,
-      SessionStore.node,
-      PermissionSaved.node,
-      Agent.node,
-      PluginHooks.node,
-      Permission.node,
-    ]),
-    [[Location.node, current]],
-  ),
+const layer = AppNodeBuilder.build(
+  LayerNode.group([
+    Database.node,
+    Bus.node,
+    SessionStore.node,
+    PermissionSaved.node,
+    Agent.node,
+    PluginHooks.node,
+    Permission.node,
+  ]),
+  [[Location.node, current]],
 )
+const it = testEffect(layer)
 
 function setup(rules: Permission.Ruleset = [], sessionID = Session.ID.make("ses_test")) {
   return Effect.gen(function* () {
@@ -338,7 +337,7 @@ describe("Permission", () => {
     }),
   )
 
-  it.effect("defects when an asked permission is declined", () =>
+  it.effect("fails with a typed decline when an asked permission is rejected", () =>
     Effect.gen(function* () {
       yield* setup()
       const { service, fiber, request } = yield* waitForRequest()
@@ -349,10 +348,26 @@ describe("Permission", () => {
       if (exit._tag === "Failure")
         expect(
           exit.cause.reasons.some(
-            (reason) => Cause.isDieReason(reason) && reason.defect instanceof Permission.DeclinedError,
+            (reason) => Cause.isFailReason(reason) && reason.error instanceof Permission.Declined,
           ),
         ).toBe(true)
       expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("interrupts pending assertions on service teardown without reporting a user decline", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make()
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+      const context = yield* Layer.buildWithScope(Layer.fresh(layer), scope)
+      yield* setup().pipe(Effect.provide(context))
+      const pending = yield* waitForRequest().pipe(Effect.provide(context))
+
+      yield* Scope.close(scope, Exit.void)
+      const exit = yield* Fiber.await(pending.fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(yield* pending.service.list()).toEqual([])
     }),
   )
 

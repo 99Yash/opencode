@@ -20,7 +20,7 @@ export interface Domains {
 
 type NoFailures<Spec> = { readonly [Name in keyof Spec]: never }
 
-// Failure channel for each hook event. Only tool execute.before may fail: a Tool.Error rejects the call before it runs.
+// Only tool execute.before may fail, with Tool.Error or Tool.Declined before the call runs.
 interface Failures extends Record<keyof Domains, unknown> {
   readonly aisdk: NoFailures<AISDKHooks>
   readonly session: NoFailures<SessionHooks>

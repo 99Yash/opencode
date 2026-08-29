@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test"
 import { CodeModeTool } from "@opencode-ai/core/codemode/tool"
 import { Tool } from "@opencode-ai/core/tool"
-import { execute } from "@opencode-ai/core/tool/runtime"
+import { Permission } from "@opencode-ai/core/permission"
+import { definition, execute } from "@opencode-ai/core/tool/runtime"
 import { Agent } from "@opencode-ai/schema/agent"
 import { Session } from "@opencode-ai/schema/session"
 import { SessionMessage } from "@opencode-ai/schema/session-message"
 import type { Info } from "@opencode-ai/schema/tool"
-import { Effect, Schema } from "effect"
+import { Declined } from "@opencode-ai/schema/tool"
+import { Cause, Effect, Exit, Schema } from "effect"
 
 const context = {
   sessionID: Session.ID.make("ses_execute"),
@@ -98,16 +100,61 @@ test("foreign typed failures settle as Tool.Error at the untrusted boundary", as
   class ForeignFailure extends Schema.TaggedError<ForeignFailure>()("Plugin.ForeignFailure", {
     message: Schema.String,
   }) {}
-  const lying: Info = {
-    name: "lying",
+  const foreign: Info = {
+    name: "foreign",
     description: "Fails with a non-Tool.Error typed failure",
     input: Schema.Struct({}),
-    execute: () => new ForeignFailure({ message: "transport died" }) as never,
+    execute: () => new ForeignFailure({ message: "transport died" }),
   }
 
-  const error = await Effect.runPromise(execute(lying, {}, context).pipe(Effect.flip))
+  const error = await Effect.runPromise(execute(foreign, {}, context).pipe(Effect.flip))
   expect(error).toBeInstanceOf(Tool.Error)
   expect(error.message).toBe("transport died")
+})
+
+test("execution classifies permission declines without leaking the permission failure", async () => {
+  const tool: Info = {
+    name: "declined",
+    description: "Decline execution",
+    input: Schema.Struct({}),
+    execute: () => new Permission.Declined(),
+  }
+  const error = await Effect.runPromise(execute(tool, {}, context).pipe(Effect.flip))
+
+  expect(Tool.Declined).toBe(Declined)
+  expect(error).toBeInstanceOf(Tool.Declined)
+  expect(error).not.toBeInstanceOf(Permission.Declined)
+  if (!(error instanceof Tool.Declined)) throw error
+  expect(Schema.encodeSync(Declined)(error)).toEqual({
+    _tag: "Tool.Declined",
+    message: "The user declined this tool call",
+  })
+  expect(definition(tool)).not.toHaveProperty("outputSchema")
+})
+
+test("execution recovers lone decline exceptions but preserves compound causes", async () => {
+  const declined = new Tool.Declined({ message: "The user declined this tool call" })
+  const tool: Info = {
+    name: "exception",
+    description: "Fail through an exception boundary",
+    input: Schema.Struct({}),
+    execute: () => Effect.die(declined),
+  }
+  expect(await Effect.runPromise(execute(tool, {}, context).pipe(Effect.flip))).toBe(declined)
+
+  for (const cause of [
+    Cause.combine(Cause.die(declined), Cause.die("unexpected defect")),
+    Cause.combine(Cause.die(new Permission.Declined()), Cause.interrupt()),
+  ]) {
+    const exit = await Effect.runPromiseExit(execute({ ...tool, execute: () => Effect.failCause(cause) }, {}, context))
+    expect(Exit.isFailure(exit)).toBe(true)
+    if (Exit.isFailure(exit)) {
+      expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(cause.reasons.map((reason) => reason._tag))
+      expect(exit.cause.reasons.filter(Cause.isDieReason).map((reason) => reason.defect)).toEqual(
+        cause.reasons.filter(Cause.isDieReason).map((reason) => reason.defect),
+      )
+    }
+  }
 })
 
 test("execute supports callable namespace tools", async () => {

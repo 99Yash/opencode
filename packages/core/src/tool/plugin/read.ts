@@ -116,17 +116,25 @@ export const Plugin = {
                 content: toModelContent(input.path, input.offset, output),
                 metadata: { truncated: output.type === "file" ? false : output.truncated },
               })),
-              Effect.mapError((error) => {
-                if (error instanceof ToolFailure) return error
-                const message =
-                  error instanceof ReadToolFileSystem.BinaryFileError ||
-                  error instanceof ReadToolFileSystem.MediaIngestLimitError ||
-                  error instanceof ReadToolFileSystem.OffsetOutOfRangeError ||
-                  error instanceof ReadToolFileSystem.PathKindError
-                    ? error.message
-                    : `Unable to read ${input.path}`
-                return new ToolFailure({ message, error })
-              }),
+              Effect.catchTag(
+                [
+                  "ReadTool.BinaryFileError",
+                  "ReadTool.MediaIngestLimitError",
+                  "ReadTool.OffsetOutOfRangeError",
+                  "ReadTool.PathKindError",
+                ],
+                (error) => new ToolFailure({ message: error.message, error }),
+              ),
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.Failed",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
+                (error) => new ToolFailure({ message: `Unable to read ${input.path}`, error }),
+              ),
             )
           },
         }),

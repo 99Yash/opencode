@@ -5,13 +5,11 @@ import type { StreamOptions } from "@opencode-ai/ai/route"
 import type { Agent } from "@opencode-ai/schema/agent"
 import type { Model } from "@opencode-ai/schema/model"
 import type { Content } from "@opencode-ai/schema/tool"
-import { Cause, Config, Context, Effect, Layer, Result, Stream } from "effect"
+import { Config, Context, Effect, Layer, Stream } from "effect"
 import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { makeLocationNode } from "@opencode-ai/util/effect/app-node"
 import { App } from "../app.js"
-import { Permission } from "../permission.js"
 import { PluginHooks } from "../plugin/hooks.js"
-import { QuestionTool } from "../tool/plugin/question.js"
 import { Tool } from "../tool.js"
 import { SessionModelTransport } from "./model-transport.js"
 import { SessionRunnerModel } from "./runner/model.js"
@@ -28,23 +26,6 @@ const IMAGE_REMOVED =
 const responsesWebSocketFlag = (providerID: string) =>
   `OPENCODE_EXPERIMENTAL_${providerID.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase()}_RESPONSES_WEBSOCKET`
 
-/** Failures a prepared execution can surface: infrastructure errors plus user declines resurfaced from the defect tunnel. */
-export type ExecuteError = Tool.Error | Permission.DeclinedError | QuestionTool.CancelledError
-
-// User declines dive under the leaves' blanket `mapError` as defects (the deliberate
-// tunnel entered in Permission.assert and the question tool), so a user's "no" can
-// never become model-facing tool output. They resurface as typed failures exactly once,
-// here at the seam the runner executes through.
-const declineDefect = (cause: Cause.Cause<Tool.Error>) => {
-  const decline = cause.reasons.flatMap((reason) =>
-    Cause.isDieReason(reason) &&
-    (reason.defect instanceof Permission.DeclinedError || reason.defect instanceof QuestionTool.CancelledError)
-      ? [reason.defect]
-      : [],
-  )[0]
-  return decline ? Result.succeed(decline) : Result.fail(cause)
-}
-
 export interface Prepared {
   readonly request: LLMRequest
   readonly options: StreamOptions
@@ -53,7 +34,7 @@ export interface Prepared {
    * One request-scoped execution operation. Unknown and hook-removed calls
    * fail individually through the same seam.
    */
-  readonly executeTool: (input: Parameters<Tool.Snapshot["execute"]>[0]) => Effect.Effect<Tool.Result, ExecuteError>
+  readonly executeTool: Tool.Snapshot["execute"]
 }
 
 interface PrepareInput {
@@ -361,10 +342,7 @@ export const layer = Layer.effect(
           ? { webSocket: transport.bind(session.id) }
           : {}),
       }
-      const executeTool: Prepared["executeTool"] = (input) =>
-        tools
-          .execute({ ...input, definitions: hooked })
-          .pipe(Effect.catchCauseFilter(declineDefect, (decline) => Effect.fail(decline)))
+      const executeTool: Prepared["executeTool"] = (input) => tools.execute({ ...input, definitions: hooked })
       const retry: Prepared["retry"] = (event) => hooks.trigger("session", "retry", event).pipe(Effect.asVoid)
       return {
         request,

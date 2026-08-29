@@ -390,7 +390,7 @@ describe("WebSearchTool registration", () => {
             const sessionError = toSessionError(error)
             expect(sessionError).toEqual({ type: "tool.execution", message })
             expect(sessionError.message).not.toContain("secret")
-            expect(error.metadata).toEqual({ provider: "exa" })
+            expect(error).toHaveProperty("metadata", { provider: "exa" })
             expect(progress).toEqual([{ provider: "exa" }])
           }),
         { discard: true },

@@ -187,7 +187,11 @@ export const Plugin = {
                       Config.latest(yield* config.entries(), "experimental")?.portable_shell_scanner === true
                     const parsed = yield* ShellParse.scan(invocation.command, invocation.shell, target.absolute, {
                       portable,
-                    })
+                    }).pipe(
+                      Effect.mapError(
+                        (error) => new ToolFailure({ message: `Unable to execute command: ${input.command}`, error }),
+                      ),
+                    )
                     const directories = yield* Effect.forEach(parsed.directories, (directory) =>
                       mutation.resolve({
                         path: LocationMutation.resolvePath(target.absolute, directory),
@@ -219,12 +223,20 @@ export const Plugin = {
                         source,
                       })
                     const workdir = yield* Environment.typeFollowing(environment.files, target.absolute).pipe(
-                      Effect.catchTag("Environment.NotFound", () =>
-                        Effect.fail(new Error(`Working directory does not exist: ${target.absolute}`)),
+                      Effect.catchTag(
+                        "Environment.NotFound",
+                        () =>
+                          new ToolFailure({
+                            message: `Unable to execute command: ${input.command}`,
+                            error: new Error(`Working directory does not exist: ${target.absolute}`),
+                          }),
                       ),
                     )
                     if (workdir !== "directory")
-                      return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.absolute}`))
+                      return yield* new ToolFailure({
+                        message: `Unable to execute command: ${input.command}`,
+                        error: new Error(`Working directory is not a directory: ${target.absolute}`),
+                      })
                   }),
               )
               yield* context.progress({ shellID: info.id })
@@ -309,13 +321,29 @@ export const Plugin = {
                 return backgroundResult(info.id, info.file)
               }
               if (result?.info.status === "error")
-                return yield* Effect.fail(new Error(result.info.error ?? "Command failed"))
-              if (result?.info.status === "cancelled") return yield* Effect.fail(new Error("Command cancelled"))
+                return yield* new ToolFailure({
+                  message: `Unable to execute command: ${input.command}`,
+                  error: new Error(result.info.error ?? "Command failed"),
+                })
+              if (result?.info.status === "cancelled")
+                return yield* new ToolFailure({
+                  message: `Unable to execute command: ${input.command}`,
+                  error: new Error("Command cancelled"),
+                })
 
               return yield* Deferred.await(settled)
             }).pipe(
               Effect.map(toolResult),
-              Effect.mapError(
+              Effect.catchTag(
+                [
+                  "PlatformError",
+                  "Environment.Failed",
+                  "AppProcessError",
+                  "Shell.NotFoundError",
+                  "Permission.BlockedError",
+                  "Permission.CorrectedError",
+                  "Session.NotFoundError",
+                ],
                 (error) => new ToolFailure({ message: `Unable to execute command: ${input.command}`, error }),
               ),
             ),

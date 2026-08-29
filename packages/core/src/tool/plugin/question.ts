@@ -6,6 +6,7 @@ import { Effect, Schema } from "effect"
 import { Form } from "../../form.js"
 import { Permission } from "../../permission.js"
 import { Question } from "@opencode-ai/schema/question"
+import { Tool } from "@opencode-ai/schema/tool"
 
 export const name = "question"
 
@@ -28,12 +29,6 @@ export const Output = Schema.Struct({
   answers: Schema.Array(Question.Answer),
 })
 export type Output = typeof Output.Type
-
-export class CancelledError extends Schema.TaggedError<CancelledError>()("QuestionTool.CancelledError", {}) {
-  override get message() {
-    return "The user dismissed this question"
-  }
-}
 
 export const toModelContent = (questions: ReadonlyArray<Question.Prompt>, answers: ReadonlyArray<Question.Answer>) => {
   const formatted = questions
@@ -69,7 +64,10 @@ export const Plugin = {
                 source: { type: "tool", messageID: context.messageID, id: context.id },
               })
               .pipe(
-                Effect.mapError((error) => new ToolFailure({ message: "Permission denied: question", error })),
+                Effect.catchTag(
+                  ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                  (error) => new ToolFailure({ message: "Permission denied: question", error }),
+                ),
                 Effect.andThen(
                   forms
                     .ask({
@@ -87,10 +85,8 @@ export const Plugin = {
                     .pipe(Effect.orDie),
                 ),
                 Effect.flatMap((state) => {
-                  // Deliberate defect tunnel (see Permission.assert): a dismissal must dodge
-                  // leaf `mapError` blankets so it never becomes model-facing tool output; it
-                  // resurfaces as a typed failure at SessionModelRequest.executeTool.
-                  if (state.status === "cancelled") return Effect.die(new CancelledError())
+                  if (state.status === "cancelled")
+                    return new Tool.Declined({ message: "The user dismissed this question" })
                   const output = {
                     answers: input.questions.map((_, index): Question.Answer => {
                       const value = state.answer[`q${index}`]

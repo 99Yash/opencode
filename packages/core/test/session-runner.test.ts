@@ -50,7 +50,7 @@ import { SessionUsage } from "@opencode-ai/core/session/usage"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { PluginHooks } from "@opencode-ai/core/plugin/hooks"
 import { SystemPromptPlugin } from "@opencode-ai/core/plugin/system-prompt"
-import { QuestionTool } from "@opencode-ai/core/tool/plugin/question"
+import { UserInterruptedError } from "@opencode-ai/core/session/error"
 import { Agent } from "@opencode-ai/core/agent"
 import { Config } from "@opencode-ai/core/config"
 import { Document, Info } from "@opencode-ai/schema/config"
@@ -3877,7 +3877,7 @@ describe("SessionRunnerLLM", () => {
           description: "Fail because the user declined approval",
           input: Schema.Struct({}),
           output: Schema.Struct({}),
-          execute: () => Effect.die(new Permission.DeclinedError()),
+          execute: () => Effect.fail(new Permission.Declined()),
         },
       },
       { codemode: false },
@@ -3894,12 +3894,49 @@ describe("SessionRunnerLLM", () => {
     const exit = yield* s.resume.pipe(Effect.exit)
 
     expect(exit._tag).toBe("Failure")
-    if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    if (exit._tag === "Failure") expect(Cause.squash(exit.cause)).toBeInstanceOf(UserInterruptedError)
     expect(s.requests).toHaveLength(1)
     expect(yield* s.context).toMatchObject([
       Expected.user("Call declined"),
       Expected.assistant({}, [
         Expected.failedTool({ id: "call-failed" }, { error: { message: "Ordinary tool failure" } }),
+        Expected.failedTool(
+          { id: "call-declined" },
+          { error: { type: "aborted", message: "The user declined this tool call" } },
+        ),
+      ]),
+    ])
+  })
+
+  scenario("does not continue a failed provider stream after a tool decline", function* (s) {
+    const registry = yield* Tool.Service
+    yield* transformTools(
+      registry,
+      {
+        declined: {
+          name: "declined",
+          description: "Decline execution",
+          input: Schema.Struct({}),
+          execute: () => new Tool.Declined({ message: "The user declined this tool call" }),
+        },
+      },
+      { codemode: false },
+    )
+    yield* s.admit("Call declined")
+    yield* s.llm.push(
+      TestLLM.failAfter(
+        streamDisconnected(),
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.toolCall({ id: "call-declined", name: "declined", input: {} }),
+      ),
+    )
+
+    const error = yield* s.resume.pipe(Effect.flip)
+    expect(error).toBeInstanceOf(UserInterruptedError)
+    expect(s.requests).toHaveLength(1)
+    expect(yield* s.context).toMatchObject([
+      Expected.user("Call declined"),
+      Expected.assistant({}, [
         Expected.failedTool(
           { id: "call-declined" },
           { error: { type: "aborted", message: "The user declined this tool call" } },
@@ -3982,7 +4019,7 @@ describe("SessionRunnerLLM", () => {
           description: "Ask the user",
           input: Schema.Struct({}),
           output: Schema.Struct({}),
-          execute: () => Effect.die(new QuestionTool.CancelledError()),
+          execute: () => Effect.fail(new Tool.Declined({ message: "The user dismissed this question" })),
         },
       },
       { codemode: false },
@@ -3995,7 +4032,7 @@ describe("SessionRunnerLLM", () => {
     const exit = yield* Fiber.join(run)
 
     expect(exit._tag).toBe("Failure")
-    if (exit._tag === "Failure") expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+    if (exit._tag === "Failure") expect(Cause.squash(exit.cause)).toBeInstanceOf(UserInterruptedError)
     expect(s.requests).toHaveLength(1)
     expect(yield* s.context).toMatchObject([
       Expected.user("Ask then stop"),
@@ -4003,6 +4040,53 @@ describe("SessionRunnerLLM", () => {
         Expected.failedTool(
           { id: "call-question" },
           { error: { type: "aborted", message: "The user dismissed this question" } },
+        ),
+      ]),
+    ])
+  })
+
+  scenario("preserves form-service teardown as shutdown interruption after tool settlement", function* (s) {
+    const scope = yield* Scope.make()
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+    const context = yield* Layer.buildWithScope(Layer.fresh(Form.layer), scope)
+    const forms = Context.get(context, Form.Service)
+    const registry = yield* Tool.Service
+    const execution = yield* SessionExecution.Service
+    const opened = yield* Deferred.make<void>()
+    const unsubscribe = yield* s.bus.listen((event) =>
+      event.type === Form.Event.Created.type ? Deferred.succeed(opened, undefined).pipe(Effect.asVoid) : Effect.void,
+    )
+    yield* Effect.addFinalizer(() => unsubscribe)
+    yield* transformTools(
+      registry,
+      {
+        waiting: {
+          name: "waiting",
+          description: "Wait for a form answer",
+          input: Schema.Struct({}),
+          execute: () =>
+            forms
+              .ask({ sessionID, title: "Question", fields: [{ key: "answer", type: "string" }] })
+              .pipe(Effect.as({ content: "answered" })),
+        },
+      },
+      { codemode: false },
+    )
+    yield* s.admit("Ask a question")
+    yield* s.llm.push(TestLLM.tool("call-waiting", "waiting", {}))
+    const run = yield* execution.resume(sessionID).pipe(Effect.exit, Effect.forkScoped)
+    yield* Deferred.await(opened)
+    yield* Scope.close(scope, Exit.void)
+
+    const exit = yield* Fiber.join(run)
+    expect(SessionExecution.terminal(exit)).toEqual({ type: "interrupted", reason: "shutdown" })
+    expect(s.requests).toHaveLength(1)
+    expect(yield* s.context).toMatchObject([
+      Expected.user("Ask a question"),
+      Expected.assistant({}, [
+        Expected.failedTool(
+          { id: "call-waiting" },
+          { error: { type: "aborted", message: "Tool execution interrupted" } },
         ),
       ]),
     ])

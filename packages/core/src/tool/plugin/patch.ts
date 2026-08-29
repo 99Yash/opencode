@@ -185,10 +185,9 @@ export const Plugin = {
                   })
                   if (!moveTarget) updates.set(target.absolute, Patch.joinBom(update.content, update.bom))
                 }).pipe(
-                  Effect.mapError((error) =>
-                    error instanceof ToolFailure
-                      ? error
-                      : new ToolFailure({ message: `Unable to prepare patch at ${hunk.path}`, error }),
+                  Effect.catchTag(
+                    ["PlatformError", "Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                    (error) => new ToolFailure({ message: `Unable to prepare patch at ${hunk.path}`, error }),
                   ),
                 )
               }
@@ -289,8 +288,9 @@ export const Plugin = {
                 content: toModelContent(output),
                 metadata: { files: output.files },
               })),
-              Effect.mapError((error) =>
-                error instanceof ToolFailure ? error : new ToolFailure({ message: "Unable to apply patch", error }),
+              Effect.catchTag(
+                ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                (error) => new ToolFailure({ message: "Unable to apply patch", error }),
               ),
             )
           },

@@ -202,6 +202,176 @@ describe("Tool", () => {
     }),
   )
 
+  for (const [name, code] of [
+    ["try/catch", 'try { await tools.decline({}) } catch { return "recovered" }'],
+    ["Promise.allSettled", 'await Promise.allSettled([tools.decline({})]); return "recovered"'],
+    ["an unawaited call", 'tools.decline({}); return "escaped"'],
+  ] as const) {
+    it.effect(`stops Code Mode on a decline despite ${name}`, () =>
+      Effect.gen(function* () {
+        const service = yield* Tool.Service
+        const hooks = yield* PluginHooks.Service
+        const declined = new Tool.Declined({ message: "User declined this tool" })
+        const observed: string[] = []
+        const after: string[] = []
+        const progress: Tool.Metadata[] = []
+        const tool: Info = {
+          name: "decline",
+          description: "Decline execution",
+          input: Schema.Struct({}),
+          execute: () => Effect.sync(() => observed.push("decline")).pipe(Effect.andThen(Effect.fail(declined))),
+        }
+        yield* transform(service, { decline: tool, echo: make() })
+        yield* transform(service, { direct: tool }, { codemode: false })
+        yield* hooks.register("tool", "execute.after", (event) => Effect.sync(() => after.push(event.tool)))
+        const snapshot = yield* service.snapshot()
+        expect(yield* snapshot.execute(call("direct")).pipe(Effect.flip)).toBe(declined)
+        expect(
+          yield* snapshot
+            .execute({
+              ...call("execute"),
+              call: { type: "tool-call", id: "declined", name: "execute", input: { code } },
+              progress: (update) => Effect.sync(() => progress.push(update)),
+            })
+            .pipe(Effect.flip),
+        ).toBe(declined)
+        expect(observed).toEqual(["decline", "decline"])
+        expect(after).toEqual([])
+        expect(progress).toEqual([
+          { toolCalls: [{ tool: "decline", status: "running" }] },
+          { toolCalls: [{ tool: "decline", status: "error" }] },
+        ])
+
+        const result = yield* snapshot.execute({
+          ...call("execute"),
+          call: {
+            type: "tool-call",
+            id: "healthy",
+            name: "execute",
+            input: { code: 'return await tools.echo({ text: "healthy" })' },
+          },
+        })
+        expect(result.output).toMatchObject({ output: '{\n  "text": "healthy"\n}' })
+        expect(after).toEqual(["echo", "execute"])
+      }),
+    )
+  }
+
+  it.effect("awaits already-running Code Mode sibling cleanup before returning a decline", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const hooks = yield* PluginHooks.Service
+      const declined = new Tool.Declined({ message: "User declined this tool" })
+      const started = yield* Deferred.make<void>()
+      const cleaning = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const events: string[] = []
+      const after: string[] = []
+      const progress: Tool.Metadata[] = []
+      yield* transform(service, {
+        sibling: {
+          name: "sibling",
+          description: "Wait until interrupted",
+          input: Schema.Struct({}),
+          execute: () =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.ensuring(
+                Deferred.succeed(cleaning, undefined).pipe(
+                  Effect.andThen(Deferred.await(release)),
+                  Effect.andThen(Effect.sync(() => events.push("cleaned"))),
+                ),
+              ),
+            ),
+        },
+        decline: {
+          name: "decline",
+          description: "Decline after the sibling starts",
+          input: Schema.Struct({}),
+          execute: () => Deferred.await(started).pipe(Effect.andThen(Effect.fail(declined))),
+        },
+      })
+      yield* hooks.register("tool", "execute.after", (event) => Effect.sync(() => after.push(event.tool)))
+      const snapshot = yield* service.snapshot()
+      const fiber = yield* snapshot
+        .execute({
+          ...call("execute"),
+          call: {
+            type: "tool-call",
+            id: "siblings",
+            name: "execute",
+            input: { code: "return await Promise.allSettled([tools.sibling({}), tools.decline({})])" },
+          },
+          progress: (update) => Effect.sync(() => progress.push(update)),
+        })
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(cleaning)
+      expect(fiber.pollUnsafe()).toBeUndefined()
+      expect(events).toEqual([])
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(fiber).pipe(Effect.flip)).toBe(declined)
+      expect(events).toEqual(["cleaned"])
+      expect(after).toEqual([])
+      expect(progress.at(-1)).toEqual({
+        toolCalls: [
+          { tool: "sibling", status: "error" },
+          { tool: "decline", status: "error" },
+        ],
+      })
+    }),
+  )
+
+  it.effect("keeps Code Mode tool errors and operational defects catchable", () =>
+    Effect.gen(function* () {
+      const service = yield* Tool.Service
+      const hooks = yield* PluginHooks.Service
+      const after: string[] = []
+      yield* transform(service, {
+        failed: {
+          name: "failed",
+          description: "Fail with an ordinary tool error",
+          input: Schema.Struct({}),
+          execute: () => Effect.fail(new Tool.Error({ message: "Expected tool failure" })),
+        },
+        defect: {
+          name: "defect",
+          description: "Fail with an operational defect",
+          input: Schema.Struct({}),
+          execute: () => Effect.die(new Error("Unexpected tool defect")),
+        },
+      })
+      yield* hooks.register("tool", "execute.after", (event) =>
+        Effect.sync(() => after.push(`${event.tool}:${event.status}`)),
+      )
+      const snapshot = yield* service.snapshot()
+      const result = yield* snapshot.execute({
+        ...call("execute"),
+        call: {
+          type: "tool-call",
+          id: "recovered",
+          name: "execute",
+          input: {
+            code: `const caught = [];
+              try { await tools.failed({}) } catch (error) { caught.push(error.message) }
+              const settled = await Promise.allSettled([tools.defect({})]);
+              caught.push(settled[0].reason.message);
+              return caught;`,
+          },
+        },
+      })
+      expect(result.output).toMatchObject({
+        output: '[\n  "Expected tool failure",\n  "Unexpected tool defect"\n]',
+      })
+      expect(result.metadata).toEqual({
+        toolCalls: [
+          { tool: "failed", status: "error" },
+          { tool: "defect", status: "error" },
+        ],
+      })
+      expect(after).toEqual(["failed:error", "execute:completed"])
+    }),
+  )
+
   it.effect("replays mutations on refreshed sources and restores tools on disposal and scope cleanup", () =>
     Effect.gen(function* () {
       const service = yield* Tool.Service

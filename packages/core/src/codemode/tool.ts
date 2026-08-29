@@ -1,8 +1,8 @@
 export * as CodeModeTool from "./tool.js"
 
 import { CodeMode, Tool, toolError } from "@opencode-ai/codemode"
-import type { Content, Context, Error, Info, Metadata, Result } from "@opencode-ai/schema/tool"
-import { Effect, Ref, Schema, Semaphore } from "effect"
+import type { Content, Context, Declined, Error, Info, Metadata, Result } from "@opencode-ai/schema/tool"
+import { Deferred, Effect, Ref, Schema, Semaphore } from "effect"
 import { definition, normalizedName } from "../tool/runtime.js"
 
 const ExecuteFile = Schema.Struct({
@@ -43,7 +43,7 @@ const description = [
 
 export const create = (
   registrations: ReadonlyMap<string, Info>,
-  executeTool: (name: string, tool: Info, input: unknown, context: Context) => Effect.Effect<Result, Error>,
+  executeTool: (name: string, tool: Info, input: unknown, context: Context) => Effect.Effect<Result, Error | Declined>,
 ) => {
   return {
     name: "execute",
@@ -52,6 +52,7 @@ export const create = (
     output: ExecuteOutput,
     execute: ({ code }, context) =>
       Effect.gen(function* () {
+        const declined = yield* Deferred.make<never, Declined>()
         const callIndex = yield* Ref.make(0)
         const files = yield* Ref.make<Array<CollectedFiles>>([])
         const calls = yield* Ref.make<Array<ExecuteCall>>([])
@@ -60,12 +61,17 @@ export const create = (
           lock.withPermit(
             Ref.updateAndGet(calls, update).pipe(Effect.flatMap((toolCalls) => context.progress({ toolCalls }))),
           )
-        const result = yield* runtime(
+        const execution = runtime(
           registrations,
           (name, tool, input) =>
             Effect.gen(function* () {
               const index = yield* Ref.getAndUpdate(callIndex, (index) => index + 1)
-              const executed = yield* executeTool(name, tool, input, context)
+              // A decline stops the host execution; never expose it as a catchable JavaScript rejection.
+              const executed = yield* executeTool(name, tool, input, context).pipe(
+                Effect.catchTag("Tool.Declined", (error) =>
+                  Deferred.fail(declined, error).pipe(Effect.andThen(Effect.never)),
+                ),
+              )
               const content =
                 typeof executed.content === "string"
                   ? [{ type: "text" as const, text: executed.content }]
@@ -99,6 +105,8 @@ export const create = (
             },
           },
         ).execute(code)
+        // Register the interpreter fiber with the race before a synchronous tool can signal a decline.
+        const result = yield* Effect.raceFirst(Deferred.await(declined), Effect.andThen(Effect.yieldNow, execution))
         const toolCalls = yield* Ref.get(calls)
         const collected = (yield* Ref.get(files))
           .toSorted((left, right) => left.index - right.index)

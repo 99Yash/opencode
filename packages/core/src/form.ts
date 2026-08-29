@@ -207,7 +207,7 @@ export const layer = Layer.effect(
         Effect.flatMap((entries) =>
           Effect.forEach(
             Array.from(entries).filter((entry) => entry.state.status === "pending"),
-            (entry) => cancel(entry.form.id).pipe(Effect.ignore),
+            (entry) => Deferred.interrupt(entry.deferred).pipe(Effect.andThen(cancel(entry.form.id)), Effect.ignore),
             { discard: true },
           ),
         ),

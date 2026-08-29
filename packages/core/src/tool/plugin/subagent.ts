@@ -147,7 +147,12 @@ export const Plugin = {
                     id: context.id,
                   },
                 })
-                .pipe(Effect.mapError((error) => new ToolFailure({ message: `Subagent denied: ${agent.id}`, error })))
+                .pipe(
+                  Effect.catchTag(
+                    ["Permission.BlockedError", "Permission.CorrectedError", "Session.NotFoundError"],
+                    (error) => new ToolFailure({ message: `Subagent denied: ${agent.id}`, error }),
+                  ),
+                )
 
               const existing =
                 input.sessionID === undefined

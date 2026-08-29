@@ -26,7 +26,7 @@ const source = {
 }
 ```
 
-Leaves own resolution, permission, and side-effect ordering. Translate only expected typed errors into `ToolFailure`; do not use `catchCause`, because interruption and defects must survive. User declines from `Permission.assert` and question dismissals travel as defects beneath leaf `mapError` blankets and resurface as typed failures at `SessionModelRequest.executeTool`; leaves must never catch or convert them. A decline with feedback (`Permission.CorrectedError`) stays typed so the leaf converts it into `ToolFailure` and the model continues.
+Leaves own resolution, permission, and side-effect ordering. Registration accepts executors with arbitrary typed failures; `Tool.Snapshot.execute` normalizes ordinary failures into `Tool.Error` and preserves `Tool.Declined`. Translate expected operational errors into `ToolFailure` only when supplying curated messages or metadata, using narrow catches or mappings at the failing operation rather than blanket executor mappings. `Permission.assert` fails with typed `Permission.Declined`, which the tool execution boundary translates into `Tool.Declined`; question dismissals fail with `Tool.Declined` directly. Leaves must preserve these control failures. A decline with feedback (`Permission.CorrectedError`) remains an ordinary model-facing error so the model continues. Do not use `catchCause`: interruption and defects must survive.
 
 ## Registration
 
