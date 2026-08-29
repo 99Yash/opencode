@@ -166,6 +166,7 @@ export function createSseFixture(options: FixtureOptions = {}) {
     messages,
     requests,
     send,
+    streamCount: () => streams.size,
     async stop() {
       for (const stream of streams) {
         try {

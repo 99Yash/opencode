@@ -506,6 +506,72 @@ describe("acp service lifecycle", () => {
     ])
   })
 
+  test("invalidates a location when MCP rollback fails", async () => {
+    let failing = false
+    let created = 0
+    await using fixture = makeACPFixture({
+      sessionUpdate: async (update) => {
+        if (failing && update.sessionId === "ses_rollback_1") throw new Error("command publication failed")
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          created++
+          return Response.json({ data: makeSession(`ses_rollback_${created}`) })
+        }
+        if (request.method === "GET" && request.path.startsWith("/api/session/ses_rollback_")) {
+          return Response.json({ data: makeSession(request.path.split("/").at(-1) ?? "missing") })
+        }
+        if (request.method === "PUT" && request.path === "/api/mcp/tools") {
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "DELETE" && request.path === "/api/mcp/tools") {
+          return new Response(null, { status: failing ? 500 : 204 })
+        }
+        if (request.method === "POST" && request.path.endsWith("/model")) {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const first = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const second = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    failing = true
+
+    const failure = await fixture.service
+      .resumeSession({
+        cwd: "/workspace",
+        sessionId: first.sessionId,
+        mcpServers: [{ name: "tools", command: "bun", args: ["tools.ts"], env: [] }],
+      })
+      .catch((error: unknown) => error)
+    const missing = await Promise.all(
+      [first, second].map((session) =>
+        fixture.service
+          .setSessionConfigOption({ sessionId: session.sessionId, configId: "effort", value: "high" })
+          .catch((error: unknown) => error),
+      ),
+    )
+
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(failure).toMatchObject({ message: "ACP attachment failed and MCP rollback did not complete" })
+    expect(missing).toEqual([
+      expect.objectContaining({ _tag: "ACPSessionNotFoundError" }),
+      expect.objectContaining({ _tag: "ACPSessionNotFoundError" }),
+    ])
+
+    failing = false
+    const recovered = await fixture.service.resumeSession({
+      cwd: "/workspace",
+      sessionId: first.sessionId,
+      mcpServers: [],
+    })
+
+    expect(currentValue(recovered, "model")).toBe("test/test-model")
+    expect(
+      fixture.requests.filter((request) => request.path === "/api/mcp/tools").map((request) => request.method),
+    ).toEqual(["PUT", "DELETE", "DELETE"])
+  })
+
   test("allows MCP attachment transactions in distinct locations to proceed concurrently", async () => {
     const firstStaged = Promise.withResolvers<void>()
     const releaseFirst = Promise.withResolvers<void>()
@@ -766,6 +832,125 @@ describe("acp service lifecycle", () => {
     expect(prompts).toBe(2)
   })
 
+  test("failed authoritative interruption retains sole prompt ownership", async () => {
+    const admitted = Promise.withResolvers<void>()
+    const afterFailure = Promise.withResolvers<void>()
+    let interruptFails = true
+    let prompts = 0
+    await using fixture = makeACPFixture({
+      sessionUpdate: async (update) => {
+        if (
+          update.update.sessionUpdate === "agent_message_chunk" &&
+          update.update.content.type === "text" &&
+          update.update.content.text === "before cancel"
+        ) {
+          admitted.resolve()
+        }
+        if (
+          update.update.sessionUpdate === "agent_message_chunk" &&
+          update.update.content.type === "text" &&
+          update.update.content.text === "after failure"
+        ) {
+          afterFailure.resolve()
+        }
+      },
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_interrupt_owner") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_interrupt_owner/prompt") {
+          prompts++
+          const id = requestField(request.body, "id")
+          context.send({
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_interrupt_owner", inboxID: id },
+          })
+          context.send({
+            id: `evt_text_${prompts}`,
+            type: "session.text.delta",
+            data: {
+              sessionID: "ses_interrupt_owner",
+              assistantMessageID: `msg_assistant_${prompts}`,
+              ordinal: 0,
+              delta: prompts === 1 ? "before cancel" : "replacement",
+            },
+          })
+          if (prompts > 1) {
+            context.send({
+              id: "evt_replacement_complete",
+              type: "session.execution.succeeded",
+              data: { sessionID: "ses_interrupt_owner" },
+            })
+          }
+          return Response.json({ data: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_interrupt_owner/interrupt") {
+          if (interruptFails) return new Response(null, { status: 500 })
+          context.send({
+            id: "evt_owner_interrupted",
+            type: "session.execution.interrupted",
+            data: { sessionID: "ses_interrupt_owner", reason: "user" },
+          })
+          return Response.json({ interrupted: true })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const first = fixture.service
+      .prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "first" }] })
+      .catch((error: unknown) => error)
+    await admitted.promise
+
+    const interruptionFailure = await fixture.service.cancel({ sessionId: session.sessionId }).catch((error) => error)
+    const replacementFailure = await fixture.service
+      .prompt({ sessionId: session.sessionId, prompt: [{ type: "text", text: "must wait" }] })
+      .catch((error: unknown) => error)
+    fixture.updates.length = 0
+    fixture.send({
+      id: "evt_after_failed_interrupt",
+      type: "session.text.delta",
+      data: {
+        sessionID: "ses_interrupt_owner",
+        assistantMessageID: "msg_assistant_1",
+        ordinal: 1,
+        delta: "after failure",
+      },
+    })
+    await afterFailure.promise
+    const activeStream = fixture.requests.filter((request) => request.path === "/api/event").length
+
+    expect(interruptionFailure).toBeInstanceOf(Error)
+    expect(replacementFailure).toMatchObject({ _tag: "ACPServiceFailureError" })
+    expect(activeStream).toBe(1)
+    expect(
+      fixture.updates.flatMap((update) =>
+        update.update.sessionUpdate === "agent_message_chunk" && update.update.content.type === "text"
+          ? [update.update.content.text]
+          : [],
+      ),
+    ).toEqual(["after failure"])
+
+    interruptFails = false
+    await fixture.service.cancel({ sessionId: session.sessionId })
+    await first
+    const replacement = await fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "replacement" }],
+    })
+
+    expect(replacement.stopReason).toBe("end_turn")
+    expect(prompts).toBe(2)
+    expect(
+      fixture.updates.flatMap((update) =>
+        update.update.sessionUpdate === "agent_message_chunk" && update.update.content.type === "text"
+          ? [update.update.content.text]
+          : [],
+      ),
+    ).toEqual(["after failure", "replacement"])
+  })
+
   test("delete detaches and cancels an active foreground prompt", async () => {
     const promptStarted = Promise.withResolvers<void>()
     await using fixture = makeACPFixture({
@@ -894,11 +1079,7 @@ describe("acp service lifecycle", () => {
     expect(await fixture.service.closeSession({ sessionId: "missing" })).toEqual({})
     expect(
       fixture.requests.filter((request) => request.path.endsWith("/interrupt")).map((request) => request.path),
-    ).toEqual([
-      "/api/session/ses_lifecycle/interrupt",
-      "/api/session/ses_lifecycle/interrupt",
-      "/api/session/missing/interrupt",
-    ])
+    ).toEqual(["/api/session/ses_lifecycle/interrupt", "/api/session/missing/interrupt"])
   })
 
   test("deletes sessions from backing and local storage", async () => {

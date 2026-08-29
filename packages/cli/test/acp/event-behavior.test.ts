@@ -670,7 +670,7 @@ describe("acp event behavior", () => {
 
       const response = await withTimeout(result, "pre-admission cancellation did not terminate")
       expect(response).toMatchObject({ stopReason: "cancelled" })
-      expect(fixture.requests.filter((request) => request.path.endsWith("/interrupt"))).toHaveLength(1)
+      expect(fixture.requests.filter((request) => request.path.endsWith("/interrupt"))).toHaveLength(0)
     } finally {
       control.cancelled = true
       control.admission.abort()
@@ -746,6 +746,97 @@ describe("acp event behavior", () => {
 
       await withTimeout(admissionAborted.promise, "connection abort did not cancel admission")
       expect(await withTimeout(observed, "connection-aborted turn did not settle")).toBeInstanceOf(Error)
+    } finally {
+      await fixture.stop()
+    }
+  })
+
+  test("cleans stream setup when attachment is already aborted", async () => {
+    const fixture = createSseFixture()
+    const session = new AbortController()
+    let submitted = false
+    session.abort()
+
+    try {
+      const failure = await streamTurn({
+        client: fixture.client,
+        connection: recordingConnection([]),
+        sessionSignal: session.signal,
+        sessionID: "ses_preaborted",
+        cwd: "/workspace",
+        start: { type: "input", id: "input_preaborted" },
+        writeTextFile: false,
+        control: { cancelled: false, admission: new AbortController() },
+        submit: async () => {
+          submitted = true
+        },
+      }).catch((error: unknown) => error)
+
+      expect(failure).toBeInstanceOf(Error)
+      expect(submitted).toBe(false)
+      expect(fixture.streamCount()).toBe(0)
+    } finally {
+      await fixture.stop()
+    }
+  })
+
+  test("preserves admission failure when admission settles first", async () => {
+    const fixture = createSseFixture()
+    const expected = new Error("admission failed first")
+
+    try {
+      const failure = await streamTurn({
+        client: fixture.client,
+        connection: recordingConnection([]),
+        sessionID: "ses_admission_first",
+        cwd: "/workspace",
+        start: { type: "input", id: "input_admission_first" },
+        writeTextFile: false,
+        control: { cancelled: false, admission: new AbortController() },
+        submit: () => Promise.reject(expected),
+      }).catch((error: unknown) => error)
+
+      expect(failure).toBe(expected)
+    } finally {
+      await fixture.stop()
+    }
+  })
+
+  test("preserves stream failure when stream settles before admission", async () => {
+    const fixture = createSseFixture()
+    const connection = new AbortController()
+    const submitted = Promise.withResolvers<void>()
+    const lateAdmission = new Error("admission failed later")
+    const result = streamTurn({
+      client: fixture.client,
+      connection: recordingConnection([]),
+      connectionSignal: connection.signal,
+      sessionID: "ses_stream_first",
+      cwd: "/workspace",
+      start: { type: "input", id: "input_stream_first" },
+      writeTextFile: false,
+      control: { cancelled: false, admission: new AbortController() },
+      submit: (signal) =>
+        new Promise<void>((_, reject) => {
+          submitted.resolve()
+          signal.addEventListener(
+            "abort",
+            () => {
+              void Bun.sleep(20).then(() => reject(lateAdmission))
+            },
+            { once: true },
+          )
+        }),
+    })
+    const observed = result.catch((error: unknown) => error)
+
+    try {
+      await submitted.promise
+      connection.abort()
+
+      const failure = await withTimeout(observed, "stream-first failure did not settle")
+      expect(failure).toBeInstanceOf(Error)
+      expect(failure).not.toBe(lateAdmission)
     } finally {
       await fixture.stop()
     }

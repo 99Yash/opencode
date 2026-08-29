@@ -82,11 +82,22 @@ type Attached = {
 type ActiveTurn = {
   readonly state: Attached
   readonly control: TurnControl
+  readonly stopped: Promise<void>
+  readonly resolveStopped: () => void
 }
 
 type RegisteredMcp = {
   readonly server: string
   readonly config: ReturnType<typeof mcpConfig>
+}
+
+class McpRollbackError extends AggregateError {
+  readonly servers: ReadonlyArray<string>
+
+  constructor(primary: unknown, rollback: unknown, servers: ReadonlyArray<string>) {
+    super([primary, rollback], "ACP attachment failed and MCP rollback did not complete", { cause: primary })
+    this.servers = servers
+  }
 }
 
 type PreparedPrompt = {
@@ -147,6 +158,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
   const sessions = new Map<string, Attached>()
   const catalogs = new Map<string, Promise<Catalog>>()
   const registeredMcp = new Map<string, Map<string, RegisteredMcp>>()
+  const uncertainMcp = new Map<string, Set<string>>()
   const active = new Map<string, ActiveTurn>()
   const withSessionLock = makeKeyedLock<string>()
   const withLocationLock = makeKeyedLock<string>()
@@ -183,6 +195,28 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     sessions.delete(sessionID)
   }
 
+  const invalidateLocation = (cwd: string, servers: ReadonlyArray<string>) => {
+    sessions.forEach((state, sessionID) => {
+      if (state.cwd !== cwd) return
+      retire(state)
+      sessions.delete(sessionID)
+    })
+    const uncertain = new Set([...(registeredMcp.get(cwd)?.keys() ?? []), ...servers])
+    if (uncertain.size > 0) uncertainMcp.set(cwd, uncertain)
+    registeredMcp.delete(cwd)
+  }
+
+  const reconcileLocation = async (cwd: string) => {
+    const uncertain = uncertainMcp.get(cwd)
+    if (!uncertain) return
+    const removed = await Promise.allSettled(
+      [...uncertain].map((server) => input.client.mcp.remove({ server, location: { directory: cwd } })),
+    )
+    const failures = removed.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
+    if (failures.length > 0) throw new AggregateError(failures, "Failed to reconcile uncertain MCP configuration")
+    uncertainMcp.delete(cwd)
+  }
+
   // Lifecycle operations acquire Session ID before entering this Location transaction.
   const attach = async (
     session: SessionInfo,
@@ -201,6 +235,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     }
     return withLocationLock(cwd, async () => {
       const history = replayHistory ? await messages(input.client, state.id) : undefined
+      await reconcileLocation(cwd)
       const registration = await registerMcpServers(
         input.client,
         registeredMcp.get(cwd) ?? new Map(),
@@ -208,6 +243,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         mcpServers,
       ).catch((error) => {
         state.abort.abort()
+        if (error instanceof McpRollbackError) invalidateLocation(cwd, error.servers)
         throw error
       })
       return input.connection
@@ -233,7 +269,14 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         })
         .catch(async (error) => {
           state.abort.abort()
-          await registration.rollback()
+          const rollback = await registration.rollback().then(
+            () => ({ success: true as const }),
+            (failure) => ({ success: false as const, failure }),
+          )
+          if (!rollback.success) {
+            invalidateLocation(cwd, registration.changed)
+            throw new McpRollbackError(error, rollback.failure, registration.changed)
+          }
           throw error
         })
     }).catch((error) => {
@@ -400,9 +443,15 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
           })
         }
         const prepared = preparePrompt(state.catalog, params.prompt, SessionMessage.ID.create())
-        const control: TurnControl = { cancelled: false, admission: new AbortController() }
-        active.set(state.id, { state, control })
-        return { state, control, prepared }
+        const control: TurnControl = {
+          cancelled: false,
+          admission: new AbortController(),
+          stream: new AbortController(),
+        }
+        const stopped = Promise.withResolvers<void>()
+        const turn = { state, control, stopped: stopped.promise, resolveStopped: () => stopped.resolve() }
+        active.set(state.id, turn)
+        return { state, control, prepared, turn }
       })
       const state = acquired.state
       const control = acquired.control
@@ -426,21 +475,49 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         submit: (signal) => submitPrompt(input.client, state, prepared, signal),
         ...(childSessionUpdate ? { childSessionUpdate } : {}),
       }).finally(() => {
-        if (active.get(state.id)?.control === control) active.delete(state.id)
+        if (active.get(state.id) === acquired.turn) active.delete(state.id)
+        acquired.turn.resolveStopped()
       })
       await sendUsageUpdate(input.client, input.connection, state, response.usage?.totalTokens).catch(() => {})
       return response
     },
     cancel: async (params) => {
-      await withSessionLock(params.sessionId, async () => {
+      const cancellation = await withSessionLock(params.sessionId, async () => {
         const current = active.get(params.sessionId)
-        if (!current) return
+        if (!current) return undefined
         current.control.cancelled = true
-        current.control.interrupting = true
         current.control.admission.abort()
-        if (active.get(params.sessionId) === current) active.delete(params.sessionId)
+        if (!current.control.admitted) {
+          current.control.stream?.abort()
+          return { current, interrupt: false as const }
+        }
+        if (current.control.interrupting) return { current, interrupt: false as const }
+        current.control.interrupting = true
+        return { current, interrupt: true as const }
       })
-      await input.client.session.interrupt({ sessionID: params.sessionId }).catch(() => {})
+      if (!cancellation) return
+      const current = cancellation.current
+      if (!cancellation.interrupt) {
+        await current.stopped
+        return
+      }
+      const interrupted = await input.client.session.interrupt({ sessionID: params.sessionId }).catch(async (error) => {
+        await withSessionLock(params.sessionId, async () => {
+          if (active.get(params.sessionId) === current) current.control.interrupting = false
+        })
+        throw error
+      })
+      if (!interrupted.interrupted) {
+        await withSessionLock(params.sessionId, async () => {
+          if (active.get(params.sessionId) === current) current.control.interrupting = false
+        })
+        throw new ACPError.ServiceFailureError({
+          safeMessage: `Failed to interrupt active ACP prompt: ${params.sessionId}`,
+          service: "session",
+        })
+      }
+      current.control.stream?.abort()
+      await current.stopped
     },
   }
 }
@@ -604,7 +681,7 @@ async function registerMcpServers(
   const registered = new Map(current)
   changed.forEach((entry) => registered.set(entry.server, entry))
   const rollback = async () => {
-    await Promise.allSettled(
+    const results = await Promise.allSettled(
       changed.map((entry) => {
         const previous = current.get(entry.server)
         if (previous) {
@@ -617,6 +694,8 @@ async function registerMcpServers(
         return client.mcp.remove({ server: entry.server, location: { directory: session.cwd } })
       }),
     )
+    const failures = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))
+    if (failures.length > 0) throw new AggregateError(failures, "Failed to roll back MCP configuration")
   }
   const additions = await Promise.allSettled(
     changed.map((entry) =>
@@ -625,10 +704,20 @@ async function registerMcpServers(
   )
   const failure = additions.find((result): result is PromiseRejectedResult => result.status === "rejected")
   if (failure) {
-    await rollback()
+    const rollbackResult = await rollback().then(
+      () => ({ success: true as const }),
+      (error) => ({ success: false as const, error }),
+    )
+    if (!rollbackResult.success) {
+      throw new McpRollbackError(
+        failure.reason,
+        rollbackResult.error,
+        changed.map((entry) => entry.server),
+      )
+    }
     throw failure.reason
   }
-  return { registered, rollback }
+  return { registered, rollback, changed: changed.map((entry) => entry.server) }
 }
 
 function mcpConfig(server: McpServer) {

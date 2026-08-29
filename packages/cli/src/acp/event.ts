@@ -22,7 +22,9 @@ type Connection = Pick<AgentSideConnection, "sessionUpdate" | "requestPermission
 
 export type TurnControl = {
   cancelled: boolean
+  admitted?: boolean
   interrupting?: boolean
+  stream?: AbortController
   readonly admission: AbortController
 }
 
@@ -70,6 +72,44 @@ function emptyToolState(): ToolState {
   return { name: "tool", input: {}, metadata: {}, content: [] }
 }
 
+async function openEventStream(input: {
+  readonly client: OpenCodeClient
+  readonly streamController: AbortController
+  readonly admission: AbortController
+  readonly connectionSignal?: AbortSignal
+  readonly sessionSignal?: AbortSignal
+}) {
+  const connectionAbort = () => {
+    input.streamController.abort()
+    input.admission.abort()
+  }
+  const sessionAbort = () => {
+    input.streamController.abort()
+    input.admission.abort()
+  }
+  let stream: AsyncIterator<EventSubscribeOutput> | undefined
+  let opened = false
+  const close = async () => {
+    input.streamController.abort()
+    input.connectionSignal?.removeEventListener("abort", connectionAbort)
+    input.sessionSignal?.removeEventListener("abort", sessionAbort)
+    await stream?.return?.(undefined).catch(() => {})
+  }
+  try {
+    input.connectionSignal?.addEventListener("abort", connectionAbort, { once: true })
+    input.sessionSignal?.addEventListener("abort", sessionAbort, { once: true })
+    if (input.connectionSignal?.aborted) connectionAbort()
+    if (input.sessionSignal?.aborted) sessionAbort()
+    stream = input.client.event.subscribe({ signal: input.streamController.signal })[Symbol.asyncIterator]()
+    const connected = await stream.next()
+    if (connected.done) throw new Error("event stream disconnected before prompt admission")
+    opened = true
+    return { stream, close }
+  } finally {
+    if (!opened) await close()
+  }
+}
+
 export async function streamTurn(input: {
   readonly client: OpenCodeClient
   readonly connection: Connection
@@ -84,22 +124,17 @@ export async function streamTurn(input: {
   readonly connectionSignal?: AbortSignal
   readonly sessionSignal?: AbortSignal
 }): Promise<PromptResponse> {
-  const streamController = new AbortController()
-  const connectionAbort = () => {
-    streamController.abort()
-    input.control.admission.abort()
-  }
-  const sessionAbort = () => {
-    streamController.abort()
-    input.control.admission.abort()
-  }
-  input.connectionSignal?.addEventListener("abort", connectionAbort, { once: true })
-  input.sessionSignal?.addEventListener("abort", sessionAbort, { once: true })
-  if (input.connectionSignal?.aborted) connectionAbort()
-  if (input.sessionSignal?.aborted) sessionAbort()
-  const stream = input.client.event.subscribe({ signal: streamController.signal })[Symbol.asyncIterator]()
-  const connected = await stream.next()
-  if (connected.done) throw new Error("event stream disconnected before prompt admission")
+  const streamController = input.control.stream ?? new AbortController()
+  input.control.stream = streamController
+  const opened = await openEventStream({
+    client: input.client,
+    streamController,
+    admission: input.control.admission,
+    connectionSignal: input.connectionSignal,
+    sessionSignal: input.sessionSignal,
+  })
+  const stream = opened.stream
+  const closeStream = opened.close
 
   const control = input.control
   let started = false
@@ -184,6 +219,7 @@ export async function streamTurn(input: {
       if (!eventSessionID || (eventSessionID !== input.sessionID && !child)) continue
       if (matchesStart(event, input.start)) {
         started = true
+        control.admitted = true
         continue
       }
       if (!started) continue
@@ -350,58 +386,32 @@ export async function streamTurn(input: {
     (value) => ({ success: true as const, value }),
     (error) => ({ success: false as const, error }),
   )
-  let admissionResult: { readonly success: true } | { readonly success: false; readonly error: unknown } | undefined
-  const submitted = input
-    .submit(control.admission.signal)
-    .then(
-      () => ({ success: true as const }),
-      (error) => ({ success: false as const, error }),
-    )
-    .then((result) => {
-      admissionResult = result
-      return result
-    })
-  const closeStream = async () => {
-    streamController.abort()
-    input.connectionSignal?.removeEventListener("abort", connectionAbort)
-    input.sessionSignal?.removeEventListener("abort", sessionAbort)
-    await stream.return?.(undefined).catch(() => {})
-  }
+  const submitted = input.submit(control.admission.signal).then(
+    () => ({ success: true as const }),
+    (error) => ({ success: false as const, error }),
+  )
   try {
     const first = await Promise.race([
-      submitted.then(() => "admission" as const),
-      completed.then(() => "stream" as const),
+      submitted.then((result) => ({ source: "admission" as const, result })),
+      completed.then((result) => ({ source: "stream" as const, result })),
     ])
-    if (first === "stream") {
-      const completion = await completed
-      if (!completion.success) {
-        const admission = admissionResult
+    const completion = await (async () => {
+      if (first.source === "stream") {
         control.admission.abort()
-        if (admission && !admission.success && !control.cancelled) throw admission.error
-        throw completion.error
+        return first.result
       }
-    }
-    const admission = await submitted
-    if (!admission.success && !control.cancelled) throw admission.error
-    if (input.action) {
-      streamController.abort()
-      await completed
-      return response(undefined, undefined, "succeeded", control.cancelled, undefined)
-    }
-    if (control.cancelled) {
-      if (!control.interrupting) {
-        control.interrupting = true
-        await input.client.session.interrupt({ sessionID: input.sessionID }).catch(() => {})
-      }
-      if (!started) {
+      if (!first.result.success && !control.cancelled) throw first.result.error
+      if (first.result.success) control.admitted = true
+      if (input.action) {
         streamController.abort()
         await completed
-        return response(undefined, undefined, "interrupted", true, undefined)
+        return { success: true as const, value: "succeeded" as const }
       }
-    }
-    const completion = await completed
-    if (!completion.success) throw completion.error
-    const terminal = completion.value
+      if (control.cancelled && !started) streamController.abort()
+      return completed
+    })()
+    if (!completion.success && !control.cancelled) throw completion.error
+    const terminal = completion.success ? completion.value : "interrupted"
     if (input.childSessionUpdate && openChildren.size > 0 && !input.sessionSignal?.aborted) {
       handedOff = true
       void consume("background")
@@ -422,7 +432,6 @@ export async function streamTurn(input: {
     )
   } catch (error) {
     streamController.abort()
-    await completed
     throw error
   } finally {
     if (!handedOff) await closeStream()

@@ -129,13 +129,15 @@ export function makeACPFixture(options: FixtureOptions = {}) {
   const requests: FixtureRequest[] = []
   const updates: Parameters<AgentSideConnection["sessionUpdate"]>[0][] = []
   const encoder = new TextEncoder()
-  let eventController: ReadableStreamDefaultController<Uint8Array> | undefined
+  const eventControllers = new Set<ReadableStreamDefaultController<Uint8Array>>()
   const models = options.models ?? [testModel, secondModel]
   const context: FixtureContext = {
     requests,
     send(event) {
-      if (!eventController) throw new Error("ACP fixture has no active event stream")
-      eventController.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      if (eventControllers.size === 0) throw new Error("ACP fixture has no active event stream")
+      eventControllers.forEach((controller) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))
+      })
     },
   }
   const server = Bun.serve({
@@ -160,11 +162,11 @@ export function makeACPFixture(options: FixtureOptions = {}) {
           new ReadableStream<Uint8Array>({
             start(value) {
               controller = value
-              eventController = value
+              eventControllers.add(value)
               context.send({ id: "evt_connected", type: "server.connected", data: {} })
             },
             cancel() {
-              if (eventController === controller) eventController = undefined
+              if (controller) eventControllers.delete(controller)
             },
           }),
           { headers: { "content-type": "text/event-stream" } },
@@ -204,8 +206,10 @@ export function makeACPFixture(options: FixtureOptions = {}) {
     service,
     requests,
     updates,
+    send: (event: unknown) => context.send(event),
     async [Symbol.asyncDispose]() {
-      eventController?.close()
+      eventControllers.forEach((controller) => controller.close())
+      eventControllers.clear()
       await server.stop(true)
     },
   }
