@@ -70,6 +70,7 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
             continue
           }
           if (key !== AsyncIteratorSymbol && key !== IteratorSymbol) continue
+          if (!Object.prototype.propertyIsEnumerable.call(source, key)) continue
           const item = Reflect.get(source, key)
           rejectCircularInsertion(out, item, "Object.assign result", node)
           Reflect.set(out, key, item)

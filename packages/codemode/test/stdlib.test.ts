@@ -17,6 +17,8 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Schema } from "effect"
 import { CodeMode, Tool } from "../src/index.js"
+import { IteratorSymbol } from "../src/interpreter/model.js"
+import { invokeObjectMethod } from "../src/stdlib/object.js"
 
 // Standard-library value types: Date, RegExp, Map, Set. Programs use them as ordinary JS;
 // intra-CodeMode checkpoints (Object.* helpers, spread, coercion inputs) preserve the live
@@ -822,6 +824,29 @@ describe("stdlib integration", () => {
       `),
     ).toEqual({ target: { a: 1, b: 2 }, result: { a: 1, b: 2 }, same: true })
     expect(await value(`try { Object.assign(null, { a: 1 }); return false } catch { return true }`)).toBe(true)
+  })
+
+  test("Object.assign ignores non-enumerable supported symbols without reading them", () => {
+    const target = {}
+    const reads: Array<boolean> = []
+    const source = Object.defineProperty({}, IteratorSymbol, {
+      get() {
+        reads.push(true)
+        return target
+      },
+    })
+    expect(invokeObjectMethod("assign", [target, source], { type: "CallExpression" })).toBe(target)
+    expect(reads).toEqual([])
+    expect(Object.hasOwn(target, IteratorSymbol)).toBe(false)
+  })
+
+  test("Object.assign rejects cycles through supported symbols on nested arrays", () => {
+    const target = {}
+    const nested = Object.defineProperty([], IteratorSymbol, { enumerable: true, value: target })
+    expect(() => invokeObjectMethod("assign", [target, { nested }], { type: "CallExpression" })).toThrow(
+      "Object.assign result contains a circular value.",
+    )
+    expect(Object.hasOwn(target, "nested")).toBe(false)
   })
 
   test("Object.assign rejects direct and nested cycles", async () => {

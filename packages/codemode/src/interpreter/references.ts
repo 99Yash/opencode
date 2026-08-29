@@ -109,7 +109,7 @@ export const rejectCircularInsertion = (container: object, value: unknown, label
       throw new InterpreterRuntimeError(`${label} contains a circular value.`, node, "InvalidDataValue")
     if (current === null || typeof current !== "object" || isRuntimeReference(current) || seen.has(current)) continue
     seen.add(current)
-    pending.push(Array.isArray(current) ? current[Symbol.iterator]() : childValues(current))
+    pending.push(childValues(current))
   }
 }
 
