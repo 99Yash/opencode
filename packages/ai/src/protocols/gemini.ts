@@ -618,7 +618,7 @@ const step = (state: ParserState, event: GeminiEvent) => {
       }),
     )
   }
-  if (event.error !== undefined && event.error !== null)
+  if ("error" in event)
     return Effect.fail(
       ProviderShared.eventError(state.route, `Invalid ${state.route} stream event`, ProviderShared.encodeJson(event)),
     )

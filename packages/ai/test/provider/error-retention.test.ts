@@ -101,6 +101,23 @@ describe("provider error retention", () => {
     }),
   )
 
+  it.effect("rejects and retains an explicit null Gemini error", () =>
+    Effect.gen(function* () {
+      const body = JSON.stringify({ error: null, trace: { opaque: "outer" } })
+      const error = yield* LLMClient.generate(
+        LLM.request({ model: Google.configure(options).model("gemini"), prompt: "hello" }),
+      ).pipe(
+        Effect.provide(fixedResponse(sseEvents(body), { headers: { "x-provider-trace": "trace-null" } })),
+        Effect.flip,
+      )
+
+      expect(error.reason._tag).toBe("InvalidProviderOutput")
+      expect(error.reason.body).toBe(body)
+      expect(error.reason.http).toMatchObject({ status: 200, headers: { "x-provider-trace": "trace-null" } })
+      expect(error.reason.http?.url).toStartWith("https://provider.test/")
+    }),
+  )
+
   it.effect("retains malformed provider frames and the original decode cause", () =>
     Effect.gen(function* () {
       const body = '{"type":"error","error":{"message":42,"opaque":{"nested":true}},"trace":"outer"}'
