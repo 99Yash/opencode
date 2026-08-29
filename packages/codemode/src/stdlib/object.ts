@@ -6,7 +6,7 @@ import {
   IteratorSymbol,
   IteratorSymbols,
 } from "../interpreter/model.js"
-import { containsOpaqueReference } from "../interpreter/references.js"
+import { containsOpaqueReference, rejectCircularInsertion } from "../interpreter/references.js"
 import { isBlockedMember } from "../tool-runtime.js"
 import { isCodeModeValue, CodeModePromise } from "../values.js"
 import { boundedData, coerceToString } from "./value.js"
@@ -39,6 +39,7 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
   }
   const guardedSet = (out: Record<string, unknown>, key: string, item: unknown): void => {
     if (isBlockedMember(key)) throw new InterpreterRuntimeError(`Property '${key}' is not available.`, node)
+    rejectCircularInsertion(out, item, "Object.assign result", node)
     out[key] = item
   }
   switch (name) {
@@ -71,7 +72,10 @@ export const invokeObjectMethod = (name: string, args: Array<unknown>, node: Ast
         }
         for (const [key, item] of Object.entries(source)) guardedSet(out, key, item)
         for (const symbol of IteratorSymbols) {
-          if (Object.hasOwn(source, symbol)) Reflect.set(out, symbol, Reflect.get(source, symbol))
+          if (!Object.hasOwn(source, symbol)) continue
+          const item = Reflect.get(source, symbol)
+          rejectCircularInsertion(out, item, "Object.assign result", node)
+          Reflect.set(out, symbol, item)
         }
       }
       return out

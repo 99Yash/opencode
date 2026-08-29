@@ -824,6 +824,55 @@ describe("stdlib integration", () => {
     expect(await value(`try { Object.assign(null, { a: 1 }); return false } catch { return true }`)).toBe(true)
   })
 
+  test("Object.assign rejects direct and nested cycles", async () => {
+    expect(
+      await value(`
+        const target = { kept: true }
+        try { Object.assign(target, { self: target }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ kept: true })
+    expect(
+      await value(`
+        const target = { kept: true }
+        const nested = { target }
+        try { Object.assign(target, { nested }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ kept: true })
+    expect(
+      await value(`
+        const target = {}
+        const source = {}
+        source[Symbol.iterator] = target
+        try { Object.assign(target, source) } catch { return Object.hasOwn(target, Symbol.iterator) }
+        return true
+      `),
+    ).toBe(false)
+  })
+
+  test("Object.assign preserves mutations before a circular field", async () => {
+    expect(
+      await value(`
+        const target = {}
+        try { Object.assign(target, { before: 1, cycle: { target }, after: 2 }) } catch { return target }
+        return null
+      `),
+    ).toEqual({ before: 1 })
+  })
+
+  test("Object.assign preserves target identity and acyclic shared aliases", async () => {
+    expect(
+      await value(`
+        const shared = { count: 1 }
+        const target = {}
+        const result = Object.assign(target, { left: shared, right: shared })
+        result.left.count = 2
+        return [result === target, result.left === shared, result.left === result.right, shared.count]
+      `),
+    ).toEqual([true, true, true, 2])
+  })
+
   test("assignment resolves and reads its left side before evaluating the right side", async () => {
     expect(await value(`let x = 1; x += (x = 5); return x`)).toBe(6)
     expect(await value(`let i = 0; const values = [9]; values[i++] = i; return [values, i]`)).toEqual([[1], 1])
