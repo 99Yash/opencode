@@ -301,50 +301,99 @@ describe("Open Responses basic-item lifecycles", () => {
       }),
     )
   })
-
-  it.effect("isolates a done-only call whose item id collides with a pending call", () =>
-    Effect.gen(function* () {
-      const first = { type: "function_call", id: "fc_1", call_id: "call_1", name: "first" }
-      const second = {
-        type: "function_call",
-        id: "fc_1",
-        call_id: "call_2",
-        name: "second",
-        arguments: '{"second":true}',
-      }
-      const events = yield* collect(
-        { type: "response.output_item.added", item: first },
-        { type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"first":"draft"}' },
-        { type: "response.output_item.done", item: second },
-        { type: "response.output_item.done", item: second },
-        {
-          type: "response.output_item.done",
-          item: { ...first, arguments: '{"first":"final"}' },
-        },
-        {
-          type: "response.output_item.done",
-          item: { ...first, arguments: '{"first":"duplicate"}' },
-        },
-        completed,
-      )
-      const providerMetadata = { "openai-compatible": { itemId: "fc_1" } }
-      expect(events.filter((event) => event.type.startsWith("tool-"))).toEqual([
-        { type: "tool-input-start", id: "call_1", name: "first", providerMetadata },
-        {
-          type: "tool-input-delta",
-          id: "call_1",
+  ;[
+    {
+      label: "same item id with direct completion",
+      firstID: "shared",
+      firstCallID: "call_1",
+      secondID: "shared",
+      completion: "direct",
+      reverse: false,
+    },
+    {
+      label: "same item id with reversed response completion",
+      firstID: "shared",
+      firstCallID: "call_1",
+      secondID: "shared",
+      completion: "response",
+      reverse: true,
+    },
+    {
+      label: "call id matching another item id with reversed direct completion",
+      firstID: "fc_1",
+      firstCallID: "shared",
+      secondID: "shared",
+      completion: "direct",
+      reverse: true,
+    },
+    {
+      label: "call id matching another item id with response completion",
+      firstID: "fc_1",
+      firstCallID: "shared",
+      secondID: "shared",
+      completion: "response",
+      reverse: false,
+    },
+  ].forEach((fixture) => {
+    it.effect(`isolates pending calls with ${fixture.label}`, () =>
+      Effect.gen(function* () {
+        const first = {
+          type: "function_call",
+          id: fixture.firstID,
+          call_id: fixture.firstCallID,
           name: "first",
-          text: '{"first":"draft"}',
-          input: { first: "draft" },
-        },
-        { type: "tool-input-start", id: "call_2", name: "second", providerMetadata },
-        { type: "tool-input-end", id: "call_2", name: "second", providerMetadata },
-        { type: "tool-call", id: "call_2", name: "second", input: { second: true }, providerMetadata },
-        { type: "tool-input-end", id: "call_1", name: "first", providerMetadata },
-        { type: "tool-call", id: "call_1", name: "first", input: { first: "final" }, providerMetadata },
-      ])
-    }),
-  )
+        }
+        const second = { type: "function_call", id: fixture.secondID, call_id: "call_2", name: "second" }
+        const finished = [
+          { ...first, arguments: '{"first":"final"}' },
+          { ...second, arguments: '{"second":"final"}' },
+        ]
+        const ordered = fixture.reverse ? finished.toReversed() : finished
+        const terminal: OpenResponses.Event[] =
+          fixture.completion === "direct"
+            ? [...ordered, ...ordered].map((item) => ({ type: "response.output_item.done", item }))
+            : [
+                {
+                  type: "response.completed",
+                  response: { id: "resp_1", output: [...ordered, ...ordered] },
+                },
+              ]
+        const events = yield* collect(
+          { type: "response.output_item.added", output_index: 0, item: first },
+          { type: "response.output_item.added", output_index: 1, item: second },
+          {
+            type: "response.function_call_arguments.delta",
+            output_index: 1,
+            item_id: fixture.firstID,
+            delta: '{"second":"draft"}',
+          },
+          {
+            type: "response.function_call_arguments.delta",
+            output_index: 0,
+            item_id: fixture.secondID,
+            delta: '{"first":"draft"}',
+          },
+          ...terminal,
+          ...(fixture.completion === "direct" ? [completed] : []),
+        )
+        ;[
+          { item: first, input: { first: "final" } },
+          { item: second, input: { second: "final" } },
+        ].forEach((expected) => {
+          expect(
+            events.filter((event) => "id" in event && event.id === expected.item.call_id).map((event) => event.type),
+          ).toEqual(["tool-input-start", "tool-input-delta", "tool-input-end", "tool-call"])
+          expect(events.filter(LLMEvent.is.toolCall).find((event) => event.id === expected.item.call_id)).toEqual({
+            type: "tool-call",
+            id: expected.item.call_id,
+            name: expected.item.name,
+            input: expected.input,
+            providerMetadata: { "openai-compatible": { itemId: expected.item.id } },
+          })
+        })
+      }),
+    )
+  })
 
   it.effect("recovers pending calls without reconciling terminal reasoning", () =>
     Effect.gen(function* () {
