@@ -392,6 +392,7 @@ export interface ParserState {
   readonly providerMetadataKey: string
   // Pending calls use generated keys. Wire call ids, item ids, and output
   // indexes are aliases only and can therefore collide without sharing state.
+  // Alias history is retained until this response's parser state is discarded.
   readonly tools: ToolStream.State<string>
   readonly toolCalls: ReadonlyMap<string, string>
   readonly toolItems: ReadonlyMap<string, ReadonlyArray<string>>
@@ -876,9 +877,10 @@ const pendingToolID = (state: ParserState, event: Event) => {
     return id !== undefined && state.tools[id] !== undefined ? id : undefined
   }
   if (event.item_id === undefined) return undefined
-  const active = (state.toolItems.get(event.item_id) ?? []).filter((id) => state.tools[id] !== undefined)
-  if (active.length > 1) return null
-  return active[0]
+  const admitted = state.toolItems.get(event.item_id) ?? []
+  if (admitted.length > 1) return null
+  const id = admitted[0]
+  return id !== undefined && state.tools[id] !== undefined ? id : undefined
 }
 
 const startReasoningSummaryPart = (state: ParserState, itemID: string, index: number): StepResult => {
@@ -1037,7 +1039,9 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
       toolCalls: new Map(state.toolCalls).set(item.call_id, id),
       toolItems: new Map(state.toolItems).set(itemID, [...(state.toolItems.get(itemID) ?? []), id]),
       toolOutputs:
-        event.output_index === undefined ? state.toolOutputs : new Map(state.toolOutputs).set(event.output_index, id),
+        event.output_index === undefined || state.toolOutputs.has(event.output_index)
+          ? state.toolOutputs
+          : new Map(state.toolOutputs).set(event.output_index, id),
       nextTool: state.nextTool + 1,
     },
     [...events, LLMEvent.toolInputStart({ id: item.call_id, name: item.name ?? "", providerMetadata: metadata })],

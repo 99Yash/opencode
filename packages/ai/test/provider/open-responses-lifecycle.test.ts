@@ -394,78 +394,124 @@ describe("Open Responses basic-item lifecycles", () => {
       }),
     )
   })
-
-  it.effect("tombstones a completed output index instead of resolving its late events through a shared item id", () =>
-    Effect.gen(function* () {
-      const first = { type: "function_call", id: "shared", call_id: "call_1", name: "first" }
-      const second = { type: "function_call", id: "shared", call_id: "call_2", name: "second" }
-      const events = yield* collect(
-        { type: "response.output_item.added", output_index: 0, item: first },
-        { type: "response.output_item.added", output_index: 1, item: second },
-        {
-          type: "response.function_call_arguments.delta",
-          output_index: 0,
-          item_id: "shared",
-          delta: '{"first":"draft"}',
-        },
-        {
-          type: "response.function_call_arguments.delta",
-          output_index: 1,
-          item_id: "shared",
-          delta: '{"second":"kept"}',
-        },
-        {
-          type: "response.output_item.done",
-          output_index: 0,
-          item: { ...first, arguments: '{"first":"final"}' },
-        },
-        { type: "response.output_item.added", output_index: 0, item: first },
-        {
-          type: "response.function_call_arguments.delta",
-          output_index: 0,
-          item_id: "shared",
-          delta: '{"wrong":"delta"}',
-        },
-        {
-          type: "response.function_call_arguments.done",
-          output_index: 0,
-          item_id: "shared",
-          arguments: '{"wrong":"done"}',
-        },
-        {
-          type: "response.output_item.done",
-          output_index: 0,
-          item: { ...first, arguments: '{"wrong":"item"}' },
-        },
-        { type: "response.output_item.done", output_index: 1, item: second },
-        completed,
-      )
-      expect(events.filter(LLMEvent.is.toolCall)).toEqual([
-        {
-          type: "tool-call",
-          id: "call_1",
-          name: "first",
-          input: { first: "final" },
-          providerMetadata: { "openai-compatible": { itemId: "shared" } },
-        },
-        {
-          type: "tool-call",
-          id: "call_2",
-          name: "second",
-          input: { second: "kept" },
-          providerMetadata: { "openai-compatible": { itemId: "shared" } },
-        },
-      ])
-      ;["call_1", "call_2"].forEach((id) => {
-        expect(events.filter((event) => "id" in event && event.id === id).map((event) => event.type)).toEqual([
-          "tool-input-start",
-          "tool-input-delta",
-          "tool-input-end",
-          "tool-call",
+  ;["direct", "response"].forEach((completion) => {
+    it.effect(`keeps a completed output index tombstoned across ${completion} completion of its replacement`, () =>
+      Effect.gen(function* () {
+        const first = { type: "function_call", id: "old", call_id: "call_1", name: "first" }
+        const second = { type: "function_call", id: "new", call_id: "call_2", name: "second" }
+        const terminal: OpenResponses.Event[] =
+          completion === "direct"
+            ? [{ type: "response.output_item.done", output_index: 0, item: second }, completed]
+            : [
+                {
+                  type: "response.completed",
+                  response: { id: "resp_1", output: [second, { ...first, arguments: '{"wrong":"terminal"}' }] },
+                },
+              ]
+        const events = yield* collect(
+          { type: "response.output_item.added", output_index: 0, item: first },
+          {
+            type: "response.function_call_arguments.delta",
+            output_index: 0,
+            item_id: "old",
+            delta: '{"first":"draft"}',
+          },
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: { ...first, arguments: '{"first":"final"}' },
+          },
+          { type: "response.output_item.added", output_index: 0, item: second },
+          { type: "response.output_item.added", output_index: 0, item: second },
+          {
+            type: "response.function_call_arguments.delta",
+            item_id: "new",
+            delta: '{"second":"kept"}',
+          },
+          {
+            type: "response.function_call_arguments.delta",
+            output_index: 0,
+            item_id: "new",
+            delta: '{"wrong":"delta"}',
+          },
+          {
+            type: "response.function_call_arguments.done",
+            output_index: 0,
+            item_id: "new",
+            arguments: '{"wrong":"done"}',
+          },
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: { ...first, arguments: '{"wrong":"item"}' },
+          },
+          ...terminal,
+        )
+        expect(events.filter(LLMEvent.is.toolCall)).toEqual([
+          {
+            type: "tool-call",
+            id: "call_1",
+            name: "first",
+            input: { first: "final" },
+            providerMetadata: { "openai-compatible": { itemId: "old" } },
+          },
+          {
+            type: "tool-call",
+            id: "call_2",
+            name: "second",
+            input: { second: "kept" },
+            providerMetadata: { "openai-compatible": { itemId: "new" } },
+          },
         ])
-      })
-    }),
-  )
+        ;["call_1", "call_2"].forEach((id) => {
+          expect(events.filter((event) => "id" in event && event.id === id).map((event) => event.type)).toEqual([
+            "tool-input-start",
+            "tool-input-delta",
+            "tool-input-end",
+            "tool-call",
+          ])
+        })
+      }),
+    )
+  })
+  ;[
+    { type: "response.function_call_arguments.delta", item_id: "shared", delta: '{"wrong":"delta"}' },
+    { type: "response.function_call_arguments.done", item_id: "shared", arguments: '{"wrong":"done"}' },
+  ].forEach((late) => {
+    it.effect(`keeps a reused item id ambiguous for a late ${late.type}`, () =>
+      Effect.gen(function* () {
+        const first = { type: "function_call", id: "shared", call_id: "call_1", name: "first" }
+        const second = { type: "function_call", id: "shared", call_id: "call_2", name: "second" }
+        const error = yield* LLMClient.generate(request).pipe(
+          Effect.provide(
+            fixedResponse(
+              sseEvents(
+                { type: "response.output_item.added", output_index: 0, item: first },
+                {
+                  type: "response.output_item.done",
+                  output_index: 0,
+                  item: { ...first, arguments: '{"first":"final"}' },
+                },
+                { type: "response.output_item.added", output_index: 1, item: second },
+                {
+                  type: "response.function_call_arguments.delta",
+                  output_index: 1,
+                  item_id: "shared",
+                  delta: '{"second":"kept"}',
+                },
+                late,
+                { type: "response.output_item.done", output_index: 1, item: second },
+                completed,
+              ),
+            ),
+          ),
+          Effect.flip,
+        )
+        expect(error.reason._tag).toBe("InvalidProviderOutput")
+        expect(error.message).toContain("ambiguous item_id without a matching output_index")
+      }),
+    )
+  })
 
   it.effect("treats prototype property names as ordinary call and item ids", () =>
     Effect.gen(function* () {
