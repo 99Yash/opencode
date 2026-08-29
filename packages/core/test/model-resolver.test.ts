@@ -16,6 +16,7 @@ import { it } from "./lib/effect"
 
 interface ModelOptions {
   readonly providerID?: Provider.ID
+  readonly canonical?: Provider.ID
   readonly modelID?: string
   readonly compatibility?: Compatibility
   readonly settings?: Info["settings"]
@@ -30,6 +31,7 @@ const model = (packageName: string | undefined, options: ModelOptions = {}) =>
     id: ID.make("test-model"),
     modelID: ID.make(options.modelID ?? "api-test-model"),
     providerID: options.providerID ?? Provider.ID.make("test-provider"),
+    canonical: options.canonical,
     name: "Test model",
     compatibility: options.compatibility,
     package: packageName,
@@ -283,6 +285,7 @@ describe("ModelResolver", () => {
   it.effect("uses no native API-key auth for an explicitly enabled provider without credentials", () => {
     const selected = model(Provider.aisdk("@ai-sdk/google"), {
       providerID: Provider.ID.make("gateway"),
+      canonical: Provider.ID.google,
       settings: { baseURL: "https://gateway.example.com/v1" },
       headers: { "cf-access-token": "access-token" },
     })
@@ -309,7 +312,10 @@ describe("ModelResolver", () => {
     })
     const integrations = Layer.mock(Integration.Service, {
       connection: {
-        active: () => Effect.undefined,
+        active: (id) => {
+          expect(id).toBe(Integration.ID.make("gateway"))
+          return Effect.undefined
+        },
         resolve: () => Effect.die("unused"),
         key: () => Effect.die("unused"),
         activate: () => Effect.die("unused"),
@@ -347,6 +353,8 @@ describe("ModelResolver", () => {
         const resolved = yield* resolver.resolveModel(selected)
 
         expect(resolved.limit).toEqual(selected.limit)
+        expect(resolved.ref.providerID).toBe(selected.providerID)
+        expect(String(resolved.model.provider)).toBe("google")
         const headers = yield* resolved.model.route.auth.apply({
           request: LLM.request({ model: resolved.model, prompt: "Hello" }),
           method: "POST",
@@ -389,6 +397,7 @@ describe("ModelResolver", () => {
     Effect.gen(function* () {
       const resolved = yield* ModelResolver.fromCatalogModel(
         model(Provider.aisdk("@ai-sdk/openai-compatible"), {
+          canonical: Provider.ID.make("deepseek"),
           compatibility: {
             reasoningField: "vendor_reasoning",
             requireReasoning: true,
@@ -417,6 +426,8 @@ describe("ModelResolver", () => {
 
       expect(headers.authorization).toBe("Bearer settings-secret")
       expect(resolved.route.id).toBe("openai-compatible-chat")
+      expect(String(resolved.provider)).toBe("deepseek")
+      expect(resolved.route.providerMetadataKey).toBe("deepseek")
       expect(resolved.compatibility?.reasoningField).toBe("vendor_reasoning")
       expect(resolved.compatibility?.requireReasoning).toBe(true)
       expect(resolved.compatibility?.maxTokensField).toBe("max_completion_tokens")
