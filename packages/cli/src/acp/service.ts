@@ -9,6 +9,7 @@ import {
   type SkillInfo,
 } from "@opencode-ai/client/promise"
 import { withTimestampedFallback } from "@opencode-ai/util/session-title-fallback"
+import { Effect, Semaphore } from "effect"
 import type {
   AgentSideConnection,
   AuthenticateRequest,
@@ -73,6 +74,7 @@ type Attached = {
   readonly id: string
   readonly cwd: string
   readonly abort: AbortController
+  readonly configLock: Semaphore.Semaphore
   catalog: Catalog
   model: ModelRef
   modeID: string
@@ -141,6 +143,7 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       id: session.id,
       cwd,
       abort: new AbortController(),
+      configLock: Semaphore.makeUnsafe(1),
       catalog: currentCatalog,
       model: session.model ?? currentCatalog.defaultModel,
       modeID: session.agent ?? currentCatalog.defaultModeID,
@@ -273,34 +276,37 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
     setSessionConfigOption: async (params) => {
       const state = await requireSession(params.sessionId)
       if (typeof params.value !== "string") throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
-      switch (params.configId) {
-        case "model": {
-          const selected = requireModel(state.catalog, params.value)
-          await input.client.session.switchModel({ sessionID: state.id, model: selected })
-          state.model = selected
-          break
+      return withConfigLock(state, async () => {
+        switch (params.configId) {
+          case "model": {
+            const selected = requireModel(state.catalog, params.value)
+            await input.client.session.switchModel({ sessionID: state.id, model: selected })
+            state.model = selected
+            break
+          }
+          case "effort": {
+            const model = state.catalog.models.find(
+              (item) => item.providerID === state.model.providerID && item.id === state.model.id,
+            )
+            if (!model?.variants.some((variant) => variant.id === params.value))
+              throw new ACPError.InvalidEffortError({ effort: params.value })
+            const selected = { ...state.model, variant: params.value }
+            await input.client.session.switchModel({ sessionID: state.id, model: selected })
+            state.model = selected
+            break
+          }
+          case "mode":
+            await selectMode(input.client, state, params.value)
+            break
+          default:
+            throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
         }
-        case "effort": {
-          const model = state.catalog.models.find(
-            (item) => item.providerID === state.model.providerID && item.id === state.model.id,
-          )
-          if (!model?.variants.some((variant) => variant.id === params.value))
-            throw new ACPError.InvalidEffortError({ effort: params.value })
-          const selected = { ...state.model, variant: params.value }
-          await input.client.session.switchModel({ sessionID: state.id, model: selected })
-          state.model = selected
-          break
-        }
-        case "mode":
-          await selectMode(input.client, state, params.value)
-          break
-        default:
-          throw new ACPError.InvalidConfigOptionError({ configId: params.configId })
-      }
-      return { configOptions: configOptions(state) }
+        return { configOptions: configOptions(state) }
+      })
     },
     setSessionMode: async (params) => {
-      await selectMode(input.client, await requireSession(params.sessionId), params.modeId)
+      const state = await requireSession(params.sessionId)
+      await withConfigLock(state, () => selectMode(input.client, state, params.modeId))
       return {}
     },
     prompt: async (params) => {
@@ -464,6 +470,21 @@ async function selectMode(client: OpenCodeClient, state: Attached, modeID: strin
   if (!state.catalog.modes.some((mode) => mode.id === modeID)) throw new ACPError.InvalidModeError({ mode: modeID })
   await client.session.switchAgent({ sessionID: state.id, agent: modeID })
   state.modeID = modeID
+}
+
+async function withConfigLock<A>(state: Attached, operation: () => Promise<A>) {
+  const result = await Effect.runPromise(
+    state.configLock.withPermit(
+      Effect.promise(() =>
+        operation().then(
+          (value) => ({ success: true as const, value }),
+          (error) => ({ success: false as const, error }),
+        ),
+      ),
+    ),
+  )
+  if (!result.success) throw result.error
+  return result.value
 }
 
 async function getSession(client: OpenCodeClient, sessionID: string) {

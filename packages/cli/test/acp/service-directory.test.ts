@@ -258,6 +258,103 @@ describe("acp service directory behavior", () => {
     expect(currentValue(afterModeFailure, "mode")).toBe("plan")
   })
 
+  test("orders overlapping model and effort switches for one session", async () => {
+    const modelStarted = Promise.withResolvers<void>()
+    const releaseModel = Promise.withResolvers<void>()
+    let serverModel = "test/test-model/default"
+    await using fixture = makeACPFixture({
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_ordered_model") })
+        }
+        if (request.method !== "POST" || request.path !== "/api/session/ses_ordered_model/model") return undefined
+        if (serverModel === "test/test-model/default") {
+          serverModel = "test/second-model"
+          modelStarted.resolve()
+          return releaseModel.promise.then(() => new Response(null, { status: 204 }))
+        }
+        serverModel = "test/second-model/medium"
+        return new Response(null, { status: 204 })
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const model = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/second-model",
+    })
+    await modelStarted.promise
+    const effort = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "medium",
+    })
+    releaseModel.resolve()
+    await model
+    const result = await effort
+
+    expect(serverModel).toBe("test/second-model/medium")
+    expect(currentValue(result, "model")).toBe("test/second-model")
+    expect(currentValue(result, "effort")).toBe("medium")
+    expect(
+      fixture.requests
+        .filter((request) => request.path === "/api/session/ses_ordered_model/model")
+        .map((request) => request.body),
+    ).toEqual([
+      { model: { providerID: "test", id: "second-model" } },
+      { model: { providerID: "test", id: "second-model", variant: "medium" } },
+    ])
+  })
+
+  test("orders overlapping config-mode and setSessionMode switches for one session", async () => {
+    const configModeStarted = Promise.withResolvers<void>()
+    const releaseConfigMode = Promise.withResolvers<void>()
+    let serverMode = "build"
+    await using fixture = makeACPFixture({
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_ordered_mode") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_ordered_mode/model") {
+          return new Response(null, { status: 204 })
+        }
+        if (request.method !== "POST" || request.path !== "/api/session/ses_ordered_mode/agent") return undefined
+        if (serverMode !== "build") {
+          serverMode = "build"
+          return new Response(null, { status: 204 })
+        }
+        serverMode = "plan"
+        configModeStarted.resolve()
+        return releaseConfigMode.promise.then(() => new Response(null, { status: 204 }))
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const configMode = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "mode",
+      value: "plan",
+    })
+    await configModeStarted.promise
+    const mode = fixture.service.setSessionMode({ sessionId: session.sessionId, modeId: "build" })
+    releaseConfigMode.resolve()
+    await Promise.all([configMode, mode])
+    const result = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/test-model",
+    })
+
+    expect(serverMode).toBe("build")
+    expect(currentValue(result, "mode")).toBe("build")
+    expect(
+      fixture.requests
+        .filter((request) => request.path === "/api/session/ses_ordered_mode/agent")
+        .map((request) => request.body),
+    ).toEqual([{ agent: "plan" }, { agent: "build" }])
+  })
+
   test("converts MCP configs and deduplicates registrations per session and config", async () => {
     const local: McpServer = {
       name: "tools",
