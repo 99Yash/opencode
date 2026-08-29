@@ -393,9 +393,9 @@ export interface ParserState {
   // Pending calls use generated keys. Wire call ids, item ids, and output
   // indexes are aliases only and can therefore collide without sharing state.
   readonly tools: ToolStream.State<string>
-  readonly toolCalls: Readonly<Record<string, string>>
-  readonly toolItems: Readonly<Record<string, ReadonlyArray<string>>>
-  readonly toolOutputs: Readonly<Record<number, string>>
+  readonly toolCalls: ReadonlyMap<string, string>
+  readonly toolItems: ReadonlyMap<string, ReadonlyArray<string>>
+  readonly toolOutputs: ReadonlyMap<number, string>
   readonly nextTool: number
   readonly completedTools: ReadonlySet<string>
   readonly hasFunctionCall: boolean
@@ -871,12 +871,12 @@ export const outputItemID = (state: ParserState, event: Event) =>
 const pendingToolID = (state: ParserState, event: Event) => {
   // Output position is the exact streaming identity. Item ids are aliases and
   // only resolve when unambiguous; never guess from a colliding call id.
-  if (event.output_index !== undefined) {
-    const id = state.toolOutputs[event.output_index]
-    if (id !== undefined && state.tools[id] !== undefined) return id
+  if (event.output_index !== undefined && state.toolOutputs.has(event.output_index)) {
+    const id = state.toolOutputs.get(event.output_index)
+    return id !== undefined && state.tools[id] !== undefined ? id : undefined
   }
   if (event.item_id === undefined) return undefined
-  const active = (state.toolItems[event.item_id] ?? []).filter((id) => state.tools[id] !== undefined)
+  const active = (state.toolItems.get(event.item_id) ?? []).filter((id) => state.tools[id] !== undefined)
   if (active.length > 1) return null
   return active[0]
 }
@@ -1018,7 +1018,7 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
     ]
   }
   if (item?.type !== "function_call" || !item.call_id) return [state, NO_EVENTS]
-  if (state.toolCalls[item.call_id] !== undefined || state.completedTools.has(item.call_id)) return [state, NO_EVENTS]
+  if (state.toolCalls.has(item.call_id) || state.completedTools.has(item.call_id)) return [state, NO_EVENTS]
   const id = `tool:${state.nextTool}`
   const itemID = item.id ?? item.call_id
   const metadata = item.id !== undefined ? providerMetadata(state, { itemId: item.id }) : undefined
@@ -1034,10 +1034,10 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
         input: item.arguments ?? "",
         providerMetadata: metadata,
       }),
-      toolCalls: { ...state.toolCalls, [item.call_id]: id },
-      toolItems: { ...state.toolItems, [itemID]: [...(state.toolItems[itemID] ?? []), id] },
+      toolCalls: new Map(state.toolCalls).set(item.call_id, id),
+      toolItems: new Map(state.toolItems).set(itemID, [...(state.toolItems.get(itemID) ?? []), id]),
       toolOutputs:
-        event.output_index === undefined ? state.toolOutputs : { ...state.toolOutputs, [event.output_index]: id },
+        event.output_index === undefined ? state.toolOutputs : new Map(state.toolOutputs).set(event.output_index, id),
       nextTool: state.nextTool + 1,
     },
     [...events, LLMEvent.toolInputStart({ id: item.call_id, name: item.name ?? "", providerMetadata: metadata })],
@@ -1147,7 +1147,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const callID = item.call_id
     if (state.completedTools.has(callID)) return [state, NO_EVENTS] satisfies StepResult
     const metadata = item.id !== undefined ? providerMetadata(state, { itemId: item.id }) : undefined
-    const admitted = state.toolCalls[callID]
+    const admitted = state.toolCalls.get(callID)
     const registered = admitted !== undefined && state.tools[admitted] !== undefined ? admitted : undefined
     const id = registered ?? callID
     const tools =
@@ -1271,7 +1271,7 @@ const onResponseFinish = Effect.fn("OpenResponses.onResponseFinish")(function* (
   if (event.type === "response.completed") {
     for (const item of event.response?.output ?? []) {
       if (item.type !== "function_call" || !item.call_id) continue
-      const id = current.toolCalls[item.call_id]
+      const id = current.toolCalls.get(item.call_id)
       if (id === undefined || current.tools[id] === undefined) continue
       const [next, emitted] = yield* onOutputItemDone(current, item)
       current = next
@@ -1441,9 +1441,9 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   providerMetadataKey: request.model.route.providerMetadataKey ?? "openresponses",
   hasFunctionCall: false,
   tools: ToolStream.empty<string>(),
-  toolCalls: {},
-  toolItems: {},
-  toolOutputs: {},
+  toolCalls: new Map(),
+  toolItems: new Map(),
+  toolOutputs: new Map(),
   nextTool: 0,
   completedTools: new Set<string>(),
   lifecycle: Lifecycle.initial(),

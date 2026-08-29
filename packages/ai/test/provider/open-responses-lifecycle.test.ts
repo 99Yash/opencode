@@ -395,6 +395,117 @@ describe("Open Responses basic-item lifecycles", () => {
     )
   })
 
+  it.effect("tombstones a completed output index instead of resolving its late events through a shared item id", () =>
+    Effect.gen(function* () {
+      const first = { type: "function_call", id: "shared", call_id: "call_1", name: "first" }
+      const second = { type: "function_call", id: "shared", call_id: "call_2", name: "second" }
+      const events = yield* collect(
+        { type: "response.output_item.added", output_index: 0, item: first },
+        { type: "response.output_item.added", output_index: 1, item: second },
+        {
+          type: "response.function_call_arguments.delta",
+          output_index: 0,
+          item_id: "shared",
+          delta: '{"first":"draft"}',
+        },
+        {
+          type: "response.function_call_arguments.delta",
+          output_index: 1,
+          item_id: "shared",
+          delta: '{"second":"kept"}',
+        },
+        {
+          type: "response.output_item.done",
+          output_index: 0,
+          item: { ...first, arguments: '{"first":"final"}' },
+        },
+        { type: "response.output_item.added", output_index: 0, item: first },
+        {
+          type: "response.function_call_arguments.delta",
+          output_index: 0,
+          item_id: "shared",
+          delta: '{"wrong":"delta"}',
+        },
+        {
+          type: "response.function_call_arguments.done",
+          output_index: 0,
+          item_id: "shared",
+          arguments: '{"wrong":"done"}',
+        },
+        {
+          type: "response.output_item.done",
+          output_index: 0,
+          item: { ...first, arguments: '{"wrong":"item"}' },
+        },
+        { type: "response.output_item.done", output_index: 1, item: second },
+        completed,
+      )
+      expect(events.filter(LLMEvent.is.toolCall)).toEqual([
+        {
+          type: "tool-call",
+          id: "call_1",
+          name: "first",
+          input: { first: "final" },
+          providerMetadata: { "openai-compatible": { itemId: "shared" } },
+        },
+        {
+          type: "tool-call",
+          id: "call_2",
+          name: "second",
+          input: { second: "kept" },
+          providerMetadata: { "openai-compatible": { itemId: "shared" } },
+        },
+      ])
+      ;["call_1", "call_2"].forEach((id) => {
+        expect(events.filter((event) => "id" in event && event.id === id).map((event) => event.type)).toEqual([
+          "tool-input-start",
+          "tool-input-delta",
+          "tool-input-end",
+          "tool-call",
+        ])
+      })
+    }),
+  )
+
+  it.effect("treats prototype property names as ordinary call and item ids", () =>
+    Effect.gen(function* () {
+      const items = [
+        { type: "function_call", id: "__proto__", call_id: "toString", name: "first" },
+        { type: "function_call", id: "constructor", call_id: "__proto__", name: "second" },
+        { type: "function_call", id: "toString", call_id: "constructor", name: "third" },
+      ]
+      const streamed: OpenResponses.Event[] = items.flatMap((item, output_index) => [
+        { type: "response.output_item.added", output_index, item },
+        {
+          type: "response.function_call_arguments.delta",
+          item_id: item.id,
+          delta: `{"value":"${item.name}"}`,
+        },
+      ])
+      const events = yield* collect(...streamed, {
+        type: "response.completed",
+        response: {
+          id: "resp_1",
+          output: items.toReversed().map((item) => ({ ...item, arguments: `{"value":"${item.name}"}` })),
+        },
+      })
+      expect(events.filter(LLMEvent.is.toolCall)).toEqual(
+        items.toReversed().map((item) => ({
+          type: "tool-call",
+          id: item.call_id,
+          name: item.name,
+          input: { value: item.name },
+          providerMetadata: { "openai-compatible": { itemId: item.id } },
+        })),
+      )
+      items.forEach((item) => {
+        expect(events.filter((event) => "id" in event && event.id === item.call_id).map((event) => event.type)).toEqual(
+          ["tool-input-start", "tool-input-delta", "tool-input-end", "tool-call"],
+        )
+      })
+    }),
+  )
+
   it.effect("recovers pending calls without reconciling terminal reasoning", () =>
     Effect.gen(function* () {
       const events = yield* collect(
