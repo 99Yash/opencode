@@ -216,6 +216,90 @@ describe("Open Responses basic-item lifecycles", () => {
       ])
     }),
   )
+
+  it.effect("preserves non-empty done-only message content without replaying duplicates", () =>
+    Effect.gen(function* () {
+      const text = {
+        type: "message",
+        id: "msg_text",
+        content: [{ type: "output_text", text: "Done-only text." }],
+      }
+      const refusal = {
+        type: "message",
+        id: "msg_refusal",
+        content: [{ type: "refusal", refusal: "Done-only refusal." }],
+      }
+      const events = yield* collect(
+        { type: "response.output_item.done", item: text },
+        { type: "response.output_item.done", item: text },
+        {
+          type: "response.output_item.done",
+          item: { type: "message", id: "msg_empty", content: [{ type: "output_text", text: "" }] },
+        },
+        { type: "response.output_item.done", item: refusal },
+        { type: "response.output_item.done", item: refusal },
+        completed,
+      )
+
+      expect(events.filter((event) => event.type.startsWith("text-"))).toEqual([
+        {
+          type: "text-start",
+          id: "msg_text",
+          providerMetadata: { "openai-compatible": { itemId: "msg_text" } },
+        },
+        {
+          type: "text-end",
+          id: "msg_text",
+          text: "Done-only text.",
+          providerMetadata: { "openai-compatible": { itemId: "msg_text" } },
+        },
+        {
+          type: "text-start",
+          id: "msg_refusal",
+          providerMetadata: { "openai-compatible": { itemId: "msg_refusal" } },
+        },
+        {
+          type: "text-end",
+          id: "msg_refusal",
+          text: "Done-only refusal.",
+          providerMetadata: { "openai-compatible": { itemId: "msg_refusal" } },
+        },
+      ])
+    }),
+  )
+
+  it.effect("allows a done-only message id to be reused after a new added event", () =>
+    Effect.gen(function* () {
+      const events = yield* collect(
+        {
+          type: "response.output_item.done",
+          item: { type: "message", id: "msg_1", content: [{ type: "output_text", text: "First" }] },
+        },
+        { type: "response.output_item.added", item: { type: "message", id: "msg_1", phase: "commentary" } },
+        {
+          type: "response.output_item.done",
+          item: { type: "message", id: "msg_1", content: [{ type: "output_text", text: "Second" }] },
+        },
+        completed,
+      )
+
+      expect(events.filter(LLMEvent.is.textEnd)).toEqual([
+        {
+          type: "text-end",
+          id: "msg_1",
+          text: "First",
+          providerMetadata: { "openai-compatible": { itemId: "msg_1" } },
+        },
+        {
+          type: "text-end",
+          id: "msg_1",
+          text: "Second",
+          providerMetadata: { "openai-compatible": { itemId: "msg_1", phase: "commentary" } },
+        },
+      ])
+    }),
+  )
+
   it.effect("allows a message to be registered again without inheriting its previous phase", () =>
     Effect.gen(function* () {
       const events = yield* collect(

@@ -397,6 +397,7 @@ export interface ParserState {
   readonly lifecycle: Lifecycle.State
   readonly outputItems: Readonly<Record<number, string>>
   readonly message: { readonly id: string; readonly phase: MessagePhase | null | undefined } | undefined
+  readonly completedMessages: ReadonlySet<string>
   readonly reasoningItems: Readonly<Record<string, ReasoningStreamItem>>
 }
 
@@ -954,6 +955,9 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
   if (item?.type === "message" && item.id !== undefined) {
     const itemID = item.id
     const phase = messagePhase(item.phase)
+    const completedMessages = new Set(state.completedMessages)
+    completedMessages.delete(itemID)
+    if (state.message?.id !== undefined && state.message.id !== itemID) completedMessages.add(state.message.id)
     // A new message closes earlier messages, including ones that never streamed.
     const events: LLMEvent[] = []
     const lifecycle = [...state.lifecycle.text]
@@ -971,6 +975,7 @@ const onOutputItemAdded = (state: ParserState, event: Event): StepResult => {
       {
         ...state,
         lifecycle,
+        completedMessages,
         message: {
           id: itemID,
           phase: phase === undefined && state.message?.id === itemID ? state.message.phase : phase,
@@ -1087,6 +1092,7 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
   if (!item) return [state, NO_EVENTS] satisfies StepResult
 
   if (item.type === "message" && item.id !== undefined) {
+    if (state.completedMessages.has(item.id)) return [state, NO_EVENTS] satisfies StepResult
     const message = state.message?.id === item.id ? state.message : undefined
     const itemPhase = messagePhase(item.phase)
     const phase = itemPhase === undefined ? message?.phase : itemPhase
@@ -1100,12 +1106,12 @@ const onOutputItemDone = Effect.fn("OpenResponses.onOutputItemDone")(function* (
     const text = content.length > 0 ? content.join("") : undefined
     const metadata = providerMetadata(state, { itemId: item.id, ...(phase === undefined ? {} : { phase }) })
     const events: LLMEvent[] = []
-    const lifecycle =
-      message && text ? Lifecycle.textStart(state.lifecycle, events, item.id, metadata) : state.lifecycle
+    const lifecycle = text ? Lifecycle.textStart(state.lifecycle, events, item.id, metadata) : state.lifecycle
     return [
       {
         ...state,
         lifecycle: Lifecycle.textEnd(lifecycle, events, item.id, metadata, text),
+        completedMessages: new Set([...state.completedMessages, item.id]),
         message: message ? undefined : state.message,
       },
       events,
@@ -1420,6 +1426,7 @@ export const initial = (request: LLMRequest, extension: Extension = BASE): Parse
   lifecycle: Lifecycle.initial(),
   outputItems: {},
   message: undefined,
+  completedMessages: new Set<string>(),
   reasoningItems: {},
 })
 
