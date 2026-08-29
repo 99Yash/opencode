@@ -9025,13 +9025,13 @@
             }
           },
           "400": {
-            "description": "InvalidRequestError",
+            "description": "RpcError | InvalidRequestError",
             "content": {
               "application/json": {
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
+                      "$ref": "#/components/schemas/RpcErrorEncoded"
                     },
                     {
                       "$ref": "#/components/schemas/InvalidRequestErrorEncoded"
@@ -9047,6 +9047,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UnauthorizedErrorEncoded"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "RpcInternalError",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RpcInternalErrorEncoded"
                 }
               }
             }
@@ -17110,6 +17120,57 @@
         "properties": {
           "output": {}
         },
+        "additionalProperties": false
+      },
+      "RpcErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["RpcError"]
+          },
+          "type": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["_tag", "type", "message"],
+        "additionalProperties": false
+      },
+      "RpcInternalErrorEncoded": {
+        "type": "object",
+        "properties": {
+          "_tag": {
+            "type": "string",
+            "enum": ["RpcInternalError"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["rpc.internal"]
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": ["_tag", "type", "message"],
         "additionalProperties": false
       },
       "ServiceHealth": {

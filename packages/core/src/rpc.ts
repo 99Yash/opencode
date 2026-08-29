@@ -268,7 +268,7 @@ const logicalEvent = Effect.fn("Rpc.logicalEvent")(function* <
 ): Effect.fn.Return<Rpc.EventPayload<D, Name>, unknown> {
   const event = definition.events[name]
   const data = yield* read(event.schema, payload.data)
-  // SAFETY: The private Bus definition owns the envelope, durability, version, and location.
+  // SAFETY: The private Bus definition owns the envelope and location.
   // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
   return {
     ...payload,
