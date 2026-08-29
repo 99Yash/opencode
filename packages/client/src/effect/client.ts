@@ -13,7 +13,8 @@ const CurrentHeaders = Context.Reference<RpcCallOptions["headers"]>("@opencode-a
 
 export const make = Effect.fn("OpenCode.make")(function* (options?: { readonly baseUrl?: URL | string }) {
   const httpClient = yield* HttpClient.HttpClient
-  const raw = yield* OpenCode.make(options).pipe(
+  const raw = yield* OpenCode.make(options)
+  const rpc = yield* OpenCode.make(options).pipe(
     Effect.provideService(
       HttpClient.HttpClient,
       HttpClient.mapRequestEffect(httpClient, (request) =>
@@ -49,7 +50,7 @@ export const make = Effect.fn("OpenCode.make")(function* (options?: { readonly b
     event: { ...raw.event, subscribe },
     rpc: Object.assign(
       RpcClientRuntime.make(
-        (input, options) => raw.rpc.call(input).pipe(Effect.provideService(CurrentHeaders, options?.headers)),
+        (input, options) => rpc.rpc.call(input).pipe(Effect.provideService(CurrentHeaders, options?.headers)),
         subscribe,
       ),
       raw.rpc,

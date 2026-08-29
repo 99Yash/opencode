@@ -43,6 +43,10 @@ describe("Rpc", () => {
         type: "rpc.method_not_found",
         message: "Unknown RPC method: test.rpc.missing",
       })
+      expect(yield* rpc.call(Echo.namespace, "toString", "hello").pipe(Effect.flip)).toEqual({
+        type: "rpc.method_not_found",
+        message: "Unknown RPC method: test.rpc.toString",
+      })
     }),
   )
 

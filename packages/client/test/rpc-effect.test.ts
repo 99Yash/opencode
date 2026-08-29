@@ -477,3 +477,19 @@ test("shared event source runs with the Effect context captured by make", async 
   )
   expect((await Effect.runPromise(Stream.runCollect(client.event.subscribe())))[0]).toEqual(connected)
 })
+
+test("Effect RPC rejects inherited event names without opening the source", async () => {
+  const requests: string[] = []
+  const httpClient = HttpClient.make((request) => {
+    requests.push(request.url)
+    return Effect.die(new Error("Unexpected request"))
+  })
+  const error = await Effect.gen(function* () {
+    const client = yield* OpenCode.make({ baseUrl: "http://localhost:3000" })
+    const broad: Rpc.Definition = definition
+    return yield* client.rpc(broad).events.subscribe("toString").pipe(Stream.runDrain, Effect.flip)
+  }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.runPromise)
+
+  expect(error).toEqual(new Error("Unknown RPC event: rpc.example.toString"))
+  expect(requests).toEqual([])
+})

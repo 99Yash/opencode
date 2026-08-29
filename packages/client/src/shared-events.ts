@@ -3,7 +3,7 @@ export * as SharedEvents from "./shared-events.js"
 export function make<A extends { readonly type: string }>(connect: (signal: AbortSignal) => AsyncIterable<A>) {
   type Completion = { readonly error: unknown } | Record<string, never>
   type Subscriber = {
-    push: (value: A) => Promise<void>
+    push: (value: A) => void | Promise<void>
     finish: (completion: Completion) => void
   }
   type Connection = {
@@ -31,7 +31,7 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
       while (!connection.controller.signal.aborted) {
         // Cancellation must reach return() even when the source has a pending next().
         connection.read = Promise.withResolvers<IteratorResult<A>>()
-        Promise.resolve(iterator.next()).then(connection.read.resolve, connection.read.reject)
+        iterator.next().then(connection.read.resolve, connection.read.reject)
         const item = await connection.read.promise
         connection.read = undefined
         if (item.done || connection.controller.signal.aborted) break
@@ -82,11 +82,11 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
           const subscriber: Subscriber = {
             finish,
             push(value) {
-              if (completion) return Promise.resolve()
+              if (completion) return
               const request = pending.shift()
               if (request) {
                 request.resolve({ done: false, value })
-                return Promise.resolve()
+                return
               }
               const accepted = Promise.withResolvers<void>()
               offered = { value, accepted }
@@ -94,7 +94,7 @@ export function make<A extends { readonly type: string }>(connect: (signal: Abor
             },
           }
 
-          async function start() {
+          function start() {
             if (completion) return
             const fresh = !current
             connection = current ?? {

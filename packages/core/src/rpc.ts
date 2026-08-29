@@ -94,7 +94,11 @@ const layer = Layer.effect(
               return yield* Effect.fail(new Error(`Unknown RPC event: ${definition.namespace}.${args[0]}`))
             const event = registered.event
             const data = yield* applyEventSchema(event.schema, args[1])
-            return yield* bus.publish(registered.definition, data, { location: { ...ref } }).pipe(Effect.asVoid)
+            return yield* bus
+              .publish(registered.definition, data, {
+                location: Location.Ref.make({ directory: ref.directory, workspaceID: ref.workspaceID }),
+              })
+              .pipe(Effect.asVoid)
           }),
         },
       }
@@ -104,10 +108,10 @@ const layer = Layer.effect(
       const entry = registrations.get(namespace)?.at(-1)
       if (!entry)
         return yield* Effect.fail(failure("rpc.namespace_unavailable", `RPC namespace is unavailable: ${namespace}`))
+      if (!Object.hasOwn(entry.definition.methods, name) || !Object.hasOwn(entry.handlers, name))
+        return yield* Effect.fail(failure("rpc.method_not_found", `Unknown RPC method: ${namespace}.${name}`))
       const method = entry.definition.methods[name]
       const handler = entry.handlers[name]
-      if (!method || !handler)
-        return yield* Effect.fail(failure("rpc.method_not_found", `Unknown RPC method: ${namespace}.${name}`))
       const parsed = yield* parse(method.input, input).pipe(
         Effect.mapError((error) => failure("rpc.invalid_input", errorMessage(error, "Invalid RPC input"))),
       )

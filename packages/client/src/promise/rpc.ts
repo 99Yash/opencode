@@ -60,8 +60,7 @@ export function makeRpc(
       name: string,
       options?: Pick<RequestOptions, "signal">,
     ): AsyncIterable<RpcEventPayload<Rpc.PortableDefinition>> => {
-      const schema = definition.events[name]
-      if (!schema) throw new Error(`Unknown RPC event: ${definition.namespace}.${name}`)
+      if (!Object.hasOwn(definition.events, name)) throw new Error(`Unknown RPC event: ${definition.namespace}.${name}`)
       const type = eventType(definition, name)
       return {
         [Symbol.asyncIterator]() {
@@ -72,7 +71,9 @@ export function makeRpc(
               for await (const published of events.subscribe({ signal })) {
                 if (signal.aborted) return
                 if (!isRpcEvent(published, type)) continue
-                yield event(type, published)
+                // SAFETY: The exact RPC type was selected above; Promise contracts require no client-side transform.
+                // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+                yield published as RpcEventPayload<Rpc.PortableDefinition>
               }
             } catch (error) {
               if (!signal.aborted) throw error
@@ -139,17 +140,6 @@ export function makeRpc(
         },
       },
     ) as RpcClient<typeof definition>
-  }
-}
-
-function event(
-  type: RpcEventType,
-  event: RpcEvent,
-): RpcEventPayload<Rpc.PortableDefinition> {
-  return {
-    ...event,
-    type,
-    location: { ...event.location },
   }
 }
 

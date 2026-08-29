@@ -3,12 +3,13 @@ export * as RpcClientRuntime from "./rpc.js"
 import type { Rpc } from "@opencode-ai/schema/rpc"
 import type { RpcError, RpcInternalError } from "@opencode-ai/protocol/errors"
 import type { OpenCodeEvent } from "@opencode-ai/protocol/groups/event"
-import { Effect, Stream } from "effect"
+import { Effect, Schema, Stream } from "effect"
 import type { RpcArguments, RpcCallOptions } from "../promise/rpc.js"
 import { RpcRuntime } from "../rpc-runtime.js"
 import type { RpcCallInput, RpcCallOutput } from "./api/api.js"
 
 type RpcEvent = Extract<OpenCodeEvent, { type: `rpc.${string}` }>
+type DecodeError<S> = S extends Schema.Top ? Schema.SchemaError : never
 
 export type RpcClient<
   D extends Rpc.Definition,
@@ -18,12 +19,15 @@ export type RpcClient<
 > = {
   readonly [Name in keyof D["methods"]]: (
     ...args: RpcArguments<Rpc.Input<D["methods"][Name]["input"]>, Options>
-  ) => Effect.Effect<Rpc.Output<D["methods"][Name]["output"]>, Rpc.MethodError<D["methods"][Name]> | E>
+  ) => Effect.Effect<
+    Rpc.Output<D["methods"][Name]["output"]>,
+    Rpc.MethodError<D["methods"][Name]> | DecodeError<D["methods"][Name]["output"]> | E
+  >
 } & {
   readonly events: {
     readonly subscribe: <Name extends keyof D["events"] & string>(
       name: Name,
-    ) => Stream.Stream<Rpc.EventPayload<D, Name>, EventError>
+    ) => Stream.Stream<Rpc.EventPayload<D, Name>, DecodeError<D["events"][Name]["schema"]> | EventError>
   }
 }
 
@@ -68,8 +72,8 @@ export function make<CallError, EventError>(
         events: {
           subscribe: (name: keyof D["events"] & string) => {
             const type = RpcRuntime.eventType(definition, name)
+            if (!Object.hasOwn(definition.events, name)) return Stream.fail(new Error(`Unknown RPC event: ${type}`))
             const schema = definition.events[name]
-            if (!schema) return Stream.fail(new Error(`Unknown RPC event: ${type}`))
             return subscribe().pipe(
               Stream.filter((event): event is RpcEvent => event.type === type),
               Stream.mapEffect((event) => RpcRuntime.event(definition, name, schema, event)),

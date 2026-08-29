@@ -22,6 +22,7 @@ const ping = acme.ping()
 const updates = acme.events.subscribe("updated")
 const actualCall = actualClient.rpc(Acme).codec({ count: "42" })
 const effectCall = actualClient.rpc(EffectAcme).codec({ count: "42" })
+const effectUpdates = actualClient.rpc(EffectAcme).events.subscribe("progress")
 const localCall = ctx.rpc(Acme).search({ query: "hello" })
 
 export type Checks = [
@@ -45,6 +46,8 @@ export type Checks = [
   Assert<Equal<Effect.Success<typeof actualCall>, number>>,
   Assert<Equal<Effect.Services<typeof actualCall>, never>>,
   Assert<Equal<Effect.Success<typeof effectCall>, number>>,
+  Assert<Equal<Extract<Effect.Error<typeof effectCall>, Schema.SchemaError>, Schema.SchemaError>>,
+  Assert<Equal<Extract<Stream.Error<typeof effectUpdates>, Schema.SchemaError>, Schema.SchemaError>>,
   Assert<
     Equal<
       Extract<Effect.Error<typeof effectCall>, { readonly type: "invalid_count" }>,

@@ -126,17 +126,18 @@ const rpcFromEffect = Effect.fn("Plugin.Rpc.fromEffect")(function* (host: HostRp
             name,
             (input: unknown, context: HostRpcCallContext) =>
               Effect.tryPromise({
-                try: (signal) =>
-                  Promise.resolve(
-                    Reflect.apply(handler, undefined, [
-                      input,
-                      {
-                        signal,
-                        error: (type: string, message: string, data?: unknown) =>
-                          new ReturnedRpcError(type, message, data),
-                      },
-                    ]),
-                  ),
+                try: (signal) => {
+                  // SAFETY: Promise RPC handlers return Promise values before this adapter erases their concrete types.
+                  // oxlint-disable-next-line typescript-eslint/no-unsafe-type-assertion
+                  return Reflect.apply(handler, undefined, [
+                    input,
+                    {
+                      signal,
+                      error: (type: string, message: string, data?: unknown) =>
+                        new ReturnedRpcError(type, message, data),
+                    },
+                  ]) as Promise<unknown>
+                },
                 catch: (error) => hostRpcError(context, error),
               }).pipe(
                 Effect.flatMap((result) =>

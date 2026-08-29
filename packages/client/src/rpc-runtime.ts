@@ -49,7 +49,6 @@ export const event = Effect.fn("Client.Rpc.event")(function* <
     ...event,
     type: eventType(definition, name),
     data,
-    location: { ...event.location },
   } as Rpc.EventPayload<D, Name>
 })
 

@@ -375,6 +375,7 @@ test("RPC checks unknown event names and pre-aborted subscriptions remain lazy",
   const source = events()
   const broad: Rpc.PortableDefinition = Echo
   expect(() => source.client.rpc(broad).events.subscribe("unknown")).toThrow("Unknown RPC event")
+  expect(() => source.client.rpc(broad).events.subscribe("toString")).toThrow("Unknown RPC event")
   expect(() => source.client.rpc(broad).events.on("unknown", () => {})).toThrow("Unknown RPC event")
   const aborted = source.client.rpc(Echo).events.subscribe("updated", { signal: AbortSignal.abort() })
   const iterator = aborted[Symbol.asyncIterator]()
