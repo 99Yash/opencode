@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { SessionConfigOption } from "@agentclientprotocol/sdk"
 import { makeACPFixture, makeSession, secondModel } from "./service-fixture"
+import { withTimeout } from "./sse-fixture"
 
 describe("acp service lifecycle", () => {
   test("does not persist the first catalog variant when no explicit default exists", async () => {
@@ -283,6 +284,55 @@ describe("acp service lifecycle", () => {
     expect(currentValue(effort, "effort")).toBe("medium")
   })
 
+  test("forks from authoritative parent config after an overlapping switch completes", async () => {
+    const switchStarted = Promise.withResolvers<void>()
+    const releaseSwitch = Promise.withResolvers<void>()
+    const nativeFetch = fetch
+    let serverModel = makeSession("server").model
+    await using fixture = makeACPFixture({
+      clientFetch(input, init) {
+        const url = new URL(input instanceof Request ? input.url : input.toString())
+        if (init?.method !== "POST" || url.pathname !== "/api/session/ses_fork_parent/fork") {
+          return nativeFetch(input, init)
+        }
+        return Promise.resolve(
+          Response.json({ data: makeSession("ses_fork_child", { model: serverModel, agent: "build" }) }),
+        )
+      },
+      fetch(request) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_fork_parent", { model: serverModel }) })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_fork_parent/model") {
+          switchStarted.resolve()
+          return releaseSwitch.promise.then(() => {
+            serverModel = { providerID: "test", id: secondModel.id }
+            return new Response(null, { status: 204 })
+          })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_fork_child/message") {
+          return Response.json({ data: [], cursor: {} })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const switched = fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "test/second-model",
+    })
+    await switchStarted.promise
+    const forked = fixture.service.forkSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [] })
+    releaseSwitch.resolve()
+    await switched
+    const result = await forked
+
+    expect(result.sessionId).toBe("ses_fork_child")
+    expect(currentValue(result, "model")).toBe("test/second-model")
+  })
+
   test("allows config switches for distinct sessions to proceed concurrently", async () => {
     const firstStarted = Promise.withResolvers<void>()
     const releaseFirst = Promise.withResolvers<void>()
@@ -321,6 +371,108 @@ describe("acp service lifecycle", () => {
     await blocked
 
     expect(currentValue(concurrent, "effort")).toBe("high")
+  })
+
+  test("load replacement cancels prompt ownership acquired before streaming", async () => {
+    await using fixture = makeACPFixture({
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_prompt_load") })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_prompt_load") {
+          return Response.json({ data: makeSession("ses_prompt_load") })
+        }
+        if (request.method === "GET" && request.path === "/api/session/ses_prompt_load/message") {
+          return Response.json({ data: [], cursor: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_load/prompt") {
+          const id = requestField(request.body, "id")
+          context.send({
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_prompt_load", inboxID: id },
+          })
+          if (requestField(request.body, "text") === "second") {
+            context.send({
+              id: "evt_second_complete",
+              type: "session.execution.succeeded",
+              data: { sessionID: "ses_prompt_load" },
+            })
+          }
+          return Response.json({ data: {} })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+
+    const prompt = fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "first" }],
+    })
+    const stoppedPrompt = prompt.then(
+      () => "resolved",
+      () => "rejected",
+    )
+    const loaded = fixture.service.loadSession({ cwd: "/workspace", sessionId: session.sessionId, mcpServers: [] })
+    await loaded
+    const stopped = await withTimeout(stoppedPrompt, "replaced prompt did not stop")
+    const second = await fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "second" }],
+    })
+
+    expect(stopped).toBe("rejected")
+    expect(second.stopReason).toBe("end_turn")
+  })
+
+  test("delete detaches and cancels an active foreground prompt", async () => {
+    const promptStarted = Promise.withResolvers<void>()
+    await using fixture = makeACPFixture({
+      fetch(request, context) {
+        if (request.method === "POST" && request.path === "/api/session") {
+          return Response.json({ data: makeSession("ses_prompt_delete") })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_delete/prompt") {
+          const id = requestField(request.body, "id")
+          context.send({
+            id: `evt_${id}`,
+            type: "session.inbox.delivered",
+            data: { sessionID: "ses_prompt_delete", inboxID: id },
+          })
+          promptStarted.resolve()
+          return Response.json({ data: {} })
+        }
+        if (request.method === "POST" && request.path === "/api/session/ses_prompt_delete/model") {
+          return new Response(null, { status: 204 })
+        }
+        if (request.method === "DELETE" && request.path === "/api/session/ses_prompt_delete") {
+          return new Response(null, { status: 204 })
+        }
+        return undefined
+      },
+    })
+    const session = await fixture.service.newSession({ cwd: "/workspace", mcpServers: [] })
+    const prompt = fixture.service.prompt({
+      sessionId: session.sessionId,
+      prompt: [{ type: "text", text: "running" }],
+    })
+    const stoppedPrompt = prompt.then(
+      () => "resolved",
+      () => "rejected",
+    )
+    await promptStarted.promise
+
+    const configured = await fixture.service.setSessionConfigOption({
+      sessionId: session.sessionId,
+      configId: "effort",
+      value: "high",
+    })
+    await fixture.service.deleteSession({ sessionId: session.sessionId })
+    const stopped = await withTimeout(stoppedPrompt, "deleted session prompt did not stop")
+
+    expect(currentValue(configured, "effort")).toBe("high")
+    expect(stopped).toBe("rejected")
   })
 
   test("lists server-backed pages and forwards cwd and cursor", async () => {
@@ -439,4 +591,11 @@ describe("acp service lifecycle", () => {
 
 function currentValue(result: { readonly configOptions?: readonly SessionConfigOption[] | null }, id: string) {
   return result.configOptions?.find((option) => option.id === id)?.currentValue
+}
+
+function requestField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") throw new Error(`Missing request ${key}`)
+  const field = Reflect.get(value, key)
+  if (typeof field !== "string") throw new Error(`Missing request ${key}`)
+  return field
 }

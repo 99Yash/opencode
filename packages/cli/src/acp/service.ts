@@ -291,10 +291,12 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
         return {}
       }),
     forkSession: async (params) => {
-      const forked = await input.client.session.fork({
-        sessionID: params.sessionId,
-        boundary: { type: "through" },
-      })
+      const forked = await withSessionLock(params.sessionId, () =>
+        input.client.session.fork({
+          sessionID: params.sessionId,
+          boundary: { type: "through" },
+        }),
+      )
       const state = await withSessionLock(forked.id, async () => {
         const attached = await attach(forked, forked.location.directory, params.mcpServers ?? [])
         await replay(attached)
@@ -341,22 +343,27 @@ export function make(input: { readonly client: OpenCodeClient; readonly connecti
       return {}
     },
     prompt: async (params) => {
-      const state = await requireSession(params.sessionId)
-      if (active.has(state.id)) {
-        throw new ACPError.ServiceFailureError({
-          safeMessage: `Session already has an active ACP prompt: ${state.id}`,
-          service: "session",
-        })
-      }
-      const messageID = SessionMessage.ID.create()
-      const prepared = preparePrompt(state.catalog, params.prompt, messageID)
-      const control: TurnControl = { cancelled: false, admission: new AbortController() }
+      const acquired = await withSessionLock(params.sessionId, async () => {
+        const state = await requireSession(params.sessionId)
+        if (active.has(state.id)) {
+          throw new ACPError.ServiceFailureError({
+            safeMessage: `Session already has an active ACP prompt: ${state.id}`,
+            service: "session",
+          })
+        }
+        const prepared = preparePrompt(state.catalog, params.prompt, SessionMessage.ID.create())
+        const control: TurnControl = { cancelled: false, admission: new AbortController() }
+        active.set(state.id, control)
+        return { state, control, prepared }
+      })
+      const state = acquired.state
+      const control = acquired.control
+      const prepared = acquired.prepared
       const extNotification = input.connection.extNotification
       const childSessionUpdate =
         capabilities.childSessionUpdates && extNotification
           ? (update: ChildSessionUpdate) => extNotification(ChildSessionUpdateMethod, update).then(() => {})
           : undefined
-      active.set(state.id, control)
       const response = await streamTurn({
         client: input.client,
         connection: input.connection,

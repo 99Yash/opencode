@@ -85,7 +85,14 @@ export async function streamTurn(input: {
 }): Promise<PromptResponse> {
   const streamController = new AbortController()
   const connectionAbort = () => streamController.abort()
+  const sessionAbort = () => {
+    streamController.abort()
+    input.control.admission.abort()
+  }
   input.connectionSignal?.addEventListener("abort", connectionAbort, { once: true })
+  input.sessionSignal?.addEventListener("abort", sessionAbort, { once: true })
+  if (input.connectionSignal?.aborted) connectionAbort()
+  if (input.sessionSignal?.aborted) sessionAbort()
   const stream = input.client.event.subscribe({ signal: streamController.signal })[Symbol.asyncIterator]()
   const connected = await stream.next()
   if (connected.done) throw new Error("event stream disconnected before prompt admission")
@@ -339,7 +346,7 @@ export async function streamTurn(input: {
   const closeStream = async () => {
     streamController.abort()
     input.connectionSignal?.removeEventListener("abort", connectionAbort)
-    input.sessionSignal?.removeEventListener("abort", connectionAbort)
+    input.sessionSignal?.removeEventListener("abort", sessionAbort)
     await stream.return?.(undefined).catch(() => {})
   }
   try {
@@ -362,7 +369,6 @@ export async function streamTurn(input: {
     const terminal = await completed
     if (input.childSessionUpdate && openChildren.size > 0 && !input.sessionSignal?.aborted) {
       handedOff = true
-      input.sessionSignal?.addEventListener("abort", connectionAbort, { once: true })
       void consume("background")
         .catch(() => {})
         .finally(closeStream)
