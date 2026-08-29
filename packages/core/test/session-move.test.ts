@@ -24,10 +24,7 @@ import { globalProjectNode } from "./lib/project"
 const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
-    [
-      [Project.node, globalProjectNode],
-      [SessionExecution.node, SessionExecution.noopLayer],
-    ],
+    [Project.node.replace(globalProjectNode), SessionExecution.node.replace(SessionExecution.noopLayer)],
   ),
 )
 const unavailableLocations = Layer.effect(
@@ -40,9 +37,9 @@ const itWithUnavailableDestination = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
     [
-      [Project.node, globalProjectNode],
-      [SessionExecution.node, SessionExecution.noopLayer],
-      [LocationServiceMap.node, unavailableLocations],
+      Project.node.replace(globalProjectNode),
+      SessionExecution.node.replace(SessionExecution.noopLayer),
+      LocationServiceMap.node.replace(unavailableLocations),
     ],
   ),
 )

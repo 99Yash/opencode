@@ -86,9 +86,9 @@ const locations = makeGlobalNode({
             return Layer.merge(SessionRevert.layer, SessionPrompt.layer).pipe(
               Layer.provideMerge(
                 Layer.mergeAll(
-                  LayerNode.compile(LayerNode.group([PluginHooks.node, Skill.node]), [
-                    [Bus.node, Layer.succeed(Bus.Service, bus)],
-                  ]),
+                  LayerNode.compile(LayerNode.group([PluginHooks.node, Skill.node]), {
+                    replacements: [Bus.node.replace(Layer.succeed(Bus.Service, bus))],
+                  }),
                   Layer.mock(Image.Service, {
                     normalize: (_resource, content) =>
                       ready
@@ -122,9 +122,9 @@ const it = testEffect(
   AppNodeBuilder.build(
     LayerNode.group([Database.node, Bus.node, SessionProjector.node, SessionStore.node, Session.node]),
     [
-      [Bus.node, Bus.configured({ persist: true })],
-      [SessionExecution.node, execution],
-      [LocationServiceMap.node, locations],
+      Bus.node.replace(Bus.configured({ persist: true })),
+      SessionExecution.node.replace(execution),
+      LocationServiceMap.node.replace(locations),
     ],
   ),
 )
