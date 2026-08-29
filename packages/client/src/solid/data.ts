@@ -300,14 +300,30 @@ export function createData(config: CreateDataInput) {
       typeof tool.messageID !== "string"
     )
       return
-    setFormAnswers(form.id, {
+    const entry = formAnswers[form.id]
+    if (
+      confirmed &&
+      entry?.form.sessionID === form.sessionID &&
+      entry.tool.id === tool.id &&
+      entry.tool.messageID === tool.messageID
+    ) {
+      setFormAnswers(form.id, { answer, confirmed })
+      return
+    }
+    // A new owner/attempt must not mutate a previous host's retained submission.
+    const next = {
       form,
       tool: { id: tool.id, messageID: tool.messageID },
       answer,
       confirmed,
-      posting: confirmed ? (formAnswers[form.id]?.posting ?? false) : true,
-      toolDone: formAnswers[form.id]?.toolDone ?? false,
-    })
+      posting: !confirmed,
+      toolDone: false,
+    }
+    setFormAnswers(
+      produce((draft) => {
+        draft[form.id] = next
+      }),
+    )
   }
 
   function removeFormAnswer(formID: string) {
@@ -333,12 +349,15 @@ export function createData(config: CreateDataInput) {
       : entry.answer
     setFormAnswers(formID, { answer: failed ? undefined : answer, confirmed: true, toolDone: true })
     removeForm(entry.form.sessionID, formID)
+    if (!entry.posting) removeFormAnswer(formID)
   }
 
   function settleForm(input: FormCancelInput, ref: LocationRef | undefined, request: Promise<void>) {
+    const submission = formAnswers[input.formID]
     return request
       .catch(async (error: unknown) => {
         const entry = formAnswers[input.formID]
+        if (submission && entry !== submission) return
         if (entry?.form.sessionID === input.sessionID && entry.confirmed) return
         if (entry?.form.sessionID === input.sessionID) {
           // A lost POST or competing reply can settle the form before tool metadata arrives.
@@ -346,7 +365,7 @@ export function createData(config: CreateDataInput) {
             .form.state(input, formRequestOptions(input.sessionID, ref))
             .catch(() => undefined)
           const current = formAnswers[input.formID]
-          if (!current || current.form.sessionID !== input.sessionID) return
+          if (current !== submission || current?.form.sessionID !== input.sessionID) return
           if (current.confirmed) return
           if (state?.status === "answered" || state?.status === "cancelled") {
             setFormAnswers(input.formID, {
@@ -360,6 +379,8 @@ export function createData(config: CreateDataInput) {
         if ((!isFormNotFoundError(error) && !isFormAlreadySettledError(error)) || error.id !== input.formID) throw error
       })
       .then(() => {
+        const entry = formAnswers[input.formID]
+        if (entry && entry !== submission) return
         if (formAnswers[input.formID]?.form.sessionID === input.sessionID)
           setFormAnswers(input.formID, "confirmed", true)
         if (!removeForm(input.sessionID, input.formID, ref)) return
@@ -368,8 +389,9 @@ export function createData(config: CreateDataInput) {
       })
       .finally(() => {
         const entry = formAnswers[input.formID]
-        if (entry?.form.sessionID !== input.sessionID) return
+        if (entry !== submission || entry?.form.sessionID !== input.sessionID) return
         setFormAnswers(input.formID, "posting", false)
+        if (entry.toolDone) removeFormAnswer(input.formID)
       })
   }
 
@@ -589,7 +611,9 @@ export function createData(config: CreateDataInput) {
 
   function removeSession(sessionID: string) {
     Object.entries(formAnswers).forEach(([id, entry]) => {
-      if (entry?.form.sessionID === sessionID) removeFormAnswer(id)
+      if (entry?.form.sessionID !== sessionID) return
+      setFormAnswers(id, "answer", undefined)
+      removeFormAnswer(id)
     })
     activeUpdates?.set(sessionID, undefined)
     store.session.pending[sessionID]?.forEach((item) => outbox.delete(item.id))
@@ -1748,7 +1772,16 @@ export function createData(config: CreateDataInput) {
       form: {
         submission(sessionID: string, formID: string) {
           const entry = formAnswers[formID]
-          return entry?.form.sessionID === sessionID ? { answer: entry.answer, confirmed: entry.confirmed } : undefined
+          if (entry?.form.sessionID !== sessionID) return undefined
+          // Hosts retain this owner's reactive values even after the lookup is retired.
+          return {
+            get answer() {
+              return entry.answer
+            },
+            get confirmed() {
+              return entry.confirmed
+            },
+          }
         },
         answer(sessionID: string, messageID: string, toolID: string) {
           return Object.values(formAnswers).find(
@@ -2137,12 +2170,6 @@ export function createData(config: CreateDataInput) {
       finishFormAnswer(id, part.state.metadata?.answers, part.state.status === "error")
     })
   })
-
-  // Pure host memos consume terminal answers before effects retire the bridge, including SSE batches.
-  const retiredForms = createMemo(() =>
-    Object.entries(formAnswers).flatMap(([id, entry]) => (entry?.toolDone && !entry.posting ? [id] : [])),
-  )
-  createEffect(() => retiredForms().forEach(removeFormAnswer))
 
   onCleanup(
     config.event.listen(({ details }) => {

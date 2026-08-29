@@ -18,15 +18,15 @@ function setup() {
   }
   let terminal = false
   let reads = 0
+  let replies = 0
   const api = OpenCode.make({
     baseUrl: "http://opencode.local",
     fetch: async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init)
       const path = new URL(request.url).pathname
       if (path.endsWith("/form")) return Response.json({ data: terminal ? [] : [form] })
-      if (path === "/api/session/ses_other/form/frm_question/reply") return other.promise
       if (path.endsWith("/reply"))
-        return response.promise.then((response) => {
+        return (replies++ === 0 ? response.promise : other.promise).then((response) => {
           terminal = response.ok
           return response
         })
@@ -83,6 +83,7 @@ for (const status of ["answered", "cancelled"] as const) {
         formID: fixture.form.id,
         answer: { q0: "Staging" },
       })
+      const retained = fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)
       fixture.response.resolve(Response.json({}, { status: 500 }))
       await fixture.reading.promise
       fixture.emit({
@@ -111,6 +112,8 @@ for (const status of ["answered", "cancelled"] as const) {
       const terminal: FormState = status === "answered" ? { status, answer: { q0: "Old result" } } : { status }
       fixture.state.resolve(Response.json({ data: terminal }))
       await reply
+      expect(retained?.answer).toBeUndefined()
+      expect(retained?.confirmed).toBe(false)
       expect(fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)).toBeUndefined()
       expect(fixture.data.session.form.answer(fixture.form.sessionID, "msg_question", "tool_question")).toBeUndefined()
       expect(fixture.data.session.form.list(fixture.form.sessionID)).toBeUndefined()
@@ -126,6 +129,47 @@ for (const status of ["answered", "cancelled"] as const) {
   }
 }
 
+for (const sessionID of ["ses_question", "ses_other"]) {
+  test(`a fresh ${sessionID === "ses_question" ? "same-session attempt" : "different-session owner"} cannot mutate a retained submission or be settled by its late state`, async () => {
+    using fixture = setup()
+    await fixture.data.session.form.sync(fixture.form.sessionID)
+    const reply = fixture.data.session.form.reply({
+      sessionID: fixture.form.sessionID,
+      formID: fixture.form.id,
+      answer: { q0: "Staging" },
+    })
+    const retained = fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)
+    fixture.response.resolve(Response.json({}, { status: 500 }))
+    await fixture.reading.promise
+    if (sessionID !== fixture.form.sessionID)
+      fixture.emit({
+        id: "evt_replacement",
+        created: 0,
+        type: "form.created",
+        location: { directory: "/demo/other" },
+        data: {
+          form: {
+            ...fixture.form,
+            sessionID,
+            metadata: { kind: "question", tool: { id: "tool_other", messageID: "msg_other" } },
+          },
+        },
+      })
+    const next = fixture.data.session.form.reply({ sessionID, formID: fixture.form.id, answer: { q0: "Other answer" } })
+    fixture.state.resolve(Response.json({ data: { status: "answered", answer: { q0: "Old result" } } }))
+    await reply
+    expect(retained).toEqual({ answer: { q0: "Staging" }, confirmed: false })
+    expect(fixture.data.session.form.submission(sessionID, fixture.form.id)).toEqual({
+      answer: { q0: "Other answer" },
+      confirmed: false,
+    })
+    fixture.other.resolve(new Response(null, { status: 204 }))
+    await next
+    expect(retained).toEqual({ answer: { q0: "Staging" }, confirmed: false })
+    expect(fixture.data.session.form.submission(sessionID, fixture.form.id)?.confirmed).toBe(true)
+  })
+}
+
 for (const failed of [false, true]) {
   for (const acknowledged of [false, true]) {
     test(`unhydrated question tool ${failed ? "failure" : "success"} releases its preview ${acknowledged ? "after" : "before"} POST settlement`, async () => {
@@ -136,6 +180,7 @@ for (const failed of [false, true]) {
         formID: fixture.form.id,
         answer: { q0: "Staging" },
       })
+      const retained = fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)
       if (acknowledged) {
         fixture.response.resolve(new Response(null, { status: 204 }))
         await reply
@@ -185,6 +230,7 @@ for (const failed of [false, true]) {
       expect(fixture.data.session.form.submission(fixture.form.sessionID, fixture.form.id)).toBeUndefined()
       expect(fixture.data.session.form.answer(fixture.form.sessionID, "msg_question", "tool_question")).toBeUndefined()
       expect(fixture.observed()).toEqual({ answer: failed ? undefined : { q0: "Production" }, confirmed: true })
+      expect(retained).toEqual({ answer: failed ? undefined : { q0: "Production" }, confirmed: true })
       expect(fixture.reads()).toBe(0)
     })
   }

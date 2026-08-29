@@ -208,45 +208,7 @@ async function mountQuestionSession(state: string, width: number, child: boolean
         },
       })
     },
-    hydrated(answers: string[][], sibling = false) {
-      if (sibling) {
-        const other: FormCreated["data"]["form"] = {
-          ...form,
-          fields: [
-            { key: "q0", type: "string", options: [{ value: "Staging", label: "Staging" }] },
-            { key: "q1", type: "multiselect", options: [{ value: "Focused", label: "Focused" }] },
-          ],
-          id: "frm_sibling_question",
-          metadata: { kind: "question", tool: { messageID: "msg_sibling_question", id: "tool_sibling_question" } },
-        }
-        events.emit({
-          id: "evt_sibling_form",
-          created: 3,
-          type: "form.created",
-          location: { directory },
-          data: { form: other },
-        })
-        events.emit({
-          id: "evt_sibling_reply",
-          created: 3,
-          type: "form.replied",
-          data: { sessionID: owner, id: other.id, answer: { q0: "Staging", q1: ["Focused"] } },
-        })
-        events.emit({
-          id: "evt_sibling_success",
-          created: 3,
-          type: "session.tool.success",
-          durable: { aggregateID: owner, seq: 0, version: 2 },
-          data: {
-            sessionID: owner,
-            assistantMessageID: "msg_sibling_question",
-            id: "tool_sibling_question",
-            executed: true,
-            metadata: { answers: [["Staging"], ["Focused"]] },
-            content: [{ type: "text", text: "Sibling response" }],
-          },
-        })
-      }
+    hydrated(answers: string[][]) {
       events.emit({
         id: "evt_child_step",
         created: 3,
@@ -284,6 +246,44 @@ async function mountQuestionSession(state: string, width: number, child: boolean
         created: 3,
         type: "session.tool.progress",
         data: { sessionID: owner, assistantMessageID: message.id, id: "tool_session_question", metadata: { answers } },
+      })
+    },
+    sibling() {
+      const other: FormCreated["data"]["form"] = {
+        ...form,
+        fields: [
+          { key: "q0", type: "string", options: [{ value: "Staging", label: "Staging" }] },
+          { key: "q1", type: "multiselect", options: [{ value: "Focused", label: "Focused" }] },
+        ],
+        id: "frm_sibling_question",
+        metadata: { kind: "question", tool: { messageID: "msg_sibling_question", id: "tool_sibling_question" } },
+      }
+      events.emit({
+        id: "evt_sibling_form",
+        created: 3,
+        type: "form.created",
+        location: { directory },
+        data: { form: other },
+      })
+      events.emit({
+        id: "evt_sibling_reply",
+        created: 3,
+        type: "form.replied",
+        data: { sessionID: owner, id: other.id, answer: { q0: "Staging", q1: ["Focused"] } },
+      })
+      events.emit({
+        id: "evt_sibling_success",
+        created: 3,
+        type: "session.tool.success",
+        durable: { aggregateID: owner, seq: 0, version: 2 },
+        data: {
+          sessionID: owner,
+          assistantMessageID: "msg_sibling_question",
+          id: "tool_sibling_question",
+          executed: true,
+          metadata: { answers: [["Staging"], ["Focused"]] },
+          content: [{ type: "text", text: "Sibling response" }],
+        },
       })
     },
     continued() {
@@ -449,7 +449,7 @@ test("production root Session removes a descendant answer panel when tool failur
   }
 })
 
-for (const mode of ["event", "effect", "batched-effect"] as const) {
+for (const mode of ["event", "effect", "batched-effect-before", "batched-effect-after"] as const) {
   test(`production root Session retains changed canonical answers after POST acknowledgement (${mode})`, async () => {
     await using state = await tmpdir()
     const fixture = await mountQuestionSession(state.path, 48, true, true)
@@ -457,7 +457,9 @@ for (const mode of ["event", "effect", "batched-effect"] as const) {
       await fixture.select()
       await fixture.setup.waitFor(() => fixture.setup.renderer.currentFocusedEditor !== null)
       expect(fixture.setup.captureCharFrame()).toContain("Staging")
-      if (mode !== "event") fixture.hydrated([["Production"], ["Full"]], mode === "batched-effect")
+      if (mode === "batched-effect-before") fixture.sibling()
+      if (mode !== "event") fixture.hydrated([["Production"], ["Full"]])
+      if (mode === "batched-effect-after") fixture.sibling()
       if (mode === "event") fixture.completed([["Production"], ["Full"]])
       await fixture.setup.waitForVisualIdle()
       expect(fixture.setup.captureCharFrame()).toContain("# Questions")

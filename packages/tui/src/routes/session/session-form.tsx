@@ -18,22 +18,8 @@ export function SessionForm(props: {
   const parentTheme = useTheme()
   const [selected, setSelected] = createSignal<{
     form: FormWithLocation
-    answer: FormReplyInput["answer"] | undefined
+    submission: { answer: FormReplyInput["answer"] | undefined }
   }>()
-  // The host has no descendant transcript. Retain its last reply after form/tool cache cleanup.
-  const preview = createMemo((previous: ReturnType<typeof selected>) => {
-    const current = selected()
-    if (!current) return undefined
-    const submission = data.session.form.submission(current.form.sessionID, current.form.id)
-    return {
-      form: current.form,
-      answer: submission
-        ? submission.answer
-        : previous?.form.id === current.form.id && previous.form.sessionID === current.form.sessionID
-          ? previous.answer
-          : current.answer,
-    }
-  })
   createEffect(
     on(
       () => props.promptID,
@@ -67,20 +53,22 @@ export function SessionForm(props: {
   }
 
   function reply(form: FormWithLocation, answer: FormAnswer) {
-    if (form.metadata?.kind === "question" && form.sessionID !== "global" && !inTranscript(form))
-      setSelected({ form, answer })
-    return data.session.form
-      .reply({ sessionID: form.sessionID, formID: form.id, answer }, form.location)
-      .catch((error: unknown) => {
-        const current = selected()
-        if (current?.form.id === form.id && current.form.sessionID === form.sessionID) setSelected(undefined)
-        throw error
-      })
+    const request = data.session.form.reply({ sessionID: form.sessionID, formID: form.id, answer }, form.location)
+    // Capture the live owner before acknowledgement/terminal events can retire its lookup.
+    const current =
+      form.metadata?.kind === "question" && form.sessionID !== "global" && !inTranscript(form)
+        ? { form, submission: data.session.form.submission(form.sessionID, form.id) ?? { answer } }
+        : undefined
+    if (current) setSelected(current)
+    return request.catch((error: unknown) => {
+      if (current && selected() === current) setSelected(undefined)
+      throw error
+    })
   }
 
   const local = createMemo(() => {
-    const current = preview()
-    return current?.answer && !inTranscript(current.form) ? current : undefined
+    const current = selected()
+    return current?.submission.answer && !inTranscript(current.form) ? current : undefined
   })
 
   return (
@@ -100,7 +88,7 @@ export function SessionForm(props: {
           <text fg={theme.text.subdued}># Questions</text>
           <QuestionAnswers
             questions={local()?.form.fields.map((field) => ({ question: field.description ?? formLabel(field) })) ?? []}
-            answers={formQuestionAnswers(local()?.answer, local()?.form.fields.length ?? 0) ?? []}
+            answers={formQuestionAnswers(local()?.submission.answer, local()?.form.fields.length ?? 0) ?? []}
           />
         </box>
       </Show>
