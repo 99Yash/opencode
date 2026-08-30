@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { expandTrackedPastedText } from "../../src/prompt/part"
+import { expandTrackedPastedText, pasteSummaryLineCount } from "../../src/prompt/part"
 
 describe("prompt part", () => {
   test("preserves wide characters around pasted text", () => {
@@ -30,5 +30,13 @@ describe("prompt part", () => {
         },
       ]),
     ).toBe(`keep ${marker} then alpha\nbeta\ngamma tail`)
+  })
+
+  test("keeps long single-line dictation visible", () => {
+    expect(pasteSummaryLineCount("dictated speech ".repeat(20).trim())).toBeUndefined()
+  })
+
+  test("summarizes multi-line pasted text", () => {
+    expect(pasteSummaryLineCount("first\nsecond\nthird")).toBe(3)
   })
 })

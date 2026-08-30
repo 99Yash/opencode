@@ -13,3 +13,8 @@ export function expandTrackedPastedText(text: string, ranges: { start: number; e
     .sort((a, b) => b.start - a.start)
     .reduce((result, part) => displaySlice(result, 0, part.start) + part.text + displaySlice(result, part.end), text)
 }
+
+export function pasteSummaryLineCount(text: string) {
+  const lineCount = (text.match(/\n/g)?.length ?? 0) + 1
+  if (lineCount >= 3) return lineCount
+}
